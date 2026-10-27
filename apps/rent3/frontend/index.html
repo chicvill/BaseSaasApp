@@ -159,13 +159,20 @@
       </div>
       <div class="kpi-card">
         <div class="kpi-label">직거래 법적 모드</div>
-        <div class="kpi-value" style="font-size:18px; color:var(--success);">✅ SaaS 안전 (중개수수료 없음)</div>
+        <div class="kpi-value" style="font-size:16px; color:var(--success);">✅ SaaS 안전 (복비 0원)</div>
+      </div>
+      <div class="kpi-card" style="border-color:rgba(56,189,248,0.3); background:rgba(56,189,248,0.06);">
+        <div class="kpi-label">🏛️ 국토부 RTMS 신고 기한</div>
+        <div class="kpi-value" style="font-size:17px; color:var(--primary);">D-26일 <span style="font-size:11px; color:var(--text-muted);">(과태료 0건)</span></div>
       </div>
     </div>
 
     <!-- Nav Tabs -->
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('tabApplications')">📋 비대면 입주신청 심사 (<span id="tabBadgeApp">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabChats')">💬 직거래 문의 & 방문예약 (<span id="tabBadgeChat">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabRenewals')">⏳ 만기 & 재계약 관제 (<span id="tabBadgeRenewals">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabParking')">🚗 주차 & 도어락 관제 (<span id="tabBadgeParking">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 세입자 라운지 민원/수리 (<span id="tabBadgeMaint">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabRooms')">🏢 호실 현황 (rent2 계승)</button>
       <button class="tab-btn" onclick="switchTab('tabListings')">📢 공실 광고 관리</button>
@@ -193,6 +200,112 @@
           </thead>
           <tbody id="appTbody">
             <tr><td colspan="8" style="text-align:center; color:var(--text-muted);">신청서를 불러오는 중입니다...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Direct Chats & Tour Bookings -->
+    <div id="tabChats" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>💬 임차인 1:1 직거래 문의 및 대면 방문투어 예약</span>
+          <button class="btn btn-secondary" onclick="loadActiveChats()">🔄 새로고침</button>
+        </div>
+        <div style="display: grid; grid-template-columns: 320px 1fr; gap: 20px; min-height: 480px;">
+          <!-- Left: Rooms with chat -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px; overflow-y: auto;">
+            <div style="font-size: 13px; font-weight: 700; color: var(--text-muted); margin-bottom: 10px;">호실별 문의 대화방</div>
+            <div id="chatRoomsList" style="display: flex; flex-direction: column; gap: 8px;">
+              <div style="text-align: center; color: var(--text-muted); font-size: 13px; padding: 20px;">불러오는 중...</div>
+            </div>
+          </div>
+          <!-- Right: Active Chat Conversation -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--card-border); border-radius: 12px; padding: 18px; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 12px; margin-bottom: 12px;">
+              <div>
+                <h3 id="adminChatRoomTitle" style="font-size: 16px; font-weight: 700; color: #fff;">호실을 선택해주세요</h3>
+                <span id="adminChatRoomSub" style="font-size: 12px; color: var(--text-muted);">좌측 대화방 목록에서 호실을 클릭하면 메시지가 표시됩니다.</span>
+              </div>
+              <div id="adminChatActions"></div>
+            </div>
+
+            <!-- Messages Stream -->
+            <div id="adminChatStream" style="flex: 1; min-height: 280px; max-height: 360px; overflow-y: auto; background: #0b1120; border: 1px solid var(--card-border); border-radius: 10px; padding: 14px; margin-bottom: 14px;">
+              <div style="text-align: center; color: var(--text-muted); font-size: 13px; padding-top: 40px;">대화방을 선택하세요.</div>
+            </div>
+
+            <!-- Landlord Reply Input Form (인앱 메신저 완결형) -->
+            <div id="adminReplyArea" style="display: none; background: #1e293b; border-radius: 10px; padding: 12px; border: 1px solid var(--card-border);">
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:6px; font-weight:700;">⚡ 원클릭 퀵 액션 발송 (문자/알림톡 비용 0원):</div>
+              <div style="display: flex; flex-wrap:wrap; gap: 8px; margin-bottom: 10px;">
+                <button class="tag" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); cursor: pointer;" onclick="sendQuickReplyTemplate('tour_accept')">✅ 투어 일정 수락</button>
+                <button class="tag" style="background: rgba(56, 189, 248, 0.15); color: var(--primary); border: 1px solid rgba(56, 189, 248, 0.3); cursor: pointer;" onclick="sendQuickReplyTemplate('cosign_ready')">📜 전자계약서 작성 링크 발송</button>
+                <button class="tag" style="background: rgba(129, 140, 248, 0.15); color: var(--accent); border: 1px solid rgba(129, 140, 248, 0.3); cursor: pointer;" onclick="sendQuickReplyTemplate('access_info')">🔑 도어락 & 주차 등록 안내</button>
+                <button class="tag" style="background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); cursor: pointer;" onclick="sendQuickReplyTemplate('payment_reminder')">💳 월세/관리비 청구 안내</button>
+              </div>
+              <!-- Photo Attachment Controls & Previews -->
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <input type="file" id="adminChatPhotoInput" accept="image/*" multiple style="display:none;" onchange="handleAdminPhotoSelect(this)">
+                <button type="button" class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3); cursor:pointer; padding:5px 10px; display:inline-flex; align-items:center; gap:4px; font-weight:700;" onclick="document.getElementById('adminChatPhotoInput').click()">
+                  📷 사진 첨부 (수리 전후/영수증 등)
+                </button>
+                <span id="adminChatPhotoCountText" style="font-size:11px; color:var(--text-muted);"></span>
+              </div>
+              <div id="adminPhotoPreviewArea" style="display:none; gap:8px; margin-bottom:8px; flex-wrap:wrap;"></div>
+
+              <div style="display: flex; gap: 8px;">
+                <textarea id="adminChatInputText" placeholder="임차인에게 보낼 답변 메시지를 입력하세요... (Enter로 즉시 전송)" rows="2" style="flex: 1; padding: 10px; font-size: 13px; background: #0f172a; border: 1px solid var(--card-border); border-radius: 6px; color: #fff; resize: none; outline: none;" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendLandlordChatReply(document.getElementById('btnAdminSendChat'));}"></textarea>
+                <button id="btnAdminSendChat" class="btn btn-primary" style="width: auto; padding: 0 20px; font-size: 14px;" onclick="sendLandlordChatReply(this)">답변 전송</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Lease Renewals & Expiration 관제 -->
+    <div id="tabRenewals" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>⏳ 주택임대차보호법 준수 — 계약 만기 D-Day & 비대면 재계약 관제</span>
+          <button class="btn btn-secondary" onclick="loadRenewals()">🔄 새로고침</button>
+        </div>
+
+        <!-- Renewal KPI Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:20px;">
+          <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#fbbf24; font-weight:600;">⚠️ 갱신 통지 가능 기간 (D-60~180일)</div>
+            <div style="font-size:22px; font-weight:700; color:#fbbf24; margin-top:4px;" id="renewalKpiNoticeActive">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">적정 갱신/해지 통지 시기</div>
+          </div>
+          <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#f87171; font-weight:600;">🚨 만기 임박 (D-60일 이내)</div>
+            <div style="font-size:22px; font-weight:700; color:#f87171; margin-top:4px;" id="renewalKpiImminent">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">미통지 시 묵시적 갱신 주의</div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#34d399; font-weight:600;">✅ 갱신 체결 / 묵시적 연장</div>
+            <div style="font-size:22px; font-weight:700; color:#34d399; margin-top:4px;" id="renewalKpiSigned">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">전자서명 및 2년 연장 확정</div>
+          </div>
+        </div>
+
+        <table id="renewalTable">
+          <thead>
+            <tr>
+              <th>호실</th>
+              <th>입주자</th>
+              <th>계약 만기일</th>
+              <th>만기 D-Day</th>
+              <th>현재 임대료</th>
+              <th>갱신 제안 조건</th>
+              <th>상태</th>
+              <th>관리 조치</th>
+            </tr>
+          </thead>
+          <tbody id="renewalTbody">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">만기 현황을 불러오는 중...</td></tr>
           </tbody>
         </table>
       </div>
@@ -277,6 +390,73 @@
         </div>
       </div>
     </div>
+
+    <!-- Tab 5: Parking & Doorlock Management -->
+    <div id="tabParking" class="tab-pane">
+      <div style="display: grid; grid-template-columns: 1fr 380px; gap: 20px;">
+        <!-- Left: Parking Records & Enforcement Search -->
+        <div class="card">
+          <div class="card-title">
+            <span>🚗 입주 세입자 등록 차량 대장</span>
+            <button class="btn btn-secondary" onclick="loadParkingRecords()">🔄 새로고침</button>
+          </div>
+          <!-- Plate Search & Enforcement Filter -->
+          <div style="background: #1e293b; padding: 12px; border-radius: 8px; margin-bottom: 16px; display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="plateSearchInput" placeholder="차량번호 뒷자리/전체 검색 (외부차량 불법주차 단속)" style="flex:1; padding:8px 12px; background:#0f172a; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:13px;" onkeyup="filterParkingVehicles()">
+            <span style="font-size:12px; color:var(--text-muted);">실시간 차량 대조</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>호실</th>
+                <th>세입자</th>
+                <th>차량번호</th>
+                <th>차종</th>
+                <th>주차 구분</th>
+                <th>등록일시</th>
+              </tr>
+            </thead>
+            <tbody id="parkingTbody">
+              <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">차량 대장을 불러오는 중입니다...</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Right: Doorlock & Access Settings -->
+        <div class="card">
+          <div class="card-title">
+            <span>🔐 호실별 도어락 비밀번호 관리</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">관리 대상 호실</label>
+              <input type="text" id="doorRoomInput" placeholder="예: 201" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">세대 디지털 도어락 비밀번호</label>
+              <input type="text" id="doorCodeInput" placeholder="예: 1234*" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">1층 공동현관 로비 비밀번호</label>
+              <input type="text" id="doorLobbyInput" value="#1234*" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">전용 Wi-Fi SSID</label>
+              <input type="text" id="doorWifiInput" value="MQNET_DIRECT_5G" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">Wi-Fi 비밀번호</label>
+              <input type="text" id="doorWifiPwInput" value="rent2026pw" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px;">
+            </div>
+            <div>
+              <label style="font-size:12px; color:var(--text-muted);">출입 시 주의사항 안내</label>
+              <textarea id="doorNotesInput" rows="2" style="width:100%; padding:8px 10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; margin-top:4px; resize:none;">도어락 번호 입력 후 * 버튼을 누르세요.</textarea>
+            </div>
+            <button class="btn btn-primary" style="margin-top:6px;" onclick="updateDoorlock(this)">🔐 도어락/출입 정보 저장</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script>
@@ -309,11 +489,27 @@
       }
     };
 
+    let adminChatPollTimer = null;
+
     function switchTab(tabId) {
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.getElementById(tabId).classList.add("active");
-      event.target.classList.add("active");
+      if (event && event.target) event.target.classList.add("active");
+
+      if (tabId === 'tabChats') {
+        loadActiveChats();
+        if (adminChatPollTimer) clearInterval(adminChatPollTimer);
+        adminChatPollTimer = setInterval(() => {
+          refreshAdminChatStream();
+          loadActiveChats(true);
+        }, 2500);
+      } else {
+        if (adminChatPollTimer) {
+          clearInterval(adminChatPollTimer);
+          adminChatPollTimer = null;
+        }
+      }
     }
 
     async function loadDashboard() {
@@ -339,12 +535,22 @@
             <td>${(r.deposit || 0).toLocaleString()}원</td>
             <td>${(r.rent || 0).toLocaleString()}원</td>
             <td><span class="badge ${r.is_occupied ? 'badge-confirmed' : 'badge-pending'}">${r.is_occupied ? '입주중' : '공실'}</span></td>
-            <td><a href="cosign.html?room_id=${r.room_id}" target="_blank" class="btn btn-primary" style="padding:4px 10px; font-size:12px; display:inline-flex;">🤝 현장계약</a></td>
+            <td>
+              <div style="display:flex; gap:6px;">
+                <a href="cosign.html?room_id=${r.room_id}" target="_blank" class="btn btn-primary" style="padding:4px 10px; font-size:12px; display:inline-flex;">🤝 현장계약</a>
+                ${r.is_occupied ? `
+                  <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3);" onclick="openCheckOutModal('${r.room_id}')">🚪 퇴실 정산</button>
+                ` : ''}
+              </div>
+            </td>
           </tr>
         `).join("") || `<tr><td colspan="6" style="text-align:center;">호실 정보가 없습니다.</td></tr>`;
 
         loadApplications();
         loadMaintenance();
+        loadActiveChats();
+        loadParkingRecords();
+        loadRenewals();
       } catch (err) {
         Bass.updateAppAlert("대시보드 데이터를 불러오지 못했습니다: " + err.message, "error");
       }
@@ -502,7 +708,743 @@
       });
     }
 
+    /* ─── 1:1 In-App Direct Chat & Tour Booking Management ─── */
+    let currentAdminRoomId = null;
+    let adminChatAttachedPhotos = [];
+
+    function handleAdminPhotoSelect(input) {
+      if (!input.files || input.files.length === 0) return;
+      Array.from(input.files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          adminChatAttachedPhotos.push(e.target.result);
+          renderAdminPhotoPreviews();
+        };
+        reader.readAsDataURL(file);
+      });
+      input.value = "";
+    }
+
+    function renderAdminPhotoPreviews() {
+      const area = document.getElementById("adminPhotoPreviewArea");
+      const text = document.getElementById("adminChatPhotoCountText");
+      if (!area) return;
+      if (adminChatAttachedPhotos.length === 0) {
+        area.style.display = "none";
+        area.innerHTML = "";
+        if (text) text.innerText = "";
+        return;
+      }
+      area.style.display = "flex";
+      if (text) text.innerText = `${adminChatAttachedPhotos.length}장 첨부됨`;
+      area.innerHTML = adminChatAttachedPhotos.map((p, idx) => `
+        <div style="position:relative; width:64px; height:64px; border-radius:6px; overflow:hidden; border:1px solid var(--primary);">
+          <img src="${p}" style="width:100%; height:100%; object-fit:cover;">
+          <button type="button" onclick="removeAdminPhoto(${idx})" style="position:absolute; top:2px; right:2px; background:rgba(0,0,0,0.7); border:none; color:#fff; border-radius:50%; width:18px; height:18px; font-size:10px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+        </div>
+      `).join("");
+    }
+
+    function removeAdminPhoto(idx) {
+      adminChatAttachedPhotos.splice(idx, 1);
+      renderAdminPhotoPreviews();
+    }
+
+    function openAdminPhotoViewer(src) {
+      document.getElementById("adminPhotoViewerImg").src = src;
+      document.getElementById("adminPhotoViewerModal").style.display = "flex";
+    }
+
+    function closeAdminPhotoViewer() {
+      document.getElementById("adminPhotoViewerModal").style.display = "none";
+    }
+
+    async function loadActiveChats(isBackground = false) {
+      const branch = document.getElementById("branchSelect").value;
+      const res = await fetch(`/api/rent3/admin/chats?branch=${branch}`);
+      const data = await res.json();
+      
+      const listDiv = document.getElementById("chatRoomsList");
+      const rooms = data.chat_rooms || data.rooms || [];
+      const totalUnread = data.total_unread || 0;
+      
+      document.getElementById("tabBadgeChat").innerText = totalUnread > 0 ? `${totalUnread} (새글)` : rooms.length;
+      if (totalUnread > 0) {
+        document.getElementById("tabBadgeChat").style.color = "#ef4444";
+        document.getElementById("tabBadgeChat").style.fontWeight = "800";
+      } else {
+        document.getElementById("tabBadgeChat").style.color = "inherit";
+        document.getElementById("tabBadgeChat").style.fontWeight = "normal";
+      }
+
+      if (rooms.length === 0) {
+        listDiv.innerHTML = `<div style="text-align:center; color:var(--text-muted); font-size:13px; padding:20px;">접수된 문의가 없습니다.</div>`;
+        return;
+      }
+
+      listDiv.innerHTML = rooms.map(r => `
+        <div onclick="selectChatRoom('${r.room_id}')" style="background:${currentAdminRoomId === r.room_id ? 'rgba(56,189,248,0.18)' : '#1e293b'}; border:1px solid ${currentAdminRoomId === r.room_id ? 'var(--primary)' : 'var(--card-border)'}; border-radius:10px; padding:12px; cursor:pointer; transition:all 0.2s;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <strong style="color:#fff; font-size:14px;">${r.room_id}호</strong>
+              ${r.unread_count > 0 ? `<span style="background:#ef4444; color:#fff; font-size:10px; font-weight:800; padding:2px 7px; border-radius:10px;">${r.unread_count}</span>` : ''}
+              ${r.is_tour_request ? `<span style="background:rgba(245,158,11,0.25); color:#fbbf24; font-size:10px; font-weight:700; padding:2px 6px; border-radius:4px;">📅 투어</span>` : ''}
+            </div>
+            <span style="font-size:11px; color:var(--text-muted);">${r.last_time ? r.last_time.split(' ')[0] : ''}</span>
+          </div>
+          <div style="font-size:12px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+            <strong style="color:var(--primary);">${r.tenant_name || r.last_sender}:</strong> ${r.last_message}
+          </div>
+        </div>
+      `).join("");
+
+      if (!currentAdminRoomId && rooms.length > 0 && !isBackground) {
+        selectChatRoom(rooms[0].room_id);
+      }
+    }
+
+    async function selectChatRoom(roomId) {
+      currentAdminRoomId = roomId;
+      const branch = document.getElementById("branchSelect").value;
+      adminChatAttachedPhotos = [];
+      renderAdminPhotoPreviews();
+      
+      document.getElementById("adminChatRoomTitle").innerText = `[${roomId}호] 임차인 1:1 직거래 대화방`;
+      document.getElementById("adminChatRoomSub").innerText = `카카오톡·문자 비용 없는 앱내 실시간 메신저 (투어/계약/도어락 소통)`;
+      document.getElementById("adminReplyArea").style.display = "block";
+      document.getElementById("adminChatActions").innerHTML = `
+        <a href="cosign.html?room_id=${roomId}" target="_blank" class="btn btn-primary" style="font-size:12px; padding:6px 12px;">🤝 현장 동행 계약실 열기</a>
+      `;
+
+      // 관리자 읽음 처리
+      fetch(`/api/rent3/chat/${branch}/${roomId}/read?role=landlord`, { method: "POST" }).catch(() => {});
+
+      await refreshAdminChatStream();
+      loadActiveChats(true);
+    }
+
+    async function refreshAdminChatStream() {
+      if (!currentAdminRoomId) return;
+      const branch = document.getElementById("branchSelect").value;
+      const streamDiv = document.getElementById("adminChatStream");
+
+      try {
+        const res = await fetch(`/api/rent3/chat/${branch}/${currentAdminRoomId}`);
+        const data = await res.json();
+        
+        if (!data.messages || data.messages.length === 0) {
+          streamDiv.innerHTML = `<div style="text-align:center; color:var(--text-muted); font-size:13px; padding-top:40px;">메시지가 없습니다.</div>`;
+          return;
+        }
+
+        const isScrolledToBottom = streamDiv.scrollHeight - streamDiv.clientHeight <= streamDiv.scrollTop + 40;
+
+        streamDiv.innerHTML = data.messages.map(m => {
+          const isLandlord = m.sender_role === "landlord";
+          const photos = m.photos || [];
+          return `
+            <div style="display:flex; flex-direction:column; align-items:${isLandlord ? 'flex-end' : 'flex-start'}; margin-bottom:12px;">
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:3px; display:flex; gap:6px; align-items:center;">
+                <span>${isLandlord ? (m.sender_name || '나(임대인)') : (m.sender_name || '임차인')}</span>
+                <span>·</span>
+                <span>${m.created_at || ''}</span>
+                ${isLandlord ? `<span style="font-size:10px; color:${m.is_read ? '#10b981' : 'var(--text-muted)'};">${m.is_read ? '상대방 읽음 ✔' : '전송됨'}</span>` : ''}
+              </div>
+              <div style="max-width:82%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.5; ${
+                isLandlord ? 'background:linear-gradient(135deg, #10b981, #059669); color:#fff; border-bottom-right-radius:2px;' : 'background:#1e293b; color:#f1f5f9; border:1px solid var(--card-border); border-bottom-left-radius:2px;'
+              }">
+                ${m.is_tour_request ? `<div style="background:rgba(245,158,11,0.25); color:#fbbf24; font-size:12px; font-weight:700; padding:4px 8px; border-radius:6px; margin-bottom:6px; display:inline-block;">📅 대면 방문투어 신청: ${m.tour_date || '일시 조율'}</div>` : ''}
+                <div>${m.message.replace(/\n/g, '<br>')}</div>
+                ${photos.length > 0 ? `
+                  <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px;">
+                    ${photos.map(p => `
+                      <img src="${p}" alt="첨부사진" style="width:110px; height:80px; object-fit:cover; border-radius:8px; cursor:pointer; border:1px solid rgba(255,255,255,0.25); transition:transform 0.15s;" onmouseover="this.style.transform='scale(1.04)'" onmouseout="this.style.transform='scale(1)'" onclick="openAdminPhotoViewer('${p}')">
+                    `).join("")}
+                  </div>
+                ` : ''}
+                ${m.quick_action_url ? `
+                  <div style="margin-top:8px; padding-top:6px; border-top:1px dashed rgba(255,255,255,0.2);">
+                    <a href="${m.quick_action_url}" target="_blank" style="display:inline-flex; align-items:center; gap:4px; background:rgba(255,255,255,0.2); color:#fff; text-decoration:none; padding:4px 10px; border-radius:6px; font-size:12px; font-weight:700;">
+                      👉 첨부 링크 확인: ${m.quick_action_url}
+                    </a>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        }).join("");
+
+        if (isScrolledToBottom || streamDiv.scrollTop === 0) {
+          streamDiv.scrollTop = streamDiv.scrollHeight;
+        }
+      } catch (e) {
+        streamDiv.innerHTML = `<div style="color:var(--error); text-align:center;">메시지를 불러오지 못했습니다.</div>`;
+      }
+    }
+
+    async function sendQuickReplyTemplate(templateType) {
+      if (!currentAdminRoomId) {
+        Bass.updateAppAlert("대화방을 먼저 선택하세요.", "warning");
+        return;
+      }
+      const branch = document.getElementById("branchSelect").value;
+      try {
+        const res = await fetch(`/api/rent3/chat/${branch}/${currentAdminRoomId}/quick-reply?template=${templateType}`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          await refreshAdminChatStream();
+          await loadActiveChats(true);
+          Bass.updateAppAlert("⚡ 퀵 액션 안내 메시지가 임차인 대화방에 실시간 전송되었습니다.", "success");
+        }
+      } catch (err) {
+        Bass.updateAppAlert("전송 실패: " + err.message, "error");
+      }
+    }
+
+    function quickReplyLandlord(text) {
+      document.getElementById("adminChatInputText").value = text;
+    }
+
+    async function sendLandlordChatReply(btn) {
+      if (!currentAdminRoomId) return;
+      const branch = document.getElementById("branchSelect").value;
+      const input = document.getElementById("adminChatInputText");
+      const message = input.value.trim();
+      const photosToSend = [...adminChatAttachedPhotos];
+
+      if (!message && photosToSend.length === 0) {
+        Bass.updateAppAlert("답변 내용 또는 사진을 첨부하세요.", "warning");
+        return;
+      }
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/chat/${branch}/${currentAdminRoomId}/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sender_role: "landlord",
+            sender_name: "김임대 (임대인)",
+            message: message || "📷 [사진 첨부]",
+            is_tour_request: false,
+            photos: photosToSend
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          input.value = "";
+          adminChatAttachedPhotos = [];
+          renderAdminPhotoPreviews();
+          await refreshAdminChatStream();
+          await loadActiveChats(true);
+          Bass.updateAppAlert("답변 메시지가 임차인에게 실시간 전송되었습니다.", "success");
+        }
+      });
+    }
+
+    /* ─── Parking & Doorlock Management ─── */
+    let allParkingVehicles = [];
+
+    async function loadParkingRecords() {
+      const branch = document.getElementById("branchSelect").value;
+      const res = await fetch(`/api/rent3/admin/parking?branch=${branch}`);
+      const data = await res.json();
+      allParkingVehicles = data.vehicles || [];
+      document.getElementById("tabBadgeParking").innerText = allParkingVehicles.length;
+      renderParkingVehicles(allParkingVehicles);
+    }
+
+    function renderParkingVehicles(vehicles) {
+      const tbody = document.getElementById("parkingTbody");
+      if (vehicles.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; color:var(--text-muted);">등록된 입주자 차량이 없습니다.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = vehicles.map(v => `
+        <tr>
+          <td><strong>${v.room_id}호</strong></td>
+          <td>${v.tenant_name} (${v.tenant_phone})</td>
+          <td><span style="font-size:15px; font-weight:800; color:var(--primary);">${v.car_number}</span></td>
+          <td>${v.car_model || '-'}</td>
+          <td><span class="badge badge-approved">${v.slot_type} ${v.slot_number ? `(${v.slot_number})` : ''}</span></td>
+          <td style="font-size:12px; color:var(--text-muted);">${v.registered_at}</td>
+        </tr>
+      `).join("");
+    }
+
+    function filterParkingVehicles() {
+      const query = document.getElementById("plateSearchInput").value.trim().toLowerCase();
+      if (!query) {
+        renderParkingVehicles(allParkingVehicles);
+        return;
+      }
+      const filtered = allParkingVehicles.filter(v => 
+        (v.car_number && v.car_number.toLowerCase().includes(query)) ||
+        (v.room_id && v.room_id.toLowerCase().includes(query)) ||
+        (v.tenant_name && v.tenant_name.toLowerCase().includes(query))
+      );
+      renderParkingVehicles(filtered);
+    }
+
+    async function updateDoorlock(btn) {
+      const branch = document.getElementById("branchSelect").value;
+      const room_id = document.getElementById("doorRoomInput").value.trim();
+      const door_lock_code = document.getElementById("doorCodeInput").value.trim();
+      const building_entry_code = document.getElementById("doorLobbyInput").value.trim();
+      const wifi_ssid = document.getElementById("doorWifiInput").value.trim();
+      const wifi_pw = document.getElementById("doorWifiPwInput").value.trim();
+      const notes = document.getElementById("doorNotesInput").value.trim();
+
+      if (!room_id || !door_lock_code) {
+        Bass.updateAppAlert("호실과 도어락 비밀번호를 입력해주세요.", "warning");
+        return;
+      }
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch("/api/rent3/admin/doorlock/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            branch, room_id, door_lock_code, building_entry_code,
+            wifi_ssid, wifi_pw, notes
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+        }
+      });
+    }
+
+    /* ─── Check-Out & Settlement Modal Logic ─── */
+    let currentCheckOutRoom = null;
+    let currentOriginalDeposit = 5000000;
+
+    async function openCheckOutModal(roomId) {
+      currentCheckOutRoom = roomId;
+      const branch = document.getElementById("branchSelect").value;
+      try {
+        const res = await fetch(`/api/rent3/checkout/${branch}/${roomId}`);
+        const data = await res.json();
+        const c = data.checkout_record;
+        currentOriginalDeposit = data.original_deposit || 5000000;
+
+        document.getElementById("coTitle").innerText = `[${roomId}호] 퇴실 검수 및 보증금 정산 명세서`;
+        document.getElementById("coTenant").innerText = `${data.tenant_name} (${data.tenant_phone})`;
+        document.getElementById("coDeposit").innerText = `${currentOriginalDeposit.toLocaleString()}원`;
+
+        document.getElementById("coUnpaid").value = c.unpaid_rent_deduction || 0;
+        document.getElementById("coUtility").value = c.utility_deduction || 45000;
+        document.getElementById("coDamage").value = c.damage_deduction || 0;
+        document.getElementById("coNotes").value = c.damage_notes || "통상 손모 외 특이 파손 없음";
+
+        calculateRefundInModal();
+        document.getElementById("checkoutModal").style.display = "flex";
+      } catch (err) {
+        Bass.updateAppAlert("퇴실 정보를 불러오지 못했습니다: " + err.message, "error");
+      }
+    }
+
+    function closeCheckOutModal() {
+      document.getElementById("checkoutModal").style.display = "none";
+    }
+
+    function calculateRefundInModal() {
+      const unpaid = parseInt(document.getElementById("coUnpaid").value) || 0;
+      const utility = parseInt(document.getElementById("coUtility").value) || 0;
+      const damage = parseInt(document.getElementById("coDamage").value) || 0;
+      const totalDeduction = unpaid + utility + damage;
+      const finalRefund = Math.max(0, currentOriginalDeposit - totalDeduction);
+
+      document.getElementById("coTotalDeduction").innerText = `${totalDeduction.toLocaleString()}원`;
+      document.getElementById("coFinalRefund").innerText = `${finalRefund.toLocaleString()}원`;
+    }
+
+    async function completeCheckOutSubmit(btn) {
+      if (!currentCheckOutRoom) return;
+      const branch = document.getElementById("branchSelect").value;
+      const unpaid = parseInt(document.getElementById("coUnpaid").value) || 0;
+      const utility = parseInt(document.getElementById("coUtility").value) || 0;
+      const damage = parseInt(document.getElementById("coDamage").value) || 0;
+      const damage_notes = document.getElementById("coNotes").value.trim();
+
+      if (!confirm(`[${currentCheckOutRoom}호] 보증금 정산을 확정하고 호실을 즉시 '공실 매물'로 전환하시겠습니까?`)) return;
+
+      await Bass.withLock(btn, async () => {
+        // 1. 검수 공제액 저장
+        await fetch(`/api/rent3/checkout/${branch}/${currentCheckOutRoom}/inspect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            unpaid_rent_deduction: unpaid,
+            utility_deduction: utility,
+            damage_deduction: damage,
+            damage_notes
+          })
+        });
+
+        // 2. 보증금 반환 완료 & 공실 자동 전환
+        const res2 = await fetch(`/api/rent3/checkout/${branch}/${currentCheckOutRoom}/complete`, {
+          method: "POST"
+        });
+        const data2 = await res2.json();
+        if (data2.success) {
+          Bass.updateAppAlert(data2.message, "success");
+          closeCheckOutModal();
+          loadDashboard();
+        }
+      });
+    }
+
+    /* ─── ⏳ Lease Expiration & Online Renewal (재계약 관제) ─── */
+    let renewalsCache = [];
+
+    async function loadRenewals() {
+      const branch = document.getElementById("branchSelect").value;
+      const tbody = document.getElementById("renewalTbody");
+      try {
+        const res = await fetch(`/api/rent3/renewals?branch=${branch}`);
+        const data = await res.json();
+        if (!data.success) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--error);">만기 정보를 불러오지 못했습니다.</td></tr>`;
+          return;
+        }
+
+        renewalsCache = data.items || [];
+        document.getElementById("tabBadgeRenewals").innerText = (data.summary.notice_active_count + data.summary.imminent_count);
+        document.getElementById("renewalKpiNoticeActive").innerText = `${data.summary.notice_active_count}건`;
+        document.getElementById("renewalKpiImminent").innerText = `${data.summary.imminent_count}건`;
+        document.getElementById("renewalKpiSigned").innerText = `${data.summary.signed_count}건`;
+
+        if (renewalsCache.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:32px;">등록된 계약 만기 정보가 없습니다.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = renewalsCache.map(r => {
+          let ddayBadge = '';
+          if (r.days_remaining < 0) {
+            ddayBadge = `<span class="tag" style="background:rgba(239,68,68,0.2); color:#f87171; font-weight:700;">만기 ${Math.abs(r.days_remaining)}일 경과</span>`;
+          } else if (r.days_remaining <= 60) {
+            ddayBadge = `<span class="tag" style="background:rgba(239,68,68,0.2); color:#f87171; font-weight:700;">🚨 D-${r.days_remaining}일 (임박)</span>`;
+          } else if (r.days_remaining <= 180) {
+            ddayBadge = `<span class="tag" style="background:rgba(245,158,11,0.2); color:#fbbf24; font-weight:700;">⚠️ D-${r.days_remaining}일 (통지구간)</span>`;
+          } else {
+            ddayBadge = `<span class="tag" style="background:rgba(148,163,184,0.15); color:var(--text-muted);">D-${r.days_remaining}일</span>`;
+          }
+
+          let statusBadge = '';
+          if (r.status === 'SIGNED') {
+            statusBadge = `<span class="badge badge-confirmed">✅ 서명완료(${r.rate_increase_pct > 0 ? `+${r.rate_increase_pct}%` : '동결'})</span>`;
+          } else if (r.status === 'TACIT') {
+            statusBadge = `<span class="badge badge-confirmed" style="background:rgba(56,189,248,0.2); color:var(--primary);">🔄 묵시적 갱신(2년)</span>`;
+          } else if (r.status === 'PROPOSED') {
+            statusBadge = `<span class="badge badge-pending">📜 제안 중(임차인 서명 대기)</span>`;
+          } else {
+            statusBadge = `<span class="badge" style="background:rgba(255,255,255,0.1); color:var(--text-muted);">미제안</span>`;
+          }
+
+          return `
+            <tr>
+              <td><strong>${r.room_number || r.room_id + '호'}</strong></td>
+              <td>${r.tenant_name || '미상'}<br><span style="font-size:11px; color:var(--text-muted);">${r.tenant_phone || ''}</span></td>
+              <td>${r.original_end_date || '-'}</td>
+              <td>${ddayBadge}</td>
+              <td>${(r.original_deposit || 0).toLocaleString()}원 / ${(r.original_rent || 0).toLocaleString()}원</td>
+              <td>
+                ${r.new_rent ? `
+                  <div style="font-size:12px;">
+                    보증금: ${(r.new_deposit||0).toLocaleString()}원<br>
+                    월세: ${(r.new_rent||0).toLocaleString()}원 (${r.rate_increase_pct > 0 ? `<strong style="color:var(--warning);">+${r.rate_increase_pct}%</strong>` : '<strong style="color:var(--success);">동결</strong>'})
+                  </div>
+                ` : '<span style="color:var(--text-muted); font-size:12px;">-</span>'}
+              </td>
+              <td>${statusBadge}</td>
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <button class="btn btn-primary" style="padding:4px 8px; font-size:12px;" onclick="openRenewalModal('${r.room_id}')">📝 재계약 제안</button>
+                  <button class="btn btn-secondary" style="padding:4px 8px; font-size:12px; background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3);" onclick="confirmTacitRenewal('${r.renewal_id}', '${r.room_number}')">🔄 묵시적 갱신</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--error);">만기 현황 오류: ${err.message}</td></tr>`;
+      }
+    }
+
+    function openRenewalModal(roomId) {
+      const item = renewalsCache.find(r => r.room_id === String(roomId));
+      if (!item) return;
+
+      document.getElementById("renewalModalRoomId").value = item.room_id;
+      document.getElementById("renewalModalRoomNum").innerText = item.room_number || `${item.room_id}호`;
+      document.getElementById("renewalModalTenantName").innerText = `${item.tenant_name} (${item.tenant_phone})`;
+      document.getElementById("renewalModalOrigRent").value = item.original_rent;
+      document.getElementById("renewalModalCurrDeposit").innerText = (item.original_deposit || 0).toLocaleString();
+      document.getElementById("renewalModalCurrRent").innerText = (item.original_rent || 0).toLocaleString();
+
+      document.getElementById("renewalNewDeposit").value = item.new_deposit || item.original_deposit;
+      document.getElementById("renewalNewRent").value = item.new_rent || item.original_rent;
+      document.getElementById("renewalTypeSelect").value = item.renewal_type || "EXPLICIT";
+
+      calcRenewalRate();
+      document.getElementById("renewalModal").style.display = "flex";
+    }
+
+    function closeRenewalModal() {
+      document.getElementById("renewalModal").style.display = "none";
+    }
+
+    function handleRenewalTypeChange() {
+      const type = document.getElementById("renewalTypeSelect").value;
+      const origRent = parseInt(document.getElementById("renewalModalOrigRent").value) || 0;
+      if (type === "TACIT") {
+        document.getElementById("renewalNewRent").value = origRent;
+        document.getElementById("renewalPeriodMonths").value = "24";
+        calcRenewalRate();
+      }
+    }
+
+    function calcRenewalRate() {
+      const origRent = parseInt(document.getElementById("renewalModalOrigRent").value) || 0;
+      const newRent = parseInt(document.getElementById("renewalNewRent").value) || 0;
+      const preview = document.getElementById("renewalRatePreview");
+      const warning = document.getElementById("renewalRateWarning");
+      const btn = document.getElementById("btnSubmitRenewal");
+
+      if (origRent <= 0) {
+        preview.innerText = "0.0% (동결)";
+        preview.style.color = "var(--success)";
+        warning.style.display = "none";
+        btn.disabled = false;
+        return;
+      }
+
+      const diffPct = ((newRent - origRent) / origRent) * 100.0;
+      const roundPct = Math.round(diffPct * 10) / 10;
+
+      if (roundPct > 5.0) {
+        preview.innerText = `+${roundPct}% (⚠️ 5% 초과)`;
+        preview.style.color = "var(--error)";
+        warning.style.display = "block";
+        btn.disabled = true;
+        btn.style.opacity = "0.5";
+      } else if (roundPct > 0) {
+        preview.innerText = `+${roundPct}% (법정 5% 이내 합법)`;
+        preview.style.color = "var(--warning)";
+        warning.style.display = "none";
+        btn.disabled = false;
+        btn.style.opacity = "1";
+      } else if (roundPct === 0) {
+        preview.innerText = "0.0% (동결)";
+        preview.style.color = "var(--success)";
+        warning.style.display = "none";
+        btn.disabled = false;
+        btn.style.opacity = "1";
+      } else {
+        preview.innerText = `${roundPct}% (인하)`;
+        preview.style.color = "var(--primary)";
+        warning.style.display = "none";
+        btn.disabled = false;
+        btn.style.opacity = "1";
+      }
+    }
+
+    async function submitRenewalProposal(btn) {
+      const branch = document.getElementById("branchSelect").value;
+      const room_id = document.getElementById("renewalModalRoomId").value;
+      const renewal_type = document.getElementById("renewalTypeSelect").value;
+      const new_deposit = parseInt(document.getElementById("renewalNewDeposit").value) || 0;
+      const new_rent = parseInt(document.getElementById("renewalNewRent").value) || 0;
+      const period_months = parseInt(document.getElementById("renewalPeriodMonths").value) || 12;
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch("/api/rent3/renewals/propose", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            branch,
+            room_id,
+            renewal_type,
+            new_deposit,
+            new_rent,
+            period_months
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(`✅ [${room_id}호] 재계약 제안이 완료되었으며 세입자 1:1 채팅방에 자동 전송되었습니다.`, "success");
+          closeRenewalModal();
+          loadRenewals();
+        } else {
+          Bass.updateAppAlert(data.message || data.detail || "재계약 제안 처리에 실패했습니다.", "error");
+        }
+      });
+    }
+
+    async function confirmTacitRenewal(renewalId, roomNumber) {
+      if (!confirm(`[${roomNumber}] 주택임대차보호법 제6조에 따라 이전과 동일한 조건으로 2년간 묵시적 갱신을 확정하시겠습니까?`)) return;
+
+      try {
+        const res = await fetch(`/api/rent3/renewals/${renewalId}/tacit-confirm`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(`🔄 [${roomNumber}] 묵시적 갱신이 법적 효력으로 확정되었으며 1:1 대화방에 안내되었습니다.`, "success");
+          loadRenewals();
+        } else {
+          Bass.updateAppAlert(data.message || "묵시적 갱신 처리에 실패했습니다.", "error");
+        }
+      } catch (err) {
+        Bass.updateAppAlert("통신 오류가 발생했습니다: " + err.message, "error");
+      }
+    }
+
     window.addEventListener("DOMContentLoaded", loadDashboard);
   </script>
+
+  <!-- Check-Out & Deposit Settlement Modal -->
+  <div class="modal-overlay" id="checkoutModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); z-index:300; justify-content:center; align-items:center; padding:20px;">
+    <div class="modal" style="background:#131b2e; border:1px solid var(--card-border); border-radius:16px; max-width:560px; width:100%; padding:24px; max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; color:#fff;" id="coTitle">퇴실 시설 검수 및 보증금 정산 명세서</h3>
+          <div style="font-size:12px; color:var(--text-muted);">임차인: <strong id="coTenant" style="color:var(--primary);">-</strong> | 기존 보증금: <strong id="coDeposit" style="color:#fff;">-</strong></div>
+        </div>
+        <button onclick="closeCheckOutModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Facility Inspection Checklist (입실 사진 대조) -->
+      <div style="background:#1e293b; padding:12px 14px; border-radius:10px; margin-bottom:14px;">
+        <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:8px;">🔍 6대 주요 시설 퇴실 점검표 (입실 상태와 대조)</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; color:#e2e8f0;">
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 시스템 에어컨 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 드럼 세탁기 급배수 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 빌트인 냉장고 청결</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 벽지·장판 훼손 없음</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 도어락/인터폰 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 욕실 수압/도기 정상</label>
+        </div>
+      </div>
+
+      <!-- Deductions Form -->
+      <div style="background:rgba(15,23,42,0.8); border:1px solid var(--card-border); border-radius:10px; padding:14px; margin-bottom:14px;">
+        <div style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px;">📉 정산 공제 항목 산출</div>
+        
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:13px; color:var(--text-muted);">미납 월세/관리비 공제:</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" id="coUnpaid" value="0" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:13px; color:var(--text-muted);">퇴실 당일 공과금 실비:</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" id="coUtility" value="45000" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span style="font-size:13px; color:var(--text-muted);">시설 파손/원상복구 실비:</span>
+          <div style="display:flex; align-items:center; gap:4px;">
+            <input type="number" id="coDamage" value="0" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+          </div>
+        </div>
+
+        <div style="margin-top:6px;">
+          <input type="text" id="coNotes" placeholder="원상복구 및 공과금 특이사항 메모" style="width:100%; padding:6px 10px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
+        </div>
+      </div>
+
+      <!-- Settlement Summary Result -->
+      <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:14px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-muted); margin-bottom:4px;">
+          <span>총 공제 합계액:</span>
+          <span id="coTotalDeduction" style="color:#f87171; font-weight:700;">45,000원</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; font-size:17px; font-weight:800; color:#fff;">
+          <span>최종 반환 보증금:</span>
+          <span id="coFinalRefund" style="color:#10b981; font-size:20px;">4,955,000원</span>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" style="flex:1;" onclick="completeCheckOutSubmit(this)">🚪 보증금 반환 완료 & 공실 자동 전환</button>
+        <button class="btn btn-secondary" style="width:auto; padding:0 16px;" onclick="closeCheckOutModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin Photo Viewer Lightbox Modal -->
+  <div class="modal-overlay" id="adminPhotoViewerModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:500; justify-content:center; align-items:center; padding:20px;" onclick="closeAdminPhotoViewer()">
+    <div style="position:relative; max-width:92vw; max-height:90vh; display:flex; flex-direction:column; align-items:center;" onclick="event.stopPropagation()">
+      <button onclick="closeAdminPhotoViewer()" style="align-self:flex-end; margin-bottom:8px; background:rgba(255,255,255,0.2); border:none; color:#fff; font-size:20px; border-radius:50%; width:36px; height:36px; cursor:pointer;">✕</button>
+      <img id="adminPhotoViewerImg" src="" style="max-width:90vw; max-height:82vh; border-radius:10px; box-shadow:0 25px 50px rgba(0,0,0,0.8); object-fit:contain; border:1px solid rgba(255,255,255,0.2);">
+    </div>
+  </div>
+
+  <!-- Modal: Lease Renewal Proposal -->
+  <div id="renewalModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:#1e293b; border:1px solid var(--card-border); border-radius:16px; width:100%; max-width:540px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <h3 style="font-size:18px; font-weight:700; color:#fff;" id="renewalModalTitle">📝 재계약 조건 제안</h3>
+        <button onclick="closeRenewalModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+      </div>
+
+      <input type="hidden" id="renewalModalRoomId">
+      <input type="hidden" id="renewalModalOrigRent">
+
+      <div style="background:rgba(15,23,42,0.6); padding:14px; border-radius:10px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        <div><strong>호실:</strong> <span id="renewalModalRoomNum" style="color:var(--primary); font-weight:700;">-</span></div>
+        <div><strong>입주자:</strong> <span id="renewalModalTenantName">-</span></div>
+        <div><strong>현재 임대료:</strong> 보증금 <span id="renewalModalCurrDeposit">-</span>원 / 월세 <span id="renewalModalCurrRent">-</span>원</div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">갱신 방식</label>
+        <select id="renewalTypeSelect" class="branch-select" style="width:100%;" onchange="handleRenewalTypeChange()">
+          <option value="EXPLICIT">조건 합의 재계약 (동결 or 5% 이내 인상)</option>
+          <option value="TACIT">주택임대차보호법 묵시적 갱신 (동일 조건 2년 연장)</option>
+        </select>
+      </div>
+
+      <div id="renewalInputsArea">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+          <div>
+            <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">새 보증금 (원)</label>
+            <input type="number" id="renewalNewDeposit" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;">
+          </div>
+          <div>
+            <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">새 월차임 (원)</label>
+            <input type="number" id="renewalNewRent" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;" oninput="calcRenewalRate()">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+          <div>
+            <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">연장 계약기간</label>
+            <select id="renewalPeriodMonths" class="branch-select" style="width:100%;">
+              <option value="12">12개월 (1년)</option>
+              <option value="24">24개월 (2년)</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">임대료 인상률 계산</label>
+            <div id="renewalRatePreview" style="padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; font-size:14px; font-weight:700; color:var(--success);">0.0% (동결)</div>
+          </div>
+        </div>
+
+        <div id="renewalRateWarning" style="display:none; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.4); color:#f87171; font-size:12px; padding:10px; border-radius:8px; margin-bottom:14px;">
+          ⚠️ <strong>법정 증액 상한 초과!</strong> 주택임대차보호법 제7조에 따라 인상률은 5.0%를 초과할 수 없습니다.
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <button class="btn btn-secondary" onclick="closeRenewalModal()">취소</button>
+        <button class="btn btn-primary" id="btnSubmitRenewal" onclick="submitRenewalProposal(this)">🚀 재계약 제안 & 1:1 직통 채팅 발송</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

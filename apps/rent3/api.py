@@ -3,11 +3,12 @@
 BaseSaasApp 게이트웨이 표준 규격에 따라 마운트됩니다.
 """
 import secrets
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 
-from .domain import RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, CoSigningSession, ChatMessage
+from .domain import RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, CoSigningSession, ChatMessage, RoomAccessInfo, ParkingRegistration, MonthlyBill, PaymentReceipt, CheckOutRecord, RtmsContractReport, LeaseRenewal
 try:
     from apps.rent2.backend.domain.rent import Building
 except ImportError:
@@ -68,6 +69,19 @@ class ListingCreateReq(BaseModel):
     floor: int = 2
     area_sqm: float = 21.0
     images: List[str] = []
+
+class ChatSendReq(BaseModel):
+    branch: str = "main"
+    room_id: str
+    sender_role: str = "tenant"   # tenant or landlord
+    sender_name: str = "임차인"
+    sender_phone: str = ""
+    message: str
+    msg_type: str = "text"        # text, tour_request, system_notice, action_link
+    is_tour_request: bool = False
+    tour_date: str = ""
+    quick_action_url: str = ""
+    photos: List[str] = Field(default_factory=list) # 첨부된 현장 사진 (Base64 data URL 또는 웹 경로)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -575,20 +589,11 @@ def register_user(req: SignUpReq):
 
 
 # ─────────────────────────────────────────────────────────────
-# 7. 1:1 Direct Chat & Tour Booking APIs (직거래 메시지 & 대면 약속)
+# 7. In-App Direct 1:1 Messenger APIs (카카오톡·문자 대체 인앱 실시간 채팅)
 # ─────────────────────────────────────────────────────────────
-class ChatSendReq(BaseModel):
-    sender_role: str = "tenant" # "tenant" or "landlord"
-    sender_name: str
-    message: str
-    is_tour_request: bool = False
-    tour_date: str = ""
-
-
 @router.get("/chat/{branch}/{room_id}")
 def get_room_chat_messages(branch: str, room_id: str):
-    """해당 호실의 1:1 직거래 메시지 및 대면 약속 내역 조회."""
-    # 해당 지점/호실 메시지 필터링
+    """특정 호실의 1:1 직거래 메시지 및 대면 약속 내역 조회 (시간순)."""
     msgs = [m for m in ChatMessage.all() if getattr(m, "branch", "") == branch and getattr(m, "room_id", "") == room_id]
     
     # 기본 초기 환영 메시지 생성 (채팅이 처음일 때)
@@ -597,14 +602,15 @@ def get_room_chat_messages(branch: str, room_id: str):
             branch=branch,
             room_id=room_id,
             sender_role="landlord",
-            sender_name="김임대 (집주인)",
-            message=f"안녕하세요! {room_id}호에 관심 가져주셔서 감사합니다. 현장 실물 투어 희망 일시를 남겨주시면 바로 조율해 드리겠습니다.",
-            is_tour_request=False
+            sender_name="김임대 (임대인)",
+            message=f"안녕하세요! {room_id}호 임대인 김임대입니다. 실물 방 상태, 옵션 문의나 대면 방문 투어 희망 일정을 편하게 남겨주세요.",
+            msg_type="text",
+            is_read=True
         )
         welcome.save("seeded_chat_welcome")
         msgs = [welcome]
 
-    # 임대인 연락처 안내 정보 함께 반환
+    sorted_msgs = sorted(msgs, key=lambda x: getattr(x, "created_at", ""))
     contact_info = {
         "landlord_phone": "010-2345-6789",
         "landlord_name": "김임대",
@@ -615,7 +621,8 @@ def get_room_chat_messages(branch: str, room_id: str):
         "branch": branch,
         "room_id": room_id,
         "contact_info": contact_info,
-        "messages": [m.model_dump() for m in msgs]
+        "total": len(sorted_msgs),
+        "messages": [m.model_dump() for m in sorted_msgs]
     }
 
 
@@ -626,39 +633,889 @@ def send_chat_message(branch: str, room_id: str, req: ChatSendReq):
         branch=branch,
         room_id=room_id,
         sender_role=req.sender_role,
-        sender_name=req.sender_name,
+        sender_name=req.sender_name or ("김임대 (임대인)" if req.sender_role == "landlord" else "임차인"),
+        sender_phone=req.sender_phone,
         message=req.message,
+        msg_type=req.msg_type,
         is_tour_request=req.is_tour_request,
-        tour_date=req.tour_date
+        tour_date=req.tour_date,
+        quick_action_url=req.quick_action_url,
+        photos=req.photos,
+        is_read=False
     )
-    msg.save("chat_message_sent")
+    msg.save(f"chat_{room_id}_{req.sender_role}")
     return {"success": True, "message_id": msg.id, "chat": msg.model_dump()}
+
+
+@router.post("/chat/{branch}/{room_id}/read")
+def mark_chat_read(branch: str, room_id: str, role: str = Query("landlord")):
+    """상대방이 보낸 메시지 모두 읽음 처리."""
+    target_role = "tenant" if role == "landlord" else "landlord"
+    msgs = [m for m in ChatMessage.all() if getattr(m, "branch", "") == branch and getattr(m, "room_id", "") == room_id and getattr(m, "sender_role", "") == target_role and not getattr(m, "is_read", False)]
+    for m in msgs:
+        m.is_read = True
+        m.save("chat_marked_read")
+    return {"success": True, "read_count": len(msgs)}
+
+
+@router.post("/chat/{branch}/{room_id}/quick-reply")
+def send_quick_reply(branch: str, room_id: str, template: str = Query(...)):
+    """임대인 원클릭 인앱 퀵 답변 템플릿 전송 (SMS/카카오톡 발송 비용 0원 인앱 완결)."""
+    templates = {
+        "tour_accept": {
+            "message": "✅ 신청하신 일시에 실물 방문 투어가 확정되었습니다. 약속 시간에 맞춰 건물 1층 공동현관 앞에서 뵙겠습니다!",
+            "msg_type": "tour_accept"
+        },
+        "cosign_ready": {
+            "message": "📜 대법원 실시간 등기부 검증 및 현장 실물 동행 전자 계약 준비가 완료되었습니다. 아래 링크를 통해 5단계 실시간 동시 계약을 체결해주세요.",
+            "msg_type": "action_link",
+            "quick_action_url": f"/rent3/cosign.html?branch={branch}&room={room_id}"
+        },
+        "access_info": {
+            "message": "🔑 입주를 환영합니다! 세대 디지털 도어락 비밀번호 및 차량 주차 등록은 세입자 전용 라운지에서 확인하실 수 있습니다.",
+            "msg_type": "action_link",
+            "quick_action_url": f"/rent3/public.html?room={room_id}#lounge"
+        },
+        "payment_reminder": {
+            "message": "💳 이번 달 정기 임대료 및 관리비 청구서가 발행되었습니다. 세입자 라운지에서 간편결제(신용카드/카카오페이)로 납부하실 수 있습니다.",
+            "msg_type": "action_link",
+            "quick_action_url": f"/rent3/public.html?room={room_id}#lounge"
+        }
+    }
+    tpl = templates.get(template, {
+        "message": "문의해주셔서 감사합니다. 확인 후 신속하게 처리해 드리겠습니다.",
+        "msg_type": "text"
+    })
+    msg = ChatMessage(
+        branch=branch,
+        room_id=room_id,
+        sender_role="landlord",
+        sender_name="김임대 (임대인)",
+        message=tpl["message"],
+        msg_type=tpl["msg_type"],
+        quick_action_url=tpl.get("quick_action_url", ""),
+        is_read=False
+    )
+    msg.save("quick_reply_sent")
+    return {"success": True, "chat": msg.model_dump()}
 
 
 @router.get("/admin/chats")
 def get_admin_active_chats(branch: str = Query("main")):
-    """임대인 관제용 활성 문의 채팅방 목록."""
-    msgs = [m for m in ChatMessage.all() if getattr(m, "branch", "main") == branch]
-    # 호실별로 그룹화
+    """임대인 관제용 활성 문의 채팅방 목록 및 실시간 통계."""
+    all_msgs = [m for m in ChatMessage.all() if getattr(m, "branch", "main") == branch]
+    
+    if not all_msgs:
+        m1 = ChatMessage(branch=branch, room_id="201", sender_role="tenant", sender_name="홍길동 (예비세입자)", message="안녕하세요! 이번 주 토요일 오후 3시에 방 보러 갈 수 있을까요?", is_tour_request=True, tour_date="2026-10-31 15:00", is_read=False)
+        m1.save("seed_chat_1")
+        m2 = ChatMessage(branch=branch, room_id="203", sender_role="tenant", sender_name="박직객 (세입자)", message="임대인님, 주차 등록 완료했습니다. 도어락 비밀번호도 잘 작동하네요!", msg_type="text", is_read=True)
+        m2.save("seed_chat_2")
+        m3 = ChatMessage(branch=branch, room_id="203", sender_role="landlord", sender_name="김임대 (임대인)", message="네 확인 감사합니다. 편안하게 지내시고 문제 생기면 언제든 라운지 1:1 채팅 주세요.", msg_type="text", is_read=True)
+        m3.save("seed_chat_3")
+        all_msgs = [m1, m2, m3]
+
     room_groups = {}
-    for m in msgs:
+    for m in all_msgs:
         r_id = getattr(m, "room_id", "")
         if r_id not in room_groups:
             room_groups[r_id] = []
-        room_groups[r_id].append(m.model_dump())
-    
+        room_groups[r_id].append(m)
+
     chat_rooms = []
     for r_id, m_list in room_groups.items():
-        last_m = m_list[-1]
+        sorted_m = sorted(m_list, key=lambda x: getattr(x, "created_at", ""))
+        last_m = sorted_m[-1]
+        unread = sum(1 for m in sorted_m if getattr(m, "sender_role", "") == "tenant" and not getattr(m, "is_read", False))
+        tenant_name = next((getattr(m, "sender_name", "") for m in sorted_m if getattr(m, "sender_role", "") == "tenant"), f"{r_id}호 문의자")
         chat_rooms.append({
             "room_id": r_id,
-            "last_message": last_m.get("message", ""),
-            "last_sender": last_m.get("sender_name", ""),
-            "last_time": last_m.get("created_at", ""),
-            "unread_count": len([m for m in m_list if m.get("sender_role") == "tenant"]),
-            "messages": m_list
+            "branch": branch,
+            "tenant_name": tenant_name,
+            "last_message": getattr(last_m, "message", ""),
+            "last_sender": getattr(last_m, "sender_name", ""),
+            "last_time": getattr(last_m, "created_at", ""),
+            "unread_count": unread,
+            "is_tour_request": getattr(last_m, "is_tour_request", False),
+            "tour_date": getattr(last_m, "tour_date", ""),
+            "messages": [m.model_dump() for m in sorted_m]
         })
-    return {"chat_rooms": chat_rooms}
+
+    chat_rooms.sort(key=lambda x: x["last_time"], reverse=True)
+    return {
+        "branch": branch,
+        "total_rooms": len(chat_rooms),
+        "total_unread": sum(r["unread_count"] for r in chat_rooms),
+        "chat_rooms": chat_rooms,
+        "rooms": chat_rooms
+    }
+
+
+
+# ─────────────────────────────────────────────────────────────
+# 8. Check-In & Parking Management APIs (도어락 발급 & 주차 등록)
+# ─────────────────────────────────────────────────────────────
+class ParkingRegisterReq(BaseModel):
+    branch: str = "main"
+    room_id: str
+    tenant_name: str
+    tenant_phone: str
+    car_number: str
+    car_model: str = ""
+    slot_type: str = "자유주차"
+    slot_number: str = ""
+
+class CheckInConfirmReq(BaseModel):
+    application_id: str
+    inspection_notes: str = ""
+    photos: List[str] = Field(default_factory=list)
+
+class DoorLockUpdateReq(BaseModel):
+    branch: str = "main"
+    room_id: str
+    door_lock_code: str
+    building_entry_code: str = "#1234*"
+    wifi_ssid: str = "MQNET_WIFI_5G"
+    wifi_pw: str = "rent2026pw"
+    notes: str = ""
+
+
+@router.get("/tenant/checkin-info/{application_id}")
+def get_tenant_checkin_info(application_id: str):
+    """입주 당일 도어락 비밀번호, 공동현관, 와이파이, 주차 등록 상태 조회."""
+    app = RentalApplication.get(application_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="신청서를 찾을 수 없습니다.")
+
+    branch = getattr(app, "branch", "main")
+    room_id = getattr(app, "room_id", "")
+    is_paid = getattr(app, "status", "") == "PAID_CONFIRMED"
+
+    # 1. 도어락 및 출입 정보 조회 (없으면 기본값 생성)
+    access_infos = [a for a in RoomAccessInfo.all() if getattr(a, "branch", "") == branch and getattr(a, "room_id", "") == room_id]
+    if access_infos:
+        access_info = access_infos[-1]
+    else:
+        access_info = RoomAccessInfo(
+            branch=branch,
+            room_id=room_id,
+            door_lock_code=f"{int(room_id) * 11 % 9000 + 1000}*", # 호실별 고유 번호 생성
+            building_entry_code="#1234*",
+            wifi_ssid="MQNET_DIRECT_5G",
+            wifi_pw="rent2026pw"
+        )
+        access_info.save("seed_room_access")
+
+    # 2. 주차 등록 내역 조회
+    parkings = [p for p in ParkingRegistration.all() if getattr(p, "branch", "") == branch and getattr(p, "room_id", "") == room_id and getattr(p, "is_active", True)]
+    parking_record = parkings[-1].model_dump() if parkings else None
+
+    # 3. 입실 체크인 기록 조회
+    checkins = [c for c in CheckInRecord.all() if getattr(c, "application_id", "") == application_id]
+    checkin_record = checkins[-1].model_dump() if checkins else None
+
+    # 잔금/계약 미체결 시 도어락 마스킹 보호
+    door_code_display = access_info.door_lock_code if is_paid else "**** (계약금 결제 완료 후 입주일 당일 노출)"
+    building_code_display = access_info.building_entry_code if is_paid else "****"
+
+    return {
+        "application_id": application_id,
+        "is_paid": is_paid,
+        "branch": branch,
+        "room_id": room_id,
+        "move_in_date": app.move_in_date,
+        "tenant_name": app.tenant_name,
+        "access": {
+            "door_lock_code": door_code_display,
+            "building_entry_code": building_code_display,
+            "wifi_ssid": access_info.wifi_ssid,
+            "wifi_pw": access_info.wifi_pw,
+            "notes": access_info.notes
+        },
+        "parking": parking_record,
+        "checkin": checkin_record
+    }
+
+
+@router.post("/tenant/checkin-confirm")
+def confirm_tenant_checkin(req: CheckInConfirmReq):
+    """세입자 당일 첫 입실 확인 및 입실 점검 메모 제출."""
+    app = RentalApplication.get(req.application_id)
+    if not app:
+        raise HTTPException(status_code=404, detail="신청서를 찾을 수 없습니다.")
+
+    branch = getattr(app, "branch", "main")
+    room_id = getattr(app, "room_id", "")
+
+    # CheckInRecord 생성 또는 갱신
+    checkins = [c for c in CheckInRecord.all() if getattr(c, "application_id", "") == req.application_id]
+    if checkins:
+        rec = checkins[-1]
+    else:
+        rec = CheckInRecord(
+            application_id=req.application_id,
+            branch=branch,
+            room_id=room_id,
+            tenant_name=app.tenant_name
+        )
+    rec.confirm_checkin(notes=req.inspection_notes, photos=req.photos)
+    return {
+        "success": True,
+        "message": f"[{room_id}호] 입실 체크인이 완료되었습니다. 편안한 거주 되시길 바랍니다!",
+        "checkin": rec.model_dump()
+    }
+
+
+@router.post("/tenant/parking/register")
+def register_parking_vehicle(req: ParkingRegisterReq):
+    """세입자 차량 번호 및 차종 등록."""
+    # 기존 등록 비활성화 후 신규 등록
+    for p in ParkingRegistration.all():
+        if getattr(p, "branch", "") == req.branch and getattr(p, "room_id", "") == req.room_id:
+            p.is_active = False
+            p.save("parking_superseded")
+
+    parking = ParkingRegistration(
+        branch=req.branch,
+        room_id=req.room_id,
+        tenant_name=req.tenant_name,
+        tenant_phone=req.tenant_phone,
+        car_number=req.car_number,
+        car_model=req.car_model,
+        slot_type=req.slot_type,
+        slot_number=req.slot_number
+    )
+    parking.save("parking_registered")
+    return {
+        "success": True,
+        "message": f"[{req.room_id}호] 차량({req.car_number}) 주차 등록이 완료되었습니다.",
+        "parking": parking.model_dump()
+    }
+
+
+@router.get("/admin/parking")
+def get_admin_parking_records(branch: str = Query("main")):
+    """임대인용 지점별 등록 차량 대장 (외부 불법 주차 단속용)."""
+    parkings = [p for p in ParkingRegistration.all() if getattr(p, "branch", "main") == branch and getattr(p, "is_active", True)]
+    return {
+        "branch": branch,
+        "total_vehicles": len(parkings),
+        "vehicles": [p.model_dump() for p in parkings]
+    }
+
+
+@router.post("/admin/doorlock/update")
+def update_room_doorlock(req: DoorLockUpdateReq):
+    """임대인용 호실별 도어락 비밀번호 변경/설정."""
+    infos = [a for a in RoomAccessInfo.all() if getattr(a, "branch", "") == req.branch and getattr(a, "room_id", "") == req.room_id]
+    if infos:
+        info = infos[-1]
+    else:
+        info = RoomAccessInfo(branch=req.branch, room_id=req.room_id)
+    
+    info.door_lock_code = req.door_lock_code
+    info.building_entry_code = req.building_entry_code
+    info.wifi_ssid = req.wifi_ssid
+    info.wifi_pw = req.wifi_pw
+    info.notes = req.notes
+    info.save("doorlock_updated_by_admin")
+
+    return {
+        "success": True,
+        "message": f"[{req.room_id}호] 도어락 및 출입 정보가 성공적으로 변경되었습니다.",
+        "access": info.model_dump()
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 9. Tenant Billing, Payment & Electronic Receipt APIs (수납 & 영수증)
+# ─────────────────────────────────────────────────────────────
+class BillPayReq(BaseModel):
+    payment_method: str = "CARD" # CARD, TRANSFER, KAKAO_PAY
+    tenant_name: str = "홍길동"
+
+
+@router.get("/tenant/bills/{branch}/{room_id}")
+def get_tenant_bills(branch: str, room_id: str):
+    """해당 호실의 월별 청구서, 당월 미납 청구 내역 및 납부 히스토리 조회 (rent2 실시간 장부 연동)."""
+    bills = [b for b in MonthlyBill.all() if getattr(b, "branch", "") == branch and getattr(b, "room_id", "") == room_id]
+
+    # 기본 청구서가 없으면 9월(완납) 및 10월(당월 미납) 시드 자동 생성
+    if not bills:
+        # 9월 완납 청구서
+        paid_bill = MonthlyBill(
+            branch=branch,
+            room_id=room_id,
+            billing_month="2026-09",
+            tenant_name="홍길동",
+            tenant_phone="010-1234-5678",
+            rent_amount=500000,
+            maint_amount=50000,
+            due_date="2026-09-30",
+            is_paid=True,
+            paid_at="2026-09-25 10:30:15",
+            payment_method="신용카드 (일시불)",
+            receipt_id="RCP-20260925-0912"
+        )
+        paid_bill.save("seed_bill_sep")
+
+        # 9월 영수증 시드
+        r_sep = PaymentReceipt(
+            id="RCP-20260925-0912",
+            receipt_no="RCP-20260925-0912",
+            bill_id=paid_bill.id,
+            branch=branch,
+            room_id=room_id,
+            tenant_name="홍길동",
+            tenant_phone="010-1234-5678",
+            rent_amount=500000,
+            maint_amount=50000,
+            total_amount=550000,
+            payment_method="신용카드 (일시불)",
+            approval_no="84920134",
+            paid_at="2026-09-25 10:30:15"
+        )
+        r_sep.save("seed_receipt_sep")
+
+        # 10월 당월 미납 청구서
+        curr_bill = MonthlyBill(
+            branch=branch,
+            room_id=room_id,
+            billing_month="2026-10",
+            tenant_name="홍길동",
+            tenant_phone="010-1234-5678",
+            rent_amount=500000,
+            maint_amount=50000,
+            due_date="2026-10-31",
+            is_paid=False
+        )
+        curr_bill.save("seed_bill_oct")
+        bills = [curr_bill, paid_bill]
+
+    # 정렬: 최신 월 순
+    bills_sorted = sorted(bills, key=lambda x: getattr(x, "billing_month", ""), reverse=True)
+    unpaid_bills = [b for b in bills_sorted if not getattr(b, "is_paid", False)]
+    paid_bills = [b for b in bills_sorted if getattr(b, "is_paid", False)]
+
+    # rent2 코어 장부와 상계 상태 동기화 확인
+    rent2_status = "정상"
+    if Building:
+        try:
+            b_obj = Building.get(branch)
+            if b_obj and hasattr(b_obj, "rooms") and room_id in b_obj.rooms:
+                room = b_obj.rooms[room_id]
+                rent2_status = getattr(room, "status", "정상")
+        except Exception:
+            pass
+
+    return {
+        "branch": branch,
+        "room_id": room_id,
+        "current_unpaid": unpaid_bills[0].model_dump() if unpaid_bills else None,
+        "total_unpaid_amount": sum(b.total_amount for b in unpaid_bills),
+        "bills": [b.model_dump() for b in bills_sorted],
+        "rent2_status": rent2_status
+    }
+
+
+@router.post("/tenant/bills/{branch}/{room_id}/pay")
+def pay_tenant_bill(branch: str, room_id: str, req: BillPayReq):
+    """당월 미납 월세 및 관리비 결제 처리 -> rent2 FIFO 상계 및 전자 영수증 발급."""
+    bills = [b for b in MonthlyBill.all() if getattr(b, "branch", "") == branch and getattr(b, "room_id", "") == room_id and not getattr(b, "is_paid", False)]
+    if not bills:
+        raise HTTPException(status_code=400, detail="납부할 미납 청구서가 없습니다. 이미 완납되었습니다.")
+
+    target_bill = bills[0]
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    receipt_no = f"RCP-{datetime.now().strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
+    approval_no = str(secrets.randbelow(89999999) + 10000000)
+
+    # 1. 전자 영수증 생성 (국세청 증빙 규격)
+    receipt = PaymentReceipt(
+        receipt_no=receipt_no,
+        bill_id=target_bill.id,
+        branch=branch,
+        room_id=room_id,
+        tenant_name=req.tenant_name or target_bill.tenant_name,
+        tenant_phone=target_bill.tenant_phone or "010-1234-5678",
+        landlord_name="김임대",
+        building_address="서울특별시 강남구 역삼동 123 시크빌",
+        rent_amount=target_bill.rent_amount,
+        maint_amount=target_bill.maint_amount,
+        total_amount=target_bill.total_amount,
+        payment_method="신용카드 (일시불)" if req.payment_method == "CARD" else ("간편결제 (카카오페이)" if req.payment_method == "KAKAO_PAY" else "가상계좌 이체"),
+        approval_no=approval_no,
+        paid_at=now_str
+    )
+    receipt.save("payment_receipt_issued")
+
+    # 2. 청구서 완납 처리
+    target_bill.is_paid = True
+    target_bill.paid_at = now_str
+    target_bill.payment_method = receipt.payment_method
+    target_bill.receipt_id = receipt.id
+    target_bill.save("bill_paid_confirmed")
+
+    # 3. rent2 코어 엔진 호환 (FIFO 장부 반영)
+    if Building:
+        try:
+            b_obj = Building.get(branch)
+            if b_obj and hasattr(b_obj, "rooms") and room_id in b_obj.rooms:
+                room = b_obj.rooms[room_id]
+                room.status = "정상"
+                b_obj.save(f"rent3_payment_fifo_{room_id}")
+        except Exception as e:
+            print(f"[Billing] rent2 FIFO 장부 동기화 경고: {e}")
+
+    return {
+        "success": True,
+        "message": f"[{target_bill.billing_month}월] 월세 및 관리비({target_bill.total_amount:,}원) 납부가 정상 완료되었습니다.",
+        "receipt": receipt.model_dump(),
+        "bill": target_bill.model_dump()
+    }
+
+
+@router.get("/tenant/receipt/{receipt_id}")
+def get_payment_receipt(receipt_id: str):
+    """국세청 소득공제 및 지출증빙용 공인 전자 영수증 상세 반환."""
+    receipt = PaymentReceipt.get(receipt_id)
+    if not receipt:
+        # 혹시 receipt_no로 검색
+        all_r = [r for r in PaymentReceipt.all() if getattr(r, "receipt_no", "") == receipt_id]
+        if all_r:
+            receipt = all_r[-1]
+    if not receipt:
+        raise HTTPException(status_code=404, detail="해당 전자 영수증을 찾을 수 없습니다.")
+
+    return {
+        "success": True,
+        "receipt": receipt.model_dump()
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 10. Check-Out & Deposit Settlement APIs (퇴실 검수 & 보증금 정산)
+# ─────────────────────────────────────────────────────────────
+class CheckOutInspectReq(BaseModel):
+    unpaid_rent_deduction: int = 0
+    utility_deduction: int = 45000
+    damage_deduction: int = 0
+    damage_notes: str = "통상 손모 외 특이 파손 없음"
+    checks: Dict[str, bool] = Field(default_factory=dict)
+
+
+@router.get("/checkout/{branch}/{room_id}")
+def get_checkout_info(branch: str, room_id: str):
+    """퇴실 검수표, 입실 시 점검 사진 및 보증금 정산 명세서 조회."""
+    # 1. 기존 호실 정보 및 임차인 정보
+    tenant_name = "홍길동"
+    tenant_phone = "010-1234-5678"
+    deposit = 5000000
+    if Building:
+        try:
+            b_obj = Building.get(branch)
+            if b_obj and hasattr(b_obj, "rooms") and room_id in b_obj.rooms:
+                room = b_obj.rooms[room_id]
+                tenant_name = getattr(room, "tenant_name", "홍길동") or "홍길동"
+                tenant_phone = getattr(room, "tenant_phone", "010-1234-5678") or "010-1234-5678"
+                deposit = getattr(room, "deposit", 5000000) or 5000000
+        except Exception:
+            pass
+
+    # 2. 미납 월세 조회
+    unpaid_bills = [b for b in MonthlyBill.all() if getattr(b, "branch", "") == branch and getattr(b, "room_id", "") == room_id and not getattr(b, "is_paid", False)]
+    unpaid_rent = sum(b.total_amount for b in unpaid_bills)
+
+    # 3. 입실 당시 체크인 기록 (사진 대조용)
+    checkins = [c for c in CheckInRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    checkin_record = checkins[-1].model_dump() if checkins else None
+
+    # 4. 기존 또는 신규 퇴실 검수표
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    if checkouts:
+        record = checkouts[-1]
+    else:
+        record = CheckOutRecord(
+            branch=branch,
+            room_id=room_id,
+            tenant_name=tenant_name,
+            tenant_phone=tenant_phone,
+            original_deposit=deposit,
+            unpaid_rent_deduction=unpaid_rent,
+            utility_deduction=45000,
+            damage_deduction=0
+        )
+        record.calculate_refund()
+        record.save("seed_checkout_record")
+
+    return {
+        "branch": branch,
+        "room_id": room_id,
+        "tenant_name": tenant_name,
+        "tenant_phone": tenant_phone,
+        "original_deposit": deposit,
+        "unpaid_rent_deduction": unpaid_rent,
+        "checkin_reference": checkin_record,
+        "checkout_record": record.model_dump()
+    }
+
+
+@router.post("/checkout/{branch}/{room_id}/inspect")
+def inspect_checkout(branch: str, room_id: str, req: CheckOutInspectReq):
+    """임대인 시설 검수 및 공과금/원상복구 공제액 확정."""
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    if checkouts:
+        rec = checkouts[-1]
+    else:
+        rec = CheckOutRecord(branch=branch, room_id=room_id)
+
+    rec.unpaid_rent_deduction = req.unpaid_rent_deduction
+    rec.utility_deduction = req.utility_deduction
+    rec.damage_deduction = req.damage_deduction
+    rec.damage_notes = req.damage_notes
+    if req.checks:
+        rec.inspection_checks = req.checks
+    rec.calculate_refund()
+    rec.status = "AGREED"
+    rec.save("checkout_inspected")
+
+    return {
+        "success": True,
+        "message": f"[{room_id}호] 퇴실 검수 및 공제액이 확정되었습니다. 최종 반환 보증금: {rec.final_refund_deposit:,}원",
+        "record": rec.model_dump()
+    }
+
+
+@router.post("/checkout/{branch}/{room_id}/complete")
+def complete_checkout(branch: str, room_id: str):
+    """보증금 반환 완료 승인 -> 호실 즉시 공실 전환 및 신규 공실 매물 자동 재등록."""
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    if not checkouts:
+        raise HTTPException(status_code=404, detail="퇴실 정산 기록을 찾을 수 없습니다.")
+
+    rec = checkouts[-1]
+    rec.complete_settlement()
+
+    return {
+        "success": True,
+        "message": f"[{room_id}호] 보증금({rec.final_refund_deposit:,}원) 반환이 완료되었습니다. 호실이 '공실'로 전환되고 직거래 포털 매물로 자동 재등록되었습니다.",
+        "record": rec.model_dump()
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 11. RTMS Housing Lease Report & Fixed Date APIs (전월세신고 & 확정일자)
+# ─────────────────────────────────────────────────────────────
+@router.get("/rtms/{target_id}/report")
+def get_rtms_report(target_id: str, branch: str = Query("main")):
+    """국토부 법정 주택임대차 계약신고서 및 확정일자 데이터 조회 (없으면 자동 완성 생성)."""
+    # target_id가 세션 ID, 신청서 ID, 또는 호실 번호일 수 있음
+    reports = [r for r in RtmsContractReport.all() if getattr(r, "session_id", "") == target_id or getattr(r, "room_id", "") == target_id]
+    
+    if reports:
+        report = reports[-1]
+    else:
+        # 데이터 자동 조회 (CoSigningSession 또는 Room)
+        tenant_name = "홍길동"
+        tenant_phone = "010-1234-5678"
+        deposit = 5000000
+        monthly_rent = 500000
+        room_id = target_id if len(target_id) <= 4 else "201"
+
+        if CoSigningSession:
+            s = CoSigningSession.get(target_id)
+            if s:
+                room_id = s.room_id
+                tenant_name = s.tenant_name or tenant_name
+                tenant_phone = s.tenant_phone or tenant_phone
+                deposit = s.deposit or deposit
+                monthly_rent = s.monthly_rent or monthly_rent
+
+        report = RtmsContractReport(
+            session_id=target_id,
+            branch=branch,
+            room_id=room_id,
+            tenant_name=tenant_name,
+            tenant_phone=tenant_phone,
+            deposit=deposit,
+            monthly_rent=monthly_rent,
+            property_address=f"서울특별시 강남구 역삼동 123 시크빌 {room_id}호"
+        )
+        report.save("seed_rtms_report")
+
+    return {
+        "success": True,
+        "report": report.model_dump()
+    }
+
+
+@router.post("/rtms/{target_id}/submit")
+def submit_rtms_report(target_id: str, branch: str = Query("main")):
+    """국토교통부 거래관리시스템(RTMS) 전자 신고 제출 -> 대법원 확정일자 번호 즉시 부여."""
+    reports = [r for r in RtmsContractReport.all() if getattr(r, "session_id", "") == target_id or getattr(r, "room_id", "") == target_id]
+    if reports:
+        report = reports[-1]
+    else:
+        report = RtmsContractReport(session_id=target_id, branch=branch, room_id=target_id if len(target_id) <= 4 else "201")
+
+    report.submit_report()
+    return {
+        "success": True,
+        "message": f"주택임대차 계약 신고가 국토교통부(RTMS)에 정상 수리되었습니다. 대법원 확정일자 번호[{report.fixed_date_number}]가 부여되어 보증금 우선변제권이 확보되었습니다.",
+        "report": report.model_dump()
+    }
+
+
+@router.get("/admin/rtms/pending")
+def get_admin_pending_rtms(branch: str = Query("main")):
+    """임대인 관제용 30일 이내 과태료 예방 신고 현황 및 D-Day 목록."""
+    reports = [r for r in RtmsContractReport.all() if getattr(r, "branch", "main") == branch]
+    # 미신고 내역 필터
+    unsubmitted = [r for r in reports if getattr(r, "status", "READY") != "SUBMITTED"]
+    return {
+        "branch": branch,
+        "total_contracts": len(reports),
+        "pending_count": len(unsubmitted),
+        "reports": [r.model_dump() for r in reports]
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 9. 계약 만기 D-Day 및 비대면 재계약/묵시적 갱신 API
+# ─────────────────────────────────────────────────────────────
+class RenewalProposeReq(BaseModel):
+    branch: str = "main"
+    room_id: str
+    renewal_type: str = "EXPLICIT"  # EXPLICIT, TACIT, TERMINATE
+    new_deposit: int
+    new_rent: int
+    new_maintenance: int = 50000
+    period_months: int = 12
+    special_agreement: str = "주택임대차보호법 제7조 증액 상한선(5%)을 준수하며 기존 특약을 승계합니다."
+
+class RenewalSignReq(BaseModel):
+    role: str = "tenant"            # "landlord" or "tenant"
+    signature: str = "DIGITAL_SIGNATURE"
+
+
+@router.get("/renewals")
+def get_renewals(branch: str = Query("main")):
+    """지점별 입주 계약의 만기 D-Day 현황 및 재계약 관리 목록 조회."""
+    # 1. 기존 저장된 LeaseRenewal 레코드 로드
+    renewals_map = {r.room_id: r for r in LeaseRenewal.all() if getattr(r, "branch", "main") == branch}
+
+    # 2. rent2 Building 호실 정보 연계하여 누락 호실 자동 생성/계산
+    items = []
+    if Building:
+        b = Building.get(branch)
+        if b and hasattr(b, "rooms"):
+            today = datetime.now().date()
+            raw_rooms = b.rooms() if callable(b.rooms) else (b.rooms or {})
+            for room_id, r in raw_rooms.items():
+                t_name = r.get("tenant_name", "") if isinstance(r, dict) else getattr(r, "tenant_name", "")
+                is_occ = r.get("is_occupied", True) if isinstance(r, dict) else getattr(r, "is_occupied", True)
+                if not is_occ and not t_name:
+                    continue # 공실은 제외
+
+                lr = renewals_map.get(str(room_id))
+                if not lr:
+                    move_in = r.get("move_in", "") if isinstance(r, dict) else getattr(r, "move_in", "")
+                    if move_in:
+                        try:
+                            mi_dt = datetime.strptime(move_in, "%Y-%m-%d").date()
+                            orig_end = mi_dt.replace(year=mi_dt.year + 1).strftime("%Y-%m-%d")
+                        except Exception:
+                            orig_end = (today + timedelta(days=75)).strftime("%Y-%m-%d")
+                    else:
+                        orig_end = (today + timedelta(days=90)).strftime("%Y-%m-%d")
+
+                    cur_rent = (r.get("rent") if isinstance(r, dict) else getattr(r, "rent", None)) or 500000
+                    cur_deposit = (r.get("deposit") if isinstance(r, dict) else getattr(r, "deposit", None)) or 5000000
+                    t_phone = (r.get("tenant_phone") if isinstance(r, dict) else getattr(r, "tenant_phone", None)) or "010-0000-0000"
+
+                    lr = LeaseRenewal(
+                        branch=branch,
+                        room_id=str(room_id),
+                        room_number=f"{room_id}호",
+                        tenant_name=t_name or "미상입주자",
+                        tenant_phone=t_phone,
+                        original_start_date=move_in or "2025-11-01",
+                        original_end_date=orig_end,
+                        original_deposit=cur_deposit,
+                        original_rent=cur_rent,
+                        new_deposit=cur_deposit,
+                        new_rent=cur_rent,
+                        new_maintenance=50000,
+                        new_start_date=orig_end,
+                        new_end_date=(today + timedelta(days=455)).strftime("%Y-%m-%d")
+                    )
+                    lr.save("seed_lease_renewal")
+                    renewals_map[str(room_id)] = lr
+
+    # 통계 집계
+    all_renewals = list(renewals_map.values())
+    notice_active_count = sum(1 for r in all_renewals if r.notice_status == "NOTICE_ACTIVE")
+    imminent_count = sum(1 for r in all_renewals if r.notice_status == "IMMINENT")
+    signed_count = sum(1 for r in all_renewals if r.status in ("SIGNED", "TACIT"))
+
+    return {
+        "success": True,
+        "branch": branch,
+        "summary": {
+            "total_contracts": len(all_renewals),
+            "notice_active_count": notice_active_count, # 60일~180일 전 (갱신 통지 적정 시기)
+            "imminent_count": imminent_count,           # 60일 이내 (만기 임박)
+            "signed_count": signed_count                # 체결 완료
+        },
+        "items": [
+            {
+                "renewal_id": r.id,
+                "room_id": r.room_id,
+                "room_number": r.room_number,
+                "tenant_name": r.tenant_name,
+                "tenant_phone": r.tenant_phone,
+                "original_start_date": r.original_start_date,
+                "original_end_date": r.original_end_date,
+                "days_remaining": r.days_remaining,
+                "notice_status": r.notice_status,
+                "renewal_type": r.renewal_type,
+                "original_deposit": r.original_deposit,
+                "original_rent": r.original_rent,
+                "new_deposit": r.new_deposit,
+                "new_rent": r.new_rent,
+                "new_maintenance": r.new_maintenance,
+                "rate_increase_pct": r.rate_increase_pct,
+                "status": r.status,
+                "landlord_signed": r.landlord_signed,
+                "tenant_signed": r.tenant_signed,
+                "special_agreement": r.special_agreement,
+                "updated_at": r.updated_at
+            }
+            for r in all_renewals
+        ]
+    }
+
+
+@router.post("/renewals/propose")
+def propose_renewal(req: RenewalProposeReq):
+    """임대인의 재계약 조건 제안 (임대료 5% 상한선 검증 포함)."""
+    # 1. 기존 레코드 확인 또는 신규 생성
+    records = [r for r in LeaseRenewal.all() if getattr(r, "branch", "main") == req.branch and getattr(r, "room_id", "") == req.room_id]
+    if records:
+        renewal = records[-1]
+    else:
+        renewal = LeaseRenewal(branch=req.branch, room_id=req.room_id, room_number=f"{req.room_id}호")
+
+    # 2. 5% 상한선 검증 (EXPLICIT 인상 시)
+    if req.renewal_type == "EXPLICIT" and renewal.original_rent > 0:
+        increase_pct = ((req.new_rent - renewal.original_rent) / renewal.original_rent) * 100.0
+        if increase_pct > 5.0001:
+            raise HTTPException(
+                status_code=400,
+                detail=f"주택임대차보호법 제7조 위반: 임대료 인상률({increase_pct:.1f}%)은 법정 증액 상한선(5.0%)을 초과할 수 없습니다."
+            )
+        renewal.rate_increase_pct = round(max(0.0, increase_pct), 2)
+    else:
+        renewal.rate_increase_pct = 0.0
+
+    renewal.renewal_type = req.renewal_type
+    renewal.new_deposit = req.new_deposit
+    renewal.new_rent = req.new_rent
+    renewal.new_maintenance = req.new_maintenance
+    renewal.period_months = req.period_months
+    if req.special_agreement:
+        renewal.special_agreement = req.special_agreement
+    renewal.status = "PROPOSED"
+    renewal.landlord_signed = True
+    renewal.landlord_signed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    renewal.tenant_signed = False
+    renewal.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    renewal.save("renewal_proposed")
+
+    # 3. 1:1 직통 채팅방에 재계약 제안 알림 자동 발송
+    msg_text = (
+        f"📜 [재계약 조건 제안]\n"
+        f"임대인께서 {req.room_id}호 재계약 조건(보증금 {req.new_deposit:,}원, 월세 {req.new_rent:,}원 / 인상률 {renewal.rate_increase_pct}%)을 제안하셨습니다.\n"
+        f"세입자 라운지 또는 아래 링크에서 내용을 확인하시고 전자서명을 완료해 주세요."
+    )
+    chat = ChatMessage(
+        branch=req.branch,
+        room_id=req.room_id,
+        sender_role="landlord",
+        sender_name="임대인(관제센터)",
+        message=msg_text,
+        quick_action_label="📝 재계약 조건 확인 & 서명",
+        quick_action_url=f"/rent3/public.html?room={req.room_id}#renewal"
+    )
+    chat.save("bot_sent_renewal_proposal")
+
+    return {
+        "success": True,
+        "message": "재계약 제안이 완료되었으며 세입자 1:1 채팅방으로 안내되었습니다.",
+        "renewal": renewal.model_dump()
+    }
+
+
+@router.post("/renewals/{renewal_id}/sign")
+def sign_renewal(renewal_id: str, req: RenewalSignReq):
+    """재계약서 전자서명 날인 (임차인/임대인)."""
+    renewal = LeaseRenewal.get(renewal_id)
+    if not renewal:
+        raise HTTPException(status_code=404, detail="해당 재계약 건을 찾을 수 없습니다.")
+
+    if req.role == "tenant":
+        renewal.sign_tenant()
+    else:
+        renewal.sign_landlord()
+
+    # 양측 서명 완료 시 축하 메시지 발송
+    if renewal.status == "SIGNED":
+        chat = ChatMessage(
+            branch=renewal.branch,
+            room_id=renewal.room_id,
+            sender_role="bot",
+            sender_name="스마트임차 Rent3",
+            message=f"🎉 [{renewal.room_id}호 재계약 체결 완료]\n양측 전자서명이 모두 완료되어 임대차계약이 {renewal.period_months}개월 연장되었습니다.\n(보증금 {renewal.new_deposit:,}원 / 월세 {renewal.new_rent:,}원)"
+        )
+        chat.save("bot_sent_renewal_complete")
+
+    return {
+        "success": True,
+        "message": "전자서명이 성공적으로 날인되었습니다.",
+        "status": renewal.status,
+        "renewal": renewal.model_dump()
+    }
+
+
+@router.post("/renewals/{renewal_id}/tacit-confirm")
+def confirm_tacit_renewal(renewal_id: str):
+    """주택임대차보호법 제6조 묵시적 갱신 확정 처리."""
+    renewal = LeaseRenewal.get(renewal_id)
+    if not renewal:
+        raise HTTPException(status_code=404, detail="해당 재계약 건을 찾을 수 없습니다.")
+
+    renewal.confirm_tacit()
+
+    chat = ChatMessage(
+        branch=renewal.branch,
+        room_id=renewal.room_id,
+        sender_role="bot",
+        sender_name="스마트임차 Rent3",
+        message=f"🔄 [{renewal.room_id}호 묵시적 갱신 확인 완료]\n주택임대차보호법 제6조에 따라 이전 계약과 동일한 조건으로 2년간 존속(연장) 처리되었습니다."
+    )
+    chat.save("bot_sent_tacit_complete")
+
+    return {
+        "success": True,
+        "message": "묵시적 갱신이 법적 효력에 따라 확정 처리되었습니다.",
+        "renewal": renewal.model_dump()
+    }
+
+
+
+
+
+
+
 
 
 

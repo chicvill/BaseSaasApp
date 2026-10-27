@@ -345,13 +345,17 @@
 
         <h3 style="font-size:16px; font-weight:700; margin:18px 0 10px;">🏛️ 입주 전 필수 행정 신고 (원클릭 안내)</h3>
         
-        <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <button class="btn btn-primary" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); font-size:14px; padding:12px; font-weight:800; justify-content:space-between;" onclick="openRtmsModal()">
+            <span>🏛️ 국토교통부(RTMS) 주택임대차 신고서 & 확정일자 즉시 발급</span>
+            <span>원클릭 ↗</span>
+          </button>
           <a href="https://rtms.molit.go.kr" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:space-between;">
-            <span>📋 국토교통부 전월세 계약 신고 (30일 이내)</span>
-            <span>바로가기 ↗</span>
+            <span>📋 국토교통부 부동산거래관리시스템 포털 (30일 이내)</span>
+            <span>포털 이동 ↗</span>
           </a>
           <a href="https://www.gov.kr/portal/main" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:space-between;">
-            <span>🏠 정부24 입주일 전입신고 및 확정일자</span>
+            <span>🏠 정부24 입주일 전입신고 및 확정일자 부여</span>
             <span>바로가기 ↗</span>
           </a>
         </div>
@@ -522,10 +526,168 @@
       document.getElementById("completedArea").style.display = "block";
     }
 
+    /* ─── RTMS Report & Fixed Date Modal Logic ─── */
+    let currentRtmsTarget = "203";
+
+    async function openRtmsModal() {
+      try {
+        const res = await fetch(`/api/rent3/rtms/${currentRtmsTarget}/report`);
+        const data = await res.json();
+        const r = data.report;
+
+        document.getElementById("rtmsReportNo").innerText = r.report_no;
+        document.getElementById("rtmsContractDate").innerText = r.contract_date;
+        document.getElementById("rtmsDeadline").innerText = r.deadline_date;
+        document.getElementById("rtmsLandlord").innerText = `${r.landlord_name} (${r.landlord_ssn_front}******)`;
+        document.getElementById("rtmsLandlordPhone").innerText = r.landlord_phone;
+        document.getElementById("rtmsTenant").innerText = `${r.tenant_name} (${r.tenant_ssn_front}******)`;
+        document.getElementById("rtmsTenantPhone").innerText = r.tenant_phone;
+        document.getElementById("rtmsAddress").innerText = r.property_address;
+        document.getElementById("rtmsDeposit").innerText = `${r.deposit.toLocaleString()}원`;
+        document.getElementById("rtmsRent").innerText = `${r.monthly_rent.toLocaleString()}원`;
+        document.getElementById("rtmsPeriod").innerText = `${r.contract_period} (${r.move_in_date} 입주)`;
+
+        // Status badge
+        if (r.status === "SUBMITTED") {
+          document.getElementById("rtmsStatusBadge").innerHTML = `<span style="background:#10b981; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">✅ 신고 수리 및 확정일자 부여 완료</span>`;
+          document.getElementById("rtmsFixedDateBox").style.display = "block";
+          document.getElementById("rtmsFixedDateNo").innerText = r.fixed_date_number;
+          document.getElementById("rtmsFixedDateAt").innerText = r.fixed_date_granted_at;
+          document.getElementById("btnSubmitRtms").style.display = "none";
+        } else {
+          document.getElementById("rtmsStatusBadge").innerHTML = `<span style="background:#f59e0b; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">⏳ 제출 대기 (30일 이내)</span>`;
+          document.getElementById("rtmsFixedDateBox").style.display = "none";
+          document.getElementById("btnSubmitRtms").style.display = "block";
+        }
+
+        document.getElementById("rtmsModal").style.display = "flex";
+      } catch (err) {
+        alert("신고서 데이터를 불러오지 못했습니다: " + err.message);
+      }
+    }
+
+    function closeRtmsModal() {
+      document.getElementById("rtmsModal").style.display = "none";
+    }
+
+    async function submitRtmsOnline(btn) {
+      if (!confirm("국토교통부 거래관리시스템(RTMS)에 주택임대차 계약을 전자 신고하고 확정일자를 즉시 부여받으시겠습니까?")) return;
+      btn.disabled = true;
+      btn.innerText = "RTMS 전송 및 확정일자 처리 중...";
+
+      try {
+        const res = await fetch(`/api/rent3/rtms/${currentRtmsTarget}/submit`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          alert(data.message);
+          openRtmsModal();
+        }
+      } catch (err) {
+        alert("신고 실패: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "🏛️ 국토교통부 RTMS 전자 신고 제출 & 확정일자 즉시 받기";
+      }
+    }
+
+    function printRtmsReport() {
+      window.print();
+    }
+
     window.addEventListener("DOMContentLoaded", () => {
       document.getElementById("inpMoveInDate").value = new Date().toISOString().split("T")[0];
       renderFacilityChecklist();
     });
   </script>
+
+  <!-- RTMS Official Housing Lease Report Modal (국토교통부 법정 서식) -->
+  <div class="modal-overlay" id="rtmsModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:400; justify-content:center; align-items:center; padding:20px;">
+    <div class="modal" style="background:#fff; color:#0f172a; border-radius:12px; max-width:620px; width:100%; padding:28px; max-height:92vh; overflow-y:auto; box-shadow:0 25px 50px rgba(0,0,0,0.5);">
+      <!-- Official Header -->
+      <div style="border-bottom:2px solid #0f172a; padding-bottom:12px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:flex-start;">
+        <div>
+          <div style="font-size:11px; color:#64748b; font-weight:600;">[부동산 거래신고 등에 관한 법률 시행규칙 별지 제1호의2서식]</div>
+          <h2 style="font-size:19px; font-weight:800; color:#0f172a; margin-top:2px;">🏛️ 주택 임대차 계약 신고서</h2>
+          <div style="font-size:11px; color:#0284c7; font-weight:700;">(주택임대차보호법 제3조의6에 따른 확정일자 부여 신청 겸용)</div>
+        </div>
+        <button onclick="closeRtmsModal()" style="background:none; border:none; color:#64748b; font-size:24px; cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Report Metadata & Status -->
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 14px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+        <div>
+          <div>신고 관리번호: <strong id="rtmsReportNo" style="color:#0f172a;">-</strong></div>
+          <div style="color:#64748b; margin-top:2px;">계약체결일: <span id="rtmsContractDate">-</span> | <strong>과태료 마감 기한: <span id="rtmsDeadline" style="color:#ef4444;">-</span></strong></div>
+        </div>
+        <div id="rtmsStatusBadge"></div>
+      </div>
+
+      <!-- Fixed Date Granted Box (확정일자 필증) -->
+      <div id="rtmsFixedDateBox" style="display:none; background:rgba(16,185,129,0.1); border:1px solid #10b981; border-radius:8px; padding:12px 14px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:12px; color:#065f46; font-weight:800;">🏛️ 대법원 등기정보시스템 확정일자 부여 증명</div>
+            <div style="font-size:15px; font-weight:800; color:#047857; margin-top:3px;">확정일자 번호: <span id="rtmsFixedDateNo">-</span></div>
+            <div style="font-size:11px; color:#059669; margin-top:2px;">부여일시: <span id="rtmsFixedDateAt">-</span> (우선변제권 확보 완료)</div>
+          </div>
+          <div style="border:2px solid #059669; color:#059669; border-radius:50%; width:54px; height:54px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800; transform:rotate(-10deg);">
+            확정<br>일자필
+          </div>
+        </div>
+      </div>
+
+      <!-- Legal Parties Table -->
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:14px; border:1px solid #cbd5e1;">
+        <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1;">
+          <th style="padding:6px 10px; width:22%; text-align:left; color:#475569;">구분</th>
+          <th style="padding:6px 10px; width:45%; text-align:left; color:#475569;">임대인 (신고의무자 1)</th>
+          <th style="padding:6px 10px; width:45%; text-align:left; color:#475569;">임차인 (신고의무자 2)</th>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">성명 (주민번호)</td>
+          <td style="padding:6px 10px; font-weight:700;" id="rtmsLandlord">-</td>
+          <td style="padding:6px 10px; font-weight:700;" id="rtmsTenant">-</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">연락처</td>
+          <td style="padding:6px 10px;" id="rtmsLandlordPhone">-</td>
+          <td style="padding:6px 10px;" id="rtmsTenantPhone">-</td>
+        </tr>
+      </table>
+
+      <!-- Property & Contract Terms Table -->
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:16px; border:1px solid #cbd5e1;">
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc; width:26%;">임대 목적물 소재지</td>
+          <td style="padding:6px 10px; font-weight:700;" colspan="3" id="rtmsAddress">-</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">보증금 (전세금)</td>
+          <td style="padding:6px 10px; font-weight:800; color:#0284c7;" id="rtmsDeposit">-</td>
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc; width:22%;">월차임 (월세)</td>
+          <td style="padding:6px 10px; font-weight:800; color:#0284c7;" id="rtmsRent">-</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">계약기간 및 입주일</td>
+          <td style="padding:6px 10px;" colspan="3" id="rtmsPeriod">-</td>
+        </tr>
+      </table>
+
+      <!-- Submission Info & Buttons -->
+      <div style="background:#f1f5f9; padding:10px 14px; border-radius:6px; font-size:11px; color:#64748b; line-height:1.5; margin-bottom:16px;">
+        * 본 서식은 국토교통부 RTMS 시스템과 연동되어 제출 즉시 행정관청에 정식 접수되며, 대법원 확정일자가 자동 부여됩니다.
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button id="btnSubmitRtms" class="btn btn-primary" style="background:#0284c7; color:#fff; padding:12px; font-size:14px; font-weight:800;" onclick="submitRtmsOnline(this)">
+          🏛️ 국토교통부 RTMS 전자 신고 제출 & 확정일자 즉시 받기
+        </button>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-secondary" style="flex:1; background:#0f172a; color:#fff;" onclick="printRtmsReport()">🖨️ 법정 신고서 출력 / PDF 저장</button>
+          <button class="btn" style="flex:1; background:#e2e8f0; color:#334155;" onclick="closeRtmsModal()">닫기</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

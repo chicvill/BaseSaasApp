@@ -111,8 +111,111 @@ class TestRent3Domain(unittest.TestCase):
         self.assertTrue(session.down_payment_paid)
         self.assertEqual(session.status, "COMPLETED")
 
+    def test_rtms_and_checkout_domain(self):
+        """RTMS 전월세신고/확정일자 및 퇴실 정산 도메인 테스트."""
+        from apps.rent3.domain import RtmsContractReport, CheckOutRecord, MonthlyBill
+
+        # RTMS 리포트 생성 및 제출
+        report = RtmsContractReport(
+            session_id="session_test_1",
+            branch="main",
+            room_id="203",
+            tenant_name="이몽룡",
+            tenant_phone="010-3333-4444",
+            deposit=5000000,
+            monthly_rent=500000
+        )
+        self.assertEqual(report.status, "READY")
+        self.assertTrue(report.report_no.startswith("RTMS-2026-"))
+        report.submit_report()
+        self.assertEqual(report.status, "SUBMITTED")
+        self.assertTrue(report.fixed_date_number.startswith("FIX-"))
+
+        # 퇴실 정산 계산
+        checkout = CheckOutRecord(
+            branch="main",
+            room_id="203",
+            original_deposit=5000000,
+            utility_deduction=50000,
+            damage_deduction=30000
+        )
+        refund = checkout.calculate_refund()
+        self.assertEqual(refund, 4920000)
+
+        # 월세 청구서 자동 합계
+        bill = MonthlyBill(
+            branch="main",
+            room_id="203",
+            rent_amount=500000,
+            maint_amount=50000
+        )
+        self.assertEqual(bill.total_amount, 550000)
+
+        # 1:1 인앱 채팅 사진 첨부
+        from apps.rent3.domain import ChatMessage
+        chat = ChatMessage(
+            branch="main",
+            room_id="203",
+            sender_role="tenant",
+            sender_name="박직객",
+            message="에어컨 누수 사진 첨부합니다.",
+            photos=["data:image/png;base64,mockphoto123"]
+        )
+        self.assertEqual(len(chat.photos), 1)
+        self.assertIn("mockphoto", chat.photos[0])
+
+    def test_lease_renewal_lifecycle(self):
+        """계약 만기 D-Day 알림 및 갱신/묵시적 연장 전자서명 테스트."""
+        from apps.rent3.domain import LeaseRenewal
+        from datetime import datetime, timedelta
+
+        # 1. 갱신 제안 생성 (만기 90일 전 -> 갱신 통지 가능 기간)
+        target_end_date = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
+        renewal = LeaseRenewal(
+            branch="main",
+            room_id="201",
+            room_number="201호",
+            tenant_name="김철수",
+            tenant_phone="010-1234-5678",
+            original_start_date="2025-11-01",
+            original_end_date=target_end_date,
+            original_deposit=5000000,
+            original_rent=500000,
+            new_deposit=5000000,
+            new_rent=520000, # 4% 인상 (5% 이내 합법)
+            rate_increase_pct=4.0
+        )
+        self.assertEqual(renewal.status, "PROPOSED")
+        self.assertEqual(renewal.notice_status, "NOTICE_ACTIVE")
+        self.assertGreaterEqual(renewal.days_remaining, 89)
+
+        # 2. 임차인 서명
+        renewal.sign_tenant()
+        self.assertEqual(renewal.status, "AGREED")
+        self.assertTrue(renewal.tenant_signed)
+
+        # 3. 임대인 서명 -> 체결 완료(SIGNED)
+        renewal.sign_landlord()
+        self.assertEqual(renewal.status, "SIGNED")
+        self.assertTrue(renewal.landlord_signed)
+
+        # 4. 묵시적 갱신 테스트
+        tacit = LeaseRenewal(
+            branch="main",
+            room_id="202",
+            room_number="202호",
+            original_deposit=5000000,
+            original_rent=450000
+        )
+        tacit.confirm_tacit()
+        self.assertEqual(tacit.status, "TACIT")
+        self.assertEqual(tacit.renewal_type, "TACIT")
+        self.assertEqual(tacit.period_months, 24)
+        self.assertEqual(tacit.new_rent, 450000)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 
