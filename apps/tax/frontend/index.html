@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>스마트 부동산 세무 (Tax) & 5역할 협업 센터 | BassSaasApp</title>
+  <meta name="description" content="부동산 임대사업자 부가세 자동 집계, 종부세 산출, rent2 수납 연동 및 5역할 AI 협업 세무 관리 솔루션.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <style>
+    .top-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 0 12px; flex-wrap: wrap; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin: 16px 0 24px; }
+    .kpi-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; position: relative; overflow: hidden; }
+    .kpi-card::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--primary), var(--primary-2)); }
+    .kpi-card b { display: block; font: 800 24px var(--font-display); margin-top: 6px; }
+    .kpi-card span { font-size: 13px; color: var(--muted); }
+
+    .tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--border); margin: 20px 0; overflow-x: auto; }
+    .tab-btn { padding: 10px 18px; background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--muted); font-weight: 600; cursor: pointer; transition: all .2s; }
+    .tab-btn.active { color: var(--primary-2); border-bottom-color: var(--primary-2); }
+
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; animation: fadeIn .3s ease; }
+
+    .role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 14px; }
+    .role-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; transition: transform .2s, border-color .2s; }
+    .role-card:hover { transform: translateY(-3px); border-color: var(--primary-2); }
+    .role-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .role-badge { padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; }
+    .role-Advisor .role-badge { background: hsl(45 90% 40% / .2); color: hsl(45 95% 60%); }
+    .role-Librarian .role-badge { background: hsl(200 90% 40% / .2); color: hsl(200 95% 60%); }
+    .role-Tutor .role-badge { background: hsl(150 90% 40% / .2); color: hsl(150 95% 60%); }
+    .role-Editor .role-badge { background: hsl(270 90% 40% / .2); color: hsl(270 95% 60%); }
+    .role-Roommate .role-badge { background: hsl(330 90% 40% / .2); color: hsl(330 95% 60%); }
+
+    table.data-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+    table.data-table th, table.data-table td { padding: 10px 14px; border-bottom: 1px solid var(--border); text-align: left; }
+    table.data-table th { background: hsl(230 25% 14%); color: var(--muted); font-size: 12.5px; }
+    .badge-sales { color: #10b981; font-weight: 600; }
+    .badge-purchase { color: #f59e0b; font-weight: 600; }
+
+    dialog { border: 0; padding: 0; background: transparent; color: var(--text); width: min(480px, 92vw); }
+    dialog::backdrop { background: hsl(232 50% 3% / .75); backdrop-filter: blur(4px); }
+    .dialog-box { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    .form-group input, .form-group select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: hsl(230 25% 12%); color: var(--text); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="top-bar">
+      <div>
+        <h1 style="display:flex; align-items:center; gap:10px; margin:0; font-size:24px;">
+          <span>⚖️</span> 스마트 부동산 세무 (Tax)
+        </h1>
+        <p style="margin:4px 0 0; color:var(--muted); font-size:13.5px;">
+          부가가치세 자동 집계 · 종합부동산세 시뮬레이터 · 5역할 AI 협업 거버넌스
+        </p>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button id="btnSyncRent" class="btn" style="background:hsl(160 80% 30%);">🔄 rent2 수납 동기화</button>
+        <button id="btnNewTx" class="btn btn-primary">+ 전표 등록</button>
+        <a href="manual.html" class="btn" style="border:1px solid var(--border);">📖 운영 매뉴얼</a>
+      </div>
+    </header>
+
+    <div id="bass-alert" style="display:none; margin-bottom:16px;"></div>
+
+    <!-- KPI 요약 카드 -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <span>매출 공급가액 (세액 10%)</span>
+        <b id="kpiSalesSupply">0 원</b>
+        <small id="kpiSalesTax" style="color:#10b981;">세액 0 원</small>
+      </div>
+      <div class="kpi-card">
+        <span>매입 공급가액 (공제세액)</span>
+        <b id="kpiPurchaseSupply">0 원</b>
+        <small id="kpiPurchaseTax" style="color:#f59e0b;">세액 0 원</small>
+      </div>
+      <div class="kpi-card">
+        <span>차감 납부(환급) 부가세</span>
+        <b id="kpiNetVat" style="color:var(--primary-2);">0 원</b>
+        <small id="kpiVatStatus">납부 예상</small>
+      </div>
+      <div class="kpi-card">
+        <span>종부세 과세표준 (공정 60%)</span>
+        <b id="kpiTaxBase">0 원</b>
+        <small id="kpiPropertyTax" style="color:#f43f5e;">예상세액 0 원</small>
+      </div>
+    </div>
+
+    <!-- 네비게이션 탭 -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('vat')">📑 부가가치세(VAT) 원장</button>
+      <button class="tab-btn" onclick="switchTab('property')">🏡 종합부동산세 시뮬레이터</button>
+      <button class="tab-btn" onclick="switchTab('roles')">🤖 5역할 AI 협업 센터</button>
+    </div>
+
+    <!-- 탭 1: 부가세 원장 -->
+    <div id="tab-vat" class="tab-pane active">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">매출 / 매입 전표 내역</h3>
+        <select id="selPeriod" onchange="loadSummary()" style="padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--text);">
+          <option value="">전체 과세기간</option>
+          <option value="2026-1기예정">2026년 1기 예정</option>
+          <option value="2026-1기확정" selected>2026년 1기 확정</option>
+          <option value="2026-2기예정">2026년 2기 예정</option>
+          <option value="2026-2기확정">2026년 2기 확정</option>
+        </select>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>일자</th>
+              <th>구분</th>
+              <th>분류</th>
+              <th>거래처 (임차인)</th>
+              <th>적요</th>
+              <th style="text-align:right;">공급가액</th>
+              <th style="text-align:right;">세액</th>
+              <th style="text-align:right;">합계금액</th>
+              <th>관리</th>
+            </tr>
+          </thead>
+          <tbody id="txTableBody">
+            <tr><td colspan="9" style="text-align:center; color:var(--muted);">전표를 불러오는 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 탭 2: 종부세 시뮬레이터 -->
+    <div id="tab-property" class="tab-pane">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0;">보유 부동산 자산 및 2026 누진 종부세 산출</h3>
+        <button id="btnNewAsset" class="btn" style="border:1px solid var(--border);">+ 자산 추가</button>
+      </div>
+      <div id="propDetailCard" class="kpi-card" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+          <div>
+            <span style="font-size:12px; color:var(--muted);">총 공시가격 합계</span>
+            <div id="propTotalOfficial" style="font:700 20px var(--font-display);">0 원</div>
+          </div>
+          <div>
+            <span style="font-size:12px; color:var(--muted);">적용 기본공제</span>
+            <div id="propDeduction" style="font:700 20px var(--font-display); color:#10b981;">0 원</div>
+          </div>
+          <div>
+            <span style="font-size:12px; color:var(--muted);">과세표준 (공정 60%)</span>
+            <div id="propTaxBase" style="font:700 20px var(--font-display); color:var(--primary-2);">0 원</div>
+          </div>
+          <div>
+            <span style="font-size:12px; color:var(--muted);">최종 납부세액 (농특세 20% 포함)</span>
+            <div id="propTotalPayable" style="font:700 20px var(--font-display); color:#f43f5e;">0 원</div>
+          </div>
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>부동산 명칭</th>
+            <th>구분</th>
+            <th>소재지</th>
+            <th style="text-align:right;">공시가격</th>
+            <th style="text-align:right;">지분율</th>
+            <th style="text-align:right;">환산 공시가</th>
+            <th>1주택 여부</th>
+            <th>관리</th>
+          </tr>
+        </thead>
+        <tbody id="assetTableBody">
+          <tr><td colspan="8" style="text-align:center; color:var(--muted);">부동산 자산을 불러오는 중...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 탭 3: 5역할 AI 협업 센터 -->
+    <div id="tab-roles" class="tab-pane">
+      <div style="margin-bottom:12px;">
+        <h3 style="margin:0;">5역할 AI 협업 거버넌스 실시간 진단</h3>
+        <p style="margin:4px 0 0; color:var(--muted); font-size:13px;">
+          Advisor(자문), Librarian(사서), Tutor(튜터), Editor(엔지니어), Roommate(동거인)의 5개 관점에서 세무 상태를 실시간 진단합니다.
+        </p>
+      </div>
+      <div class="role-grid" id="roleCards">
+        <!-- 5개 역할 카드 동적 렌더링 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 전표 등록 다이얼로그 -->
+  <dialog id="txModal">
+    <div class="dialog-box">
+      <h3 style="margin-top:0;">신규 세무 전표 등록</h3>
+      <form id="txForm" onsubmit="submitTx(event)">
+        <div class="form-group">
+          <label>일자</label>
+          <input type="date" id="txDate" required>
+        </div>
+        <div class="form-group">
+          <label>전표 구분</label>
+          <select id="txType">
+            <option value="SALES">매출 (세금계산서/카드/현금영수증)</option>
+            <option value="PURCHASE">매입 (비용/수리비/용역비)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>분류</label>
+          <select id="txCategory">
+            <option value="임대료">임대료</option>
+            <option value="관리비">관리비</option>
+            <option value="시설보수">시설보수</option>
+            <option value="소모품">소모품</option>
+            <option value="중개수수료">중개수수료</option>
+            <option value="공과금">공과금</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>거래처 (임차인/상호)</label>
+          <input type="text" id="txCounterparty" placeholder="예: 홍길동 (201호)" required>
+        </div>
+        <div class="form-group">
+          <label>품목/적요</label>
+          <input type="text" id="txItemName" placeholder="예: 2026년 4월분 월세" required>
+        </div>
+        <div class="form-group">
+          <label>공급가액 (원)</label>
+          <input type="number" id="txSupplyAmount" min="0" placeholder="500000" required>
+        </div>
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="txIsExempt" style="width:auto;"> 부가가치세 면세 (주택임대 등)
+          </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="btn" onclick="document.getElementById('txModal').close()">취소</button>
+          <button type="submit" class="btn btn-primary">등록하기</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- 부동산 자산 등록 다이얼로그 -->
+  <dialog id="assetModal">
+    <div class="dialog-box">
+      <h3 style="margin-top:0;">신규 보유 부동산 등록</h3>
+      <form id="assetForm" onsubmit="submitAsset(event)">
+        <div class="form-group">
+          <label>부동산 명칭</label>
+          <input type="text" id="assetName" placeholder="예: 시크빌 원룸주택 (20실)" required>
+        </div>
+        <div class="form-group">
+          <label>소재지 주소</label>
+          <input type="text" id="assetAddress" placeholder="인천시 미추홀구..." required>
+        </div>
+        <div class="form-group">
+          <label>공시가격 (원)</label>
+          <input type="number" id="assetOfficialPrice" min="0" placeholder="1200000000" required>
+        </div>
+        <div class="form-group">
+          <label>소유 지분율 (%)</label>
+          <input type="number" id="assetRatio" min="1" max="100" value="100" required>
+        </div>
+        <div class="form-group">
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" id="assetIsSingle" style="width:auto;"> 1세대 1주택 단독명의 (기본공제 12억 적용)
+          </label>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+          <button type="button" class="btn" onclick="document.getElementById('assetModal').close()">취소</button>
+          <button type="submit" class="btn btn-primary">등록하기</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <script src="/shared/ui/bass.js"></script>
+  <script>
+    function showAlert(type, msg) {
+      const banner = document.getElementById("bass-alert");
+      if (!banner) return;
+      banner.style.display = "block";
+      const colors = {
+        success: "background:hsl(150 90% 12%); border:1px solid hsl(150 80% 30%); color:#10b981;",
+        warning: "background:hsl(45 90% 12%); border:1px solid hsl(45 80% 30%); color:#f59e0b;",
+        error: "background:hsl(350 90% 12%); border:1px solid hsl(350 80% 30%); color:#f43f5e;"
+      };
+      banner.style.cssText = `padding:12px 16px; border-radius:10px; margin-bottom:16px; ${colors[type] || colors.warning}`;
+      banner.innerHTML = msg;
+    }
+
+    function switchTab(tabId) {
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+      event.target.classList.add("active");
+      document.getElementById(`tab-${tabId}`).classList.add("active");
+    }
+
+    async function loadSummary() {
+      const period = document.getElementById("selPeriod").value;
+      const url = `/api/tax/summary?branch=main${period ? '&period=' + encodeURIComponent(period) : ''}`;
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.ok) return;
+
+        // KPI 부가세
+        const vat = data.vat;
+        document.getElementById("kpiSalesSupply").innerText = vat.sales.total_supply.toLocaleString() + " 원";
+        document.getElementById("kpiSalesTax").innerText = `세액 ${vat.sales.tax.toLocaleString()} 원 (면세 ${vat.sales.exempt_supply.toLocaleString()}원)`;
+        document.getElementById("kpiPurchaseSupply").innerText = vat.purchase.total_supply.toLocaleString() + " 원";
+        document.getElementById("kpiPurchaseTax").innerText = `공제세액 ${vat.purchase.tax.toLocaleString()} 원`;
+        document.getElementById("kpiNetVat").innerText = (vat.is_refund ? "-" : "") + Math.abs(vat.net_tax_payable).toLocaleString() + " 원";
+        document.getElementById("kpiVatStatus").innerText = vat.is_refund ? "환급 예상 🟢" : "납부 예상 🟡";
+
+        // KPI 종부세
+        const prop = data.property_tax;
+        document.getElementById("kpiTaxBase").innerText = prop.tax_base.toLocaleString() + " 원";
+        document.getElementById("kpiPropertyTax").innerText = `예상세액 ${prop.total_tax_payable.toLocaleString()} 원 (${prop.is_exempt ? '전액비과세' : '과세대상'})`;
+
+        // 종부세 상세
+        document.getElementById("propTotalOfficial").innerText = prop.total_official_price.toLocaleString() + " 원";
+        document.getElementById("propDeduction").innerText = prop.basic_deduction.toLocaleString() + " 원";
+        document.getElementById("propTaxBase").innerText = prop.tax_base.toLocaleString() + " 원";
+        document.getElementById("propTotalPayable").innerText = prop.total_tax_payable.toLocaleString() + " 원";
+
+        // 5역할 인텔리전스 렌더링
+        renderRoles(data.five_roles);
+
+        // 전표 목록 및 자산 목록 로드
+        await loadTransactions();
+        await loadAssets();
+      } catch (err) {
+        showAlert("error", "데이터를 불러오는 중 오류가 발생했습니다: " + err);
+      }
+    }
+
+    function renderRoles(roles) {
+      const container = document.getElementById("roleCards");
+      if (!container || !roles) return;
+      container.innerHTML = Object.entries(roles).map(([k, v]) => `
+        <div class="role-card role-${k}">
+          <div class="role-header">
+            <span class="role-badge">${k} (${v.role})</span>
+            <small style="color:var(--muted);">${v.tag}</small>
+          </div>
+          <p style="margin:0; font-size:13.5px; line-height:1.6; color:var(--text);">${v.message}</p>
+        </div>
+      `).join("");
+    }
+
+    async function loadTransactions() {
+      const period = document.getElementById("selPeriod").value;
+      const url = `/api/tax/vat/transactions?branch=main${period ? '&period=' + encodeURIComponent(period) : ''}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      const tbody = document.getElementById("txTableBody");
+      if (!data.items || data.items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:var(--muted); padding:20px;">등록된 전표가 없습니다.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = data.items.map(t => `
+        <tr>
+          <td>${t.date}</td>
+          <td><span class="${t.tx_type === 'SALES' ? 'badge-sales' : 'badge-purchase'}">${t.tx_type === 'SALES' ? '매출' : '매입'}</span></td>
+          <td>${t.category}</td>
+          <td>${t.counterparty}</td>
+          <td>${t.item_name}</td>
+          <td style="text-align:right;">${t.supply_amount.toLocaleString()} 원</td>
+          <td style="text-align:right;">${t.tax_amount.toLocaleString()} 원</td>
+          <td style="text-align:right; font-weight:700;">${t.total_amount.toLocaleString()} 원</td>
+          <td>
+            <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="deleteTx('${t.id}')">삭제</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function loadAssets() {
+      const res = await fetch("/api/tax/property/assets?branch=main");
+      const data = await res.json();
+      const tbody = document.getElementById("assetTableBody");
+      if (!data.items || data.items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:20px;">등록된 부동산 자산이 없습니다.</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = data.items.map(a => `
+        <tr>
+          <td><strong>${a.name}</strong></td>
+          <td>${a.asset_type === 'RESIDENTIAL' ? '주택' : '일반건축물'}</td>
+          <td>${a.address}</td>
+          <td style="text-align:right;">${a.official_price.toLocaleString()} 원</td>
+          <td style="text-align:right;">${a.ownership_ratio}%</td>
+          <td style="text-align:right; font-weight:700; color:var(--primary-2);">${a.share_price.toLocaleString()} 원</td>
+          <td>${a.is_single_homeowner ? '단독명의 (12억공제)' : '일반 (9억공제)'}</td>
+          <td>
+            <button class="btn" style="padding:4px 8px; font-size:11px;" onclick="deleteAsset('${a.id}')">삭제</button>
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function submitTx(e) {
+      e.preventDefault();
+      const payload = {
+        date: document.getElementById("txDate").value,
+        tx_type: document.getElementById("txType").value,
+        category: document.getElementById("txCategory").value,
+        counterparty: document.getElementById("txCounterparty").value,
+        item_name: document.getElementById("txItemName").value,
+        supply_amount: parseInt(document.getElementById("txSupplyAmount").value, 10),
+        is_tax_exempt: document.getElementById("txIsExempt").checked,
+        branch_id: "main"
+      };
+
+      const res = await fetch("/api/tax/vat/transactions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        document.getElementById("txModal").close();
+        showAlert("success", "전표가 성공적으로 등록되었습니다.");
+        loadSummary();
+      } else {
+        showAlert("error", "전표 등록 실패: " + (data.detail || "알 수 없는 오류"));
+      }
+    }
+
+    async function submitAsset(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById("assetName").value,
+        address: document.getElementById("assetAddress").value,
+        official_price: parseInt(document.getElementById("assetOfficialPrice").value, 10),
+        ownership_ratio: parseFloat(document.getElementById("assetRatio").value),
+        is_single_homeowner: document.getElementById("assetIsSingle").checked,
+        branch_id: "main"
+      };
+
+      const res = await fetch("/api/tax/property/assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.ok) {
+        document.getElementById("assetModal").close();
+        showAlert("success", "부동산 자산이 성공적으로 등록되었습니다.");
+        loadSummary();
+      }
+    }
+
+    async function deleteTx(id) {
+      if (!confirm("전표를 삭제하시겠습니까?")) return;
+      await fetch(`/api/tax/vat/transactions/${id}`, { method: "DELETE" });
+      loadSummary();
+    }
+
+    async function deleteAsset(id) {
+      if (!confirm("부동산 자산을 삭제하시겠습니까?")) return;
+      await fetch(`/api/tax/property/assets/${id}`, { method: "DELETE" });
+      loadSummary();
+    }
+
+    // rent2 수납 동기화 버튼 이벤트
+    document.getElementById("btnSyncRent").onclick = async () => {
+      const btn = document.getElementById("btnSyncRent");
+      btn.disabled = true;
+      btn.innerText = "동기화 중... ⏳";
+      try {
+        const res = await fetch("/api/tax/sync/rent2?branch=main", { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          showAlert("success", data.message);
+          loadSummary();
+        }
+      } catch (err) {
+        showAlert("error", "동기화 실패: " + err);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "🔄 rent2 수납 동기화";
+      }
+    };
+
+    document.getElementById("btnNewTx").onclick = () => {
+      document.getElementById("txDate").value = new Date().toISOString().substring(0, 10);
+      document.getElementById("txModal").showModal();
+    };
+
+    document.getElementById("btnNewAsset").onclick = () => {
+      document.getElementById("assetModal").showModal();
+    };
+
+    // 초기 로딩
+    window.onload = () => loadSummary();
+  </script>
+</body>
+</html>

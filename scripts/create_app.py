@@ -5,10 +5,15 @@ scripts/create_app.py — 신규 마이크로 SaaS 앱 1초 원클릭 스캐폴�
     py -3.14 scripts/create_app.py --id petcare --name "스마트 애견호텔" --icon "🐶" --category business
 """
 import argparse
+import os
 import sys
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 from core.scaffold import create_app
 
