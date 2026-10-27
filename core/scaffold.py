@@ -233,7 +233,7 @@ MANUAL_HTML_TEMPLATE = '''<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{app_name} 공식 운영 매뉴얼</title>
+  <title>{app_name} 공식 운영 매뉴얼 & 5역할 협업 가이드</title>
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="/shared/ui/manual.css">
 </head>
@@ -247,10 +247,19 @@ MANUAL_HTML_TEMPLATE = '''<!doctype html>
   <h1>{icon} <span class="bass-gradient-text">{app_name}</span> 운영 매뉴얼</h1>
   <p class="bass-muted">앱 ID: <code>{app_id}</code> · 카테고리: {category}</p>
 
-  <h2>1. 개요</h2>
+  <h2>1. 🌟 5역할 협업 거버넌스 안내</h2>
+  <ul>
+    <li><b>🧭 Advisor (자문가)</b>: 나침반 3원칙(간소화, 보안 리스크 최소화, 1분 내 추적성)으로 오버엔지니어링 차단</li>
+    <li><b>📚 Librarian (사서)</b>: {app_name} 관련 업무 규칙 및 외부 규격 선행 팩트체크</li>
+    <li><b>🎓 Tutor (튜터)</b>: 도메인 산출식 및 사용자 가이드 실시간 해설</li>
+    <li><b>🛠️ Editor (엔지니어)</b>: Kernel Obj(domain.py) 기반 도메인 구현 및 테스트 무결성 보장</li>
+    <li><b>🤝 Roommate (동거인)</b>: 진도 요약 및 배포/릴리즈 체크</li>
+  </ul>
+
+  <h2>2. 개요</h2>
   <p>{description}</p>
 
-  <h2>2. 사용 방법</h2>
+  <h2>3. 사용 방법</h2>
   <ol>
     <li>화면에서 <b>READY</b> 상태의 항목의 [활성화] 버튼을 누릅니다.</li>
     <li>진행 완료 후 [완료] 버튼을 누르면 상태가 <b>COMPLETED</b>로 전환됩니다.</li>
@@ -259,6 +268,71 @@ MANUAL_HTML_TEMPLATE = '''<!doctype html>
 </main>
 </body>
 </html>
+'''
+
+SKILL_MD_TEMPLATE = '''---
+name: bass-{app_id}-ops
+description: Operational business rules, domain invariants, 5-role collaboration governance, and verification instructions for {app_name} (apps/{app_id}).
+---
+
+# {icon} BassSaasApp {app_name} ({app_id}) 운영 거버넌스 스킬
+
+본 스킬은 `{app_name}` 마이크로 SaaS 앱의 비즈니스 불변 규칙과 5역할 협업 사이클을 준수하기 위한 공식 운영 명세서입니다.
+
+---
+
+## 1. 🌟 5역할 협업 개발 거버넌스 (Five-Role Governance)
+
+모든 요구사항 반영 시 다음 5가지 페르소나 단계를 순차적으로 통과해야 합니다:
+
+1. **🧭 Advisor (자문가)**: 나침반 3원칙(수동 대비 간소화, 보안 리스크 최소화, 1분 내 추적성)으로 오버엔지니어링 제동.
+2. **📚 Librarian (사서)**: {app_name} 관련 업무 규칙 및 외부 규격 사전 조사 (선행 팩트체크 원칙).
+3. **🎓 Tutor (튜터)**: 도메인 산출식 및 manual.html 매뉴얼 실시간 동기화.
+4. **🛠️ Editor (엔지니어)**: Kernel Obj(domain.py) 기반 도메인 구현 및 단위 테스트 무결성 보장.
+5. **🤝 Roommate (동거인)**: 검증 통과 확인, 진도 요약 및 배포/커밋 완료.
+
+---
+
+## 2. 🏛️ 도메인 비즈니스 불변 규칙 (Domain Invariants)
+- 모든 엔티티는 `core.kernel.Obj` 를 상속받아 스키마리스 WAL로 영구 보존됩니다.
+- 상태 변경 시 이력 로그(`log()`)가 자동으로 기록되어 감사 추적이 가능해야 합니다.
+
+---
+
+## 3. 🚀 자가 업그레이드 검증 (Self-Upgrading)
+- 코드 수정 후 `apps/{app_id}/tests/test_domain.py` 단위 테스트를 반드시 실행하여 100% 통과를 확인합니다.
+'''
+
+TEST_DOMAIN_TEMPLATE = '''"""
+apps/{app_id}/tests/test_domain.py — {app_name} 도메인 모델 단위 테스트.
+"""
+import unittest
+from core.kernel.obj import use_store
+from apps.{app_id}.backend import domain
+
+
+class Test{class_name}Domain(unittest.TestCase):
+    def setUp(self):
+        use_store(":memory:")
+        self.branch = "test_branch"
+
+    def test_item_lifecycle(self):
+        item = domain.Item(
+            branch_id=self.branch,
+            code="T01",
+            name="테스트 항목",
+            status="READY"
+        ).save("created")
+
+        self.assertEqual(item.status, "READY")
+        item.activate()
+        self.assertEqual(item.status, "ACTIVE")
+        item.complete()
+        self.assertEqual(item.status, "COMPLETED")
+
+
+if __name__ == "__main__":
+    unittest.main()
 '''
 
 
@@ -274,8 +348,13 @@ def create_app(app_id: str, app_name: str, icon: str, category: str, description
 
     backend_dir = os.path.join(app_dir, "backend")
     frontend_dir = os.path.join(app_dir, "frontend")
+    tests_dir = os.path.join(app_dir, "tests")
+    skill_dir = os.path.join(ROOT, ".agents", "skills", f"bass-{app_id}-ops")
+
     os.makedirs(backend_dir, exist_ok=True)
     os.makedirs(frontend_dir, exist_ok=True)
+    os.makedirs(tests_dir, exist_ok=True)
+    os.makedirs(skill_dir, exist_ok=True)
 
     ctx = {
         "app_id": app_id,
@@ -295,6 +374,9 @@ def create_app(app_id: str, app_name: str, icon: str, category: str, description
         os.path.join(frontend_dir, "index.html"): INDEX_HTML_TEMPLATE.format(**ctx),
         os.path.join(frontend_dir, "app.js"): APP_JS_TEMPLATE.format(**ctx),
         os.path.join(frontend_dir, "manual.html"): MANUAL_HTML_TEMPLATE.format(**ctx),
+        os.path.join(tests_dir, "__init__.py"): "",
+        os.path.join(tests_dir, "test_domain.py"): TEST_DOMAIN_TEMPLATE.format(**ctx),
+        os.path.join(skill_dir, "SKILL.md"): SKILL_MD_TEMPLATE.format(**ctx),
     }
 
     for path, content in files.items():
@@ -302,13 +384,17 @@ def create_app(app_id: str, app_name: str, icon: str, category: str, description
             f.write(content)
 
     safe_print("=" * 60)
-    safe_print(f"[OK] 신규 SaaS 앱 생성 완료: {ctx['icon']} {ctx['app_name']} ({app_id})")
-    safe_print(f"• 위치: apps/{app_id}/")
+    safe_print(f"[OK] 신규 SaaS 앱 및 5역할 거버넌스 스킬 생성 완료: {ctx['icon']} {ctx['app_name']} ({app_id})")
+    safe_print(f"• 앱 디렉터리 : apps/{app_id}/")
+    safe_print(f"• 거버넌스 스킬: .agents/skills/bass-{app_id}-ops/SKILL.md")
     safe_print("• 구성 요소:")
     safe_print(f"  - apps/{app_id}/app.py (BaseSaaSApp 객체 정의)")
     safe_print(f"  - apps/{app_id}/backend/domain.py (도메인 모델)")
     safe_print(f"  - apps/{app_id}/backend/api.py (API 라우터)")
     safe_print(f"  - apps/{app_id}/frontend/index.html (반응형 UI)")
     safe_print(f"  - apps/{app_id}/frontend/manual.html (인쇄 최적화 운영 매뉴얼)")
+    safe_print(f"  - apps/{app_id}/tests/test_domain.py (단위 테스트)")
+    safe_print(f"  - .agents/skills/bass-{app_id}-ops/SKILL.md (5역할 협업 운영 스킬)")
     safe_print("\n👉 게이트웨이를 실행하면 포털에 즉시 자동 마운트됩니다!")
     safe_print("=" * 60)
+
