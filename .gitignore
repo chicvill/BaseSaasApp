@@ -19,9 +19,11 @@ integrat.db
 .env
 *.env
 .env.*
+!.env.encrypted
 !.env.example
 !.env.template
 !.env.production
+
 
 # IDE & scratch
 .DS_Store
