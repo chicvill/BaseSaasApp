@@ -80,6 +80,13 @@ class BuildingEntity(Obj):
     branch: str = "main"                 # 지점 키 (main, sunho, sinbi)
     total_rooms: int = 20                # 총 호실 수
 
+    @property
+    def lessor(self) -> Optional["Lessor"]:
+        """건물 소유 임대인 객체 탐색."""
+        if not self.id_lessor:
+            return None
+        return Rent3EntityManager.find_by_custom_id("lessor", self.id_lessor)
+
 
 # ─────────────────────────────────────────────────────────────
 # 5. Room (임대상세)
@@ -111,6 +118,20 @@ class RoomEntity(Obj):
     maintenance_fee: int = 50000         # 관리비
     is_published: bool = True            # 매물 홈페이지 게시 여부
 
+    @property
+    def building(self) -> Optional[BuildingEntity]:
+        """소속 건물 객체 탐색."""
+        if not self.id_building:
+            return None
+        return Rent3EntityManager.find_by_custom_id("building", self.id_building)
+
+    @property
+    def tenant(self) -> Optional["Tenant"]:
+        """현재 입주 임차인 객체 탐색."""
+        if not self.id_tenant:
+            return None
+        return Rent3EntityManager.find_by_custom_id("tenant", self.id_tenant)
+
 
 # ─────────────────────────────────────────────────────────────
 # 6. Contract (계약)
@@ -133,6 +154,20 @@ class ContractEntity(Obj):
     deposit_capture_img: str = ""        # 계약금 캡춰 화면 (영수증 이미지 URL 또는 Base64)
     status: str = "CONFIRMED"            # DRAFT, CONFIRMED, ACTIVE, TERMINATED
 
+    @property
+    def room(self) -> Optional[RoomEntity]:
+        """계약 호실 객체 탐색."""
+        if not self.id_room:
+            return None
+        return Rent3EntityManager.find_by_custom_id("room", self.id_room)
+
+    @property
+    def tenant(self) -> Optional["Tenant"]:
+        """계약 임차인 객체 탐색."""
+        if not self.id_tenant:
+            return None
+        return Rent3EntityManager.find_by_custom_id("tenant", self.id_tenant)
+
 
 # ─────────────────────────────────────────────────────────────
 # 7. Pay (수납)
@@ -149,6 +184,13 @@ class Pay(Obj):
     total_amount: int = 550000           # 총 납부액 (임차료 + 관리비 + 부가세)
     receipt_number: str = ""             # 전자 영수증 승인번호
     payment_method: str = "계좌이체"     # 계좌이체, 신용카드, 카카오페이
+
+    @property
+    def room(self) -> Optional[RoomEntity]:
+        """수납 대상 호실 객체 탐색."""
+        if not self.id_room:
+            return None
+        return Rent3EntityManager.find_by_custom_id("room", self.id_room)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -178,9 +220,16 @@ class Outlay(Obj):
         d["summary"] = self.summary_desc
         return d
 
+    @property
+    def room(self) -> Optional[RoomEntity]:
+        """지출 발생 호실 (공용부일 경우 None)."""
+        if not self.id_room or self.id_room == "COMMON":
+            return None
+        return Rent3EntityManager.find_by_custom_id("room", self.id_room)
+
 
 # ─────────────────────────────────────────────────────────────
-# 데이터 통합 CRUD 및 검색/편집 서비스 매니저
+# 데이터 통합 CRUD 및 검색/편집 서비스 매니저 (O(1) 인덱스 캐시 최적화)
 # ─────────────────────────────────────────────────────────────
 ENTITY_CLS_MAP = {
     "admin": Admin,
@@ -204,9 +253,12 @@ ID_FIELD_MAP = {
     "outlay": "id_outlay"
 }
 
+# O(1) 메모리 인덱스 캐시
+_ENTITY_INDEX_CACHE: Dict[str, Dict[str, Obj]] = {k: {} for k in ENTITY_CLS_MAP}
+
 
 class Rent3EntityManager:
-    """8대 표준 객체의 생성, 검색, 편집, 삭제를 처리하는 통합 매니저."""
+    """8대 표준 객체의 생성, 검색, 편집, 삭제를 처리하는 통합 매니저 (O(1) 인덱스 최적화)."""
 
     @classmethod
     def get_class(cls, entity_type: str):
@@ -217,22 +269,41 @@ class Rent3EntityManager:
 
     @classmethod
     def create(cls, entity_type: str, data: Dict[str, Any]) -> Obj:
-        """신규 객체 생성 및 저장."""
-        model_cls = cls.get_class(entity_type)
+        """신규 객체 생성 및 인덱스 등록."""
+        key = entity_type.lower()
+        model_cls = cls.get_class(key)
         obj = model_cls(**data)
-        obj.save(f"create_{entity_type}")
+        obj.save(f"create_{key}")
+        
+        # O(1) 인덱스 등록
+        id_field = ID_FIELD_MAP.get(key, "id")
+        custom_id = getattr(obj, id_field, None)
+        if custom_id:
+            _ENTITY_INDEX_CACHE[key][custom_id] = obj
+        if hasattr(obj, "id"):
+            _ENTITY_INDEX_CACHE[key][obj.id] = obj
         return obj
 
     @classmethod
     def find_by_custom_id(cls, entity_type: str, custom_id: str) -> Optional[Obj]:
-        """고유 ID(예: id_lessor, id_room) 또는 시스템 id 로 단일 객체 조회."""
-        model_cls = cls.get_class(entity_type)
-        id_field = ID_FIELD_MAP.get(entity_type.lower(), "id")
+        """고유 ID(예: id_lessor, id_room) 또는 시스템 id 로 단일 객체 초고속 조회 (O(1) 캐시)."""
+        key = entity_type.lower()
+        model_cls = cls.get_class(key)
+        id_field = ID_FIELD_MAP.get(key, "id")
         
+        # 0차: O(1) 인덱스 캐시 조회
+        cached = _ENTITY_INDEX_CACHE.get(key, {}).get(custom_id)
+        if cached:
+            return cached
+
         # 1차: 시스템 id로 조회
         try:
             item = model_cls.get(custom_id)
             if item:
+                _ENTITY_INDEX_CACHE[key][custom_id] = item
+                c_id = getattr(item, id_field, None)
+                if c_id:
+                    _ENTITY_INDEX_CACHE[key][c_id] = item
                 return item
         except Exception:
             pass
@@ -240,9 +311,56 @@ class Rent3EntityManager:
         # 2차: 커스텀 고유키(id_lessor 등)로 검색
         all_items = model_cls.all()
         for item in all_items:
-            if getattr(item, id_field, None) == custom_id or getattr(item, "id", None) == custom_id:
+            c_id = getattr(item, id_field, None)
+            sys_id = getattr(item, "id", None)
+            if c_id:
+                _ENTITY_INDEX_CACHE[key][c_id] = item
+            if sys_id:
+                _ENTITY_INDEX_CACHE[key][sys_id] = item
+            if c_id == custom_id or sys_id == custom_id:
                 return item
         return None
+
+    @classmethod
+    def update(cls, entity_type: str, custom_id: str, updates: Dict[str, Any]) -> Obj:
+        """기존 객체 필드 편집 및 인덱스 갱신."""
+        key = entity_type.lower()
+        item = cls.find_by_custom_id(key, custom_id)
+        if not item:
+            raise KeyError(f"{entity_type} 객체를 찾을 수 없습니다: {custom_id}")
+        
+        for k, v in updates.items():
+            if hasattr(item, k):
+                setattr(item, k, v)
+        item.save(f"update_{key}_{custom_id}")
+
+        # 캐시 갱신
+        id_field = ID_FIELD_MAP.get(key, "id")
+        c_id = getattr(item, id_field, None)
+        if c_id:
+            _ENTITY_INDEX_CACHE[key][c_id] = item
+        if hasattr(item, "id"):
+            _ENTITY_INDEX_CACHE[key][item.id] = item
+        return item
+
+    @classmethod
+    def delete(cls, entity_type: str, custom_id: str) -> bool:
+        """객체 삭제 및 인덱스 제거."""
+        key = entity_type.lower()
+        item = cls.find_by_custom_id(key, custom_id)
+        if not item:
+            return False
+        
+        # 캐시 제거
+        id_field = ID_FIELD_MAP.get(key, "id")
+        c_id = getattr(item, id_field, None)
+        if c_id and c_id in _ENTITY_INDEX_CACHE[key]:
+            del _ENTITY_INDEX_CACHE[key][c_id]
+        if hasattr(item, "id") and item.id in _ENTITY_INDEX_CACHE[key]:
+            del _ENTITY_INDEX_CACHE[key][item.id]
+
+        item.delete(f"delete_{key}_{custom_id}")
+        return True
 
     @classmethod
     def search(cls, entity_type: str, query: str = "", filters: Optional[Dict[str, Any]] = None) -> List[Obj]:
@@ -278,27 +396,6 @@ class Rent3EntityManager:
             results.append(item)
         return results
 
-    @classmethod
-    def update(cls, entity_type: str, custom_id: str, updates: Dict[str, Any]) -> Obj:
-        """기존 객체 필드 편집 및 저장."""
-        item = cls.find_by_custom_id(entity_type, custom_id)
-        if not item:
-            raise KeyError(f"{entity_type} 객체를 찾을 수 없습니다: {custom_id}")
-        
-        for k, v in updates.items():
-            if hasattr(item, k):
-                setattr(item, k, v)
-        item.save(f"update_{entity_type}_{custom_id}")
-        return item
-
-    @classmethod
-    def delete(cls, entity_type: str, custom_id: str) -> bool:
-        """객체 삭제."""
-        item = cls.find_by_custom_id(entity_type, custom_id)
-        if not item:
-            return False
-        item.delete(f"delete_{entity_type}_{custom_id}")
-        return True
 
 
 # ─────────────────────────────────────────────────────────────
