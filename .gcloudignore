@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.vscode
+.git
+.gitignore
+node_modules
+**/node_modules/**
+tests/scratch_apps
+.agents/skills/**/scratch
+data/*.db-shm
+data/*.db-wal
