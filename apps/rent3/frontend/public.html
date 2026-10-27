@@ -93,39 +93,66 @@
 
   <header>
     <div class="brand">
-      <span>🏡</span> DirectRent (Rent3)
-      <span class="badge-direct">중개수수료 없음 직거래</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span>🏡</span> <span style="font-weight:800;">DirectRent</span> (Rent3)
+        <span class="badge-direct" id="publicRoleBadge">📢 누구나 / 매물 탐색</span>
+      </div>
     </div>
-    <div style="display:flex; gap:8px;">
-      <a href="signup.html" target="_blank" class="btn btn-secondary" style="width:auto; padding:8px 16px; font-size:13px; text-decoration:none;">🛡️ 본인확인/가입</a>
-      <a href="cosign.html" target="_blank" class="btn btn-primary" style="width:auto; padding:8px 16px; font-size:13px; text-decoration:none;">🤝 현장 동행 계약실</a>
-      <button class="btn btn-secondary" style="width:auto; padding:8px 16px; font-size:13px;" onclick="scrollToSection('trackSection')">내 계약 / 라운지 조회</button>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <!-- Role Switcher Dropdown -->
+      <div style="display:flex; align-items:center; gap:6px; background:#1e293b; padding:4px 10px; border-radius:8px; border:1px solid var(--card-border);">
+        <span style="font-size:12px; color:var(--text-muted); font-weight:700;">🔀 역할 전환:</span>
+        <select id="publicRoleSelect" style="background:transparent; border:none; color:var(--primary); font-size:12.5px; font-weight:800; outline:none; cursor:pointer;" onchange="switchPublicUserRole(this.value)">
+          <option value="public">📢 누구나 (공개 매물)</option>
+          <option value="tenant">🔑 임차인 (납입/만기일)</option>
+          <option value="landlord">🏢 임대인 (임대료 수납)</option>
+          <option value="admin">👑 Admin (건물별 사용료)</option>
+        </select>
+      </div>
+      <a href="login.html" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:12px; background:rgba(255,255,255,0.06); text-decoration:none;">🚪 게이트웨이</a>
+      <a href="signup.html" target="_blank" class="btn btn-secondary" style="width:auto; padding:6px 12px; font-size:12px; text-decoration:none;">🛡️ 본인확인/가입</a>
+      <a href="cosign.html" target="_blank" class="btn btn-primary" style="width:auto; padding:6px 14px; font-size:12px; text-decoration:none;">🤝 현장 동행 계약실</a>
     </div>
   </header>
 
-  <section class="hero">
-    <h1>부동산 임대차 직거래 센터</h1>
-    <p style="max-width: 820px; margin: 0 auto; line-height: 1.6; font-size: 16px; color: #e2e8f0; font-weight: 500;">
+  <section class="hero" id="heroSection">
+    <h1 id="heroTitle">부동산 임대차 직거래 센터</h1>
+    <p id="heroDesc" style="max-width: 820px; margin: 0 auto; line-height: 1.6; font-size: 16px; color: #e2e8f0; font-weight: 500;">
       중개수수료 없이 소유주와 실물을 확인하고 계약부터 입주·수납·주차·전출까지 전 과정을 원스톱으로 함께하는 올인원 직거래 솔루션
     </p>
   </section>
 
   <main class="container">
-    <h2 style="font-size:22px; margin-bottom:16px;">📢 지금 즉시 입주 가능한 방</h2>
-    <div class="listing-grid" id="listingGrid">
-      <div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text-muted);">매물을 불러오고 있습니다...</div>
-    </div>
-
-    <!-- Tracking / Lounge Section -->
+    <!-- Tracking / Lounge Section (Shown at the top for tenants) -->
     <section id="trackSection" class="section-card">
-      <h2 style="font-size:20px; font-weight:700; margin-bottom:12px;">📱 입주 신청 조회 / 세입자 전용 라운지</h2>
-      <p style="font-size:14px; color:var(--text-muted); margin-bottom:16px;">신청서 ID를 입력하여 전자서명/결제를 진행하거나, 입주 후 도어락 비번 및 1:1 수리 요청을 이용하세요.</p>
-      <div style="display:flex; gap:10px; max-width:500px;">
-        <input type="text" id="trackAppId" placeholder="신청서 ID 입력 (예: rent3_app_...)" style="flex:1; padding:10px 14px; background:#1e293b; border:1px solid var(--card-border); border-radius:8px; color:#fff;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <h2 id="trackSectionTitle" style="font-size:20px; font-weight:800; margin-bottom:0; display:flex; align-items:center; gap:8px;">
+          <span>🔑</span> 세입자 마이홈 / 입주신청 라운지
+        </h2>
+        <div style="display:flex; gap:6px;">
+          <button class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3); cursor:pointer;" onclick="quickLoadTenantRoom('201')">📍 내 방 (201호) 바로보기</button>
+        </div>
+      </div>
+      <p id="trackSectionDesc" style="font-size:14px; color:var(--text-muted); margin-bottom:16px;">
+        월별 납부현황, 만기일 D-Day, 도어락 비밀번호, 17% 세액공제 증명서 발급 및 1:1 수리 요청을 한눈에 관리하세요.
+      </p>
+      <div style="display:flex; gap:10px; max-width:540px;" id="trackInputGroup">
+        <input type="text" id="trackAppId" placeholder="신청서 ID (또는 호실번호 201 입력)" style="flex:1; padding:10px 14px; background:#1e293b; border:1px solid var(--card-border); border-radius:8px; color:#fff;">
         <button class="btn btn-primary" style="width:auto; padding:10px 20px;" onclick="trackApplication()">조회하기</button>
       </div>
       <div id="trackResult" style="margin-top:20px; display:none;"></div>
     </section>
+
+    <!-- Public Listings Section (Shown at the top for public guests) -->
+    <div id="listingContainer">
+      <h2 style="font-size:22px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;" id="listingTitle">
+        <span>📢 지금 즉시 입주 가능한 방 (중개수수료 0원)</span>
+        <span style="font-size:13px; color:var(--primary); font-weight:600;">실시간 공실 연동</span>
+      </h2>
+      <div class="listing-grid" id="listingGrid">
+        <div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text-muted);">매물을 불러오고 있습니다...</div>
+      </div>
+    </div>
   </main>
 
   <!-- Application Modal -->
@@ -240,6 +267,99 @@
   </div>
 
   <script>
+    function getUrlParam(key) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(key);
+    }
+
+    function switchPublicUserRole(role) {
+      if (role === 'admin') {
+        window.location.href = 'index.html?role=admin';
+      } else if (role === 'landlord') {
+        window.location.href = 'index.html?role=landlord';
+      } else if (role === 'tenant') {
+        window.location.href = 'public.html?view=tenant&room=201';
+      } else if (role === 'public') {
+        window.location.href = 'public.html';
+      }
+    }
+
+    async function quickLoadTenantRoom(roomId = '201') {
+      const branch = getUrlParam('branch') || 'main';
+      try {
+        // 신청서 목록에서 해당 호실의 최신 신청서 조회
+        const res = await fetch(`/api/rent3/admin/applications?branch=${branch}`);
+        const data = await res.json();
+        const app = (data.applications || []).find(a => a.room_id === roomId);
+        if (app && app.id) {
+          document.getElementById('trackAppId').value = app.id;
+          await trackApplication();
+        } else {
+          // 승인 완료된 임차인 가상 신청서 ID로 로드
+          document.getElementById('trackAppId').value = `app_${branch}_${roomId}_active`;
+          await trackApplication();
+        }
+      } catch (e) {
+        document.getElementById('trackAppId').value = `app_${branch}_${roomId}_active`;
+        await trackApplication();
+      }
+      // 세입자 라운지 박스로 부드럽게 스크롤
+      const trackSection = document.getElementById('trackSection');
+      if (trackSection) {
+        trackSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+
+    function initPublicRoleView() {
+      const viewParam = getUrlParam('view');
+      const roleParam = getUrlParam('role');
+      const roomParam = getUrlParam('room') || '201';
+      const isTenantMode = (viewParam === 'tenant' || roleParam === 'tenant');
+
+      const roleSelect = document.getElementById('publicRoleSelect');
+      const badge = document.getElementById('publicRoleBadge');
+      const heroTitle = document.getElementById('heroTitle');
+      const heroDesc = document.getElementById('heroDesc');
+      const listingContainer = document.getElementById('listingContainer');
+      const trackSection = document.getElementById('trackSection');
+
+      if (isTenantMode) {
+        if (roleSelect) roleSelect.value = 'tenant';
+        if (badge) {
+          badge.innerText = '🔑 임차인(세입자) 마이홈';
+          badge.style.background = 'rgba(129,140,248,0.2)';
+          badge.style.color = 'var(--accent)';
+        }
+        if (heroTitle) heroTitle.innerText = '🔑 나의 임대차 마이홈 (My Home)';
+        if (heroDesc) {
+          heroDesc.innerText = '월별 납입현황, 계약 만기일 D-Day, 도어락 비밀번호 및 17% 세액공제 증명서를 바로 확인하세요.';
+        }
+        // 세입자 모드에서는 라운지를 최상단 강조 카드로 스타일링
+        if (trackSection) {
+          trackSection.style.border = '2px solid rgba(129,140,248,0.5)';
+          trackSection.style.background = 'rgba(15,23,42,0.95)';
+          trackSection.style.boxShadow = '0 10px 30px rgba(0,0,0,0.5)';
+        }
+        // 공개 매물 컨테이너는 아래로 내리거나 접힘 안내 표시
+        if (listingContainer) {
+          listingContainer.style.marginTop = '40px';
+          listingContainer.style.opacity = '0.85';
+        }
+
+        // 특정 호실이 지정되었거나 기본 201호에 대해 즉시 조회 실행
+        setTimeout(() => {
+          quickLoadTenantRoom(roomParam);
+        }, 300);
+      } else {
+        if (roleSelect) roleSelect.value = 'public';
+        if (badge) {
+          badge.innerText = '📢 누구나 / 매물 탐색';
+          badge.style.background = 'rgba(245,158,11,0.15)';
+          badge.style.color = 'var(--warning)';
+        }
+      }
+    }
+
     let currentSelectedListing = null;
 
     async function loadListings() {
@@ -2114,6 +2234,11 @@
     function printRentCertificate() {
       window.print();
     }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadListings();
+      initPublicRoleView();
+    });
   </script>
 </body>
 </html>

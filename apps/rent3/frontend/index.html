@@ -118,21 +118,31 @@
       <div>
         <div style="display:flex; align-items:center; gap:8px;">
           <span class="brand-title">Rent3 관제 대시보드</span>
-          <span class="brand-badge">비대면 직거래 SaaS</span>
+          <span class="brand-badge" id="currentRoleBadge">👑 총괄 Admin 모드</span>
         </div>
-        <div style="font-size:12px; color:var(--text-muted);">시크빌 · 선호아트빌 · 신비주택 올인원 관리</div>
+        <div style="font-size:12px; color:var(--text-muted);" id="currentRoleSubtitle">건물별 사용료 현황 & 통합 수익률 관제</div>
       </div>
     </div>
     <div class="header-actions">
+      <!-- Role Switcher Gateway -->
+      <div style="display:flex; align-items:center; gap:6px; background:#1e293b; padding:4px 10px; border-radius:8px; border:1px solid var(--card-border);">
+        <span style="font-size:12px; color:var(--text-muted); font-weight:700;">🔀 역할 전환:</span>
+        <select id="userRoleSelect" style="background:transparent; border:none; color:var(--primary); font-size:12.5px; font-weight:800; outline:none; cursor:pointer;" onchange="switchUserRole(this.value)">
+          <option value="admin">👑 Admin (건물별 사용료)</option>
+          <option value="landlord">🏢 임대인 (임대료 수납)</option>
+          <option value="tenant">🔑 임차인 (납입/만기일)</option>
+          <option value="public">📢 누구나 (공개 매물)</option>
+        </select>
+      </div>
+
       <select id="branchSelect" class="branch-select" onchange="loadDashboard()">
         <option value="main">시크빌 (본점 29개실)</option>
         <option value="sunho">선호아트빌 (15개실)</option>
         <option value="sinbi">신비주택 (20개실)</option>
       </select>
-      <a href="signup.html" target="_blank" class="btn btn-secondary">🛡️ 신원확인/가입</a>
       <a href="cosign.html" target="_blank" class="btn btn-primary">🤝 현장 동행 계약실</a>
-      <a href="public.html" target="_blank" class="btn btn-secondary">🌐 임차인용 웹페이지 열기</a>
-      <a href="manual.html" target="_blank" class="btn btn-secondary">📖 운영 매뉴얼</a>
+      <a href="manual.html" target="_blank" class="btn btn-secondary">📖 매뉴얼</a>
+      <a href="login.html" class="btn btn-secondary" style="background:rgba(255,255,255,0.06);">🚪 게이트웨이</a>
     </div>
   </header>
 
@@ -717,13 +727,72 @@
       }
     };
 
+    function getUrlParam(key) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(key);
+    }
+
+    function switchUserRole(role) {
+      if (role === 'admin') {
+        window.location.href = 'index.html?role=admin';
+      } else if (role === 'landlord') {
+        window.location.href = 'index.html?role=landlord';
+      } else if (role === 'tenant') {
+        window.location.href = 'public.html?view=tenant&room=201';
+      } else if (role === 'public') {
+        window.location.href = 'public.html';
+      }
+    }
+
+    function applyRoleBasedInitialView() {
+      const roleParam = getUrlParam('role') || localStorage.getItem('rent3_user_role') || 'admin';
+      localStorage.setItem('rent3_user_role', roleParam);
+
+      const roleSelect = document.getElementById('userRoleSelect');
+      const badge = document.getElementById('currentRoleBadge');
+      const subtitle = document.getElementById('currentRoleSubtitle');
+
+      if (roleParam === 'admin') {
+        if (roleSelect) roleSelect.value = 'admin';
+        if (badge) {
+          badge.innerText = '👑 총괄 Admin 모드';
+          badge.style.background = 'rgba(56,189,248,0.2)';
+          badge.style.color = 'var(--primary)';
+        }
+        if (subtitle) subtitle.innerText = '건물별 사용료 현황 & 통합 수익률 관제';
+        // Admin의 첫 번째 열리는 화면: 건물별 사용료 현황 & 통합 세무·수익률
+        switchTab('tabTaxRoi');
+      } else if (roleParam === 'landlord') {
+        if (roleSelect) roleSelect.value = 'landlord';
+        if (badge) {
+          badge.innerText = '🏢 임대인 실무 모드';
+          badge.style.background = 'rgba(16,185,129,0.2)';
+          badge.style.color = 'var(--success)';
+        }
+        if (subtitle) subtitle.innerText = '호실별 임대료 수납 장부 & 입주 승인 실무';
+        // 임대인의 첫 번째 열리는 화면: 호실별 임대료 수납 현황
+        switchTab('tabRooms');
+      } else if (roleParam === 'tenant') {
+        window.location.href = 'public.html?view=tenant&room=201';
+      } else if (roleParam === 'public') {
+        window.location.href = 'public.html';
+      }
+    }
+
     let adminChatPollTimer = null;
 
     function switchTab(tabId) {
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-      document.getElementById(tabId).classList.add("active");
-      if (event && event.target) event.target.classList.add("active");
+      const targetPane = document.getElementById(tabId);
+      if (targetPane) targetPane.classList.add("active");
+
+      // 활성화 버튼 표시
+      document.querySelectorAll(".tab-btn").forEach(b => {
+        if (b.getAttribute("onclick") && b.getAttribute("onclick").includes(tabId)) {
+          b.classList.add("active");
+        }
+      });
 
       if (tabId === 'tabTaxRoi') {
         loadTaxRoiDashboard();
@@ -785,6 +854,7 @@
         loadRenewals();
         loadCheckouts();
         loadTaxRoiDashboard();
+        applyRoleBasedInitialView();
       } catch (err) {
         Bass.updateAppAlert("대시보드 데이터를 불러오지 못했습니다: " + err.message, "error");
       }
@@ -2621,6 +2691,10 @@
         }
       });
     }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadDashboard();
+    });
   </script>
 </body>
 </html>

@@ -148,6 +148,17 @@ description: Operational business rules, domain invariants, and verification ins
       - 세입자 라운지(public.html) 및 관리자 관제 센터(index.html)에서 즉시 1-Click 발급·인쇄 가능.
       - 1:1 직통 인앱 메신저를 통해 세입자 대화방으로 발급 안내 알림 자동 발송.
 
+13. **역할별 맞춤형 첫 페이지 랜딩 및 권한 라우팅 거버넌스 (Role-Based Landing & Routing)**:
+    - **모든 사용자가 동일한 관제 대시보드에서 시작하지 않음**: 로그인 목적, 역할, 권한에 따라 가장 빈번하게 사용하는 업무 화면이 로그인 즉시 첫 페이지(First-Page)로 오픈되어야 한다.
+    - **4대 역할별 첫 페이지 표준 (Landing Standard)**:
+      - 📢 **누구나 (일반 방문자 / 예비임차인)**: `public.html` ➔ 복비 0원 즉시 입주 매물 광고 쇼케이스 & 사진/옵션 확인 & 1:1 방문투어 예약이 1순위로 열림.
+      - 🔑 **임차인 (입주 세입자)**: `public.html?view=tenant&room=201` ➔ 월별 납입현황(미납 0원/영수증) & 계약 만기일 D-Day & 도어락 비번 보기 & 17% 세액공제 증명서 발급 & 1:1 채팅방이 첫 페이지로 최상단 전면 배열.
+      - 🏢 **임대인 (건물주/지점장)**: `index.html?role=landlord` ➔ 호실별 임대료 수납 장부(`tabRooms`)가 첫 페이지로 즉시 열리며 가짜 체납 방지 FIFO 수납, 온라인 입주신청 심사, 만기 재계약 관리 진행.
+      - 👑 **총괄 관리자 (Admin)**: `index.html?role=admin` ➔ 건물별 사용료 현황 & 3대 지점 통합 세무·수익률 분석(`tabTaxRoi`)이 첫 페이지로 즉시 열려 포트폴리오 NOI 및 연간 수익률 관제.
+    - **접속 게이트웨이 및 원클릭 역할 전환 (Role Switcher)**:
+      - `login.html`: 4개 역할 카드로 구성된 공식 접속 게이트웨이 제공.
+      - 모든 화면 상단 헤더에 통일된 `[🔀 역할 전환: Admin ↔ 임대인 ↔ 임차인 ↔ 누구나]` 드롭다운 및 게이트웨이 바로가기 바 탑재.
+
 ---
 
 ## 4. 🎨 Resilient UX 배너 표준

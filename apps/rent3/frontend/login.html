@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>역할별 맞춤 로그인 & 바로가기 — Rent3</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 30, 49, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --success: #10b981;
+      --accent: #818cf8;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 30px 20px;
+      background-image: radial-gradient(circle at 50% 10%, rgba(56, 189, 248, 0.12) 0%, transparent 60%);
+    }
+    .login-container { max-width: 980px; width: 100%; }
+    .brand-header { text-align: center; margin-bottom: 36px; }
+    .brand-logo { font-size: 38px; margin-bottom: 8px; }
+    .brand-title { font-size: 26px; font-weight: 800; color: #fff; }
+    .brand-sub { font-size: 14.5px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+    .role-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 26px; }
+    .role-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 18px;
+      padding: 24px 20px;
+      text-decoration: none;
+      color: inherit;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.25s ease;
+    }
+    .role-card:hover { transform: translateY(-6px); box-shadow: 0 20px 35px rgba(0,0,0,0.5); }
+    .card-public:hover { border-color: var(--warning); background: rgba(245,158,11,0.08); }
+    .card-tenant:hover { border-color: var(--accent); background: rgba(129,140,248,0.08); }
+    .card-landlord:hover { border-color: var(--success); background: rgba(16,185,129,0.08); }
+    .card-admin:hover { border-color: var(--primary); background: rgba(56,189,248,0.08); }
+    .role-badge { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; margin-bottom: 12px; align-self: flex-start; }
+    .badge-public { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-tenant { background: rgba(129,140,248,0.15); color: var(--accent); }
+    .badge-landlord { background: rgba(16,185,129,0.15); color: var(--success); }
+    .badge-admin { background: rgba(56,189,248,0.15); color: var(--primary); }
+    .role-icon { font-size: 32px; margin-bottom: 12px; }
+    .role-title { font-size: 18px; font-weight: 800; color: #fff; margin-bottom: 8px; }
+    .first-page-hint {
+      font-size: 12.5px; font-weight: 600; background: rgba(0,0,0,0.35); padding: 8px 10px; border-radius: 8px; margin-bottom: 12px; line-height: 1.4;
+    }
+    .role-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; margin-bottom: 16px; }
+    .enter-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 10px; border-radius: 10px; font-size: 13.5px; font-weight: 700; border: none; cursor: pointer;
+    }
+    .btn-public { background: var(--warning); color: #090d16; }
+    .btn-tenant { background: var(--accent); color: #090d16; }
+    .btn-landlord { background: var(--success); color: #090d16; }
+    .btn-admin { background: var(--primary); color: #090d16; }
+    .quick-footer {
+      text-align: center; background: rgba(15,23,42,0.5); border: 1px solid var(--card-border); border-radius: 14px; padding: 16px 20px; font-size: 13px; color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="login-container">
+    <div class="brand-header">
+      <div class="brand-logo">🏡</div>
+      <h1 class="brand-title">Rent3 역할별 맞춤 접속 게이트웨이</h1>
+      <p class="brand-sub">
+        로그인 목적, 역할, 권한에 따라 <strong>가장 많이 사용하는 첫 번째 화면</strong>으로 즉시 연결됩니다.<br>
+        모든 사용자가 관제 대시보드에서 시작할 필요 없이, 본인의 역할에 최적화된 업무를 바로 시작하세요.
+      </p>
+    </div>
+
+    <div class="role-grid">
+      <!-- 1. 누구나 (일반 방문자) -->
+      <a href="public.html" class="role-card card-public">
+        <div>
+          <span class="role-badge badge-public">누구나 / 일반</span>
+          <div class="role-icon">📢</div>
+          <div class="role-title">일반 방문자</div>
+          <div class="first-page-hint" style="color:#fde68a;">
+            📍 <strong>첫 페이지:</strong><br>즉시 입주 매물 광고 쇼케이스
+          </div>
+          <div class="role-desc">
+            복비 0원 직거래 매물 검색, 사진/옵션 확인, 1:1 방문투어 예약 및 온라인 입주신청서 작성.
+          </div>
+        </div>
+        <button class="enter-btn btn-public">공개 매물 보러가기 ➔</button>
+      </a>
+
+      <!-- 2. 임차인 (세입자) -->
+      <a href="public.html?view=tenant&room=201" class="role-card card-tenant">
+        <div>
+          <span class="role-badge badge-tenant">임차인 (세입자)</span>
+          <div class="role-icon">🔑</div>
+          <div class="role-title">입주 임차인</div>
+          <div class="first-page-hint" style="color:#c7d2fe;">
+            📍 <strong>첫 페이지:</strong><br>월별 납입현황 & 계약 만기일
+          </div>
+          <div class="role-desc">
+            나의 월세·관리비 납부 확인, 만기 D-Day, 도어락 비번, 17% 세액공제 증명서 발급, 1:1 하자보수.
+          </div>
+        </div>
+        <button class="enter-btn btn-tenant">세입자 마이홈 열기 ➔</button>
+      </a>
+
+      <!-- 3. 임대인 (건물주) -->
+      <a href="index.html?role=landlord" class="role-card card-landlord">
+        <div>
+          <span class="role-badge badge-landlord">임대인 (건물주)</span>
+          <div class="role-icon">🏢</div>
+          <div class="role-title">지점 임대인</div>
+          <div class="first-page-hint" style="color:#a7f3d0;">
+            📍 <strong>첫 페이지:</strong><br>호실별 임대료 수납 & 미납 관리
+          </div>
+          <div class="role-desc">
+            가짜 체납 방지 FIFO 수납 장부, 비대면 입주신청 심사 승인, 만기 재계약, 협력업체 A/S 배정.
+          </div>
+        </div>
+        <button class="enter-btn btn-landlord">임대료 수납 장부 열기 ➔</button>
+      </a>
+
+      <!-- 4. 총괄 관리자 (Admin) -->
+      <a href="index.html?role=admin" class="role-card card-admin">
+        <div>
+          <span class="role-badge badge-admin">최고 관리자</span>
+          <div class="role-icon">👑</div>
+          <div class="role-title">총괄 Admin</div>
+          <div class="first-page-hint" style="color:#bae6fd;">
+            📍 <strong>첫 페이지:</strong><br>건물별 사용료 현황 & 통합 수익률
+          </div>
+          <div class="role-desc">
+            3대 지점(시크빌/선호아트빌/신비주택) 연간 총수입, 공실 손실액, 세무 및 Net ROI 통합 비교.
+          </div>
+        </div>
+        <button class="enter-btn btn-admin">건물별 사용료 관제 열기 ➔</button>
+      </a>
+    </div>
+
+    <div class="quick-footer">
+      💡 <strong>스마트 전환 안내:</strong> 어떤 페이지로 접속하셔도 상단 <strong>[역할 전환]</strong> 메뉴를 통해 언제든 다른 모드로 자유롭게 이동하실 수 있습니다.
+    </div>
+  </div>
+</body>
+</html>
