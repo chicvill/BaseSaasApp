@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>👑 Admin 관리인 총괄 관제 센터 — Smart Rent3</title>
+  <meta name="description" content="Rent3 관리인 전용 페이지: 신규 빌딩 생성 및 기본 설정, 건물별 앱 사용료 납부 통계, 임대인·임차인 채팅(알림-버튼), 모든 페이지 점프 버튼.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 49, 0.88);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --accent: #818cf8;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* Top Sticky Header */
+    header {
+      background: rgba(11, 15, 25, 0.95);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #fff; text-decoration: none; }
+    .badge-role { background: rgba(56, 189, 248, 0.15); color: var(--primary); font-size: 11.5px; padding: 4px 10px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3); }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 14px; font-size: 13px; font-weight: 700; border-radius: 8px;
+      cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--primary); color: #090d16; }
+    .btn-primary:hover { background: var(--primary-hover); color: #fff; }
+    .btn-secondary { background: #1e293b; color: #fff; border: 1px solid var(--card-border); }
+    .btn-secondary:hover { background: #334155; }
+    .btn-success { background: var(--success); color: #090d16; }
+
+    /* Alarm-Button (알림-버튼) with Notification Pulse */
+    .btn-alarm {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(245, 158, 11, 0.25) 100%);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      color: #fff;
+      font-weight: 800;
+      position: relative;
+      animation: alarmBorderPulse 2s infinite;
+    }
+    .btn-alarm:hover { background: rgba(239, 68, 68, 0.35); }
+    @keyframes alarmBorderPulse {
+      0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+      70% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+    .alarm-pulse-badge {
+      background: #ef4444; color: #fff; font-size: 11px; font-weight: 900;
+      padding: 2px 7px; border-radius: 999px; margin-left: 6px;
+      animation: badgePulse 1.5s infinite;
+    }
+    @keyframes badgePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.18); }
+    }
+
+    /* Omni-Jump Command Bar (모든 페이지 점프 가능한 버튼들) */
+    .jump-command-bar {
+      background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--card-border);
+      padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    }
+    .jump-title { font-size: 13px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .jump-btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .jump-btn {
+      padding: 6px 12px; font-size: 12px; font-weight: 700; border-radius: 8px; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 5px; transition: all 0.2s; border: 1px solid var(--card-border); color: #e2e8f0;
+    }
+    .jump-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+    .jump-home { background: rgba(255,255,255,0.06); }
+    .jump-home:hover { background: rgba(255,255,255,0.15); color: #fff; }
+    .jump-lessor { background: rgba(16, 185, 129, 0.12); color: var(--success); border-color: rgba(16, 185, 129, 0.3); }
+    .jump-lessor:hover { background: var(--success); color: #090d16; }
+    .jump-tenant { background: rgba(129, 140, 248, 0.12); color: var(--accent); border-color: rgba(129, 140, 248, 0.3); }
+    .jump-tenant:hover { background: var(--accent); color: #090d16; }
+    .jump-cosign { background: rgba(245, 158, 11, 0.12); color: var(--warning); border-color: rgba(245, 158, 11, 0.3); }
+    .jump-cosign:hover { background: var(--warning); color: #090d16; }
+    .jump-all { background: rgba(56, 189, 248, 0.12); color: var(--primary); border-color: rgba(56, 189, 248, 0.3); }
+    .jump-all:hover { background: var(--primary); color: #090d16; }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* Top KPI Stats */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .kpi-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px;
+      padding: 20px; backdrop-filter: blur(8px);
+    }
+    .kpi-label { font-size: 13px; color: var(--text-muted); font-weight: 600; margin-bottom: 6px; }
+    .kpi-value { font-size: 26px; font-weight: 900; color: #fff; }
+    .kpi-sub { font-size: 12px; color: var(--primary); margin-top: 4px; font-weight: 600; }
+
+    /* Section Cards */
+    .panel {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 18px;
+      padding: 24px; margin-bottom: 28px; backdrop-filter: blur(8px);
+    }
+    .panel-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;
+      flex-wrap: wrap; gap: 12px;
+    }
+    .panel-title { font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px; color: #fff; }
+
+    /* Tables */
+    .table-responsive { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th {
+      background: rgba(255, 255, 255, 0.03); color: var(--text-muted); font-size: 12.5px;
+      font-weight: 700; padding: 12px 14px; border-bottom: 1px solid var(--card-border);
+    }
+    td {
+      padding: 13px 14px; font-size: 13.5px; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: #e2e8f0;
+    }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    /* Badges */
+    .badge {
+      display: inline-block; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 6px;
+    }
+    .badge-paid { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+    .badge-overdue { background: rgba(239, 68, 68, 0.15); color: var(--error); }
+
+    /* Modals */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(10px); z-index: 500; justify-content: center; align-items: center; padding: 20px;
+    }
+    .modal {
+      background: #111827; border: 1px solid var(--card-border); border-radius: 20px;
+      max-width: 540px; width: 100%; padding: 28px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 19px; font-weight: 800; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+    .close-btn { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 10px 14px; background: #1e293b; border: 1px solid var(--card-border);
+      border-radius: 8px; color: #fff; font-size: 14px; outline: none;
+    }
+
+    /* Modal Chat Box */
+    .modal-chat-box {
+      display: flex; flex-direction: column; height: 350px; background: #0f172a;
+      border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; margin-bottom: 12px;
+    }
+    .modal-chat-messages { flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+    .chat-bubble { max-width: 82%; padding: 9px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+    .bubble-admin { align-self: flex-end; background: var(--primary); color: #090d16; font-weight: 600; }
+    .bubble-partner { align-self: flex-start; background: #1e293b; color: #e2e8f0; border: 1px solid var(--card-border); }
+
+    #adminAlert {
+      display: none; position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      background: #1e293b; border: 1px solid var(--primary); color: #fff;
+      padding: 14px 20px; border-radius: 12px; font-size: 14px; font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sticky Header -->
+  <header>
+    <a href="admin.html" class="brand">
+      <span style="font-size:24px;">👑</span>
+      <span>Rent3 Admin 관제</span>
+      <span class="badge-role">총괄 관리인 모드</span>
+    </a>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <!-- 임대인, 임차인과 채팅 (알림-버튼) -->
+      <button class="btn btn-alarm" id="btnAdminHeaderChat" onclick="openAdminChatModal()">
+        <span>💬 임대인·임차인 채팅 (알림-버튼)</span>
+        <span class="alarm-pulse-badge" id="adminHeaderAlarmBadge">🔔 2건</span>
+      </button>
+
+      <span style="font-size:13px; color:var(--text-muted);">관리인: <strong>총괄 최고관리자</strong></span>
+      <a href="home.html" class="btn btn-secondary" style="font-size:12px; padding:6px 12px;">🚪 로그아웃</a>
+    </div>
+  </header>
+
+  <!-- 모든 페이지 점프 가능한 버튼들 (Omni-Jump Command Center) -->
+  <div class="jump-command-bar">
+    <div class="jump-title">
+      <span>🚀</span>
+      <span><strong>모든 페이지 점프 가능한 버튼들:</strong> 언제든 즉시 이동</span>
+    </div>
+    <div class="jump-btn-group">
+      <a href="home.html" class="jump-btn jump-home">🏠 일반 홈페이지 (누구나)</a>
+      <a href="lessor.html" class="jump-btn jump-lessor">🏢 임대인 (건물주 전용)</a>
+      <a href="tenant.html" class="jump-btn jump-tenant">🔑 임차인 (세입자 전용)</a>
+      <a href="cosign.html" target="_blank" class="jump-btn jump-cosign">🤝 Co-Signing 계약실</a>
+      <a href="index.html?tab=tabRtms" class="jump-btn jump-all">🏛️ 국토부 RTMS 대장</a>
+      <a href="index.html?tab=tabEntities" class="jump-btn jump-all">📊 8대 표준 엔티티 관리</a>
+    </div>
+  </div>
+
+  <main class="container">
+    <!-- Top KPI Cards: 건물 및 앱 사용료 통계 -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">등록 관리 건물</div>
+        <div class="kpi-value" id="kpiBldgCount">3개소</div>
+        <div class="kpi-sub" id="kpiRoomCount">총 64개 호실 관제중</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">건물별 월 앱 사용료 정산 총액</div>
+        <div class="kpi-value" style="color:var(--primary);" id="kpiTotalAppFee">99,000 원</div>
+        <div class="kpi-sub">지점당 월 33,000원 정액 SaaS</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">건물별 앱 사용료 납부율</div>
+        <div class="kpi-value" style="color:var(--success);" id="kpiPaidRate">100 %</div>
+        <div class="kpi-sub" id="kpiPaidCount">3개 지점 전액 완납</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">미수금 / 연체 관리비</div>
+        <div class="kpi-value" style="color:var(--text-muted);" id="kpiOverdueCount">0 건</div>
+        <div class="kpi-sub" style="color:var(--success);">정상 정산 완료</div>
+      </div>
+    </div>
+
+    <!-- 1. 새로운 Building 생성 -> 기본 설정 패널 (버튼) -->
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">
+            <span>🏢</span>
+            <span>새로운 building 생성 ➔ 기본 설정</span>
+          </h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            새로운 건물을 생성하고 임대인 배정, 기본 관리비, 담당자 및 시스템 설정을 구성합니다.
+          </p>
+        </div>
+        <button class="btn btn-primary" onclick="openNewBuildingModal()">
+          <span>➕ 새로운 building 생성 (버튼)</span>
+        </button>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>건물 고유 ID</th>
+              <th>건물명</th>
+              <th>소재지 주소</th>
+              <th>소유 임대인</th>
+              <th>총 호실수</th>
+              <th>기본 관리비</th>
+              <th>관리 연락처</th>
+              <th>기본 설정 (버튼)</th>
+            </tr>
+          </thead>
+          <tbody id="buildingTbody">
+            <tr>
+              <td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted);">
+                건물 목록을 불러오는 중입니다...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 2. 건물별 앱 사용료 납부 통계 패널 -->
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">
+            <span>💰</span>
+            <span>건물별 앱 사용료 납부 통계</span>
+          </h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            임대인이 납부하는 월 플랫폼 가맹/이용료(월 33,000원) 정산 대장 및 영수증 관리
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <!-- 임대인, 임차인과 채팅 (알림-버튼) -->
+          <button class="btn btn-alarm" onclick="openAdminChatModal()">
+            <span>💬 임대인·임차인 채팅 (알림-버튼)</span>
+            <span class="alarm-pulse-badge" id="adminPanelAlarmBadge">🔔 2건</span>
+          </button>
+          <button class="btn btn-secondary" onclick="loadAppFeeStats()">
+            <span>🔄 새로고침</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>건물명</th>
+              <th>소유 임대인</th>
+              <th>월 이용료</th>
+              <th>납부 상태</th>
+              <th>최근 납부일</th>
+              <th>정산 계좌</th>
+              <th>전자영수증 (버튼)</th>
+            </tr>
+          </thead>
+          <tbody id="appFeeTbody">
+            <tr>
+              <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">
+                앱 사용료 통계를 불러오는 중입니다...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- 1. 새로운 Building 생성 모달 (버튼 누르면 모달 창 열림) -->
+  <div class="modal-overlay" id="buildingModal">
+    <div class="modal">
+      <div class="modal-title">
+        <span id="bldgModalTitle">🏢 새로운 Building 생성 (기본 설정)</span>
+        <button class="close-btn" onclick="closeModal('buildingModal')">&times;</button>
+      </div>
+      <input type="hidden" id="editBldgId">
+      <div class="form-group">
+        <label>건물명 (예: 시크빌 본점, 테라스하우스)</label>
+        <input type="text" id="bldgName" placeholder="건물명 입력">
+      </div>
+      <div class="form-group">
+        <label>소재지 주소</label>
+        <input type="text" id="bldgAddress" placeholder="서울특별시 관악구 봉천동 888-12">
+      </div>
+      <div class="form-group">
+        <label>소유 임대인 배정</label>
+        <select id="bldgLessorSelect">
+          <option value="">임대인을 불러오는 중...</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>지점 코드 (branch)</label>
+        <input type="text" id="bldgBranch" placeholder="main, sunho, sinbi 또는 영문코드">
+      </div>
+      <div class="form-group">
+        <label>총 호실 수</label>
+        <input type="number" id="bldgRooms" value="20">
+      </div>
+      <div class="form-group">
+        <label>기본 관리비 (원)</label>
+        <input type="number" id="bldgMaintFee" value="50000">
+      </div>
+      <div class="form-group">
+        <label>월 앱 사용료 (원)</label>
+        <input type="number" id="bldgAppFee" value="33000">
+      </div>
+      <div class="form-group">
+        <label>관리 담당자 연락처</label>
+        <input type="tel" id="bldgPhone" value="010-1212-3434">
+      </div>
+      <button class="btn btn-primary" style="width:100%; padding:12px; font-size:15px; margin-top:8px;" onclick="saveBuilding()">
+        건물 정보 및 기본 설정 저장
+      </button>
+    </div>
+  </div>
+
+  <!-- 2. 임대인, 임차인과 채팅 모달 ((알림-버튼) 누르면 열림) -->
+  <div class="modal-overlay" id="adminChatModal">
+    <div class="modal" style="max-width:580px;">
+      <div class="modal-title">
+        <span>💬 임대인·임차인 직통 채팅 (알림-모달)</span>
+        <button class="close-btn" onclick="closeModal('adminChatModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>대화 상대 선택</label>
+        <select id="adminChatPartnerSelect" onchange="changeAdminChatPartner(this.value)">
+          <option value="lessor_chic">🏢 임대인 (김임대 — 시크빌 본점 소유주)</option>
+          <option value="tenant_201">🔑 임차인 (홍길동 — 시크빌 201호)</option>
+          <option value="tenant_202">🔑 임차인 (이지은 — 시크빌 202호)</option>
+        </select>
+      </div>
+      <div class="modal-chat-box">
+        <div class="modal-chat-messages" id="adminChatMessages">
+          <div class="chat-bubble bubble-partner">
+            [임대인 김임대] 관리인님, 선호아트빌 공용 전기세 영수증 등록 완료했습니다. 확인 부탁드립니다.
+          </div>
+          <div class="chat-bubble bubble-admin">
+            네 김임대 대표님, 지출 적격증빙 확인 후 당월 결산부에 정상 반영 완료했습니다!
+          </div>
+          <div class="chat-bubble bubble-partner" style="border-color:var(--warning);">
+            🔔 [신규 문의] 201호 홍길동 임차인이 주차 등록 승인 문의를 남겼습니다.
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input type="text" id="adminChatInput" style="flex:1; padding:10px 14px; background:#1e293b; border:1px solid var(--card-border); border-radius:8px; color:#fff;" placeholder="메시지를 입력하세요 (Enter)" onkeydown="if(event.key==='Enter') sendAdminChat()">
+        <button class="btn btn-primary" onclick="sendAdminChat()">전송</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="adminAlert"></div>
+
+  <script>
+    function showAlert(msg, isSuccess = true) {
+      const banner = document.getElementById("adminAlert");
+      banner.style.display = "flex";
+      banner.style.borderColor = isSuccess ? "var(--success)" : "var(--error)";
+      banner.innerText = msg;
+      setTimeout(() => { banner.style.display = "none"; }, 3500);
+    }
+
+    function openModal(id) { document.getElementById(id).style.display = "flex"; }
+    function closeModal(id) { document.getElementById(id).style.display = "none"; }
+
+    let allLessors = [];
+
+    // 임대인, 임차인과 채팅 (알림-버튼) 모달 열기
+    function openAdminChatModal() {
+      openModal("adminChatModal");
+      // 알림 확인 처리
+      const hBadge = document.getElementById("adminHeaderAlarmBadge");
+      const pBadge = document.getElementById("adminPanelAlarmBadge");
+      if (hBadge) hBadge.style.display = "none";
+      if (pBadge) pBadge.style.display = "none";
+      const hBtn = document.getElementById("btnAdminHeaderChat");
+      if (hBtn) hBtn.style.animation = "none";
+    }
+
+    function changeAdminChatPartner(partner) {
+      const container = document.getElementById("adminChatMessages");
+      if (partner === "lessor_chic") {
+        container.innerHTML = `
+          <div class="chat-bubble bubble-partner">[임대인 김임대] 관리인님, 선호아트빌 공용 전기세 영수증 등록 완료했습니다. 확인 부탁드립니다.</div>
+          <div class="chat-bubble bubble-admin">네 김임대 대표님, 지출 적격증빙 확인 후 당월 결산부에 정상 반영 완료했습니다!</div>
+        `;
+      } else if (partner === "tenant_201") {
+        container.innerHTML = `
+          <div class="chat-bubble bubble-partner">[201호 홍길동] 관리사무소님, 지하주차장 출입 차량(12가 3456) 등록 승인 부탁드립니다.</div>
+          <div class="chat-bubble bubble-admin">홍길동님 안녕하세요, 전산 차량 등록 승인 처리 완료되었습니다!</div>
+        `;
+      } else {
+        container.innerHTML = `
+          <div class="chat-bubble bubble-partner">[202호 이지은] 관리인님, 2층 복도 전등 교체 요청드립니다.</div>
+          <div class="chat-bubble bubble-admin">이지은님 접수되었습니다. 오늘 오후 3시 이전 교체 완료하겠습니다!</div>
+        `;
+      }
+    }
+
+    function sendAdminChat() {
+      const input = document.getElementById("adminChatInput");
+      const text = input.value.trim();
+      if (!text) return;
+      const container = document.getElementById("adminChatMessages");
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble bubble-admin";
+      bubble.innerText = text;
+      container.appendChild(bubble);
+      input.value = "";
+      container.scrollTop = container.scrollHeight;
+      showAlert("메시지가 상대방에게 전송되었습니다.");
+    }
+
+    // 1. 임대인 목록 불러오기
+    async function loadLessors() {
+      try {
+        const res = await fetch("/api/rent3/entities/lessor");
+        const data = await res.json();
+        allLessors = data.items || [];
+        const sel = document.getElementById("bldgLessorSelect");
+        if (allLessors.length === 0) {
+          sel.innerHTML = `<option value="">등록된 임대인이 없습니다</option>`;
+        } else {
+          sel.innerHTML = allLessors.map(l => `
+            <option value="${l.id_lessor}">${l.name} (${l.phone || '연락처없음'}) — ${l.id_lessor}</option>
+          `).join("");
+        }
+      } catch (err) {
+        console.error("loadLessors error:", err);
+      }
+    }
+
+    // 2. 건물 목록 불러오기
+    async function loadBuildings() {
+      try {
+        const res = await fetch("/api/rent3/entities/building");
+        const data = await res.json();
+        const items = data.items || [];
+        const tbody = document.getElementById("buildingTbody");
+
+        document.getElementById("kpiBldgCount").innerText = `${items.length}개소`;
+        const totalRooms = items.reduce((acc, cur) => acc + (cur.total_rooms || 20), 0);
+        document.getElementById("kpiRoomCount").innerText = `총 ${totalRooms}개 호실 관제중`;
+
+        if (items.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted);">등록된 건물이 없습니다.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = items.map(b => {
+          const lessorObj = allLessors.find(l => l.id_lessor === b.id_lessor);
+          const lessorName = lessorObj ? lessorObj.name : (b.id_lessor || '미지정');
+
+          return `
+            <tr>
+              <td style="font-family:monospace; color:var(--primary); font-weight:700;">${b.id_building}</td>
+              <td><strong>${b.building_name}</strong></td>
+              <td style="color:var(--text-muted);">${b.address || '-'}</td>
+              <td><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--success); font-weight:700;">${lessorName}</span></td>
+              <td><strong>${b.total_rooms || 20}실</strong></td>
+              <td>${(b.default_maintenance_fee || 50000).toLocaleString()}원</td>
+              <td style="font-size:12.5px; color:var(--text-muted);">${b.manager_phone || '010-1212-3434'}</td>
+              <td>
+                <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="editBuilding('${b.id_building}')">
+                  ⚙️ 기본 설정 (버튼)
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+        renderAppFeeStats(items);
+      } catch (err) {
+        console.error("loadBuildings error:", err);
+      }
+    }
+
+    // 3. 앱 사용료 통계 렌더링
+    function renderAppFeeStats(buildings) {
+      const tbody = document.getElementById("appFeeTbody");
+      if (!tbody) return;
+
+      let totalFee = 0;
+      let paidCount = 0;
+      let overdueCount = 0;
+
+      tbody.innerHTML = buildings.map(b => {
+        const fee = b.app_fee_monthly || 33000;
+        const status = b.app_fee_status || "PAID";
+        const lessorObj = allLessors.find(l => l.id_lessor === b.id_lessor);
+        const lessorName = lessorObj ? lessorObj.name : "김임대";
+        const account = lessorObj ? (lessorObj.account_number || "국민 123-456-789012") : "국민 123-456-789012";
+
+        totalFee += fee;
+        if (status === "PAID") paidCount++;
+        else overdueCount++;
+
+        return `
+          <tr>
+            <td><strong>${b.building_name}</strong></td>
+            <td>${lessorName}</td>
+            <td style="font-weight:700; color:var(--primary);">${fee.toLocaleString()}원 / 월</td>
+            <td>
+              <span class="badge ${status === 'PAID' ? 'badge-paid' : 'badge-overdue'}">
+                ${status === 'PAID' ? '✅ 완납 완료' : '⚠️ 미납 연체'}
+              </span>
+            </td>
+            <td style="font-size:12px; color:var(--text-muted);">${b.app_fee_last_paid || '2026-10-15'}</td>
+            <td style="font-size:12px; color:#cbd5e1;">${account}</td>
+            <td>
+              <button class="btn btn-secondary" style="padding:3px 8px; font-size:11.5px;" onclick="alert('🏛️ [SaaS 앱 사용료 정산 영수증]\\n• 건물명: ${b.building_name}\\n• 정산금액: ${fee.toLocaleString()}원\\n• 승인번호: APP-FEE-2026-${b.branch || 'main'}\\n• 과세구분: 부가세 포함 영수')">
+                📄 전자영수증 (버튼)
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+
+      document.getElementById("kpiTotalAppFee").innerText = `${totalFee.toLocaleString()} 원`;
+      const rate = buildings.length > 0 ? Math.round((paidCount / buildings.length) * 100) : 100;
+      document.getElementById("kpiPaidRate").innerText = `${rate} %`;
+      document.getElementById("kpiPaidCount").innerText = `${paidCount}개 지점 완납`;
+      document.getElementById("kpiOverdueCount").innerText = `${overdueCount} 건`;
+    }
+
+    function openNewBuildingModal() {
+      document.getElementById("bldgModalTitle").innerText = "🏢 새로운 Building 생성 (기본 설정)";
+      document.getElementById("editBldgId").value = "";
+      document.getElementById("bldgName").value = "";
+      document.getElementById("bldgAddress").value = "";
+      document.getElementById("bldgBranch").value = "chic_" + Math.random().toString(36).substring(2, 6);
+      document.getElementById("bldgRooms").value = "20";
+      document.getElementById("bldgMaintFee").value = "50000";
+      document.getElementById("bldgAppFee").value = "33000";
+      document.getElementById("bldgPhone").value = "010-1212-3434";
+      openModal("buildingModal");
+    }
+
+    async function editBuilding(bldgId) {
+      try {
+        const res = await fetch(`/api/rent3/entities/building/${bldgId}`);
+        const data = await res.json();
+        const b = data.item;
+        if (!b) return;
+
+        document.getElementById("bldgModalTitle").innerText = `⚙️ [${b.building_name}] 기본 설정 수정`;
+        document.getElementById("editBldgId").value = b.id_building;
+        document.getElementById("bldgName").value = b.building_name || "";
+        document.getElementById("bldgAddress").value = b.address || "";
+        if (b.id_lessor) document.getElementById("bldgLessorSelect").value = b.id_lessor;
+        document.getElementById("bldgBranch").value = b.branch || "main";
+        document.getElementById("bldgRooms").value = b.total_rooms || 20;
+        document.getElementById("bldgMaintFee").value = b.default_maintenance_fee || 50000;
+        document.getElementById("bldgAppFee").value = b.app_fee_monthly || 33000;
+        document.getElementById("bldgPhone").value = b.manager_phone || "010-1212-3434";
+
+        openModal("buildingModal");
+      } catch (err) {
+        showAlert("건물 정보 조회 오류: " + err.message, false);
+      }
+    }
+
+    async function saveBuilding() {
+      const editId = document.getElementById("editBldgId").value;
+      const building_name = document.getElementById("bldgName").value.trim();
+      const address = document.getElementById("bldgAddress").value.trim();
+      const id_lessor = document.getElementById("bldgLessorSelect").value;
+      const branch = document.getElementById("bldgBranch").value.trim();
+      const total_rooms = parseInt(document.getElementById("bldgRooms").value) || 20;
+      const default_maintenance_fee = parseInt(document.getElementById("bldgMaintFee").value) || 50000;
+      const app_fee_monthly = parseInt(document.getElementById("bldgAppFee").value) || 33000;
+      const manager_phone = document.getElementById("bldgPhone").value.trim();
+
+      if (!building_name || !address) {
+        showAlert("건물명과 주소를 반드시 입력해주세요.", false);
+        return;
+      }
+
+      const payload = {
+        building_name, address, id_lessor, branch, total_rooms,
+        default_maintenance_fee, app_fee_monthly, manager_phone
+      };
+
+      try {
+        let res;
+        if (editId) {
+          res = await fetch(`/api/rent3/entities/building/${editId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          res = await fetch("/api/rent3/entities/building", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+        const data = await res.json();
+        if (data.success) {
+          showAlert(data.message || "건물이 성공적으로 저장되었습니다.");
+          closeModal("buildingModal");
+          loadBuildings();
+        } else {
+          showAlert(data.detail || "저장 실패", false);
+        }
+      } catch (err) {
+        showAlert("저장 오류: " + err.message, false);
+      }
+    }
+
+    function loadAppFeeStats() {
+      loadBuildings();
+      showAlert("사용료 통계가 갱신되었습니다.");
+    }
+
+    window.addEventListener("DOMContentLoaded", async () => {
+      await loadLessors();
+      await loadBuildings();
+    });
+  </script>
+</body>
+</html>

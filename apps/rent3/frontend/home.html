@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Rent3 — 차세대 비대면 직거래 & 올인원 임대관리 포털</title>
+  <meta name="description" content="중개수수료 0원! 소유주와 임차인을 직접 잇는 차세대 비대면 전자계약, 실시간 등기부 확인, 국토부 RTMS 신고, 세액공제 공식 증명서 올인원 직거래 플랫폼.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 30, 49, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --accent: #818cf8;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+
+    /* Top Sticky Header */
+    header {
+      background: rgba(9, 13, 22, 0.92);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #fff; text-decoration: none; }
+    .badge-direct { background: rgba(16, 185, 129, 0.15); color: var(--success); font-size: 11.5px; padding: 4px 10px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(16, 185, 129, 0.3); }
+
+    /* Jump Buttons to Dedicated Pages */
+    .jump-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .nav-btn {
+      padding: 7px 13px; font-size: 12.5px; font-weight: 700; border-radius: 8px; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s ease; cursor: pointer; border: 1px solid transparent;
+    }
+    .nav-btn-home { background: rgba(56, 189, 248, 0.15); color: var(--primary); border-color: rgba(56, 189, 248, 0.3); }
+    .nav-btn-admin { background: rgba(56, 189, 248, 0.1); color: var(--primary); border-color: var(--card-border); }
+    .nav-btn-admin:hover { background: var(--primary); color: #090d16; }
+    .nav-btn-lessor { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: var(--card-border); }
+    .nav-btn-lessor:hover { background: var(--success); color: #090d16; }
+    .nav-btn-tenant { background: rgba(129, 140, 248, 0.1); color: var(--accent); border-color: var(--card-border); }
+    .nav-btn-tenant:hover { background: var(--accent); color: #090d16; }
+    .nav-btn-auth { background: #1e293b; color: #fff; border-color: var(--card-border); }
+    .nav-btn-auth:hover { background: #334155; }
+
+    /* Hero Section (광고 & 특장점) */
+    .hero {
+      text-align: center; padding: 60px 20px 50px;
+      background: radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.16) 0%, transparent 70%);
+      border-bottom: 1px solid var(--card-border);
+    }
+    .hero-badge {
+      display: inline-block; background: rgba(56, 189, 248, 0.12); color: var(--primary);
+      padding: 6px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; margin-bottom: 18px;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+    }
+    .hero h1 { font-size: 38px; font-weight: 900; line-height: 1.3; margin-bottom: 16px; letter-spacing: -0.5px; }
+    .hero h1 span { color: var(--primary); }
+    .hero p { font-size: 17px; color: #cbd5e1; max-width: 780px; margin: 0 auto 32px; line-height: 1.6; font-weight: 400; }
+    .hero-actions { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; margin-bottom: 40px; }
+    .btn-hero { padding: 14px 28px; font-size: 15px; font-weight: 800; border-radius: 12px; cursor: pointer; text-decoration: none; border: none; transition: transform 0.2s, box-shadow 0.2s; }
+    .btn-hero:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0,0,0,0.4); }
+    .btn-hero-primary { background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%); color: #090d16; }
+    .btn-hero-secondary { background: rgba(255, 255, 255, 0.08); color: #fff; border: 1px solid var(--card-border); }
+
+    /* Feature 4 Grid (시스템 광고/특장점) */
+    .features-container { max-width: 1180px; margin: -25px auto 50px; padding: 0 20px; }
+    .features-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+    .feat-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 18px;
+      padding: 24px 20px; backdrop-filter: blur(12px); transition: all 0.25s;
+    }
+    .feat-card:hover { transform: translateY(-5px); border-color: rgba(56, 189, 248, 0.35); box-shadow: 0 15px 30px rgba(0,0,0,0.4); }
+    .feat-icon { font-size: 32px; margin-bottom: 12px; }
+    .feat-title { font-size: 17px; font-weight: 800; margin-bottom: 8px; color: #fff; }
+    .feat-desc { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+
+    /* Main Container */
+    .container { max-width: 1180px; margin: 0 auto; padding: 0 20px 60px; }
+
+    /* Showcase Section */
+    .section-header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .section-title { font-size: 24px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+    .section-sub { font-size: 14px; color: var(--text-muted); margin-top: 4px; }
+
+    .listing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; }
+    .listing-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 18px;
+      overflow: hidden; transition: all 0.25s; display: flex; flex-direction: column;
+    }
+    .listing-card:hover { transform: translateY(-4px); border-color: rgba(56, 189, 248, 0.4); box-shadow: 0 15px 30px rgba(0,0,0,0.5); }
+    .listing-img { width: 100%; height: 210px; object-fit: cover; background: #1e293b; }
+    .listing-body { padding: 20px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+    .listing-title { font-size: 17px; font-weight: 800; margin-bottom: 8px; line-height: 1.4; color: #fff; }
+    .listing-price { font-size: 21px; font-weight: 900; color: var(--primary); margin-bottom: 14px; }
+    .tag-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+    .tag { background: rgba(255, 255, 255, 0.06); font-size: 12px; color: #cbd5e1; padding: 4px 8px; border-radius: 6px; }
+
+    .btn-apply {
+      width: 100%; padding: 12px; background: var(--primary); color: #090d16; font-size: 14px;
+      font-weight: 800; border-radius: 10px; border: none; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-apply:hover { background: #0284c7; color: #fff; }
+
+    /* Modals */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(10px); z-index: 500; justify-content: center; align-items: center; padding: 20px;
+    }
+    .modal {
+      background: #111827; border: 1px solid var(--card-border); border-radius: 20px;
+      max-width: 520px; width: 100%; padding: 28px; max-height: 90vh; overflow-y: auto;
+      box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);
+    }
+    .modal-title { font-size: 20px; font-weight: 800; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; }
+    .close-btn { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .close-btn:hover { color: #fff; }
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 11px 14px; background: #1e293b; border: 1px solid var(--card-border);
+      border-radius: 10px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color: var(--primary); }
+    .btn-submit {
+      width: 100%; padding: 13px; background: var(--primary); color: #090d16; font-size: 15px;
+      font-weight: 800; border-radius: 10px; border: none; cursor: pointer; margin-top: 8px;
+    }
+
+    /* Resilient Alert Banner */
+    #appAlert {
+      display: none; position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      background: #1e293b; border: 1px solid var(--primary); color: #fff;
+      padding: 14px 20px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      font-size: 14px; font-weight: 600; align-items: center; gap: 12px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Sticky Global Navigation -->
+  <header>
+    <a href="home.html" class="brand">
+      <span style="font-size:24px;">🏡</span>
+      <span>Smart Rent3</span>
+      <span class="badge-direct">첫 만남 / 누구나</span>
+    </a>
+
+    <!-- 모든 페이지 점프 가능한 역할별 내비게이션 바 -->
+    <nav class="jump-nav">
+      <a href="home.html" class="nav-btn nav-btn-home">🏠 홈페이지</a>
+      <a href="admin.html" class="nav-btn nav-btn-admin">👑 Admin (관리인)</a>
+      <a href="lessor.html" class="nav-btn nav-btn-lessor">🏢 임대인 (건물주)</a>
+      <a href="tenant.html" class="nav-btn nav-btn-tenant">🔑 임차인 (세입자)</a>
+      <button class="nav-btn nav-btn-auth" onclick="openLoginModal()">🔑 로그인</button>
+      <button class="nav-btn nav-btn-auth" style="background:rgba(56,189,248,0.15); color:var(--primary);" onclick="openSignupModal()">🛡️ 회원가입</button>
+      <button class="nav-btn nav-btn-auth" onclick="openProfileModal()">👤 내정보 수정</button>
+    </nav>
+  </header>
+
+  <!-- Hero Section: 시스템 광고 & 직거래 특장점 -->
+  <section class="hero">
+    <div class="hero-badge">⚡ 중개수수료 0원 • 공인중개사법 안전 SaaS 구조</div>
+    <h1>임대인과 임차인이 직접 만나는<br><span>스마트 비대면 직거래 솔루션</span></h1>
+    <p>
+      복비 부담 없이 소유주와 실시간 등기부를 확인하고, 현장 동행 Co-Signing 전자계약부터<br>
+      국토부 RTMS 주택임대차 신고, 17% 세액공제 공식 납입 증명서 발급까지 한 곳에서 완결하세요.
+    </p>
+    <div class="hero-actions">
+      <a href="#showcaseSection" class="btn-hero btn-hero-primary">📢 즉시 입주 공실 매물 둘러보기</a>
+      <a href="cosign.html" target="_blank" class="btn-hero btn-hero-secondary">🤝 현장 동행 실시간 계약실 체험</a>
+      <button class="btn-hero btn-hero-secondary" onclick="openSignupModal()">🛡️ 1분 간편 본인확인 회원가입</button>
+    </div>
+  </section>
+
+  <!-- 4대 시스템 광고 & 혁신 기능 안내 -->
+  <div class="features-container">
+    <div class="features-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🏛️</div>
+        <div class="feat-title">대법원 등기부 안심 검증</div>
+        <div class="feat-desc">계약 전 소유권 및 근저당 말소 여부를 임차인과 임대인이 실시간 크로스 체크하여 전세사기 및 깡통주택을 원천 차단합니다.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">✍️</div>
+        <div class="feat-title">동행 Co-Signing 전자계약</div>
+        <div class="feat-desc">현장에서 스마트폰 하나로 시설물 사진 점검표 작성, 조건 합의, 모바일 전자서명 및 첫 결제를 10분 만에 완료합니다.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">📑</div>
+        <div class="feat-title">국토부 RTMS 자동 신고</div>
+        <div class="feat-desc">보증금 6천만원 초과 또는 월세 30만원 초과 시, 계약 체결 즉시 관할 지자체에 주택임대차 계약 신고 및 확정일자가 자동 부여됩니다.</div>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">💰</div>
+        <div class="feat-title">17% 월세 세액공제 증명서</div>
+        <div class="feat-desc">국세청 현금영수증 전산 연동으로 조세특례제한법에 따른 연말정산 공식 납입 증명서를 세입자 라운지에서 원클릭 발급합니다.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Section: 실시간 추천 공실 매물 쇼케이스 -->
+  <main class="container" id="showcaseSection">
+    <div class="section-header">
+      <div>
+        <h2 class="section-title">📢 지금 즉시 입주 가능한 추천 직거래 매물</h2>
+        <p class="section-sub">임대인이 직접 관리하는 안전하고 쾌적한 풀옵션 원룸을 복비 없이 계약하세요.</p>
+      </div>
+      <div>
+        <select id="branchFilter" style="background:#1e293b; color:#fff; border:1px solid var(--card-border); padding:8px 12px; border-radius:8px; font-weight:700;" onchange="loadPublicListings(this.value)">
+          <option value="">전체 지점 보기</option>
+          <option value="main">시크빌 본점 (봉천역)</option>
+          <option value="sunho">선호아트빌 (신림역)</option>
+          <option value="sinbi">신비주택 (서초 방배)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="listing-grid" id="listingGrid">
+      <div style="grid-column: 1/-1; text-align:center; padding:50px; color:var(--text-muted);">
+        실시간 공실 매물 데이터를 불러오는 중입니다...
+      </div>
+    </div>
+  </main>
+
+  <!-- 1. 회원가입 모달 (신원확인 연동) -->
+  <div class="modal-overlay" id="signupModal">
+    <div class="modal">
+      <div class="modal-title">
+        <span>🛡️ Rent3 간편 회원가입</span>
+        <button class="close-btn" onclick="closeModal('signupModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>가입 역할 선택</label>
+        <select id="signupRole" onchange="toggleSignupFields(this.value)">
+          <option value="tenant">임차인 (세입자 / 입주희망자)</option>
+          <option value="landlord">임대인 (건물주 / 임대사업자)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>성명 (실명)</label>
+        <input type="text" id="signupName" placeholder="홍길동">
+      </div>
+      <div class="form-group">
+        <label>휴대폰 번호 (본인확인용)</label>
+        <div style="display:flex; gap:8px;">
+          <input type="tel" id="signupPhone" placeholder="010-1234-5678">
+          <button type="button" class="nav-btn nav-btn-home" style="width:auto; white-space:nowrap;" onclick="sendPhoneVerification()">인증번호 전송</button>
+        </div>
+      </div>
+      <div class="form-group" id="verifyCodeGroup" style="display:none;">
+        <label>인증번호 6자리</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="signupVerifyCode" placeholder="123456">
+          <button type="button" class="nav-btn nav-btn-lessor" style="width:auto; white-space:nowrap;" onclick="confirmPhoneVerification()">확인</button>
+        </div>
+        <div id="verifyStatusText" style="font-size:12px; margin-top:4px; color:var(--success);"></div>
+      </div>
+      <div class="form-group">
+        <label>아이디 (Username)</label>
+        <input type="text" id="signupUsername" placeholder="user2026">
+      </div>
+      <div class="form-group">
+        <label>비밀번호</label>
+        <input type="password" id="signupPassword" placeholder="••••••••">
+      </div>
+      <!-- 임차인 전용 필드 -->
+      <div id="tenantExtraFields">
+        <div class="form-group">
+          <label>차량번호 (주차 등록용, 선택)</label>
+          <input type="text" id="signupCarNumber" placeholder="12가 3456">
+        </div>
+      </div>
+      <!-- 임대인 전용 필드 -->
+      <div id="landlordExtraFields" style="display:none;">
+        <div class="form-group">
+          <label>사업자 등록번호 (선택)</label>
+          <input type="text" id="signupBizNumber" placeholder="105-02-99881">
+        </div>
+        <div class="form-group">
+          <label>월세 정산 계좌번호</label>
+          <input type="text" id="signupAccount" placeholder="국민 123-45-67890">
+        </div>
+      </div>
+      <button class="btn-submit" onclick="submitSignup()">회원가입 완료</button>
+    </div>
+  </div>
+
+  <!-- 2. 로그인 모달 (역할별 데모 로그인 지원) -->
+  <div class="modal-overlay" id="loginModal">
+    <div class="modal">
+      <div class="modal-title">
+        <span>🔑 Rent3 로그인</span>
+        <button class="close-btn" onclick="closeModal('loginModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>아이디</label>
+        <input type="text" id="loginUsername" placeholder="아이디 입력 (데모: admin / lessor / tenant)">
+      </div>
+      <div class="form-group">
+        <label>비밀번호</label>
+        <input type="password" id="loginPassword" placeholder="••••••••">
+      </div>
+      <button class="btn-submit" onclick="handleStandardLogin()">로그인하기</button>
+
+      <div style="margin:20px 0 10px; border-top:1px solid var(--card-border); padding-top:16px;">
+        <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:10px; text-align:center;">
+          ⚡ <strong>원클릭 사용자별 전용관 체험 로그인</strong>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:8px;">
+          <button class="nav-btn nav-btn-admin" style="justify-content:center; padding:10px 4px; font-size:11.5px;" onclick="quickDemoLogin('admin')">👑 관리인<br>(admin)</button>
+          <button class="nav-btn nav-btn-lessor" style="justify-content:center; padding:10px 4px; font-size:11.5px;" onclick="quickDemoLogin('lessor')">🏢 임대인<br>(lessor)</button>
+          <button class="nav-btn nav-btn-tenant" style="justify-content:center; padding:10px 4px; font-size:11.5px;" onclick="quickDemoLogin('tenant')">🔑 임차인<br>(tenant)</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 개인정보 수정 모달 -->
+  <div class="modal-overlay" id="profileModal">
+    <div class="modal">
+      <div class="modal-title">
+        <span>👤 내 개인정보 수정</span>
+        <button class="close-btn" onclick="closeModal('profileModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>회원 역할</label>
+        <select id="profileRoleSelect" onchange="loadProfileData(this.value)">
+          <option value="tenant">임차인 (홍길동 — tenant1)</option>
+          <option value="lessor">임대인 (김임대 — lessor_chic)</option>
+          <option value="admin">관리인 (총괄 최고관리자)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>성명</label>
+        <input type="text" id="profName">
+      </div>
+      <div class="form-group">
+        <label>연락처 (전화번호)</label>
+        <input type="tel" id="profPhone">
+      </div>
+      <div class="form-group">
+        <label>이메일</label>
+        <input type="email" id="profEmail">
+      </div>
+      <div class="form-group">
+        <label>계좌번호</label>
+        <input type="text" id="profAccount">
+      </div>
+      <div class="form-group" id="profBizGroup">
+        <label>사업자 등록번호</label>
+        <input type="text" id="profBizNo">
+      </div>
+      <div class="form-group" id="profCarGroup">
+        <label>등록 차량번호</label>
+        <input type="text" id="profCarNo">
+      </div>
+      <button class="btn-submit" onclick="saveProfileData()">개인정보 저장하기</button>
+    </div>
+  </div>
+
+  <!-- 4. 온라인 입주 신청 모달 -->
+  <div class="modal-overlay" id="applyModal">
+    <div class="modal">
+      <div class="modal-title">
+        <span>📝 온라인 비대면 입주 신청</span>
+        <button class="close-btn" onclick="closeModal('applyModal')">&times;</button>
+      </div>
+      <input type="hidden" id="appListingId">
+      <input type="hidden" id="appBranch">
+      <input type="hidden" id="appRoomId">
+      <div class="form-group">
+        <label>신청 매물</label>
+        <input type="text" id="appTargetTitle" readonly style="background:#0f172a; color:var(--primary); font-weight:700;">
+      </div>
+      <div class="form-group">
+        <label>신청자 성명</label>
+        <input type="text" id="appName" placeholder="홍길동">
+      </div>
+      <div class="form-group">
+        <label>연락처</label>
+        <input type="tel" id="appPhone" placeholder="010-9876-5432">
+      </div>
+      <div class="form-group">
+        <label>입주 희망일</label>
+        <input type="date" id="appMoveInDate">
+      </div>
+      <div class="form-group">
+        <label>희망 계약 기간</label>
+        <select id="appTerm">
+          <option value="12">12개월 (1년)</option>
+          <option value="24">24개월 (2년)</option>
+          <option value="6">6개월 (단기)</option>
+        </select>
+      </div>
+      <button class="btn-submit" onclick="submitOnlineApplication()">입주 신청서 제출하기</button>
+    </div>
+  </div>
+
+  <!-- Alert Banner -->
+  <div id="appAlert"></div>
+
+  <script>
+    function showAlert(msg, isSuccess = true) {
+      const banner = document.getElementById("appAlert");
+      banner.style.display = "flex";
+      banner.style.borderColor = isSuccess ? "var(--success)" : "var(--error)";
+      banner.innerText = msg;
+      setTimeout(() => { banner.style.display = "none"; }, 3500);
+    }
+
+    function openModal(id) { document.getElementById(id).style.display = "flex"; }
+    function closeModal(id) { document.getElementById(id).style.display = "none"; }
+    function openLoginModal() { openModal("loginModal"); }
+    function openSignupModal() { openModal("signupModal"); }
+    function openProfileModal() {
+      openModal("profileModal");
+      loadProfileData(document.getElementById("profileRoleSelect").value);
+    }
+
+    // 1. 공개 매물 리스트 조회
+    async function loadPublicListings(branch = "") {
+      try {
+        const url = branch ? `/api/rent3/public/listings?branch=${branch}` : `/api/rent3/public/listings`;
+        const res = await fetch(url);
+        const data = await res.json();
+        const listings = data.listings || [];
+        const grid = document.getElementById("listingGrid");
+
+        if (listings.length === 0) {
+          grid.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:40px; color:var(--text-muted);">현재 조건에 맞는 공실 매물이 없습니다.</div>`;
+          return;
+        }
+
+        grid.innerHTML = listings.map(l => `
+          <div class="listing-card">
+            <img src="${(l.images && l.images[0]) || 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800'}" class="listing-img" alt="${l.title}">
+            <div class="listing-body">
+              <div>
+                <div class="listing-title">${l.title}</div>
+                <div class="listing-price">보증금 ${(l.deposit/10000).toLocaleString()}만 / 월 ${(l.monthly_rent/10000).toLocaleString()}만원</div>
+                <div class="tag-group">
+                  <span class="tag">관리비 ${(l.maintenance_fee||0).toLocaleString()}원</span>
+                  <span class="tag">${l.floor || 2}층 / ${l.area_sqm || 21}㎡</span>
+                  <span class="tag" style="color:var(--success); font-weight:700;">즉시입주 가능</span>
+                </div>
+              </div>
+              <button class="btn-apply" onclick="openApplyModal('${l.id}', '${l.branch}', '${l.room_id}', '${l.title.replace(/'/g, "\\'")}')">
+                ⚡ 비대면 입주 신청하기
+              </button>
+            </div>
+          </div>
+        `).join("");
+      } catch (err) {
+        console.error("loadPublicListings error:", err);
+      }
+    }
+
+    function openApplyModal(id, branch, room_id, title) {
+      document.getElementById("appListingId").value = id;
+      document.getElementById("appBranch").value = branch;
+      document.getElementById("appRoomId").value = room_id;
+      document.getElementById("appTargetTitle").value = `[${room_id}호] ${title}`;
+      document.getElementById("appMoveInDate").value = new Date().toISOString().split("T")[0];
+      openModal("applyModal");
+    }
+
+    async function submitOnlineApplication() {
+      const listing_id = document.getElementById("appListingId").value;
+      const branch = document.getElementById("appBranch").value;
+      const room_id = document.getElementById("appRoomId").value;
+      const tenant_name = document.getElementById("appName").value.trim();
+      const tenant_phone = document.getElementById("appPhone").value.trim();
+      const move_in_date = document.getElementById("appMoveInDate").value;
+      const lease_term_months = parseInt(document.getElementById("appTerm").value);
+
+      if (!tenant_name || !tenant_phone) {
+        showAlert("성명과 휴대폰 번호를 입력해주세요.", false);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/rent3/public/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            listing_id, branch, room_id, tenant_name, tenant_phone,
+            move_in_date, lease_term_months, deposit: 5000000, monthly_rent: 500000
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert("🎉 입주 신청이 접수되었습니다! 임대인 승인 후 안내 문자가 발송됩니다.");
+          closeModal("applyModal");
+        } else {
+          showAlert(data.detail || "신청 실패", false);
+        }
+      } catch (err) {
+        showAlert(`오류: ${err.message}`, false);
+      }
+    }
+
+    // 2. 회원가입 및 본인확인
+    function toggleSignupFields(role) {
+      document.getElementById("tenantExtraFields").style.display = (role === "tenant") ? "block" : "none";
+      document.getElementById("landlordExtraFields").style.display = (role === "landlord") ? "block" : "none";
+    }
+
+    async function sendPhoneVerification() {
+      const name = document.getElementById("signupName").value.trim();
+      const phone = document.getElementById("signupPhone").value.trim();
+      if (!name || !phone) {
+        showAlert("성명과 전화번호를 먼저 입력해주세요.", false);
+        return;
+      }
+      try {
+        const res = await fetch("/api/rent3/auth/verify-phone/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, phone })
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById("verifyCodeGroup").style.display = "block";
+          document.getElementById("signupVerifyCode").value = data.simulated_code || "123456";
+          showAlert(`인증번호가 발송되었습니다 (시뮬레이션: ${data.simulated_code})`);
+        }
+      } catch (err) {
+        showAlert(err.message, false);
+      }
+    }
+
+    async function confirmPhoneVerification() {
+      const phone = document.getElementById("signupPhone").value.trim();
+      const code = document.getElementById("signupVerifyCode").value.trim();
+      try {
+        const res = await fetch("/api/rent3/auth/verify-phone/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone, code })
+        });
+        const data = await res.json();
+        if (data.is_verified) {
+          document.getElementById("verifyStatusText").innerText = "✅ 본인확인 완료 (PASS CI 발급)";
+          showAlert("휴대폰 본인확인이 완료되었습니다.");
+        }
+      } catch (err) {
+        showAlert("인증 실패: " + err.message, false);
+      }
+    }
+
+    async function submitSignup() {
+      const role = document.getElementById("signupRole").value;
+      const name = document.getElementById("signupName").value.trim();
+      const phone = document.getElementById("signupPhone").value.trim();
+      const username = document.getElementById("signupUsername").value.trim();
+      const password = document.getElementById("signupPassword").value;
+      if (!username || !password || !name) {
+        showAlert("필수 항목을 모두 입력해주세요.", false);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/rent3/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            role, username, password, name, phone, branch: "main", verified_by: "PHONE"
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert(`축하합니다! [${name}]님 회원가입이 완료되었습니다. 로그인해주세요.`);
+          closeModal("signupModal");
+          openLoginModal();
+        } else {
+          showAlert(data.detail || "가입 실패", false);
+        }
+      } catch (err) {
+        showAlert("가입 오류: " + err.message, false);
+      }
+    }
+
+    // 3. 로그인 및 원클릭 데모 이동
+    function handleStandardLogin() {
+      const u = document.getElementById("loginUsername").value.trim().toLowerCase();
+      if (u.includes("admin")) quickDemoLogin("admin");
+      else if (u.includes("lessor") || u.includes("landlord")) quickDemoLogin("lessor");
+      else quickDemoLogin("tenant");
+    }
+
+    function quickDemoLogin(role) {
+      if (role === "admin") window.location.href = "admin.html";
+      else if (role === "lessor") window.location.href = "lessor.html";
+      else window.location.href = "tenant.html";
+    }
+
+    // 4. 개인정보 조회 및 수정
+    async function loadProfileData(role) {
+      try {
+        let type = (role === "admin") ? "admin" : (role === "lessor" ? "lessor" : "tenant");
+        const res = await fetch(`/api/rent3/entities/${type}`);
+        const data = await res.json();
+        const items = data.items || [];
+        if (items.length > 0) {
+          const item = items[0];
+          document.getElementById("profName").value = item.name || "";
+          document.getElementById("profPhone").value = item.phone || "";
+          document.getElementById("profEmail").value = item.email || "";
+          document.getElementById("profAccount").value = item.account_number || "";
+          document.getElementById("profBizNo").value = item.business_number || "";
+          document.getElementById("profCarNo").value = item.car_number || "";
+        }
+      } catch (err) {
+        console.error("loadProfileData error:", err);
+      }
+    }
+
+    async function saveProfileData() {
+      const role = document.getElementById("profileRoleSelect").value;
+      const type = (role === "admin") ? "admin" : (role === "lessor" ? "lessor" : "tenant");
+      try {
+        const listRes = await fetch(`/api/rent3/entities/${type}`);
+        const listData = await listRes.json();
+        const first = (listData.items && listData.items[0]);
+        if (!first) {
+          showAlert("수정할 프로필 데이터가 없습니다.", false);
+          return;
+        }
+
+        const custom_id = first.id_tenant || first.id_lessor || first.id || "admin_super";
+        const payload = {
+          name: document.getElementById("profName").value.trim(),
+          phone: document.getElementById("profPhone").value.trim(),
+          email: document.getElementById("profEmail").value.trim(),
+          account_number: document.getElementById("profAccount").value.trim(),
+          business_number: document.getElementById("profBizNo").value.trim(),
+          car_number: document.getElementById("profCarNo").value.trim()
+        };
+
+        const res = await fetch(`/api/rent3/entities/${type}/${custom_id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showAlert("✅ 개인정보가 성공적으로 업데이트되었습니다.");
+          closeModal("profileModal");
+        } else {
+          showAlert(data.detail || "수정 실패", false);
+        }
+      } catch (err) {
+        showAlert("오류: " + err.message, false);
+      }
+    }
+
+    // Initialize
+    window.addEventListener("DOMContentLoaded", () => {
+      loadPublicListings();
+    });
+  </script>
+</body>
+</html>

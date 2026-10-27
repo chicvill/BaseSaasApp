@@ -274,13 +274,13 @@
 
     function switchPublicUserRole(role) {
       if (role === 'admin') {
-        window.location.href = 'index.html?role=admin';
+        window.location.href = 'admin.html';
       } else if (role === 'landlord') {
-        window.location.href = 'index.html?role=landlord';
+        window.location.href = 'lessor.html';
       } else if (role === 'tenant') {
-        window.location.href = 'public.html?view=tenant&room=201';
+        window.location.href = 'tenant.html';
       } else if (role === 'public') {
-        window.location.href = 'public.html';
+        window.location.href = 'home.html';
       }
     }
 

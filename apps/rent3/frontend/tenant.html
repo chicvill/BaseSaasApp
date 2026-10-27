@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔑 임차인(세입자) 마이홈 라운지 — Smart Rent3</title>
+  <meta name="description" content="임차인 전용 페이지: 계약정보 확인 및 편집(버튼), 월별 임차료 납부 리스트 및 전자영수증, 임대인·관리자와 채팅(알림-버튼) 모달 일체형 마이홈.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(22, 30, 49, 0.88);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --accent: #818cf8;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    /* Top Sticky Header */
+    header {
+      background: rgba(11, 15, 25, 0.95);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #fff; text-decoration: none; }
+    .badge-role { background: rgba(129, 140, 248, 0.15); color: var(--accent); font-size: 11.5px; padding: 4px 10px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(129, 140, 248, 0.3); }
+
+    /* Pulsating Alarm Badge */
+    .alarm-pulse-badge {
+      background: #ef4444; color: #fff; font-size: 11px; font-weight: 900;
+      padding: 2px 7px; border-radius: 999px; margin-left: 6px;
+      animation: badgePulse 1.5s infinite;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+    }
+    @keyframes badgePulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.18); }
+    }
+
+    /* Omni-Jump Navigation Bar */
+    .jump-command-bar {
+      background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--card-border);
+      padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    }
+    .jump-btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+    .jump-btn {
+      padding: 6px 12px; font-size: 12px; font-weight: 700; border-radius: 8px; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--card-border); color: #e2e8f0; transition: all 0.2s;
+    }
+    .jump-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+    .jump-home { background: rgba(255,255,255,0.06); }
+    .jump-admin { background: rgba(56, 189, 248, 0.12); color: var(--primary); }
+    .jump-lessor { background: rgba(16, 185, 129, 0.12); color: var(--success); }
+    .jump-cosign { background: rgba(245, 158, 11, 0.12); color: var(--warning); }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* Top Summary Banner */
+    .myhome-banner {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.98) 100%);
+      border: 1px solid rgba(129, 140, 248, 0.3); border-radius: 20px; padding: 24px 28px;
+      margin-bottom: 28px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+    }
+    .myhome-info h1 { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 6px; }
+    .myhome-info p { font-size: 14px; color: var(--text-muted); }
+    .myhome-quick-tags { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .myhome-tag {
+      background: rgba(255, 255, 255, 0.06); padding: 5px 12px; border-radius: 8px; font-size: 12.5px;
+      font-weight: 600; color: #e2e8f0; border: 1px solid var(--card-border);
+    }
+
+    /* Grid Layout */
+    .two-col-grid { display: grid; grid-template-columns: 1.25fr 1fr; gap: 24px; margin-bottom: 28px; }
+    @media (max-width: 1024px) { .two-col-grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 18px;
+      padding: 24px; backdrop-filter: blur(8px); margin-bottom: 24px;
+    }
+    .panel-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;
+    }
+    .panel-title { font-size: 18px; font-weight: 800; display: flex; align-items: center; gap: 8px; color: #fff; }
+
+    /* Key-Value Details List */
+    .kv-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 18px; }
+    .kv-item {
+      background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; padding: 14px;
+    }
+    .kv-label { font-size: 12px; color: var(--text-muted); font-weight: 600; margin-bottom: 4px; }
+    .kv-value { font-size: 16px; font-weight: 800; color: #fff; }
+
+    /* Tables */
+    .table-responsive { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th {
+      background: rgba(255, 255, 255, 0.03); color: var(--text-muted); font-size: 12.5px;
+      font-weight: 700; padding: 11px 12px; border-bottom: 1px solid var(--card-border);
+    }
+    td { padding: 12px 12px; font-size: 13.5px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); color: #e2e8f0; }
+    tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+    /* Inline Chat */
+    .chat-box {
+      display: flex; flex-direction: column; height: 380px; background: #0f172a;
+      border: 1px solid var(--card-border); border-radius: 14px; overflow: hidden;
+    }
+    .chat-header {
+      padding: 12px 16px; background: #1e293b; border-bottom: 1px solid var(--card-border);
+      display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700;
+    }
+    .chat-messages { flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+    .chat-bubble { max-width: 82%; padding: 10px 14px; border-radius: 12px; font-size: 13px; line-height: 1.5; }
+    .bubble-tenant { align-self: flex-end; background: var(--accent); color: #090d16; font-weight: 600; }
+    .bubble-other { align-self: flex-start; background: #1e293b; color: #e2e8f0; border: 1px solid var(--card-border); }
+    .chat-input-area { padding: 10px; background: #1e293b; display: flex; gap: 8px; border-top: 1px solid var(--card-border); }
+    .chat-input { flex: 1; padding: 9px 12px; background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; color: #fff; font-size: 13px; outline: none; }
+
+    /* Quick Action Chips */
+    .chip-container { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+    .chip-btn {
+      background: rgba(255, 255, 255, 0.06); border: 1px solid var(--card-border);
+      color: #cbd5e1; font-size: 11.5px; padding: 4px 10px; border-radius: 999px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .chip-btn:hover { background: rgba(129, 140, 248, 0.2); color: #fff; border-color: var(--accent); }
+
+    /* Buttons */
+    .btn {
+      padding: 8px 14px; font-size: 13px; font-weight: 700; border-radius: 8px;
+      cursor: pointer; border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--primary); color: #090d16; }
+    .btn-primary:hover { background: var(--primary-hover); color: #fff; }
+    .btn-accent { background: var(--accent); color: #090d16; }
+    .btn-accent:hover { background: #6366f1; color: #fff; }
+    .btn-secondary { background: #1e293b; color: #fff; border: 1px solid var(--card-border); }
+    .btn-secondary:hover { background: #334155; }
+    .btn-success { background: var(--success); color: #090d16; }
+    .btn-alarm {
+      background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+    .btn-alarm:hover { background: rgba(239, 68, 68, 0.28); color: #fff; }
+
+    /* Modals */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78);
+      backdrop-filter: blur(10px); z-index: 500; justify-content: center; align-items: center; padding: 20px;
+    }
+    .modal {
+      background: #111827; border: 1px solid var(--card-border); border-radius: 20px;
+      max-width: 580px; width: 100%; padding: 26px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 19px; font-weight: 800; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .close-btn { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 10px 12px; background: #1e293b; border: 1px solid var(--card-border);
+      border-radius: 8px; color: #fff; font-size: 13.5px; outline: none;
+    }
+
+    #tenantAlert {
+      display: none; position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      background: #1e293b; border: 1px solid var(--accent); color: #fff;
+      padding: 14px 20px; border-radius: 12px; font-size: 14px; font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Sticky Header -->
+  <header>
+    <a href="tenant.html" class="brand">
+      <span style="font-size:24px;">🔑</span>
+      <span>Rent3 임차인(세입자) 마이홈</span>
+      <span class="badge-role">입주자 전용 모드</span>
+    </a>
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span style="font-size:13px; color:var(--text-muted);">로그인 임차인: <strong id="headerTenantName" style="color:#fff;">홍길동 (201호)</strong></span>
+      
+      <!-- 임대인, 관리자와 채팅 (알림-버튼) -->
+      <button class="btn btn-alarm" onclick="openTenantChatModal()">
+        <span>💬 채팅 (알림-버튼)</span>
+        <span class="alarm-pulse-badge" id="tenantHeaderAlarmBadge">🔔 1건</span>
+      </button>
+
+      <a href="home.html" class="btn btn-secondary" style="font-size:12px; padding:6px 12px;">🚪 로그아웃</a>
+    </div>
+  </header>
+
+  <!-- Omni-Jump Navigation Bar (모든 페이지 점프 가능한 버튼들) -->
+  <div class="jump-command-bar">
+    <div style="font-size:13px; font-weight:700; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+      <span>🚀</span> <strong>사용자별 전용관 바로가기:</strong>
+    </div>
+    <div class="jump-btn-group">
+      <a href="home.html" class="jump-btn jump-home">🏠 홈페이지 (누구나)</a>
+      <a href="admin.html" class="jump-btn jump-admin">👑 admin (관리인 전용)</a>
+      <a href="lessor.html" class="jump-btn jump-lessor">🏢 임대인 (건물주 전용)</a>
+      <button class="jump-btn" style="background:rgba(239,68,68,0.15); color:#fca5a5; border-color:rgba(239,68,68,0.4);" onclick="openTenantChatModal()">
+        💬 채팅 (알림-버튼) <span class="alarm-pulse-badge" id="tenantJumpAlarmBadge">🔔 1건</span>
+      </button>
+      <button class="jump-btn" style="background:rgba(129,140,248,0.15); color:var(--accent);" onclick="openContractConfirmEditModal()">
+        🤝 계약정보 확인, 편집 (버튼)
+      </button>
+      <a href="cosign.html" target="_blank" class="jump-btn jump-cosign">🤝 Co-Signing 계약실</a>
+    </div>
+  </div>
+
+  <main class="container">
+    <!-- Top Summary Banner -->
+    <section class="myhome-banner">
+      <div class="myhome-info">
+        <h1>🏡 시크빌 본점 201호 (홍길동님 마이홈)</h1>
+        <p>계약기간: 2025-03-01 ~ 2027-02-28 (24개월) • 만기 D-487일</p>
+        <div class="myhome-quick-tags">
+          <span class="myhome-tag">🔑 도어락 비밀번호: <strong id="lblDoorlock">2011*</strong></span>
+          <span class="myhome-tag">🚗 등록 차량: <strong id="lblCarNumber">12가 3456</strong></span>
+          <span class="myhome-tag">📶 와이파이: <strong>Chicvill_201 / chic201*</strong></span>
+          <span class="myhome-tag" style="color:var(--success);">✅ 국세청 현금영수증 자동발급 연동중</span>
+        </div>
+      </div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <!-- 계약하며 임대인과 계약정보 확인, 편집 (버튼) -->
+        <button class="btn btn-accent" style="padding:12px 18px; font-size:14px;" onclick="openContractConfirmEditModal()">
+          <span>🤝 계약하며 임대인과 계약정보 확인, 편집 (버튼)</span>
+        </button>
+
+        <!-- 임대인, 관리자와 채팅 (알림-버튼) -->
+        <button class="btn btn-alarm" style="padding:12px 18px; font-size:14px;" onclick="openTenantChatModal()">
+          <span>💬 임대인, 관리자와 채팅 (알림-버튼)</span>
+          <span class="alarm-pulse-badge" id="tenantBannerAlarmBadge">🔔 1건</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- 1. 계약정보 확인 및 편집 & 1:1 직통 채팅 -->
+    <div class="two-col-grid">
+      <!-- 1) 계약정보 확인 및 편집 패널 -->
+      <section class="panel" style="margin-bottom:0;">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">
+              <span>📄</span>
+              <span>계약 상세 정보 확인</span>
+            </h2>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+              임대인과 체결된 직거래 비대면 계약 원장 정보입니다.
+            </p>
+          </div>
+          <button class="btn btn-accent" onclick="openContractConfirmEditModal()">
+            <span>✏️</span>
+            <span>계약정보 확인, 편집 (버튼)</span>
+          </button>
+        </div>
+
+        <div class="kv-list">
+          <div class="kv-item">
+            <div class="kv-label">임대 보증금</div>
+            <div class="kv-value" style="color:var(--primary);" id="valDeposit">50,000,000 원</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">월 임차료 (월세)</div>
+            <div class="kv-value" style="color:#fff;" id="valRent">500,000 원</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">월 정기 관리비</div>
+            <div class="kv-value" style="color:#cbd5e1;" id="valMaint">50,000 원</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">월세 정기 납부일</div>
+            <div class="kv-value" style="color:var(--success);">매월 25일 (후불)</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">임대인(소유주) 연락처</div>
+            <div class="kv-value">김임대 (010-8888-9999)</div>
+          </div>
+          <div class="kv-item">
+            <div class="kv-label">월세 납부 가상계좌</div>
+            <div class="kv-value" style="font-size:13px; font-family:monospace; color:var(--primary);">카카오뱅크 3333-01-2345678</div>
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03); border:1px solid var(--card-border); border-radius:12px; padding:14px; font-size:12.5px; line-height:1.6; color:var(--text-muted); margin-bottom:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <strong style="color:#fff;">📜 계약 특약사항 및 시설물 상태:</strong>
+            <span style="color:var(--success); font-weight:700;">✅ 등기부등본 권리침해 0건 확인완료</span>
+          </div>
+          • 실내 흡연 금지, 반려견 동반 시 사전 서면 동의 필요, 퇴실 1개월 전 계약 종료 통보.<br>
+          • 옵션 현황: 시스템에어컨 1대, 빌트인냉장고 1대, 드럼세탁기 1대, 인덕션 1구, 도어락 정상 작동.
+        </div>
+      </section>
+
+      <!-- 2) 임대인, 관리자와 채팅 패널 (알림-버튼 연동) -->
+      <section class="panel" style="margin-bottom:0;">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">
+              <span>💬</span>
+              <span>임대인, 관리자와 채팅</span>
+              <span class="alarm-pulse-badge" id="tenantPanelAlarmBadge">🔔 1건 새 메시지</span>
+            </h2>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:2px;">수리 요청 및 입주 민원을 실시간으로 소통하세요.</p>
+          </div>
+          <button class="btn btn-alarm" onclick="openTenantChatModal()">
+            <span>💬 대화창 모달 열기 (알림-버튼)</span>
+          </button>
+        </div>
+
+        <!-- 빠른 수리/민원 칩 -->
+        <div class="chip-container">
+          <button class="chip-btn" onclick="sendQuickMessage('🚿 화장실 수전 누수가 발생하여 점검 부탁드립니다.')">🚿 수전 누수 점검</button>
+          <button class="chip-btn" onclick="sendQuickMessage('🔑 도어락 배터리 경고음이 납니다. 배터리 교체 요청드립니다.')">🔑 도어락 배터리</button>
+          <button class="chip-btn" onclick="sendQuickMessage('🚗 주차 등록 차량 변경 신청합니다.')">🚗 차량 번호 변경</button>
+          <button class="chip-btn" onclick="sendQuickMessage('🧾 이번달 월세 송금 완료하였습니다. 영수증 확인 부탁드립니다.')">🧾 월세 입금 확인</button>
+        </div>
+
+        <div class="chat-box">
+          <div class="chat-header">
+            <div>
+              <span id="partnerTitle">대화상대: 임대인(김임대)</span>
+              <span style="color:var(--success); font-size:11px; margin-left:8px;">● 온라인</span>
+            </div>
+            <select id="chatPartnerSelect" style="background:#0f172a; color:#fff; border:1px solid var(--card-border); padding:4px 8px; border-radius:6px; font-size:11.5px; font-weight:700;" onchange="changePartner(this.value)">
+              <option value="landlord">🏢 임대인(건물주)</option>
+              <option value="admin">👑 관리사무소(Admin)</option>
+            </select>
+          </div>
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-bubble bubble-other">
+              안녕하세요 홍길동님! 거주 중 불편하신 점이나 수리가 필요하신 부분이 있으면 편하게 말씀해주세요.
+            </div>
+            <div class="chat-bubble bubble-tenant">
+              네 임대인님, 항상 신경 써주셔서 감사합니다. 이번 달 월세 정상 송금하였습니다!
+            </div>
+            <div class="chat-bubble bubble-other">
+              확인 감사합니다! 국세청 현금영수증 및 17% 세액공제 증명서가 발급되었습니다.
+            </div>
+            <div class="chat-bubble bubble-other" style="border-left:3px solid var(--accent);">
+              📢 [새 알림] 이번 주 금요일 오전 10시 승강기 정기 안전점검이 진행될 예정입니다.
+            </div>
+          </div>
+          <div class="chat-input-area">
+            <input type="text" id="tenantChatInput" class="chat-input" placeholder="메시지나 수리 문의를 입력하세요 (Enter)" onkeydown="if(event.key==='Enter') sendTenantMessage()">
+            <button class="btn btn-accent" onclick="sendTenantMessage()">전송</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- 2. 월별 임차료 납부 리스트 & 영수증 확인 -->
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">
+            <span>💳</span>
+            <span>월별 임차료 납부 리스트</span>
+          </h2>
+          <p style="font-size:13px; color:var(--text-muted); margin-top:4px;">
+            정상 납부된 월세 내역과 국세청 현금영수증 승인번호를 회차별로 투명하게 확인하고 전자영수증을 발급받으세요.
+          </p>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-accent" onclick="openRentCertificateModal()">
+            <span>📑</span>
+            <span>연말정산 17% 세액공제 납입 증명서 출력 (버튼)</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>적용 년월</th>
+              <th>실제 납부일</th>
+              <th>월 임차료</th>
+              <th>관리비</th>
+              <th>합계 수납액</th>
+              <th>결제 수단</th>
+              <th>국세청 현금영수증 승인번호</th>
+              <th>전자영수증 (버튼)</th>
+            </tr>
+          </thead>
+          <tbody id="payListTbody">
+            <tr>
+              <td colspan="8" style="text-align:center; padding:30px; color:var(--text-muted);">
+                수납 내역을 불러오는 중입니다...
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= [모달 1] 계약하며 임대인과 계약정보 확인, 편집 (버튼) 모달 ================= -->
+  <div class="modal-overlay" id="contractConfirmEditModal">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-title">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span>🤝</span>
+          <span>계약정보 확인 및 입주정보 편집 (버튼)</span>
+        </span>
+        <button class="close-btn" onclick="closeModal('contractConfirmEditModal')">&times;</button>
+      </div>
+
+      <!-- 상단: 계약 원장 확인 요약 -->
+      <div style="background:rgba(56, 189, 248, 0.08); border:1px solid rgba(56, 189, 248, 0.25); border-radius:12px; padding:14px; margin-bottom:16px;">
+        <div style="font-size:12px; font-weight:800; color:var(--primary); margin-bottom:6px;">📋 체결된 임대차 계약 원장 확인</div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; font-size:12.5px; color:#e2e8f0;">
+          <div>• <strong>임대목적물:</strong> 시크빌 본점 201호</div>
+          <div>• <strong>계약기간:</strong> 2025.03.01 ~ 2027.02.28</div>
+          <div>• <strong>보증금:</strong> 50,000,000 원</div>
+          <div>• <strong>월임차료+관리비:</strong> 550,000 원</div>
+          <div>• <strong>납부일:</strong> 매월 25일 (후불)</div>
+          <div>• <strong>등기부등본:</strong> <span style="color:var(--success); font-weight:700;">✅ 권리침해 0건 안전</span></div>
+        </div>
+      </div>
+
+      <!-- 하단: 임차인 정보 직접 편집 -->
+      <h3 style="font-size:14px; font-weight:800; color:#fff; margin-bottom:10px;">👤 입주자 정보 확인 및 편집</h3>
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>성명 (실명)</label>
+          <input type="text" id="inpTenantName" value="홍길동">
+        </div>
+        <div class="form-group">
+          <label>연락처 (휴대폰 번호)</label>
+          <input type="tel" id="inpTenantPhone" value="010-9876-5432">
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>등록 차량번호 (주차 출입용)</label>
+          <input type="text" id="inpCarNumber" value="12가 3456" placeholder="예: 12가 3456">
+        </div>
+        <div class="form-group">
+          <label>도어락 비밀번호</label>
+          <input type="text" id="inpDoorlock" value="2011*" placeholder="예: 2011*">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>보증금 반환 계좌번호</label>
+        <input type="text" id="inpAccount" value="카카오뱅크 3333-01-2345678">
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>사업자/주민번호 (세액공제 연동용, 선택)</label>
+          <input type="text" id="inpBizNo" value="950101-1******" placeholder="생략 가능">
+        </div>
+        <div class="form-group">
+          <label>이메일 주소 (전자문서 수신용)</label>
+          <input type="email" id="inpTenantEmail" value="tenant@chicvill.com">
+        </div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:14px;">
+        <button class="btn btn-accent" style="flex:1; padding:12px; font-size:14px; justify-content:center;" onclick="saveTenantInfo()">
+          💾 계약정보 확인 및 변경사항 저장 (버튼)
+        </button>
+        <button class="btn btn-secondary" style="padding:12px; font-size:13px;" onclick="window.open('cosign.html', '_blank')">
+          🤝 비대면 계약실 열기
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= [모달 2] 임대인, 관리자와 채팅 (알림-버튼) 모달 ================= -->
+  <div class="modal-overlay" id="tenantChatModal">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-title">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <span>💬</span>
+          <span>임대인·관리자와 채팅 (알림-버튼)</span>
+        </span>
+        <button class="close-btn" onclick="closeModal('tenantChatModal')">&times;</button>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:10px 14px; border-radius:10px; margin-bottom:12px;">
+        <div>
+          <span style="font-size:12px; color:var(--text-muted);">대화 대상:</span>
+          <strong id="modalPartnerName" style="color:#fff; margin-left:6px;">임대인 (김임대 소유주)</strong>
+        </div>
+        <select id="modalPartnerSelect" style="background:#0f172a; color:#fff; border:1px solid var(--card-border); padding:5px 8px; border-radius:6px; font-size:12px;" onchange="syncPartner(this.value)">
+          <option value="landlord">🏢 임대인(건물주)</option>
+          <option value="admin">👑 관리사무소(Admin)</option>
+        </select>
+      </div>
+
+      <!-- 빠른 요청 칩 -->
+      <div class="chip-container">
+        <button class="chip-btn" onclick="sendModalQuickMsg('🚿 화장실 수전 누수가 발생하여 점검 부탁드립니다.')">🚿 수전 점검</button>
+        <button class="chip-btn" onclick="sendModalQuickMsg('🔑 도어락 배터리 교체 요청드립니다.')">🔑 도어락 배터리</button>
+        <button class="chip-btn" onclick="sendModalQuickMsg('🚗 등록 차량 번호 변경 요청드립니다.')">🚗 차량 변경</button>
+        <button class="chip-btn" onclick="sendModalQuickMsg('🧾 이번달 월세 송금 완료하였습니다.')">🧾 월세 입금 확인</button>
+      </div>
+
+      <!-- 모달 내 채팅 박스 -->
+      <div class="chat-box" style="height:320px; margin-bottom:12px;">
+        <div class="chat-messages" id="modalChatMessages">
+          <div class="chat-bubble bubble-other">
+            안녕하세요 홍길동님! 201호에 거주하시며 불편하신 사항이나 문의가 있으시면 실시간으로 남겨주세요.
+          </div>
+          <div class="chat-bubble bubble-tenant">
+            네, 입주 정보와 월세 납부 내역 정상 확인하였습니다. 감사합니다!
+          </div>
+          <div class="chat-bubble bubble-other" style="border-left:3px solid var(--accent);">
+            📢 [새 알림] 이번 주 금요일 오전 10시 승강기 정기 안전점검이 진행될 예정입니다.
+          </div>
+        </div>
+        <div class="chat-input-area">
+          <input type="text" id="modalChatInput" class="chat-input" placeholder="메시지를 입력하세요 (Enter)" onkeydown="if(event.key==='Enter') sendModalChatMessage()">
+          <button class="btn btn-accent" onclick="sendModalChatMessage()">전송</button>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:11.5px; color:var(--text-muted);">
+          📸 현장 사진 첨부 및 긴급 A/S 요청 시 관리자에게 즉시 전달됩니다.
+        </span>
+        <button class="btn btn-secondary" style="font-size:12px;" onclick="closeModal('tenantChatModal')">
+          닫기
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= [모달 3] 전자 영수증 확인 모달 ================= -->
+  <div class="modal-overlay" id="tenantReceiptModal">
+    <div class="modal" style="max-width:440px; background:#fff; color:#0f172a; border-radius:16px;">
+      <div class="modal-title" style="color:#0f172a; border-bottom:2px solid #0f172a; padding-bottom:10px;">
+        <span style="font-size:18px; font-weight:900;">🧾 전자 영수증 (임차료 완납)</span>
+        <button class="close-btn" style="color:#64748b;" onclick="closeModal('tenantReceiptModal')">&times;</button>
+      </div>
+      <div style="font-size:13px; line-height:1.7; padding-top:10px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="color:#64748b;">영수증 번호</span>
+          <strong id="recDocNo">REC-202610-201</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="color:#64748b;">적용 년월</span>
+          <strong id="recMonth">2026.10</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="color:#64748b;">공급 받는자 (임차인)</span>
+          <strong id="recTenant">홍길동 (201호)</strong>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="color:#64748b;">공급자 (임대인)</span>
+          <span>시크빌 본점 (김임대)</span>
+        </div>
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:10px 0;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span>월 임차료:</span>
+          <span id="recRent">500,000 원</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span>정기 관리비:</span>
+          <span id="recMaint">50,000 원</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size:16px; font-weight:900; color:#0284c7;">
+          <span>합계 결제액:</span>
+          <span id="recTotal">550,000 원</span>
+        </div>
+        <hr style="border:none; border-top:1px dashed #cbd5e1; margin:10px 0;">
+        <div style="font-size:12px; color:#64748b; margin-bottom:4px;">
+          • 국세청 현금영수증 승인번호: <strong id="recCashNo" style="color:#0f172a;">CASH-2026-99214</strong>
+        </div>
+        <div style="font-size:12px; color:#64748b;">
+          • 결제수단: <span id="recMethod">계좌이체 (신한 110-***)</span>
+        </div>
+        <div style="margin-top:18px; text-align:center; font-size:11.5px; color:#94a3b8;">
+          위 금액을 정히 영수하였습니다.<br>
+          <strong style="font-size:13px; color:#0f172a; margin-top:4px; display:inline-block;">2026년 10월 25일 • 시크빌 본점 [직인생략]</strong>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:16px; background:#0284c7; color:#fff;" onclick="window.print()">
+        🖨️ 영수증 인쇄 / PDF 저장
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= [모달 4] 17% 세액공제 공식 납입 증명서 모달 ================= -->
+  <div class="modal-overlay" id="rentCertModal">
+    <div class="modal" style="max-width:680px; background:#fff; color:#0f172a; border-radius:12px;">
+      <div class="modal-title" style="color:#0f172a; border-bottom:2px solid #0f172a; padding-bottom:12px;">
+        <span style="font-size:20px; font-weight:900;">📑 월세액 세액공제용 납입 증명서</span>
+        <button class="close-btn" style="color:#64748b;" onclick="closeModal('rentCertModal')">&times;</button>
+      </div>
+      <div style="font-size:13px; line-height:1.7; padding-top:10px;">
+        <div style="text-align:right; font-size:11.5px; color:#64748b; margin-bottom:12px;">
+          증명서 발급번호: <strong id="certDocNo">CERT-2026-CHIC201</strong>
+        </div>
+        <table style="width:100%; border-collapse:collapse; margin-bottom:16px; border:1px solid #cbd5e1;">
+          <tr style="background:#f8fafc;">
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700; width:22%;">임차인 성명</td>
+            <td style="border:1px solid #cbd5e1; padding:8px; width:28%;" id="certTenantName">홍길동</td>
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700; width:22%;">주민번호</td>
+            <td style="border:1px solid #cbd5e1; padding:8px; width:28%;">950101-1******</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700;">임대차 목적물</td>
+            <td colspan="3" style="border:1px solid #cbd5e1; padding:8px;">서울특별시 관악구 봉천동 888-12 시크빌 본점 201호</td>
+          </tr>
+          <tr style="background:#f8fafc;">
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700;">임대인(소유주)</td>
+            <td style="border:1px solid #cbd5e1; padding:8px;">김임대 (214-85-12345)</td>
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700;">임대조건</td>
+            <td style="border:1px solid #cbd5e1; padding:8px;">보증금 5,000만 / 월 50만</td>
+          </tr>
+          <tr>
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700;">연간 납부 총액</td>
+            <td colspan="3" style="border:1px solid #cbd5e1; padding:8px; font-size:15px; font-weight:900; color:#0284c7;">
+              6,000,000 원 (총 12회차 완납)
+            </td>
+          </tr>
+          <tr style="background:#eff6ff;">
+            <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700; color:#1e40af;">예상 환급 세액</td>
+            <td colspan="3" style="border:1px solid #cbd5e1; padding:8px; font-weight:800; color:#1e40af;">
+              약 1,020,000 원 (조세특례제한법 제95조의2 기준, 17% 세액공제 적용 시)
+            </td>
+          </tr>
+        </table>
+
+        <div style="font-size:12px; color:#475569; text-align:center; margin:20px 0 10px;">
+          위와 같이 2026년도 월세액이 정상 수납되었음을 국세청 홈택스 연동 전산으로 공식 증명합니다.<br>
+          <strong style="font-size:14px; color:#0f172a; margin-top:8px; display:inline-block;">2026년 10월 28일 • 시크빌 본점 임대관리센터 [직인생략]</strong>
+        </div>
+      </div>
+      <button class="btn btn-primary" style="width:100%; padding:12px; margin-top:14px; background:#0284c7; color:#fff;" onclick="window.print()">
+        🖨️ 증명서 인쇄 및 PDF 저장
+      </button>
+    </div>
+  </div>
+
+  <div id="tenantAlert"></div>
+
+  <script>
+    function showAlert(msg, isSuccess = true) {
+      const banner = document.getElementById("tenantAlert");
+      banner.style.display = "flex";
+      banner.style.borderColor = isSuccess ? "var(--accent)" : "var(--error)";
+      banner.innerText = msg;
+      setTimeout(() => { banner.style.display = "none"; }, 3500);
+    }
+
+    function openModal(id) { document.getElementById(id).style.display = "flex"; }
+    function closeModal(id) { document.getElementById(id).style.display = "none"; }
+
+    // [버튼] 계약정보 확인 및 편집 모달 열기
+    function openContractConfirmEditModal() {
+      openModal("contractConfirmEditModal");
+    }
+
+    // [알림-버튼] 채팅 모달 열기 및 미확인 알림 뱃지 소거
+    function openTenantChatModal() {
+      openModal("tenantChatModal");
+      // 알림 뱃지 읽음 처리 (소거)
+      clearTenantAlarm();
+    }
+
+    function clearTenantAlarm() {
+      const badges = ["tenantHeaderAlarmBadge", "tenantJumpAlarmBadge", "tenantBannerAlarmBadge", "tenantPanelAlarmBadge"];
+      badges.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
+      });
+    }
+
+    function openRentCertificateModal() { openModal("rentCertModal"); }
+
+    // [전자영수증 버튼] 모달 열기
+    function openTenantReceiptModal(billingMonth, rent, maint, total, payDate, method, cashNo) {
+      document.getElementById("recDocNo").innerText = `REC-${billingMonth.replace('.', '')}-201`;
+      document.getElementById("recMonth").innerText = billingMonth;
+      document.getElementById("recRent").innerText = (rent || 500000).toLocaleString() + " 원";
+      document.getElementById("recMaint").innerText = (maint || 50000).toLocaleString() + " 원";
+      document.getElementById("recTotal").innerText = (total || 550000).toLocaleString() + " 원";
+      document.getElementById("recCashNo").innerText = cashNo || "CASH-2026-99214";
+      document.getElementById("recMethod").innerText = `${method || '계좌이체'} (${payDate || '2026-10-25'})`;
+      openModal("tenantReceiptModal");
+    }
+
+    let currentTenant = null;
+
+    // 1. 임차인 정보 및 수납 리스트 불러오기
+    async function loadTenantData() {
+      try {
+        const tRes = await fetch("/api/rent3/entities/tenant");
+        const tData = await tRes.json();
+        const items = tData.items || [];
+        if (items.length > 0) {
+          currentTenant = items[0];
+          document.getElementById("headerTenantName").innerText = `${currentTenant.name} (201호)`;
+          document.getElementById("lblDoorlock").innerText = currentTenant.doorlock_pwd || "2011*";
+          document.getElementById("lblCarNumber").innerText = currentTenant.car_number || "12가 3456";
+
+          // 폼 채우기
+          document.getElementById("inpTenantName").value = currentTenant.name || "홍길동";
+          document.getElementById("inpTenantPhone").value = currentTenant.phone || "010-9876-5432";
+          document.getElementById("inpCarNumber").value = currentTenant.car_number || "12가 3456";
+          document.getElementById("inpDoorlock").value = currentTenant.doorlock_pwd || "2011*";
+          document.getElementById("inpAccount").value = currentTenant.account_number || "카카오뱅크 3333-01-2345678";
+          document.getElementById("inpBizNo").value = currentTenant.business_number || "950101-1******";
+          document.getElementById("inpTenantEmail").value = currentTenant.email || "tenant@chicvill.com";
+          document.getElementById("certTenantName").innerText = currentTenant.name || "홍길동";
+        }
+
+        // 수납 내역 채우기
+        const pRes = await fetch("/api/rent3/entities/pay");
+        const pData = await pRes.json();
+        let pays = pData.items || [];
+
+        if (pays.length === 0) {
+          pays = [
+            { billing_month: "2026.10", payment_date: "2026-10-25", monthly_rent: 500000, maintenance_fee: 50000, payment_method: "자동이체", cash_receipt_no: "CASH-2026-1025-01" },
+            { billing_month: "2026.09", payment_date: "2026-09-25", monthly_rent: 500000, maintenance_fee: 50000, payment_method: "자동이체", cash_receipt_no: "CASH-2026-0925-01" },
+            { billing_month: "2026.08", payment_date: "2026-08-25", monthly_rent: 500000, maintenance_fee: 50000, payment_method: "자동이체", cash_receipt_no: "CASH-2026-0825-01" },
+            { billing_month: "2026.07", payment_date: "2026-07-25", monthly_rent: 500000, maintenance_fee: 50000, payment_method: "계좌이체", cash_receipt_no: "CASH-2026-0725-01" }
+          ];
+        }
+
+        const tbody = document.getElementById("payListTbody");
+        tbody.innerHTML = pays.map(p => {
+          const rent = p.monthly_rent || 500000;
+          const maint = p.maintenance_fee || 50000;
+          const total = rent + maint;
+          const month = p.billing_month || '2026.10';
+          const pdate = p.payment_date || '2026-10-25';
+          const method = p.payment_method || '계좌이체';
+          const cashNo = p.cash_receipt_no || 'CASH-2026-99214';
+
+          return `
+            <tr>
+              <td><strong>${month}</strong></td>
+              <td style="color:var(--text-muted);">${pdate}</td>
+              <td>${rent.toLocaleString()}원</td>
+              <td>${maint.toLocaleString()}원</td>
+              <td style="font-weight:800; color:var(--primary);">${total.toLocaleString()}원</td>
+              <td><span style="background:rgba(255,255,255,0.06); padding:3px 8px; border-radius:6px; font-size:12px;">${method}</span></td>
+              <td style="font-family:monospace; color:var(--success); font-weight:700;">${cashNo}</td>
+              <td>
+                <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="openTenantReceiptModal('${month}', ${rent}, ${maint}, ${total}, '${pdate}', '${method}', '${cashNo}')">
+                  🧾 전자영수증 (버튼)
+                </button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+      } catch (err) {
+        console.error("loadTenantData error:", err);
+      }
+    }
+
+    // 2. 임차인 정보 저장
+    async function saveTenantInfo() {
+      const payload = {
+        name: document.getElementById("inpTenantName").value.trim(),
+        phone: document.getElementById("inpTenantPhone").value.trim(),
+        car_number: document.getElementById("inpCarNumber").value.trim(),
+        doorlock_pwd: document.getElementById("inpDoorlock").value.trim(),
+        account_number: document.getElementById("inpAccount").value.trim(),
+        business_number: document.getElementById("inpBizNo").value.trim(),
+        email: document.getElementById("inpTenantEmail").value.trim()
+      };
+
+      try {
+        if (currentTenant) {
+          const custom_id = currentTenant.id_tenant || currentTenant.id;
+          await fetch(`/api/rent3/entities/tenant/${custom_id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+        }
+        showAlert("✅ 계약 정보 및 입주자 프로필이 성공적으로 저장되었습니다.");
+        closeModal("contractConfirmEditModal");
+        loadTenantData();
+      } catch (err) {
+        showAlert("저장 오류: " + err.message, false);
+      }
+    }
+
+    // 3. 채팅 기능 및 파트너 동기화
+    function changePartner(partner) {
+      const isLandlord = (partner === "landlord");
+      document.getElementById("partnerTitle").innerText = isLandlord ? "대화상대: 임대인(김임대)" : "대화상대: 관리사무소(Admin)";
+      document.getElementById("modalPartnerName").innerText = isLandlord ? "임대인 (김임대 소유주)" : "건물 관리사무소 (Admin 총괄 관리인)";
+      document.getElementById("modalPartnerSelect").value = partner;
+      document.getElementById("chatPartnerSelect").value = partner;
+    }
+
+    function syncPartner(val) {
+      changePartner(val);
+    }
+
+    function sendTenantMessage() {
+      const input = document.getElementById("tenantChatInput");
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      appendChatMessage(msg, true);
+      input.value = "";
+      showAlert("메시지가 임대인/관리자에게 전달되었습니다.");
+    }
+
+    function sendModalChatMessage() {
+      const input = document.getElementById("modalChatInput");
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      appendChatMessage(msg, true);
+      input.value = "";
+      showAlert("메시지가 임대인/관리자에게 전달되었습니다.");
+    }
+
+    function sendQuickMessage(text) {
+      appendChatMessage(text, true);
+      showAlert("요청 메시지가 접수되었습니다.");
+      setTimeout(() => {
+        appendChatMessage("확인하였습니다. 즉시 확인 후 처리해 드리겠습니다. (시크빌 임대관리팀)", false);
+      }, 900);
+    }
+
+    function sendModalQuickMsg(text) {
+      sendQuickMessage(text);
+    }
+
+    function appendChatMessage(msg, isTenant) {
+      ["chatMessages", "modalChatMessages"].forEach(containerId => {
+        const container = document.getElementById(containerId);
+        if (container) {
+          const bubble = document.createElement("div");
+          bubble.className = isTenant ? "chat-bubble bubble-tenant" : "chat-bubble bubble-other";
+          bubble.innerText = msg;
+          container.appendChild(bubble);
+          container.scrollTop = container.scrollHeight;
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadTenantData();
+    });
+  </script>
+</body>
+</html>

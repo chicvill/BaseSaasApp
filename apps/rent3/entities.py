@@ -79,6 +79,11 @@ class BuildingEntity(Obj):
     id_lessor: str = ""                  # id_lessor (소유 임대인)
     branch: str = "main"                 # 지점 키 (main, sunho, sinbi)
     total_rooms: int = 20                # 총 호실 수
+    app_fee_monthly: int = 33000         # 월 앱 사용료 (원)
+    app_fee_status: str = "PAID"         # PAID (완납), OVERDUE (연체), PENDING (청구중)
+    app_fee_last_paid: str = "2026-10-15"# 최근 사용료 납부일
+    default_maintenance_fee: int = 50000 # 기본 관리비 (원)
+    manager_phone: str = "010-1212-3434" # 건물 관리 담당자 연락처
 
     @property
     def lessor(self) -> Optional["Lessor"]:
