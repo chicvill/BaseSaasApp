@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>현장 동행 스마트 동시 계약 (Co-Signing) — Rent3</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 30, 49, 0.85);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --accent: #818cf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; padding: 16px; display: flex; flex-direction: column; align-items: center; }
+
+    /* Role Switch Bar */
+    .role-bar {
+      width: 100%; max-width: 640px; background: rgba(30, 41, 59, 0.7); border: 1px solid var(--card-border);
+      border-radius: 12px; padding: 6px; display: flex; gap: 6px; margin-bottom: 12px;
+    }
+    .role-btn {
+      flex: 1; padding: 8px; border-radius: 8px; border: none; font-size: 13px; font-weight: 700;
+      cursor: pointer; transition: all 0.2s; background: none; color: var(--text-muted); text-align: center;
+    }
+    .role-btn.active { background: var(--primary); color: #090d16; }
+
+    .header-bar {
+      width: 100%; max-width: 640px; display: flex; justify-content: space-between; align-items: center;
+      padding: 12px 16px; background: var(--card-bg); border: 1px solid var(--card-border);
+      border-radius: 12px; margin-bottom: 16px; backdrop-filter: blur(10px);
+    }
+    .brand-title { font-weight: 800; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+    .live-badge { font-size: 11px; padding: 4px 8px; border-radius: 999px; font-weight: 700; background: rgba(16, 185, 129, 0.15); color: var(--success); display: flex; align-items: center; gap: 4px; }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.5s infinite; }
+
+    /* Progress Stepper */
+    .stepper {
+      width: 100%; max-width: 640px; display: flex; justify-content: space-between;
+      margin-bottom: 20px; position: relative;
+    }
+    .step-item {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      font-size: 11px; color: var(--text-muted); z-index: 1; flex: 1; text-align: center;
+    }
+    .step-circle {
+      width: 32px; height: 32px; border-radius: 50%; background: #1e293b;
+      display: flex; justify-content: center; align-items: center; font-weight: 700;
+      border: 2px solid var(--card-border); color: #fff; font-size: 13px;
+    }
+    .step-item.active .step-circle { background: var(--primary); border-color: var(--primary); color: #090d16; }
+    .step-item.completed .step-circle { background: var(--success); border-color: var(--success); color: #fff; }
+    .step-item.active { color: var(--primary); font-weight: 700; }
+    .step-item.completed { color: var(--success); }
+
+    /* Main Container */
+    .container { width: 100%; max-width: 640px; }
+    .step-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px;
+      padding: 24px; backdrop-filter: blur(12px); box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      display: none; animation: fadeIn 0.3s ease;
+    }
+    .step-card.active { display: block; }
+    .step-title { font-size: 20px; font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .step-desc { font-size: 13.5px; color: var(--text-muted); margin-bottom: 20px; line-height: 1.5; }
+
+    /* Live Mirroring Stream Box */
+    .stream-box {
+      background: #0d1322; border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 12px; padding: 16px; margin-bottom: 16px; font-family: monospace; font-size: 13px;
+    }
+    .stream-line { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+    .stream-line.done { color: var(--success); }
+    .stream-line.loading { color: var(--primary); animation: blink 1s infinite; }
+
+    /* Lock Status Card */
+    .lock-banner {
+      padding: 14px; border-radius: 10px; font-size: 13.5px; font-weight: 600; text-align: center;
+      margin-top: 16px; border: 1px solid transparent;
+    }
+    .lock-waiting { background: rgba(245, 158, 11, 0.15); color: #fde68a; border-color: rgba(245, 158, 11, 0.3); }
+    .lock-approved { background: rgba(16, 185, 129, 0.15); color: #a7f3d0; border-color: rgba(16, 185, 129, 0.3); }
+
+    /* Checklist */
+    .check-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; background: rgba(255,255,255,0.03); border: 1px solid var(--card-border);
+      border-radius: 8px; margin-bottom: 8px; font-size: 14px; cursor: pointer;
+    }
+    .check-item input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+
+    /* Signature Box */
+    .sig-box {
+      border: 2px dashed rgba(255,255,255,0.15); border-radius: 12px; height: 100px;
+      display: flex; justify-content: center; align-items: center; cursor: pointer;
+      background: rgba(0,0,0,0.2); margin-bottom: 12px; font-size: 14px; color: var(--text-muted);
+    }
+    .sig-box.signed { border-color: var(--success); background: rgba(16, 185, 129, 0.05); color: var(--success); font-weight: 700; }
+
+    /* Forms */
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .form-group input, .form-group textarea {
+      width: 100%; padding: 12px 14px; background: #131b2e; border: 1px solid var(--card-border);
+      border-radius: 10px; color: #fff; font-size: 14px; outline: none;
+    }
+
+    /* Buttons */
+    .btn {
+      width: 100%; padding: 14px; border-radius: 12px; font-size: 15px; font-weight: 700;
+      cursor: pointer; border: none; transition: all 0.2s; display: flex; justify-content: center; align-items: center; gap: 8px;
+    }
+    .btn-primary { background: var(--primary); color: #090d16; }
+    .btn-primary:hover { background: var(--primary-hover); color: #fff; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; margin-top: 8px; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  </style>
+</head>
+<body>
+
+  <!-- Live Role Switcher (Simulator) -->
+  <div class="role-bar">
+    <button class="role-btn active" id="btnRoleLandlord" onclick="switchRole('landlord')">🏢 임대인 화면 보기</button>
+    <button class="role-btn" id="btnRoleTenant" onclick="switchRole('tenant')">🏠 임차인 화면 보기 (실시간 동기화)</button>
+  </div>
+
+  <!-- Top Header -->
+  <div class="header-bar">
+    <div class="brand-title">
+      <span>🤝</span> 실시간 동행 계약실 (시크빌 203호)
+    </div>
+    <div class="live-badge">
+      <span class="live-dot"></span> 양방향 실시간 공유 중
+    </div>
+  </div>
+
+  <!-- Stepper 1 to 5 -->
+  <div class="stepper">
+    <div class="step-item active" id="stepIndicator1">
+      <div class="step-circle">1</div>
+      <span>등기부 공유</span>
+    </div>
+    <div class="step-item" id="stepIndicator2">
+      <div class="step-circle">2</div>
+      <span>옵션 점검</span>
+    </div>
+    <div class="step-item" id="stepIndicator3">
+      <div class="step-circle">3</div>
+      <span>조건 합의</span>
+    </div>
+    <div class="step-item" id="stepIndicator4">
+      <div class="step-circle">4</div>
+      <span>전자 서명</span>
+    </div>
+    <div class="step-item" id="stepIndicator5">
+      <div class="step-circle">5</div>
+      <span>결제 & 신고</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- STEP 1: Registry Verification & Tenant Consent Lock -->
+    <div class="step-card active" id="cardStep1">
+      <div class="step-title">📜 대법원 실시간 등기부 열람 & 임차인 승인</div>
+      <div class="step-desc">임대인이 대법원 인터넷등기소를 실시간 열람하면 진행 과정이 임차인 화면에 중계되며, 최종적으로 <strong>임차인이 직접 승인</strong>해야 다음 단계로 넘어갑니다.</div>
+
+      <!-- Real-time Mirroring Terminal Box -->
+      <div class="stream-box" id="registryStream">
+        <div class="stream-line done">✔ [대법원 인터넷등기소 전산망] 실시간 암호화 연결 완료</div>
+        <div class="stream-line done">✔ [표제부] 서울특별시 강남구 역삼동 시크빌 본점 203호 (23.5㎡)</div>
+        <div class="stream-line done">✔ [갑구] 소유자: 김임대 (소유권보존 2021-03-15, 신분증 대조 완료)</div>
+        <div class="stream-line done" style="color:var(--success);">🛡️ [을구] 선순위 근저당 / 가압류 / 임차권등기 0건 (완전 무융자 클린)</div>
+        <div class="stream-line done">✔ 대법원 공식 발급확인번호: 2026-0482-9912 (위변조 불가 원본)</div>
+      </div>
+
+      <!-- Landlord View Area -->
+      <div id="viewStep1Landlord">
+        <div class="lock-banner lock-waiting" id="landlordWaitBanner1">
+          ⏳ 임차인의 스마트폰 화면에 등기부 원문이 공유되었습니다. <strong>임차인의 최종 승인</strong>을 기다리고 있습니다...
+        </div>
+      </div>
+
+      <!-- Tenant View Area -->
+      <div id="viewStep1Tenant" style="display:none;">
+        <div class="info-box" style="border-color:rgba(56,189,248,0.3); background:rgba(56,189,248,0.05); margin-bottom:14px;">
+          <h4 style="color:var(--primary); margin-bottom:6px;">🔎 임차인 확인 요령</h4>
+          <p style="font-size:13px; line-height:1.5;">임대인의 실물 신분증(김임대)과 등기부 갑구 명의가 일치하며, 을구에 은행 대출(근저당)이 없음을 확인하셨습니까?</p>
+        </div>
+        <button class="btn btn-success" id="btnTenantApprove1" onclick="approveStep1ByTenant()">
+          ✅ 임차인 대법원 등기부 최종 확인 및 승인하기
+        </button>
+      </div>
+
+      <div class="lock-banner lock-approved" id="approvedBanner1" style="display:none;">
+        🎉 임차인이 등기부 확인을 승인했습니다! 다음 단계로 이동합니다.
+      </div>
+    </div>
+
+    <!-- STEP 2: Facility / Options On-site Inspection & Tenant Consent Lock -->
+    <div class="step-card" id="cardStep2">
+      <div class="step-title">🔍 실물 옵션/시설 동반 점검 & 임차인 승인</div>
+      <div class="step-desc">현장에서 함께 확인한 옵션 상태가 실시간 미러링되며, <strong>임차인이 최종 점검표에 동의</strong>해야 계약 조건 단계로 넘어갑니다.</div>
+
+      <div id="facilityChecklist">
+        <!-- Rendered by JS -->
+      </div>
+
+      <div class="form-group" style="margin-top:14px;">
+        <label>현장 시설 점검 특이사항 메모 (양측 공유)</label>
+        <textarea id="facilityNotes" rows="2" oninput="syncFacilityNotes(this.value)">현물 동행 점검 완료 (에어컨/세탁기 냉난방 급배수 정상 작동, 벽지 미세 스크래치 임대인 확인 완료)</textarea>
+      </div>
+
+      <!-- Landlord View Area -->
+      <div id="viewStep2Landlord">
+        <button class="btn btn-primary" id="btnLandlordSendFac" onclick="sendFacilityToTenant()">
+          📡 임차인에게 시설 점검표 전송 및 승인 요청
+        </button>
+        <div class="lock-banner lock-waiting" id="landlordWaitBanner2" style="display:none;">
+          ⏳ 임차인이 점검 항목 및 사진을 검토 중입니다. <strong>임차인의 최종 승인</strong>을 기다립니다...
+        </div>
+      </div>
+
+      <!-- Tenant View Area -->
+      <div id="viewStep2Tenant" style="display:none;">
+        <div class="info-box" style="border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.05); margin-bottom:14px;">
+          <h4 style="color:var(--success); margin-bottom:6px;">🔎 임차인 현장 점검표 확인</h4>
+          <p style="font-size:13px; line-height:1.5;">방금 임대인과 둘러본 가전/가구 옵션 작동 상태와 벽지 상태가 점검표 내용과 일치합니까? (퇴실 시 원상복구 기준 문서가 됩니다)</p>
+        </div>
+        <button class="btn btn-success" id="btnTenantApprove2" onclick="approveStep2ByTenant()">
+          ✅ 임차인 현장 시설 점검표 최종 승인하기
+        </button>
+      </div>
+
+      <div class="lock-banner lock-approved" id="approvedBanner2" style="display:none;">
+        🎉 임차인이 시설 점검표를 승인했습니다! 다음 단계로 이동합니다.
+      </div>
+    </div>
+
+    <!-- STEP 3: Terms Agreement & Tenant Info -->
+    <div class="step-card" id="cardStep3">
+      <div class="step-title">✍️ 계약 조건 합의 및 임차인 정보 등록</div>
+      <div class="step-desc">보증금, 월세, 입주 예정일 및 주차 차량 정보를 그 자리에서 협의하여 입력합니다.</div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>보증금 (원)</label>
+          <input type="number" id="inpDeposit" value="5000000">
+        </div>
+        <div class="form-group">
+          <label>월세 (원)</label>
+          <input type="number" id="inpRent" value="520000">
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="form-group">
+          <label>관리비 (원)</label>
+          <input type="number" id="inpMaint" value="50000">
+        </div>
+        <div class="form-group">
+          <label>입주 예정일</label>
+          <input type="date" id="inpMoveInDate">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>주차 관리 (차량 등록)</label>
+        <input type="text" id="inpCarNumber" placeholder="차량번호 (예: 12가 3456 / 차량 없으면 비움)" value="12가 3456">
+      </div>
+
+      <div style="border-top:1px solid var(--card-border); padding-top:14px; margin-top:8px;">
+        <div class="form-group">
+          <label>임차인 성명</label>
+          <input type="text" id="inpTenantName" value="박직객">
+        </div>
+        <div class="form-group">
+          <label>임차인 연락처</label>
+          <input type="tel" id="inpTenantPhone" value="010-7788-9900">
+        </div>
+      </div>
+
+      <button class="btn btn-primary" onclick="proceedStep3()">다음: 모바일 전자서명 날인 ➡️</button>
+    </div>
+
+    <!-- STEP 4: Dual Electronic Signatures -->
+    <div class="step-card" id="cardStep4">
+      <div class="step-title">🖋️ 임대인·임차인 실시간 전자서명</div>
+      <div class="step-desc">양측이 표준 임대차 계약 내용을 확인하고 각자의 스마트폰에서 정자로 전자 날인합니다.</div>
+
+      <div class="info-box">
+        <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
+          <span style="font-size:12px; background:rgba(16,185,129,0.15); color:var(--success); padding:3px 8px; border-radius:4px; font-weight:700;">🛡️ 전자서명법 규격 양측 신원확인(PASS/카카오) 완료</span>
+          <a href="signup.html" target="_blank" style="font-size:12px; color:var(--primary); text-decoration:none;">신원인증 재확인 ↗</a>
+        </div>
+        <p><strong>계약 요약:</strong> 시크빌 203호 | 보증금 <span id="sumDeposit">5,000,000</span>원 / 월세 <span id="sumRent">520,000</span>원</p>
+        <p style="font-size:12px; color:var(--text-muted); margin-top:4px;">* 본 계약은 임대인(PASS 실명인증)과 임차인(카카오/PASS 실명인증)의 당사자 간 직접 체결 전자계약입니다.</p>
+      </div>
+
+      <div class="form-group">
+        <label>🏢 임대인(갑) 전자서명</label>
+        <div class="sig-box" id="sigLandlordBox" onclick="signRole('landlord')">
+          <span id="sigLandlordText">여기를 터치하여 임대인 서명 날인</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>🏠 임차인(을) 전자서명</label>
+        <div class="sig-box" id="sigTenantBox" onclick="signRole('tenant')">
+          <span id="sigTenantText">여기를 터치하여 임차인 서명 날인</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="btnStep4Next" disabled style="opacity:0.5;" onclick="proceedStep4()">다음: 계약금 결제 & 전입신고 ➡️</button>
+    </div>
+
+    <!-- STEP 5: Payment & Gov Report Guide -->
+    <div class="step-card" id="cardStep5">
+      <div class="step-title">🎉 계약 체결 완료 & 계약금 결제</div>
+      <div class="step-desc">양측 서명이 완료되었습니다. 계약금(30만 원) 결제 후 원클릭 전입신고 가이드가 제공됩니다.</div>
+
+      <div id="payArea">
+        <div class="info-box" style="text-align:center; padding:24px;">
+          <div style="font-size:13px; color:var(--text-muted); margin-bottom:6px;">약정 계약금 결제</div>
+          <div style="font-size:28px; font-weight:800; color:var(--primary); margin-bottom:14px;">300,000원</div>
+          <button class="btn btn-primary" onclick="completePayment()">💳 간편결제 / 가상계좌 입금 확인</button>
+        </div>
+      </div>
+
+      <div id="completedArea" style="display:none;">
+        <div class="info-box" style="background:rgba(16, 185, 129, 0.1); border-color:rgba(16, 185, 129, 0.3);">
+          <h4 style="color:var(--success); margin-bottom:8px;">✅ 계약 체결 및 계약금 결제 완료!</h4>
+          <p style="font-size:13.5px; line-height:1.5;">임대차 계약서가 양측 스마트폰에 저장되었습니다. 잔금은 입주 전 정산되며, 입실 당일 오전 도어락 비밀번호가 발급됩니다.</p>
+        </div>
+
+        <h3 style="font-size:16px; font-weight:700; margin:18px 0 10px;">🏛️ 입주 전 필수 행정 신고 (원클릭 안내)</h3>
+        
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <a href="https://rtms.molit.go.kr" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:space-between;">
+            <span>📋 국토교통부 전월세 계약 신고 (30일 이내)</span>
+            <span>바로가기 ↗</span>
+          </a>
+          <a href="https://www.gov.kr/portal/main" target="_blank" class="btn btn-secondary" style="text-decoration:none; justify-content:space-between;">
+            <span>🏠 정부24 입주일 전입신고 및 확정일자</span>
+            <span>바로가기 ↗</span>
+          </a>
+        </div>
+
+        <button class="btn btn-primary" style="margin-top:20px;" onclick="window.location.href='/rent3/public.html'">📱 내 계약 정보 및 세입자 라운지 열기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentRole = "landlord"; // "landlord" or "tenant"
+    let currentStep = 1;
+
+    const defaultFacilityChecks = {
+      "시스템 에어컨 냉방 정상": true,
+      "드럼 세탁기 급배수 정상": true,
+      "빌트인 냉장고 냉동/냉장 정상": true,
+      "벽지 및 장판 흠집 없음": true,
+      "디지털 도어락 및 인터폰 정상": true,
+      "수도 수압 및 온수 정상": true
+    };
+
+    function switchRole(role) {
+      currentRole = role;
+      document.getElementById("btnRoleLandlord").className = role === 'landlord' ? 'role-btn active' : 'role-btn';
+      document.getElementById("btnRoleTenant").className = role === 'tenant' ? 'role-btn active' : 'role-btn';
+
+      // Step 1 Role Views
+      document.getElementById("viewStep1Landlord").style.display = role === 'landlord' ? 'block' : 'none';
+      document.getElementById("viewStep1Tenant").style.display = role === 'tenant' ? 'block' : 'none';
+
+      // Step 2 Role Views
+      document.getElementById("viewStep2Landlord").style.display = role === 'landlord' ? 'block' : 'none';
+      document.getElementById("viewStep2Tenant").style.display = role === 'tenant' ? 'block' : 'none';
+    }
+
+    function renderFacilityChecklist() {
+      const div = document.getElementById("facilityChecklist");
+      div.innerHTML = Object.keys(defaultFacilityChecks).map((item, idx) => `
+        <div class="check-item" onclick="toggleFacilityItem(${idx})">
+          <span>${item}</span>
+          <input type="checkbox" id="facChk_${idx}" checked onclick="event.stopPropagation()">
+        </div>
+      `).join("");
+    }
+
+    function toggleFacilityItem(idx) {
+      const cb = document.getElementById(`facChk_${idx}`);
+      cb.checked = !cb.checked;
+    }
+
+    function setStep(stepNum) {
+      currentStep = stepNum;
+      for (let i = 1; i <= 5; i++) {
+        const item = document.getElementById(`stepIndicator${i}`);
+        const card = document.getElementById(`cardStep${i}`);
+        if (i < stepNum) {
+          item.className = "step-item completed";
+          card.classList.remove("active");
+        } else if (i === stepNum) {
+          item.className = "step-item active";
+          card.classList.add("active");
+        } else {
+          item.className = "step-item";
+          card.classList.remove("active");
+        }
+      }
+    }
+
+    // Step 1: Tenant approves registry
+    function approveStep1ByTenant() {
+      document.getElementById("btnTenantApprove1").disabled = true;
+      document.getElementById("btnTenantApprove1").innerText = "승인 완료됨 ✔";
+      document.getElementById("landlordWaitBanner1").style.display = "none";
+      document.getElementById("approvedBanner1").style.display = "block";
+
+      setTimeout(() => {
+        setStep(2);
+      }, 900);
+    }
+
+    // Step 2: Landlord sends -> Tenant approves facility checklist
+    function sendFacilityToTenant() {
+      document.getElementById("btnLandlordSendFac").style.display = "none";
+      document.getElementById("landlordWaitBanner2").style.display = "block";
+      alert("📡 점검표가 임차인 화면으로 실시간 전송되었습니다. 상단의 [임차인 화면 보기]를 눌러 승인을 진행해보세요!");
+    }
+
+    function approveStep2ByTenant() {
+      document.getElementById("btnTenantApprove2").disabled = true;
+      document.getElementById("btnTenantApprove2").innerText = "승인 완료됨 ✔";
+      document.getElementById("landlordWaitBanner2").style.display = "none";
+      document.getElementById("approvedBanner2").style.display = "block";
+
+      setTimeout(() => {
+        setStep(3);
+      }, 900);
+    }
+
+    function syncFacilityNotes(val) {
+      // Live sync simulation
+    }
+
+    function proceedStep3() {
+      const dep = parseInt(document.getElementById("inpDeposit").value) || 0;
+      const rent = parseInt(document.getElementById("inpRent").value) || 0;
+      document.getElementById("sumDeposit").innerText = dep.toLocaleString();
+      document.getElementById("sumRent").innerText = rent.toLocaleString();
+      setStep(4);
+    }
+
+    let landlordSigned = false;
+    let tenantSigned = false;
+
+    function signRole(role) {
+      const isLandlord = role === "landlord";
+      const certMethod = isLandlord ? "통신사 PASS 실명확인" : "카카오 공인인증서";
+      const defaultName = isLandlord ? "김임대" : "박직객";
+      const defaultBirth = isLandlord ? "1980.05.12" : "1995.11.23";
+
+      const confirmCert = confirm(
+        `🛡️ [${certMethod} 전자서명 날인]\n\n` +
+        `• 대상자: ${defaultName} (생년월일: ${defaultBirth})\n` +
+        `• 인증기관: ${isLandlord ? 'KISA/방송통신위원회 공인 통신사 PASS' : '카카오페이 공인전자서명'}\n` +
+        `• 효력: 전자서명법 제3조에 따른 본인 직접 자필서명과 100% 동일한 법적 효력\n\n` +
+        `본인확인을 완료하고 전자계약서에 공인 실명 날인하시겠습니까?`
+      );
+
+      if (!confirmCert) return;
+
+      const nowTime = new Date().toLocaleTimeString();
+
+      if (isLandlord) {
+        landlordSigned = true;
+        const box = document.getElementById("sigLandlordBox");
+        box.className = "sig-box signed";
+        box.innerHTML = `
+          <div style="text-align:center;">
+            <div style="color:var(--success); font-weight:800; font-size:15px;">🛡️ 임대인(갑) [${defaultName}] PASS 실명날인 완료</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">인증CI: 2026-PASS-8812-7741 | 서명일시: ${nowTime}</div>
+          </div>
+        `;
+      } else {
+        tenantSigned = true;
+        const box = document.getElementById("sigTenantBox");
+        box.className = "sig-box signed";
+        box.innerHTML = `
+          <div style="text-align:center;">
+            <div style="color:var(--success); font-weight:800; font-size:15px;">🛡️ 임차인(을) [${defaultName}] 카카오인증서 실명날인 완료</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">인증CI: 2026-KAKAO-9923-1049 | 서명일시: ${nowTime}</div>
+          </div>
+        `;
+      }
+
+      if (landlordSigned && tenantSigned) {
+        const btn = document.getElementById("btnStep4Next");
+        btn.disabled = false;
+        btn.style.opacity = "1";
+      }
+    }
+
+    function proceedStep4() {
+      setStep(5);
+    }
+
+    function completePayment() {
+      document.getElementById("payArea").style.display = "none";
+      document.getElementById("completedArea").style.display = "block";
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("inpMoveInDate").value = new Date().toISOString().split("T")[0];
+      renderFacilityChecklist();
+    });
+  </script>
+</body>
+</html>

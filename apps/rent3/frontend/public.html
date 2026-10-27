@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>부동산 임대차 직거래 센터 — Rent3</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: rgba(22, 30, 49, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --success: #10b981;
+      --accent: #818cf8;
+      --warning: #f59e0b;
+      --error: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+    header {
+      background: rgba(9, 13, 22, 0.9);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 800; color: #fff; }
+    .badge-direct { background: rgba(16, 185, 129, 0.15); color: var(--success); font-size: 12px; padding: 4px 10px; border-radius: 999px; font-weight: 700; }
+
+    .hero {
+      text-align: center; padding: 50px 20px 40px;
+      background: radial-gradient(circle at top, rgba(56, 189, 248, 0.12) 0%, transparent 70%);
+    }
+    .hero h1 { font-size: 32px; font-weight: 800; margin-bottom: 12px; line-height: 1.3; }
+    .hero p { color: var(--text-muted); font-size: 16px; max-width: 600px; margin: 0 auto 24px; }
+
+    .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    .listing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px; margin-bottom: 40px; }
+    .listing-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px;
+      overflow: hidden; backdrop-filter: blur(8px); transition: transform 0.2s, border-color 0.2s;
+    }
+    .listing-card:hover { transform: translateY(-4px); border-color: rgba(56, 189, 248, 0.3); }
+    .listing-img { width: 100%; height: 200px; object-fit: cover; background: #1e293b; }
+    .listing-body { padding: 20px; }
+    .listing-title { font-size: 17px; font-weight: 700; margin-bottom: 8px; }
+    .listing-price { font-size: 20px; font-weight: 800; color: var(--primary); margin-bottom: 12px; }
+    .tag-group { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .tag { background: rgba(255, 255, 255, 0.06); font-size: 12px; color: var(--text-muted); padding: 4px 8px; border-radius: 6px; }
+
+    .btn {
+      width: 100%; padding: 12px; border-radius: 10px; font-size: 15px; font-weight: 700;
+      cursor: pointer; border: none; transition: all 0.2s; text-align: center;
+    }
+    .btn-primary { background: var(--primary); color: #090d16; }
+    .btn-primary:hover { background: var(--primary-hover); color: #fff; }
+
+    /* Modal */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(8px); z-index: 200; justify-content: center; align-items: center; padding: 20px;
+    }
+    .modal {
+      background: #131b2e; border: 1px solid var(--card-border); border-radius: 16px;
+      max-width: 500px; width: 100%; padding: 24px; max-height: 90vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+    .form-group input, .form-group select {
+      width: 100%; padding: 10px 14px; background: #1e293b; border: 1px solid var(--card-border);
+      border-radius: 8px; color: #fff; font-size: 14px; outline: none;
+    }
+
+    /* Section Boxes */
+    .section-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 16px;
+      padding: 24px; margin-bottom: 30px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <span>🏡</span> DirectRent (Rent3)
+      <span class="badge-direct">중개수수료 없음 직거래</span>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <a href="signup.html" target="_blank" class="btn btn-secondary" style="width:auto; padding:8px 16px; font-size:13px; text-decoration:none;">🛡️ 본인확인/가입</a>
+      <a href="cosign.html" target="_blank" class="btn btn-primary" style="width:auto; padding:8px 16px; font-size:13px; text-decoration:none;">🤝 현장 동행 계약실</a>
+      <button class="btn btn-secondary" style="width:auto; padding:8px 16px; font-size:13px;" onclick="scrollToSection('trackSection')">내 계약 / 라운지 조회</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>부동산 임대차 직거래 센터</h1>
+    <p style="max-width: 820px; margin: 0 auto; line-height: 1.6; font-size: 16px; color: #e2e8f0; font-weight: 500;">
+      중개수수료 없이 소유주와 실물을 확인하고 계약부터 입주·수납·주차·전출까지 전 과정을 원스톱으로 함께하는 올인원 직거래 솔루션
+    </p>
+  </section>
+
+  <main class="container">
+    <h2 style="font-size:22px; margin-bottom:16px;">📢 지금 즉시 입주 가능한 방</h2>
+    <div class="listing-grid" id="listingGrid">
+      <div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text-muted);">매물을 불러오고 있습니다...</div>
+    </div>
+
+    <!-- Tracking / Lounge Section -->
+    <section id="trackSection" class="section-card">
+      <h2 style="font-size:20px; font-weight:700; margin-bottom:12px;">📱 입주 신청 조회 / 세입자 전용 라운지</h2>
+      <p style="font-size:14px; color:var(--text-muted); margin-bottom:16px;">신청서 ID를 입력하여 전자서명/결제를 진행하거나, 입주 후 도어락 비번 및 1:1 수리 요청을 이용하세요.</p>
+      <div style="display:flex; gap:10px; max-width:500px;">
+        <input type="text" id="trackAppId" placeholder="신청서 ID 입력 (예: rent3_app_...)" style="flex:1; padding:10px 14px; background:#1e293b; border:1px solid var(--card-border); border-radius:8px; color:#fff;">
+        <button class="btn btn-primary" style="width:auto; padding:10px 20px;" onclick="trackApplication()">조회하기</button>
+      </div>
+      <div id="trackResult" style="margin-top:20px; display:none;"></div>
+    </section>
+  </main>
+
+  <!-- Application Modal -->
+  <div class="modal-overlay" id="applyModal">
+    <div class="modal">
+      <div class="modal-title" id="modalTitle">비대면 온라인 입주 신청서</div>
+      <div class="form-group">
+        <label>신청자 성명</label>
+        <input type="text" id="applyName" placeholder="홍길동">
+      </div>
+      <div class="form-group">
+        <label>연락처 (휴대폰 번호)</label>
+        <input type="tel" id="applyPhone" placeholder="010-1234-5678">
+      </div>
+      <div class="form-group">
+        <label>입주 희망일</label>
+        <input type="date" id="applyDate">
+      </div>
+      <div class="form-group">
+        <label>계약 기간</label>
+        <select id="applyTerm">
+          <option value="12">1년 (12개월)</option>
+          <option value="24">2년 (24개월)</option>
+          <option value="6">단기 6개월</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>첫 결제 방식</label>
+        <select id="applyPayType">
+          <option value="deposit_part">가계약금 선결제 (300,000원)</option>
+          <option value="full">첫달 월세 + 보증금 전액 결제</option>
+        </select>
+      </div>
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:16px; line-height:1.4;">
+        * 본 신청서는 임대인에게 전달되며, 임대인 검토 승인 후 모바일 전자계약서와 결제 링크가 전송됩니다.
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-primary" onclick="submitApplyForm(this)">입주 신청서 제출</button>
+        <button class="btn" style="background:rgba(255,255,255,0.08); color:#fff;" onclick="closeApplyModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentSelectedListing = null;
+
+    async function loadListings() {
+      const res = await fetch("/api/rent3/public/listings");
+      const data = await res.json();
+      const grid = document.getElementById("listingGrid");
+
+      if (!data.listings || data.listings.length === 0) {
+        grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; padding:40px; color:var(--text-muted);">현재 공개된 공실 매물이 없습니다.</div>`;
+        return;
+      }
+
+      grid.innerHTML = data.listings.map(l => `
+        <div class="listing-card">
+          <img class="listing-img" src="${(l.images && l.images[0]) || 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800'}" alt="${l.title}">
+          <div class="listing-body">
+            <div class="listing-title">${l.title}</div>
+            <div class="listing-price">보증금 ${(l.deposit / 10000).toLocaleString()}만 / 월 ${(l.monthly_rent / 10000).toLocaleString()}만</div>
+            <div class="tag-group">
+              <span class="tag">관리비 ${(l.maintenance_fee / 10000).toLocaleString()}만</span>
+              <span class="tag">${l.floor}층</span>
+              <span class="tag">${l.area_sqm}㎡</span>
+              ${(l.options || []).slice(0, 3).map(o => `<span class="tag">${o}</span>`).join("")}
+            </div>
+            <button class="btn btn-primary" onclick='openApplyModal(${JSON.stringify(l)})'>온라인 입주 신청하기</button>
+          </div>
+        </div>
+      `).join("");
+    }
+
+    function openApplyModal(listing) {
+      currentSelectedListing = listing;
+      document.getElementById("modalTitle").innerText = `[${listing.room_id}호] 비대면 입주 신청서 작성`;
+      document.getElementById("applyDate").value = new Date().toISOString().split("T")[0];
+      document.getElementById("applyModal").style.display = "flex";
+    }
+
+    function closeApplyModal() {
+      document.getElementById("applyModal").style.display = "none";
+    }
+
+    async function submitApplyForm(btn) {
+      const tenant_name = document.getElementById("applyName").value.trim();
+      const tenant_phone = document.getElementById("applyPhone").value.trim();
+      const move_in_date = document.getElementById("applyDate").value;
+      const lease_term_months = parseInt(document.getElementById("applyTerm").value);
+      const first_payment_type = document.getElementById("applyPayType").value;
+
+      if (!tenant_name || !tenant_phone || !move_in_date) {
+        alert("이름, 연락처, 입주희망일을 모두 입력해주세요.");
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerText = "신청서 제출 중...";
+
+      try {
+        const res = await fetch("/api/rent3/public/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            listing_id: currentSelectedListing.id,
+            branch: currentSelectedListing.branch || "main",
+            room_id: currentSelectedListing.room_id,
+            tenant_name,
+            tenant_phone,
+            move_in_date,
+            lease_term_months,
+            deposit: currentSelectedListing.deposit,
+            monthly_rent: currentSelectedListing.monthly_rent,
+            first_payment_type,
+            first_payment_amount: first_payment_type === "deposit_part" ? 300000 : currentSelectedListing.monthly_rent
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`신청이 완료되었습니다!\n신청서 번호: ${data.application_id}\n임대인 승인 후 결제를 진행하세요.`);
+          closeApplyModal();
+          document.getElementById("trackAppId").value = data.application_id;
+          trackApplication();
+        } else {
+          alert("신청 실패: " + (data.detail || "오류"));
+        }
+      } catch (err) {
+        alert("전송 중 오류: " + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerText = "입주 신청서 제출";
+      }
+    }
+
+    async function trackApplication() {
+      const appId = document.getElementById("trackAppId").value.trim();
+      if (!appId) return;
+
+      const res = await fetch(`/api/rent3/public/application/${appId}`);
+      const data = await res.json();
+      const div = document.getElementById("trackResult");
+      div.style.display = "block";
+
+      if (!data.application) {
+        div.innerHTML = `<div style="color:var(--error);">해당 신청서를 찾을 수 없습니다.</div>`;
+        return;
+      }
+
+      const a = data.application;
+      let actionBlock = "";
+
+      if (a.status === "PENDING_REVIEW") {
+        actionBlock = `<div style="padding:14px; background:rgba(245,158,11,0.1); border-radius:8px; color:var(--warning);">⏳ 임대인이 신청서를 검토 중입니다. 승인 시 전자서명 및 결제 버튼이 활성화됩니다.</div>`;
+      } else if (a.status === "APPROVED") {
+        actionBlock = `
+          <div style="padding:16px; background:rgba(56,189,248,0.1); border-radius:8px; border:1px solid rgba(56,189,248,0.2);">
+            <h4 style="color:var(--primary); margin-bottom:8px;">🎉 임대인 승인 완료! 전자서명 및 첫 결제를 진행하세요.</h4>
+            <p style="font-size:14px; margin-bottom:12px;">결제 예정 금액: <strong>${(a.first_payment_amount || 0).toLocaleString()}원</strong></p>
+            <button class="btn btn-primary" onclick="signAndPay('${a.id}')">✍️ 모바일 전자서명 & 결제하기</button>
+          </div>
+        `;
+      } else if (a.status === "PAID_CONFIRMED") {
+        actionBlock = `
+          <div style="padding:16px; background:rgba(16,185,129,0.1); border-radius:8px; border:1px solid rgba(16,185,129,0.2);">
+            <h4 style="color:var(--success); margin-bottom:8px;">✅ 계약 체결 및 결제 완료</h4>
+            <p style="font-size:14px; margin-bottom:6px;">입주 예정일: <strong>${a.move_in_date}</strong></p>
+            <p style="font-size:13px; color:var(--text-muted); margin-bottom:12px;">입실 당일 오전 도어락 비밀번호가 발급됩니다.</p>
+            <div style="font-size:12px; background:rgba(255,255,255,0.05); padding:10px; border-radius:6px; margin-top:8px;">
+              <strong>🏛️ 주택임대차 신고 안내</strong>: ${data.legal_guide.description}
+              <a href="${data.legal_guide.portal_url}" target="_blank" style="color:var(--primary); margin-left:6px;">[국토부 신고포털]</a>
+            </div>
+          </div>
+        `;
+      }
+
+      div.innerHTML = `
+        <div style="background:#1e293b; padding:20px; border-radius:12px; border:1px solid var(--card-border);">
+          <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+            <span style="font-weight:700; font-size:16px;">${a.room_id}호 입주 신청 내역</span>
+            <span style="color:var(--primary); font-weight:600;">${a.status}</span>
+          </div>
+          <div style="font-size:14px; color:var(--text-muted); margin-bottom:16px;">신청자: ${a.tenant_name} (${a.tenant_phone}) | 희망일: ${a.move_in_date}</div>
+          ${actionBlock}
+        </div>
+      `;
+    }
+
+    async function signAndPay(appId) {
+      const sig = prompt("전자계약서에 날인할 이름을 정자로 입력하세요:", "홍길동");
+      if (!sig) return;
+
+      const res = await fetch(`/api/rent3/public/application/${appId}/sign-and-pay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_signature: `ELECTRONIC_SIG_${sig}_${Date.now()}`,
+          payment_method: "CARD"
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("전자서명 및 결제가 완료되어 계약이 체결되었습니다!");
+        trackApplication();
+      } else {
+        alert("처리 실패: " + data.detail);
+      }
+    }
+
+    function scrollToSection(id) {
+      document.getElementById(id).scrollIntoView({ behavior: 'smooth' });
+    }
+
+    window.addEventListener("DOMContentLoaded", loadListings);
+  </script>
+</body>
+</html>

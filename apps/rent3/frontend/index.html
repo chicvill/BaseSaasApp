@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>스마트 임차 Rent3 — 차세대 비대면 직거래 & 관제 센터</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #818cf8;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --error: #ef4444;
+      --diff: #f97316;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+    
+    /* Header */
+    header {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-icon { font-size: 28px; }
+    .brand-title { font-size: 20px; font-weight: 700; color: #fff; }
+    .brand-badge { background: rgba(56, 189, 248, 0.15); color: var(--primary); font-size: 11px; padding: 4px 8px; border-radius: 6px; font-weight: 600; }
+    
+    .header-actions { display: flex; align-items: center; gap: 12px; }
+    .branch-select {
+      background: #1e293b; color: #fff; border: 1px solid var(--card-border);
+      padding: 8px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; outline: none;
+    }
+    .btn {
+      padding: 8px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+      border: none; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--primary); color: #0f172a; }
+    .btn-primary:hover { background: var(--primary-hover); color: #fff; }
+    .btn-secondary { background: rgba(255,255,255,0.08); color: #fff; border: 1px solid var(--card-border); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.15); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-danger { background: var(--error); color: #fff; }
+
+    /* Alert Banner (Standard) */
+    #appAlertBanner {
+      display: none; padding: 12px 24px; font-size: 14px; font-weight: 500;
+      justify-content: space-between; align-items: center; border-bottom: 1px solid transparent;
+      animation: fadeIn 0.3s ease;
+    }
+    #appAlertBanner.warning { background: rgba(245, 158, 11, 0.15); color: #fde68a; border-color: rgba(245, 158, 11, 0.3); }
+    #appAlertBanner.diff { background: rgba(249, 115, 22, 0.15); color: #ffedd5; border-color: rgba(249, 115, 22, 0.3); }
+    #appAlertBanner.error { background: rgba(239, 68, 68, 0.15); color: #fecaca; border-color: rgba(239, 68, 68, 0.3); }
+    #appAlertBanner.success { background: rgba(16, 185, 129, 0.15); color: #a7f3d0; border-color: rgba(16, 185, 129, 0.3); }
+
+    /* Container & Tabs */
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; width: 100%; flex: 1; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .kpi-card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px;
+      padding: 16px 20px; backdrop-filter: blur(8px);
+    }
+    .kpi-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
+    .kpi-value { font-size: 26px; font-weight: 800; color: #fff; }
+
+    .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--card-border); margin-bottom: 24px; }
+    .tab-btn {
+      padding: 12px 20px; background: none; border: none; color: var(--text-muted);
+      font-size: 15px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+    }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+    /* Content Cards */
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; animation: fadeIn 0.3s ease; }
+    .card {
+      background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 14px;
+      padding: 24px; margin-bottom: 20px; backdrop-filter: blur(8px);
+    }
+    .card-title { font-size: 18px; font-weight: 700; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+    th { padding: 12px 14px; color: var(--text-muted); border-bottom: 1px solid var(--card-border); font-weight: 600; }
+    td { padding: 14px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    
+    .badge { padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; }
+    .badge-pending { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+    .badge-approved { background: rgba(56, 189, 248, 0.2); color: var(--primary); }
+    .badge-confirmed { background: rgba(16, 185, 129, 0.2); color: var(--success); }
+    .badge-rejected { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <span class="brand-icon">🏡</span>
+      <div>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="brand-title">Rent3 관제 대시보드</span>
+          <span class="brand-badge">비대면 직거래 SaaS</span>
+        </div>
+        <div style="font-size:12px; color:var(--text-muted);">시크빌 · 선호아트빌 · 신비주택 올인원 관리</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <select id="branchSelect" class="branch-select" onchange="loadDashboard()">
+        <option value="main">시크빌 (본점 29개실)</option>
+        <option value="sunho">선호아트빌 (15개실)</option>
+        <option value="sinbi">신비주택 (20개실)</option>
+      </select>
+      <a href="signup.html" target="_blank" class="btn btn-secondary">🛡️ 신원확인/가입</a>
+      <a href="cosign.html" target="_blank" class="btn btn-primary">🤝 현장 동행 계약실</a>
+      <a href="public.html" target="_blank" class="btn btn-secondary">🌐 임차인용 웹페이지 열기</a>
+      <a href="manual.html" target="_blank" class="btn btn-secondary">📖 운영 매뉴얼</a>
+    </div>
+  </header>
+
+  <!-- 4-Color Resilient Alert Banner -->
+  <div id="appAlertBanner">
+    <span id="appAlertText">알림 메시지</span>
+    <button onclick="Bass.closeAlert()" style="background:none; border:none; color:inherit; cursor:pointer; font-size:16px;">✕</button>
+  </div>
+
+  <main class="container">
+    <!-- Top KPI Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">전체 호실 / 가동률</div>
+        <div class="kpi-value"><span id="kpiOccupied">-</span> / <span id="kpiTotal">-</span> (<span id="kpiRate" style="color:var(--primary);">-</span>%)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">온라인 입주 신청 대기</div>
+        <div class="kpi-value" style="color:var(--warning);" id="kpiPending">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">진행 중 민원/수리</div>
+        <div class="kpi-value" style="color:var(--accent);" id="kpiMaint">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">직거래 법적 모드</div>
+        <div class="kpi-value" style="font-size:18px; color:var(--success);">✅ SaaS 안전 (중개수수료 없음)</div>
+      </div>
+    </div>
+
+    <!-- Nav Tabs -->
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="switchTab('tabApplications')">📋 비대면 입주신청 심사 (<span id="tabBadgeApp">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 세입자 라운지 민원/수리 (<span id="tabBadgeMaint">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabRooms')">🏢 호실 현황 (rent2 계승)</button>
+      <button class="tab-btn" onclick="switchTab('tabListings')">📢 공실 광고 관리</button>
+    </div>
+
+    <!-- Tab 1: Applications -->
+    <div id="tabApplications" class="tab-pane active">
+      <div class="card">
+        <div class="card-title">
+          <span>비대면 온라인 입주신청서 목록</span>
+          <button class="btn btn-secondary" onclick="loadApplications()">🔄 새로고침</button>
+        </div>
+        <table id="appTable">
+          <thead>
+            <tr>
+              <th>호실</th>
+              <th>신청자</th>
+              <th>연락처</th>
+              <th>입주희망일</th>
+              <th>보증금 / 월세</th>
+              <th>첫 결제액</th>
+              <th>상태</th>
+              <th>심사 조치</th>
+            </tr>
+          </thead>
+          <tbody id="appTbody">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-muted);">신청서를 불러오는 중입니다...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab 2: Maintenance -->
+    <div id="tabMaintenance" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>세입자 라운지 접수 민원 및 수리 요청</span>
+          <button class="btn btn-secondary" onclick="loadMaintenance()">🔄 새로고침</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>호실</th>
+              <th>구분</th>
+              <th>제목 및 상세내용</th>
+              <th>접수자</th>
+              <th>접수일시</th>
+              <th>상태</th>
+              <th>조치 및 답변</th>
+            </tr>
+          </thead>
+          <tbody id="maintTbody">
+            <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">민원 내역을 불러오는 중입니다...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab 3: Rooms (rent2 core) -->
+    <div id="tabRooms" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>지점 호실 및 임차 현황 (rent2 데이터 연동)</span>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>호실</th>
+              <th>임차인</th>
+              <th>보증금</th>
+              <th>월세</th>
+              <th>상태</th>
+              <th>현장 계약</th>
+            </tr>
+          </thead>
+          <tbody id="roomsTbody">
+            <tr><td colspan="6" style="text-align:center; color:var(--text-muted);">호실 현황을 불러오는 중입니다...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab 4: Listings -->
+    <div id="tabListings" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>온라인 공개 매물 광고 등록</span>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+          <div>
+            <label style="font-size:13px; color:var(--text-muted);">대상 호실</label>
+            <input type="text" id="newListingRoom" placeholder="예: 204" style="width:100%; padding:10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:8px; margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-muted);">광고 제목</label>
+            <input type="text" id="newListingTitle" placeholder="예: 채광 좋은 풀옵션 분리형 원룸" style="width:100%; padding:10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:8px; margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-muted);">보증금 (원)</label>
+            <input type="number" id="newListingDeposit" value="5000000" style="width:100%; padding:10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:8px; margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:13px; color:var(--text-muted);">월세 (원)</label>
+            <input type="number" id="newListingRent" value="500000" style="width:100%; padding:10px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:8px; margin-top:4px;">
+          </div>
+        </div>
+        <div style="margin-top:16px; text-align:right;">
+          <button class="btn btn-primary" onclick="createListing(this)">📢 공실 매물 등록하기</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Bass Standard Resilient UX
+    const Bass = {
+      updateAppAlert(msg, type = "success") {
+        const banner = document.getElementById("appAlertBanner");
+        const text = document.getElementById("appAlertText");
+        banner.className = type;
+        text.innerText = msg;
+        banner.style.display = "flex";
+      },
+      closeAlert() {
+        document.getElementById("appAlertBanner").style.display = "none";
+      },
+      async withLock(btn, fn) {
+        if (!btn) return await fn();
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.style.opacity = "0.6";
+        try {
+          await fn();
+        } catch (err) {
+          Bass.updateAppAlert(err.message || "오류가 발생했습니다.", "error");
+        } finally {
+          btn.disabled = false;
+          btn.style.opacity = "1";
+          btn.innerHTML = originalText;
+        }
+      }
+    };
+
+    function switchTab(tabId) {
+      document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById(tabId).classList.add("active");
+      event.target.classList.add("active");
+    }
+
+    async function loadDashboard() {
+      const branch = document.getElementById("branchSelect").value;
+      try {
+        const res = await fetch(`/api/rent3/admin/overview?branch=${branch}`);
+        const data = await res.json();
+        
+        document.getElementById("kpiTotal").innerText = data.kpi.total_rooms;
+        document.getElementById("kpiOccupied").innerText = data.kpi.occupied_rooms;
+        document.getElementById("kpiRate").innerText = data.kpi.occupancy_rate;
+        document.getElementById("kpiPending").innerText = data.kpi.pending_applications + "건";
+        document.getElementById("kpiMaint").innerText = data.kpi.active_maintenance + "건";
+        document.getElementById("tabBadgeApp").innerText = data.kpi.pending_applications;
+        document.getElementById("tabBadgeMaint").innerText = data.kpi.active_maintenance;
+
+        // Render Rooms preview
+        const roomsTbody = document.getElementById("roomsTbody");
+        roomsTbody.innerHTML = data.rooms.map(r => `
+          <tr>
+            <td><strong>${r.room_id}호</strong></td>
+            <td>${r.tenant_name}</td>
+            <td>${(r.deposit || 0).toLocaleString()}원</td>
+            <td>${(r.rent || 0).toLocaleString()}원</td>
+            <td><span class="badge ${r.is_occupied ? 'badge-confirmed' : 'badge-pending'}">${r.is_occupied ? '입주중' : '공실'}</span></td>
+            <td><a href="cosign.html?room_id=${r.room_id}" target="_blank" class="btn btn-primary" style="padding:4px 10px; font-size:12px; display:inline-flex;">🤝 현장계약</a></td>
+          </tr>
+        `).join("") || `<tr><td colspan="6" style="text-align:center;">호실 정보가 없습니다.</td></tr>`;
+
+        loadApplications();
+        loadMaintenance();
+      } catch (err) {
+        Bass.updateAppAlert("대시보드 데이터를 불러오지 못했습니다: " + err.message, "error");
+      }
+    }
+
+    async function loadApplications() {
+      const branch = document.getElementById("branchSelect").value;
+      const res = await fetch(`/api/rent3/admin/applications?branch=${branch}`);
+      const data = await res.json();
+      const tbody = document.getElementById("appTbody");
+
+      if (!data.applications || data.applications.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:32px;">현재 접수된 온라인 입주신청서가 없습니다.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.applications.map(a => {
+        let statusBadge = `<span class="badge badge-pending">심사대기</span>`;
+        if (a.status === 'APPROVED') statusBadge = `<span class="badge badge-approved">승인(결제대기)</span>`;
+        if (a.status === 'PAID_CONFIRMED') statusBadge = `<span class="badge badge-confirmed">계약체결완료</span>`;
+        if (a.status === 'REJECTED') statusBadge = `<span class="badge badge-rejected">반려됨</span>`;
+
+        let actionBtns = `-`;
+        if (a.status === 'PENDING_REVIEW') {
+          actionBtns = `
+            <button class="btn btn-primary" style="padding:4px 10px; font-size:12px;" onclick="approveApp('${a.id}', this)">✅ 승인/계약발송</button>
+            <button class="btn btn-danger" style="padding:4px 10px; font-size:12px; margin-left:4px;" onclick="rejectApp('${a.id}', this)">❌ 반려</button>
+          `;
+        }
+
+        return `
+          <tr>
+            <td><strong>${a.room_id}호</strong></td>
+            <td>${a.tenant_name}</td>
+            <td>${a.tenant_phone}</td>
+            <td>${a.move_in_date}</td>
+            <td>${(a.deposit || 0).toLocaleString()} / ${(a.monthly_rent || 0).toLocaleString()}</td>
+            <td>${(a.first_payment_amount || 0).toLocaleString()}원</td>
+            <td>${statusBadge}</td>
+            <td>${actionBtns}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    async function approveApp(appId, btn) {
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/admin/applications/${appId}/approve`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signature: "APPROVED_BY_ADMIN" })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          loadDashboard();
+        } else {
+          throw new Error(data.detail || "승인 실패");
+        }
+      });
+    }
+
+    async function rejectApp(appId, btn) {
+      const reason = prompt("반려 사유를 입력하세요:", "입주 희망 일정 불일치");
+      if (!reason) return;
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/admin/applications/${appId}/reject`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "warning");
+          loadDashboard();
+        }
+      });
+    }
+
+    async function loadMaintenance() {
+      const branch = document.getElementById("branchSelect").value;
+      const res = await fetch(`/api/rent3/admin/maintenance?branch=${branch}`);
+      const data = await res.json();
+      const tbody = document.getElementById("maintTbody");
+
+      if (!data.maintenance || data.maintenance.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:32px;">접수된 민원 및 수리 요청이 없습니다.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.maintenance.map(m => `
+        <tr>
+          <td><strong>${m.room_id}호</strong></td>
+          <td><span class="badge" style="background:rgba(255,255,255,0.1);">${m.category}</span></td>
+          <td>
+            <strong>${m.title}</strong>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${m.description}</div>
+          </td>
+          <td>${m.tenant_name} (${m.tenant_phone})</td>
+          <td>${m.created_at || '-'}</td>
+          <td><span class="badge ${m.status === 'RESOLVED' ? 'badge-confirmed' : 'badge-pending'}">${m.status === 'RESOLVED' ? '조치완료' : '접수/진행중'}</span></td>
+          <td>
+            ${m.status === 'RESOLVED' ? `<span style="font-size:12px; color:var(--success);">${m.admin_reply}</span>` : `
+              <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="replyMaint('${m.id}', this)">답변 및 조치</button>
+            `}
+          </td>
+        </tr>
+      `).join("");
+    }
+
+    async function replyMaint(reqId, btn) {
+      const reply = prompt("조치 내역 및 안내 답변을 입력하세요:", "기사님 방문 일정 협의 완료 (내일 오후 2시)");
+      if (!reply) return;
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/admin/maintenance/${reqId}/reply`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reply })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          loadDashboard();
+        }
+      });
+    }
+
+    async function createListing(btn) {
+      const branch = document.getElementById("branchSelect").value;
+      const room_id = document.getElementById("newListingRoom").value.trim();
+      const title = document.getElementById("newListingTitle").value.trim();
+      const deposit = parseInt(document.getElementById("newListingDeposit").value) || 0;
+      const monthly_rent = parseInt(document.getElementById("newListingRent").value) || 0;
+
+      if (!room_id || !title) {
+        Bass.updateAppAlert("호실과 광고 제목을 입력하세요.", "error");
+        return;
+      }
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch("/api/rent3/admin/listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            branch, room_id, title, deposit, monthly_rent,
+            available_from: "즉시입주"
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          document.getElementById("newListingRoom").value = "";
+          document.getElementById("newListingTitle").value = "";
+        }
+      });
+    }
+
+    window.addEventListener("DOMContentLoaded", loadDashboard);
+  </script>
+</body>
+</html>

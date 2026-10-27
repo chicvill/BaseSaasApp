@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rent3 공식 운영 매뉴얼 (Direct Rent Standard)</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: #f8fafc; color: #1e293b; line-height: 1.6; padding: 32px 20px; }
+    .paper {
+      max-width: 860px; margin: 0 auto; background: #fff; padding: 48px; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
+    }
+    .header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; border-bottom: 2px solid #0f172a; padding-bottom: 16px; }
+    .title { font-size: 26px; font-weight: 800; color: #0f172a; }
+    .print-btn {
+      background: #0f172a; color: #fff; border: none; padding: 10px 18px; border-radius: 8px;
+      font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s;
+    }
+    .print-btn:hover { background: #334155; }
+    h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 28px 0 12px; border-left: 4px solid #38bdf8; padding-left: 10px; }
+    p, li { font-size: 14.5px; color: #334155; margin-bottom: 8px; }
+    ul, ol { padding-left: 20px; margin-bottom: 16px; }
+    .box { background: #f1f5f9; padding: 16px; border-radius: 8px; margin: 14px 0; border: 1px solid #e2e8f0; font-size: 14px; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+    .badge-law { background: #fee2e2; color: #991b1b; }
+    .badge-safe { background: #dcfce7; color: #166534; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .paper { box-shadow: none; border: none; padding: 0; max-width: 100%; }
+      .print-btn { display: none; }
+      h2 { border-left-color: #000; }
+      .box { border-color: #000; background: #fafafa; }
+    }
+  </style>
+</head>
+<body>
+  <div class="paper">
+    <div class="header-actions">
+      <div>
+        <div class="title">🏡 Rent3 비대면 임대차 표준 운영 매뉴얼</div>
+        <div style="font-size:13px; color:#64748b; margin-top:4px;">버전 3.0.0 | BaseSaasApp 공통 거버넌스 준수 문서</div>
+      </div>
+      <button class="print-btn" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+    </div>
+
+    <h2>1. 🛡️ 공인중개사법 안전 운영 준수 가이드</h2>
+    <div class="box">
+      <span class="badge badge-law">핵심 법률 불변식</span> <strong>무등록 중개행위 차단</strong><br>
+      본 플랫폼은 임대인과 임차인의 <strong>당사자 간 직접 전자계약(직거래)</strong> 및 사후 관리를 위한 IT 소프트웨어(SaaS)입니다.
+      <ul>
+        <li><strong>복비(중개수수료) 0원 원칙</strong>: 플랫폼 운영자 및 가맹점은 계약 체결에 따른 '알선 수수료'를 수취할 수 없으며, 월 솔루션비 및 PG 결제 수수료만 부과합니다.</li>
+        <li><strong>가격 알선 개입 금지</strong>: 시스템은 호실 정가(보증금/월세)대로 신청을 접수하며 임의의 가격 절충/협상에 개입하지 않습니다.</li>
+        <li><strong>주택임대차 신고(전월세 신고제)</strong>: 보증금 6천만원 초과 또는 월세 30만원 초과 계약은 체결일로부터 30일 이내에 임차인/임대인이 지자체에 계약 내용을 신고해야 합니다.</li>
+      </ul>
+    </div>
+
+    <h2>2. 🔄 3단계 비대면 계약 파이프라인 운영 절차</h2>
+    <ol>
+      <li><strong>[1단계] 입주 신청서 접수</strong>: 임차인이 공개 웹페이지에서 공실을 탐색하고 희망일과 인적사항을 입력하여 접수합니다. (상태: <code>PENDING_REVIEW</code>)</li>
+      <li><strong>[2단계] 임대인 검토 및 승인</strong>: 관리자 화면에서 신청자의 입주 일정과 보증금 조건을 확인하고 <code>[승인/계약발송]</code>을 클릭합니다. (상태: <code>APPROVED</code>)</li>
+      <li><strong>[3단계] 결제 및 전자서명 체결</strong>: 임차인에게 안내 링크가 전달되며, 모바일에서 본인 서명 날인 및 첫 결제(계약금/첫달분)를 완료하면 계약이 최종 체결됩니다. (상태: <code>PAID_CONFIRMED</code>)</li>
+    </ol>
+
+    <h2>3. 🚪 입실(Check-In) 및 시설 점검표 관리</h2>
+    <p>입주 당일 분쟁을 사전에 예방하기 위해 다음 절차를 진행합니다:</p>
+    <ul>
+      <li>입실 당일 오전 10시 임시 도어락 비밀번호 및 와이파이 정보가 세입자 라운지에 자동/수동 안내됩니다.</li>
+      <li>세입자는 입실 직후 벽지, 바닥, 에어컨, 세탁기 등 옵션의 사진을 촬영하여 시설 점검표에 등록합니다. 등록된 사진은 퇴실 시 원상복구 감가상각의 기준이 됩니다.</li>
+    </ul>
+
+    <h2>4. 🛠️ 거주 중 세입자 라운지 소통 (민원/수리)</h2>
+    <ul>
+      <li>세입자는 언제든 모바일 세입자 라운지에서 1:1 수리/민원 요청(사진 첨부 가능)을 등록할 수 있습니다.</li>
+      <li>관리자는 관제 대시보드 <strong>[세입자 라운지 민원/수리]</strong> 탭에서 실시간으로 확인 후 일정 안내 및 조치 답변을 등록합니다.</li>
+    </ul>
+
+    <h2>5. 💰 rent2 수납 엔진 계승 및 주의사항</h2>
+    <p>본 앱은 rent2의 수납 코어를 100% 공유합니다:</p>
+    <ul>
+      <li><strong>FIFO 순차 상계</strong>: 입금된 월세는 가장 오래된 미납월부터 순서대로 상계됩니다.</li>
+      <li><strong>후불 입주월 비과세</strong>: 입주월 당월에는 후불 청구가 발생하지 않으며 다음 달부터 청구됩니다 (가짜 체납 방지).</li>
+    </ul>
+  </div>
+</body>
+</html>
