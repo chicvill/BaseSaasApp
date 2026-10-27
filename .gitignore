@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Local runtime & databases
+*.log
+*.db-shm
+*.db-wal
+**/*.db-shm
+**/*.db-wal
+integrat.db
+
+# IDE & scratch
+.DS_Store
+Thumbs.db
+.pytest_cache/
+tests/scratch_apps/
+
