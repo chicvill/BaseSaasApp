@@ -1,5 +1,9 @@
 import unittest
-from apps.rent3.domain import RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, CoSigningSession
+from apps.rent3.domain import (
+    RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, 
+    CoSigningSession, CheckOutRecord, calculate_branch_tax_roi, calculate_portfolio_tax_roi,
+    RentPaymentCertificate, generate_rent_certificate
+)
 
 
 class TestRent3Domain(unittest.TestCase):
@@ -213,9 +217,166 @@ class TestRent3Domain(unittest.TestCase):
         self.assertEqual(tacit.period_months, 24)
         self.assertEqual(tacit.new_rent, 450000)
 
+    def test_maintenance_ticket_lifecycle(self):
+        """하자보수(A/S) 티켓 접수, 업체 배정, 전후 사진 및 비용 정산 테스트."""
+        from apps.rent3.domain import MaintenanceTicket
+
+        # 1. 티켓 접수
+        ticket = MaintenanceTicket(
+            branch="main",
+            room_id="203",
+            room_number="203호",
+            tenant_name="김임차",
+            tenant_phone="010-9999-8888",
+            category="plumbing",
+            title="싱크대 하부 수전 누수",
+            description="싱크대 아래 배관에서 물이 조금씩 샙니다.",
+            initial_photos=["data:image/png;base64,leak_before_photo"]
+        )
+        ticket.save("test_ticket_create")
+        self.assertEqual(ticket.status, "RECEIVED")
+        self.assertTrue(ticket.ticket_no.startswith("AS-"))
+        self.assertEqual(len(ticket.initial_photos), 1)
+
+        # 2. 협력 수리업체 배정
+        ticket.assign_contractor(
+            name="강남 종합설비 (김반장)",
+            phone="010-3333-7777",
+            visit_at="2026-10-28 14:00",
+            notes="밸브 및 패킹 교체 예정"
+        )
+        self.assertEqual(ticket.status, "ASSIGNED")
+        self.assertEqual(ticket.contractor_name, "강남 종합설비 (김반장)")
+        self.assertEqual(ticket.scheduled_visit_at, "2026-10-28 14:00")
+
+        # 3. 수리 완료 보고 및 비용 분담 (임대인 100% 부담 - 노후 마모)
+        ticket.complete_repair(
+            notes="고무 패킹 마모로 신품 교체 및 누수 테스트 완료",
+            photos=["data:image/png;base64,leak_after_photo"],
+            cost=75000,
+            burden="LANDLORD"
+        )
+        self.assertEqual(ticket.status, "COMPLETED")
+        self.assertEqual(ticket.repair_cost, 75000)
+        self.assertEqual(ticket.landlord_share, 75000)
+        self.assertEqual(ticket.tenant_share, 0)
+        self.assertEqual(len(ticket.completion_photos), 1)
+
+        # 4. 수리비 정산 및 종결
+        ticket.close_ticket()
+        self.assertEqual(ticket.status, "CLOSED")
+        self.assertTrue(ticket.is_settled)
+
+    def test_checkout_settlement_full_lifecycle(self):
+        """퇴실 점검표, 공과금/청소비 세부 정산, 세입자 서명 및 보증금 반환 완결 테스트."""
+        from apps.rent3.domain import CheckOutRecord
+
+        # 1. 퇴실 점검 착수
+        rec = CheckOutRecord(
+            branch="main",
+            room_id="203",
+            room_number="203호",
+            tenant_name="김임차",
+            tenant_phone="010-9999-8888",
+            original_deposit=5000000,
+            unpaid_rent_deduction=500000,
+            water_fee=15000,
+            electric_fee=20000,
+            gas_fee=10000,
+            cleaning_fee=70000,
+            repair_deduction=30000,
+            damage_notes="벽지 통상마모 인정, 도어락 커버 파손 실비 3만원 공제"
+        )
+        rec.save("test_checkout_init")
+        self.assertEqual(rec.status, "INSPECTING")
+        self.assertTrue(rec.settlement_no.startswith("MO-"))
+
+        # 2. 정산금 자동 계산
+        refund = rec.calculate_refund()
+        self.assertEqual(rec.utility_deduction, 45000)
+        self.assertEqual(rec.damage_deduction, 100000)
+        self.assertEqual(refund, 4355000)
+        self.assertEqual(rec.final_refund_deposit, 4355000)
+
+        # 3. 임차인 정산 동의 및 계좌 등록
+        rec.agree_by_tenant(
+            signature="SIG_DATA_KIM_2026",
+            bank="토스뱅크",
+            account="1000-2222-3333",
+            holder="김임차"
+        )
+        self.assertEqual(rec.status, "AGREED")
+        self.assertTrue(rec.tenant_agreed)
+        self.assertEqual(rec.refund_bank, "토스뱅크")
+        self.assertEqual(rec.refund_account, "1000-2222-3333")
+
+        # 4. 보증금 송금 완료 및 호실 공실화
+        rec.complete_settlement(tx_ref="TX-TOSS-998877")
+        self.assertEqual(rec.status, "COMPLETED")
+        self.assertTrue(rec.refund_completed)
+        self.assertEqual(rec.refund_tx_ref, "TX-TOSS-998877")
+        self.assertTrue(bool(rec.refund_completed_at))
+
+    def test_branch_and_portfolio_tax_roi_analytics(self):
+        """지점별(시크빌/선호아트빌/신비주택) 통합 세무 및 수익률 분석 정밀성 테스트."""
+        # 1. 시크빌(main) 단일 세무·수익률 검증
+        chic_rep = calculate_branch_tax_roi("main", tax_mode="SEPARATE_14")
+        self.assertEqual(chic_rep["branch_id"], "main")
+        self.assertEqual(chic_rep["branch_name"], "시크빌")
+        self.assertTrue(chic_rep["total_rooms"] >= 26)
+        self.assertTrue(chic_rep["occupancy_rate"] > 0)
+        self.assertTrue(chic_rep["annual_gross_revenue"] > 0)
+        self.assertTrue(chic_rep["noi"] > 0)
+        self.assertTrue(chic_rep["roi"]["net_roi_pct"] > 0)
+        # 세무: 주택 임대 부가세 면세 확인
+        self.assertTrue(chic_rep["taxes"]["is_vat_exempt"])
+        self.assertEqual(chic_rep["taxes"]["vat"], 0)
+        self.assertTrue(chic_rep["taxes"]["rental_income_tax"] > 0)
+
+        # 2. 종합과세 모드 전환 시 세액 변동 검증
+        chic_comp = calculate_branch_tax_roi("main", tax_mode="COMPREHENSIVE")
+        self.assertTrue(chic_comp["taxes"]["rental_income_tax"] > 0)
+
+        # 3. 3대 지점 통합(Portfolio) 분석 검증
+        portfolio = calculate_portfolio_tax_roi(tax_mode="SEPARATE_14")
+        agg = portfolio["aggregate"]
+        self.assertEqual(agg["total_branches"], 3)
+        self.assertTrue(agg["total_rooms"] >= 60)
+        self.assertTrue(agg["occupied_rooms"] > 0)
+        self.assertTrue(agg["annual_gross_revenue"] > 0)
+        self.assertTrue(agg["annual_vacancy_loss"] > 0)
+        self.assertEqual(agg["taxes"]["total_vat"], 0) # 전액 주택 면세
+        self.assertTrue(agg["taxes"]["grand_total_tax"] > 0)
+        self.assertTrue(agg["roi"]["avg_net_roi"] > 0)
+        self.assertEqual(len(portfolio["branches"]), 3)
+        self.assertTrue(len(portfolio["tax_advisory_tips"]) >= 3)
+
+    def test_rent_payment_certificate_generation(self):
+        """연말정산 월세 세액공제용 공식 납입 증명서 발급 무결성 테스트."""
+        cert = generate_rent_certificate(branch="main", room_id="201", year=2026)
+        self.assertIsNotNone(cert)
+        self.assertTrue(cert.cert_no.startswith("CERT-2026-MAIN-201"))
+        self.assertEqual(cert.branch, "main")
+        self.assertEqual(cert.room_id, "201")
+        self.assertEqual(cert.year, 2026)
+        self.assertTrue(len(cert.items) > 0)
+        self.assertTrue(cert.total_paid_amount > 0)
+        self.assertTrue(cert.estimated_tax_refund > 0)
+        self.assertTrue(cert.is_sealed)
+        
+        # 첫 번째 월별 항목의 국세청 현금영수증 승인번호 형식 검증
+        first_item = cert.items[0]
+        self.assertEqual(first_item["month"], 1)
+        self.assertTrue(first_item["paid_date"].startswith("2026-01"))
+        self.assertTrue("-" in first_item["cash_receipt_no"])
+        self.assertTrue(first_item["is_confirmed"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
 
 
 

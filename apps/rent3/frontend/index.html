@@ -173,7 +173,9 @@
       <button class="tab-btn" onclick="switchTab('tabChats')">💬 직거래 문의 & 방문예약 (<span id="tabBadgeChat">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabRenewals')">⏳ 만기 & 재계약 관제 (<span id="tabBadgeRenewals">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabParking')">🚗 주차 & 도어락 관제 (<span id="tabBadgeParking">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 세입자 라운지 민원/수리 (<span id="tabBadgeMaint">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 하자보수(A/S) 대장 & 정산 (<span id="tabBadgeMaint">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabCheckout')">🚪 퇴실 정산 & 공실 전환 (<span id="tabBadgeCheckout">0</span>)</button>
+      <button class="tab-btn" onclick="switchTab('tabTaxRoi')">📊 세무 & 수익률 분석</button>
       <button class="tab-btn" onclick="switchTab('tabRooms')">🏢 호실 현황 (rent2 계승)</button>
       <button class="tab-btn" onclick="switchTab('tabListings')">📢 공실 광고 관리</button>
     </div>
@@ -311,29 +313,255 @@
       </div>
     </div>
 
-    <!-- Tab 2: Maintenance -->
+    <!-- Tab 2: Maintenance & Contractor Dispatch (하자보수 A/S 대장 & 수리업체 배정·정산) -->
     <div id="tabMaintenance" class="tab-pane">
       <div class="card">
         <div class="card-title">
-          <span>세입자 라운지 접수 민원 및 수리 요청</span>
-          <button class="btn btn-secondary" onclick="loadMaintenance()">🔄 새로고침</button>
+          <span>🛠️ 정식 하자보수(A/S) 접수 대장 & 협력 수리업체 배정·정산 관제</span>
+          <button class="btn btn-secondary" onclick="loadMaintenanceTickets()">🔄 새로고침</button>
         </div>
-        <table>
+
+        <!-- Ticket Summary KPI Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+          <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#fbbf24; font-weight:600;">📥 접수 대기 (업체 미배정)</div>
+            <div style="font-size:20px; font-weight:700; color:#fbbf24; margin-top:4px;" id="asKpiReceived">0건</div>
+          </div>
+          <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:var(--primary); font-weight:600;">👷 기사 배정 (방문 예정)</div>
+            <div style="font-size:20px; font-weight:700; color:var(--primary); margin-top:4px;" id="asKpiAssigned">0건</div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#34d399; font-weight:600;">✅ 수리 완료 및 종결</div>
+            <div style="font-size:20px; font-weight:700; color:#34d399; margin-top:4px;" id="asKpiCompleted">0건</div>
+          </div>
+          <div style="background:rgba(129,140,248,0.1); border:1px solid rgba(129,140,248,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:var(--accent); font-weight:600;">💰 당월 총 수리비 지출</div>
+            <div style="font-size:20px; font-weight:700; color:var(--accent); margin-top:4px;" id="asKpiTotalCost">0원</div>
+          </div>
+        </div>
+
+        <table id="maintTicketTable">
           <thead>
             <tr>
-              <th>호실</th>
+              <th>접수번호/호실</th>
               <th>구분</th>
-              <th>제목 및 상세내용</th>
-              <th>접수자</th>
-              <th>접수일시</th>
-              <th>상태</th>
-              <th>조치 및 답변</th>
+              <th>제목 및 하자 상세</th>
+              <th>수리 전 사진</th>
+              <th>배정 수리업체 / 방문일정</th>
+              <th>수리비용 & 부담 구분</th>
+              <th>진행상태</th>
+              <th>조치 액션</th>
             </tr>
           </thead>
-          <tbody id="maintTbody">
-            <tr><td colspan="7" style="text-align:center; color:var(--text-muted);">민원 내역을 불러오는 중입니다...</td></tr>
+          <tbody id="maintTicketTbody">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">A/S 접수 대장을 불러오는 중...</td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Tab: Checkout & Deposit Settlement (퇴실 정산 & 공실 전환) -->
+    <div id="tabCheckout" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <span>🚪 퇴실 시설 점검 & 원상복구·공과금 정산 후 잔여 보증금 반환 관제</span>
+          <div style="display:flex; gap:8px;">
+            <select id="newCheckoutRoomSelect" style="padding:6px 12px; background:#1e293b; border:1px solid var(--card-border); color:#fff; border-radius:6px; font-size:13px;">
+              <option value="">-- 신규 퇴실 점검 대상 호실 선택 --</option>
+            </select>
+            <button class="btn btn-primary" onclick="startNewCheckoutModal(this)">🔍 퇴실 점검 착수</button>
+            <button class="btn btn-secondary" onclick="loadCheckouts()">🔄 새로고침</button>
+          </div>
+        </div>
+
+        <!-- Checkout KPI Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:14px; margin-bottom:20px;">
+          <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#fbbf24; font-weight:600;">🔍 점검 및 공제 산출 중</div>
+            <div style="font-size:20px; font-weight:700; color:#fbbf24; margin-top:4px;" id="kpiCheckoutInspecting">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">시설 대조 및 공과금 검침</div>
+          </div>
+          <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:var(--primary); font-weight:600;">✍️ 세입자 정산 동의 완료</div>
+            <div style="font-size:20px; font-weight:700; color:var(--primary); margin-top:4px;" id="kpiCheckoutAgreed">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">전자서명 날인 및 반환 대기</div>
+          </div>
+          <div style="background:rgba(16,185,129,0.1); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:#34d399; font-weight:600;">🚪 반환 완료 & 공실 전환</div>
+            <div style="font-size:20px; font-weight:700; color:#34d399; margin-top:4px;" id="kpiCheckoutCompleted">0건</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">rent2 공실화 + 매물 즉시 복귀</div>
+          </div>
+          <div style="background:rgba(129,140,248,0.1); border:1px solid rgba(129,140,248,0.3); border-radius:10px; padding:12px;">
+            <div style="font-size:12px; color:var(--accent); font-weight:600;">💰 누적 반환 보증금</div>
+            <div style="font-size:20px; font-weight:700; color:var(--accent); margin-top:4px;" id="kpiCheckoutTotalRefund">0원</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">투명 공제 후 정산 송금액</div>
+          </div>
+        </div>
+
+        <!-- Checkout Table -->
+        <table id="checkoutTable">
+          <thead>
+            <tr>
+              <th>정산번호 / 호실</th>
+              <th>퇴실 임차인</th>
+              <th>거주 기간</th>
+              <th>원 계약 보증금</th>
+              <th>공제 총액 (상세)</th>
+              <th>최종 반환 보증금</th>
+              <th>진행 상태</th>
+              <th>관리 조치</th>
+            </tr>
+          </thead>
+          <tbody id="checkoutTbody">
+            <tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">퇴실 정산 대장을 불러오는 중...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Integrated Tax & ROI Analytics (지점별 통합 세무 및 수익률 분석) -->
+    <div id="tabTaxRoi" class="tab-pane">
+      <div class="card">
+        <div class="card-title">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:20px;">📊</span>
+            <div>
+              <span style="font-size:18px; font-weight:800; color:#fff;">지점별(시크빌 · 선호아트빌 · 신비주택) 통합 세무 & 수익률 분석 센터</span>
+              <div style="font-size:12px; color:var(--text-muted); font-weight:400; margin-top:2px;">
+                주택임대소득세 · 부가세 면세 · 종부세 안분 및 실질 순투자수익률(Net Cap Rate / ROI) 통합 관제
+              </div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; align-items:center; gap:6px; background:#0f172a; padding:6px 12px; border-radius:8px; border:1px solid var(--card-border);">
+              <span style="font-size:12px; color:var(--text-muted);">임대소득세 모드:</span>
+              <select id="taxRoiModeSelect" style="background:transparent; border:none; color:var(--primary); font-size:12px; font-weight:700; outline:none; cursor:pointer;" onchange="loadTaxRoiDashboard()">
+                <option value="SEPARATE_14">14% 분리과세 (추천 / 수입 2,000만 이하 세제혜택)</option>
+                <option value="COMPREHENSIVE">종합과세 (누진세율 적용)</option>
+              </select>
+            </div>
+            <button class="btn btn-secondary" onclick="loadTaxRoiDashboard()">🔄 새로고침</button>
+          </div>
+        </div>
+
+        <!-- 4 Top Executive KPI Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(230px, 1fr)); gap:16px; margin-bottom:24px;">
+          <div style="background:linear-gradient(135deg, rgba(16,185,129,0.12), rgba(16,185,129,0.02)); border:1px solid rgba(16,185,129,0.3); border-radius:14px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:13px; color:#34d399; font-weight:700;">💰 3대 지점 연간 총수입 (임대+관리비)</span>
+              <span style="font-size:18px;">🏢</span>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:#fff; margin-top:8px;" id="taxRoiAnnualRevenue">- 원</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+              월 평균 <span id="taxRoiMonthlyRevenue" style="color:#34d399; font-weight:600;">-</span> 원
+            </div>
+          </div>
+
+          <div style="background:linear-gradient(135deg, rgba(239,68,68,0.12), rgba(239,68,68,0.02)); border:1px solid rgba(239,68,68,0.3); border-radius:14px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:13px; color:#f87171; font-weight:700;">📉 연간 공실 손실액 (Vacancy Loss)</span>
+              <span style="font-size:18px;">🚪</span>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:#f87171; margin-top:8px;" id="taxRoiVacancyLoss">- 원</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+              총 공실 <span id="taxRoiVacantRooms" style="color:#f87171; font-weight:700;">-</span>개실 (공실률 <span id="taxRoiVacancyRate">-</span>%)
+            </div>
+          </div>
+
+          <div style="background:linear-gradient(135deg, rgba(245,158,11,0.12), rgba(245,158,11,0.02)); border:1px solid rgba(245,158,11,0.3); border-radius:14px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:13px; color:#fbbf24; font-weight:700;">🏛️ 연간 추정 총 세액 (소득+종부+재산)</span>
+              <span style="font-size:18px;">📑</span>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:#fff; margin-top:8px;" id="taxRoiTotalTax">- 원</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+              소득세 <span id="taxRoiIncomeTax" style="color:#fbbf24; font-weight:600;">-</span> | 부가세 <span style="color:#10b981; font-weight:700;">0원(면세)</span>
+            </div>
+          </div>
+
+          <div style="background:linear-gradient(135deg, rgba(56,189,248,0.15), rgba(56,189,248,0.02)); border:1px solid rgba(56,189,248,0.3); border-radius:14px; padding:18px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:13px; color:var(--primary); font-weight:700;">📈 전사 평균 실질 수익률 (Net ROI)</span>
+              <span style="font-size:18px;">🎯</span>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:var(--primary); margin-top:8px;" id="taxRoiNetCapRate">-%</div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+              세후 순이익 연간 <span id="taxRoiNetProfit" style="color:#fff; font-weight:600;">-</span> 원
+            </div>
+          </div>
+        </div>
+
+        <!-- 3 Branches Side-by-Side Comparison Grid -->
+        <div style="margin-bottom:26px;">
+          <div style="font-size:16px; font-weight:700; color:#fff; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+            <span>🏢</span> 3대 지점(시크빌 · 선호아트빌 · 신비주택) 세무·경영 실적 1:1 비교
+          </div>
+          <div id="branchComparisonGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Detail Table & Tax Strategy Advisor Section -->
+        <div style="display:grid; grid-template-columns:1fr 380px; gap:20px; align-items:start;">
+          <!-- Left: Tax & Financial Detail Table -->
+          <div style="background:rgba(15,23,42,0.6); border:1px solid var(--card-border); border-radius:12px; padding:18px; overflow-x:auto;">
+            <div style="font-size:15px; font-weight:700; color:#fff; margin-bottom:12px;">
+              📋 지점별 세무 항목 및 투자 수익 지표 상세 대장
+            </div>
+            <table style="font-size:13px;">
+              <thead>
+                <tr>
+                  <th>지점명</th>
+                  <th>호실(가동/공실)</th>
+                  <th>월 수납액</th>
+                  <th>연간 총수입</th>
+                  <th>임대소득세</th>
+                  <th>종부세+재산세</th>
+                  <th>순운영이익(NOI)</th>
+                  <th>실질 Net ROI</th>
+                </tr>
+              </thead>
+              <tbody id="taxRoiTableBody">
+                <tr><td colspan="8" style="text-align:center; padding:24px; color:var(--text-muted);">지점 세무 데이터를 집계 중입니다...</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Right: Tax Advisor & Optimization Tips -->
+          <div style="background:rgba(15,23,42,0.6); border:1px solid var(--card-border); border-radius:12px; padding:18px;">
+            <div style="font-size:15px; font-weight:700; color:var(--primary); margin-bottom:12px; display:flex; align-items:center; gap:6px;">
+              <span>💡</span> 5역할 부동산 세무 & 경영 어드바이저
+            </div>
+            <div id="taxAdvisorTipsList" style="display:flex; flex-direction:column; gap:10px; font-size:12px; line-height:1.55; color:#cbd5e1;">
+              <!-- Tips rendered here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Tenant Year-End Tax Deduction Certificate Quick Generator -->
+        <div style="background:linear-gradient(135deg, rgba(56,189,248,0.08), rgba(56,189,248,0.02)); border:1px solid rgba(56,189,248,0.3); border-radius:12px; padding:18px; margin-top:20px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px;">📑</span>
+              <span style="font-size:15px; font-weight:800; color:#fff;">세입자 연말정산 월세 세액공제 증명서 원클릭 발급 & 1:1 대화방 전송</span>
+              <span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:11px;">국세청 현금영수증 승인 연동</span>
+            </div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+              조세특례제한법 제95조의2에 따라 세입자가 연말정산 17% 환급을 받을 수 있는 공식 납입 증명서를 1-Click으로 발행하고 임차인 채팅방에 안내합니다.
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <select id="certTargetRoomSelect" style="padding:8px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+              <option value="201">201호 (김임차)</option>
+              <option value="202">202호 (이임대)</option>
+              <option value="203">203호 (박영희)</option>
+              <option value="204">204호 (최철수)</option>
+            </select>
+            <button class="btn btn-secondary" onclick="openAdminRentCertModal()">🔍 증명서 미리보기/인쇄</button>
+            <button class="btn btn-primary" onclick="sendCertToTenantChat(this)">💬 1:1 대화방에 발급 전송</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -497,6 +725,10 @@
       document.getElementById(tabId).classList.add("active");
       if (event && event.target) event.target.classList.add("active");
 
+      if (tabId === 'tabTaxRoi') {
+        loadTaxRoiDashboard();
+      }
+
       if (tabId === 'tabChats') {
         loadActiveChats();
         if (adminChatPollTimer) clearInterval(adminChatPollTimer);
@@ -547,10 +779,12 @@
         `).join("") || `<tr><td colspan="6" style="text-align:center;">호실 정보가 없습니다.</td></tr>`;
 
         loadApplications();
-        loadMaintenance();
+        loadMaintenanceTickets();
         loadActiveChats();
         loadParkingRecords();
         loadRenewals();
+        loadCheckouts();
+        loadTaxRoiDashboard();
       } catch (err) {
         Bass.updateAppAlert("대시보드 데이터를 불러오지 못했습니다: " + err.message, "error");
       }
@@ -630,52 +864,243 @@
       });
     }
 
-    async function loadMaintenance() {
-      const branch = document.getElementById("branchSelect").value;
-      const res = await fetch(`/api/rent3/admin/maintenance?branch=${branch}`);
-      const data = await res.json();
-      const tbody = document.getElementById("maintTbody");
+    /* ─── 🛠️ Maintenance Ticket & Contractor Dispatch 관제 ─── */
+    let asTicketsCache = [];
 
-      if (!data.maintenance || data.maintenance.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:32px;">접수된 민원 및 수리 요청이 없습니다.</td></tr>`;
+    async function loadMaintenanceTickets() {
+      const branch = document.getElementById("branchSelect").value;
+      const tbody = document.getElementById("maintTicketTbody");
+      try {
+        const res = await fetch(`/api/rent3/maintenance/tickets?branch=${branch}`);
+        const data = await res.json();
+        if (!data.success) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--error);">티켓 대장을 불러오지 못했습니다.</td></tr>`;
+          return;
+        }
+
+        asTicketsCache = data.items || [];
+        document.getElementById("tabBadgeMaint").innerText = data.summary.received_count + data.summary.assigned_count;
+        document.getElementById("asKpiReceived").innerText = `${data.summary.received_count}건`;
+        document.getElementById("asKpiAssigned").innerText = `${data.summary.assigned_count}건`;
+        document.getElementById("asKpiCompleted").innerText = `${data.summary.completed_count}건`;
+        document.getElementById("asKpiTotalCost").innerText = `${(data.summary.total_repair_cost || 0).toLocaleString()}원`;
+
+        if (asTicketsCache.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:32px;">접수된 하자보수(A/S) 티켓이 없습니다.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = asTicketsCache.map(t => {
+          let statusBadge = '';
+          if (t.status === 'RECEIVED') {
+            statusBadge = `<span class="badge badge-pending" style="background:rgba(245,158,11,0.2); color:#fbbf24;">📥 접수대기</span>`;
+          } else if (t.status === 'ASSIGNED') {
+            statusBadge = `<span class="badge" style="background:rgba(56,189,248,0.2); color:var(--primary);">👷 기사배정</span>`;
+          } else if (t.status === 'COMPLETED') {
+            statusBadge = `<span class="badge badge-confirmed">✅ 수리완료</span>`;
+          } else if (t.status === 'CLOSED') {
+            statusBadge = `<span class="badge" style="background:rgba(148,163,184,0.2); color:var(--text-muted);">🔒 정산종결</span>`;
+          }
+
+          let photosHtml = '<span style="color:var(--text-muted); font-size:12px;">사진 없음</span>';
+          if (t.initial_photos && t.initial_photos.length > 0) {
+            photosHtml = `
+              <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                ${t.initial_photos.slice(0, 2).map(p => `
+                  <img src="${p}" alt="파손사진" style="width:50px; height:40px; object-fit:cover; border-radius:4px; cursor:pointer; border:1px solid rgba(255,255,255,0.2);" onclick="openAdminPhotoViewer('${p}')">
+                `).join("")}
+              </div>
+            `;
+          }
+
+          let burdenText = '-';
+          if (t.repair_cost > 0) {
+            if (t.cost_burden === 'LANDLORD') {
+              burdenText = `<strong style="color:var(--success);">${t.repair_cost.toLocaleString()}원</strong><br><span style="font-size:11px; color:#34d399;">임대인 100% 무상</span>`;
+            } else if (t.cost_burden === 'TENANT') {
+              burdenText = `<strong style="color:var(--error);">${t.repair_cost.toLocaleString()}원</strong><br><span style="font-size:11px; color:#f87171;">세입자 과실 청구</span>`;
+            } else {
+              burdenText = `<strong>${t.repair_cost.toLocaleString()}원</strong><br><span style="font-size:11px; color:#fbbf24;">50:50 분담</span>`;
+            }
+          }
+
+          return `
+            <tr>
+              <td>
+                <span style="font-size:11px; color:var(--text-muted); font-family:monospace;">${t.ticket_no}</span><br>
+                <strong style="color:var(--primary);">${t.room_number || t.room_id + '호'}</strong>
+                <span style="font-size:11px; color:var(--text-muted);">(${t.tenant_name})</span>
+              </td>
+              <td><span class="badge" style="background:rgba(255,255,255,0.08); font-size:11px;">${t.category}</span></td>
+              <td>
+                <strong>${t.title}</strong>
+                <div style="font-size:12px; color:var(--text-muted); margin-top:2px; max-width:260px;">${t.description}</div>
+              </td>
+              <td>${photosHtml}</td>
+              <td>
+                ${t.contractor_name ? `
+                  <strong style="color:#f8fafc; font-size:13px;">${t.contractor_name}</strong>
+                  <div style="font-size:11px; color:var(--text-muted);">${t.contractor_phone || ''}</div>
+                  <div style="font-size:12px; color:var(--primary); margin-top:2px;">📅 ${t.scheduled_visit_at || '방문일정 미정'}</div>
+                ` : `<span style="color:var(--warning); font-size:12px;">⚠️ 미배정</span>`}
+              </td>
+              <td>${burdenText}</td>
+              <td>${statusBadge}</td>
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  ${t.status === 'RECEIVED' || t.status === 'ASSIGNED' ? `
+                    <button class="btn btn-primary" style="padding:4px 8px; font-size:12px;" onclick="openAssignContractorModal('${t.id}')">👷 업체 배정</button>
+                  ` : ''}
+                  ${t.status === 'ASSIGNED' || t.status === 'IN_REPAIR' ? `
+                    <button class="btn btn-success" style="padding:4px 8px; font-size:12px;" onclick="openCompleteRepairModal('${t.id}')">📸 완료 & 정산</button>
+                  ` : ''}
+                  ${t.status === 'COMPLETED' ? `
+                    <button class="btn btn-secondary" style="padding:4px 8px; font-size:12px;" onclick="closeTicketSubmit('${t.id}')">🔒 종결</button>
+                  ` : ''}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--error);">오류: ${err.message}</td></tr>`;
+      }
+    }
+    const loadMaintenance = loadMaintenanceTickets;
+
+    function openAssignContractorModal(ticketId) {
+      const ticket = asTicketsCache.find(t => t.id === ticketId);
+      if (!ticket) return;
+
+      document.getElementById("asAssignTicketId").value = ticket.id;
+      document.getElementById("asAssignRoomAndTitle").innerText = `[${ticket.room_number || ticket.room_id + '호'}] ${ticket.title}`;
+      document.getElementById("asAssignTenant").innerText = `${ticket.tenant_name} (${ticket.tenant_phone})`;
+      document.getElementById("asContractorName").value = ticket.contractor_name || "";
+      document.getElementById("asContractorPhone").value = ticket.contractor_phone || "";
+      document.getElementById("asScheduledVisitAt").value = ticket.scheduled_visit_at || "2026-10-28 14:00 (방문 예정)";
+      document.getElementById("asAdminNotes").value = ticket.admin_notes || "";
+      document.getElementById("assignContractorModal").style.display = "flex";
+    }
+
+    function closeAssignContractorModal() {
+      document.getElementById("assignContractorModal").style.display = "none";
+    }
+
+    function selectPresetContractor(name, phone) {
+      document.getElementById("asContractorName").value = name;
+      document.getElementById("asContractorPhone").value = phone;
+    }
+
+    async function submitAssignContractor(btn) {
+      const ticketId = document.getElementById("asAssignTicketId").value;
+      const contractor_name = document.getElementById("asContractorName").value.trim();
+      const contractor_phone = document.getElementById("asContractorPhone").value.trim();
+      const scheduled_visit_at = document.getElementById("asScheduledVisitAt").value.trim();
+      const admin_notes = document.getElementById("asAdminNotes").value.trim();
+
+      if (!contractor_name) {
+        Bass.updateAppAlert("수리업체 또는 기사명을 입력하세요.", "error");
         return;
       }
 
-      tbody.innerHTML = data.maintenance.map(m => `
-        <tr>
-          <td><strong>${m.room_id}호</strong></td>
-          <td><span class="badge" style="background:rgba(255,255,255,0.1);">${m.category}</span></td>
-          <td>
-            <strong>${m.title}</strong>
-            <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">${m.description}</div>
-          </td>
-          <td>${m.tenant_name} (${m.tenant_phone})</td>
-          <td>${m.created_at || '-'}</td>
-          <td><span class="badge ${m.status === 'RESOLVED' ? 'badge-confirmed' : 'badge-pending'}">${m.status === 'RESOLVED' ? '조치완료' : '접수/진행중'}</span></td>
-          <td>
-            ${m.status === 'RESOLVED' ? `<span style="font-size:12px; color:var(--success);">${m.admin_reply}</span>` : `
-              <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="replyMaint('${m.id}', this)">답변 및 조치</button>
-            `}
-          </td>
-        </tr>
-      `).join("");
-    }
-
-    async function replyMaint(reqId, btn) {
-      const reply = prompt("조치 내역 및 안내 답변을 입력하세요:", "기사님 방문 일정 협의 완료 (내일 오후 2시)");
-      if (!reply) return;
       await Bass.withLock(btn, async () => {
-        const res = await fetch(`/api/rent3/admin/maintenance/${reqId}/reply`, {
+        const res = await fetch(`/api/rent3/maintenance/tickets/${ticketId}/assign`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reply })
+          body: JSON.stringify({
+            contractor_name,
+            contractor_phone,
+            scheduled_visit_at,
+            admin_notes
+          })
         });
         const data = await res.json();
         if (data.success) {
           Bass.updateAppAlert(data.message, "success");
-          loadDashboard();
+          closeAssignContractorModal();
+          loadMaintenanceTickets();
+        } else {
+          Bass.updateAppAlert(data.detail || "배정 처리에 실패했습니다.", "error");
         }
       });
+    }
+
+    function openCompleteRepairModal(ticketId) {
+      const ticket = asTicketsCache.find(t => t.id === ticketId);
+      if (!ticket) return;
+
+      document.getElementById("asCompleteTicketId").value = ticket.id;
+      document.getElementById("asCompleteRoomAndTitle").innerText = `[${ticket.room_number || ticket.room_id + '호'}] ${ticket.title}`;
+      document.getElementById("asCompleteContractor").innerText = ticket.contractor_name || "협력업체";
+      document.getElementById("asRepairNotes").value = ticket.repair_notes || "부품 교체 및 정상 작동 테스트 완료";
+      document.getElementById("asRepairCost").value = ticket.repair_cost || 50000;
+      document.getElementById("asCostBurdenSelect").value = ticket.cost_burden || "LANDLORD";
+      updateCostBurdenPreview();
+      document.getElementById("completeRepairModal").style.display = "flex";
+    }
+
+    function closeCompleteRepairModal() {
+      document.getElementById("completeRepairModal").style.display = "none";
+    }
+
+    function updateCostBurdenPreview() {
+      const cost = parseInt(document.getElementById("asRepairCost").value) || 0;
+      const burden = document.getElementById("asCostBurdenSelect").value;
+      const preview = document.getElementById("asCostBurdenPreview");
+
+      if (burden === "LANDLORD") {
+        preview.innerHTML = `정산: 임대인 전액 부담 <strong>${cost.toLocaleString()}원</strong> / 세입자 0원 (무상 수리)`;
+        preview.style.color = "var(--success)";
+      } else if (burden === "TENANT") {
+        preview.innerHTML = `정산: 임대인 0원 / 세입자 청구 <strong>${cost.toLocaleString()}원</strong> (사용자 과실)`;
+        preview.style.color = "var(--error)";
+      } else {
+        const half = Math.floor(cost / 2);
+        preview.innerHTML = `정산: 임대인 <strong>${half.toLocaleString()}원</strong> / 세입자 <strong>${(cost - half).toLocaleString()}원</strong> (50:50 분담)`;
+        preview.style.color = "var(--warning)";
+      }
+    }
+
+    async function submitCompleteRepair(btn) {
+      const ticketId = document.getElementById("asCompleteTicketId").value;
+      const repair_notes = document.getElementById("asRepairNotes").value.trim();
+      const repair_cost = parseInt(document.getElementById("asRepairCost").value) || 0;
+      const cost_burden = document.getElementById("asCostBurdenSelect").value;
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/maintenance/tickets/${ticketId}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            repair_notes,
+            repair_cost,
+            cost_burden,
+            completion_photos: []
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          closeCompleteRepairModal();
+          loadMaintenanceTickets();
+        } else {
+          Bass.updateAppAlert(data.detail || "완료 처리에 실패했습니다.", "error");
+        }
+      });
+    }
+
+    async function closeTicketSubmit(ticketId) {
+      if (!confirm("수리비 정산이 완료되었습니다. 해당 티켓을 최종 종결하시겠습니까?")) return;
+      try {
+        const res = await fetch(`/api/rent3/maintenance/tickets/${ticketId}/close`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          loadMaintenanceTickets();
+        }
+      } catch (err) {
+        Bass.updateAppAlert(err.message, "error");
+      }
     }
 
     async function createListing(btn) {
@@ -1015,9 +1440,97 @@
       });
     }
 
-    /* ─── Check-Out & Settlement Modal Logic ─── */
+    /* ─── Check-Out & Settlement Pipeline Logic ─── */
     let currentCheckOutRoom = null;
     let currentOriginalDeposit = 5000000;
+    let checkoutsCache = [];
+
+    async function loadCheckouts() {
+      const branch = document.getElementById("branchSelect").value;
+      const tbody = document.getElementById("checkoutTbody");
+      try {
+        const res = await fetch(`/api/rent3/checkout/list?branch=${branch}`);
+        const data = await res.json();
+        checkoutsCache = data.checkouts || [];
+
+        // KPI 업데이트
+        document.getElementById("kpiCheckoutInspecting").innerText = `${data.kpi.inspecting}건`;
+        document.getElementById("kpiCheckoutAgreed").innerText = `${data.kpi.agreed}건`;
+        document.getElementById("kpiCheckoutCompleted").innerText = `${data.kpi.completed}건`;
+        document.getElementById("kpiCheckoutTotalRefund").innerText = `${(data.kpi.total_refund || 0).toLocaleString()}원`;
+        document.getElementById("tabBadgeCheckout").innerText = data.kpi.inspecting + data.kpi.agreed;
+
+        // 신규 점검 대상 호실 드롭다운 채우기
+        const select = document.getElementById("newCheckoutRoomSelect");
+        if (select && data.rooms) {
+          select.innerHTML = `<option value="">-- 신규 퇴실 점검 대상 호실 선택 --</option>` +
+            data.rooms.filter(r => r.is_occupied).map(r => `<option value="${r.room_id}">${r.room_id}호 (${r.tenant_name})</option>`).join("");
+        }
+
+        if (checkoutsCache.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:32px;">현재 진행 중인 퇴실 정산 내역이 없습니다.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = checkoutsCache.map(c => {
+          let statusBadge = `<span class="badge badge-pending">🔍 점검중</span>`;
+          if (c.status === 'CALCULATED') statusBadge = `<span class="badge badge-approved">📄 정산서 발행됨</span>`;
+          if (c.status === 'AGREED') statusBadge = `<span class="badge" style="background:rgba(56,189,248,0.2); color:var(--primary); font-weight:700;">✍️ 세입자 동의완료</span>`;
+          if (c.status === 'COMPLETED') statusBadge = `<span class="badge badge-confirmed">✅ 반환&공실화 완료</span>`;
+
+          const totalDeductions = (c.unpaid_rent_deduction || 0) + (c.utility_deduction || 0) + (c.damage_deduction || 0) + (c.other_deduction || 0);
+
+          return `
+            <tr>
+              <td>
+                <strong>${c.room_number || c.room_id + '호'}</strong><br>
+                <span style="font-size:11px; color:var(--text-muted);">${c.settlement_no || '-'}</span>
+              </td>
+              <td>
+                ${c.tenant_name || '미상'}<br>
+                <span style="font-size:11px; color:var(--text-muted);">${c.tenant_phone || ''}</span>
+              </td>
+              <td style="font-size:12px; color:var(--text-muted);">
+                ${c.move_in_date || '입주'} ~ ${c.move_out_date || '퇴실'}
+              </td>
+              <td><strong>${(c.original_deposit || 0).toLocaleString()}원</strong></td>
+              <td>
+                <div style="font-size:13px; color:#f87171; font-weight:700;">-${totalDeductions.toLocaleString()}원</div>
+                <div style="font-size:11px; color:var(--text-muted);">
+                  공과금 ${((c.water_fee||0)+(c.electric_fee||0)+(c.gas_fee||0)||c.utility_deduction||0).toLocaleString()}원 | 청소/원상 ${(c.damage_deduction||0).toLocaleString()}원
+                </div>
+              </td>
+              <td>
+                <span style="font-size:15px; font-weight:800; color:#10b981;">${(c.final_refund_deposit || 0).toLocaleString()}원</span>
+                <div style="font-size:11px; color:var(--text-muted);">${c.refund_bank || ''} ${c.refund_account ? c.refund_account.slice(0, 7) + '***' : ''}</div>
+              </td>
+              <td>${statusBadge}</td>
+              <td>
+                <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                  <button class="btn btn-secondary" style="padding:4px 8px; font-size:12px;" onclick="openCheckOutModal('${c.room_id}')">🔍 점검/산출</button>
+                  <button class="btn btn-secondary" style="padding:4px 8px; font-size:12px; background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3);" onclick="openCheckoutReceiptModal('${c.room_id}')">📄 영수증 인쇄</button>
+                  ${c.status !== 'COMPLETED' ? `
+                    <button class="btn btn-primary" style="padding:4px 8px; font-size:12px;" onclick="confirmCompleteCheckOut('${c.room_id}', ${c.final_refund_deposit}, '${c.refund_bank}', '${c.refund_account}')">💸 송금완료&공실전환</button>
+                  ` : ''}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--error);">퇴실 목록을 불러오지 못했습니다: ${err.message}</td></tr>`;
+      }
+    }
+
+    function startNewCheckoutModal(btn) {
+      const select = document.getElementById("newCheckoutRoomSelect");
+      const roomId = select ? select.value : "";
+      if (!roomId) {
+        Bass.updateAppAlert("퇴실 점검을 진행할 호실을 선택해주세요.", "warning");
+        return;
+      }
+      openCheckOutModal(roomId);
+    }
 
     async function openCheckOutModal(roomId) {
       currentCheckOutRoom = roomId;
@@ -1028,14 +1541,33 @@
         const c = data.checkout_record;
         currentOriginalDeposit = data.original_deposit || 5000000;
 
-        document.getElementById("coTitle").innerText = `[${roomId}호] 퇴실 검수 및 보증금 정산 명세서`;
+        document.getElementById("coTitle").innerText = `[${roomId}호] 퇴실 시설 점검 & 보증금 정산 명세서`;
         document.getElementById("coTenant").innerText = `${data.tenant_name} (${data.tenant_phone})`;
         document.getElementById("coDeposit").innerText = `${currentOriginalDeposit.toLocaleString()}원`;
 
+        // 입실 점검 대조 메모
+        const checkinRef = data.checkin_reference;
+        const refDiv = document.getElementById("coCheckinRefBox");
+        if (refDiv) {
+          if (checkinRef && checkinRef.inspection_notes) {
+            refDiv.innerHTML = `📌 <strong>입실 당시 점검 메모:</strong> "${checkinRef.inspection_notes}" (입실일시: ${checkinRef.checked_in_at || '입주일'})`;
+            refDiv.style.display = "block";
+          } else {
+            refDiv.style.display = "none";
+          }
+        }
+
         document.getElementById("coUnpaid").value = c.unpaid_rent_deduction || 0;
-        document.getElementById("coUtility").value = c.utility_deduction || 45000;
-        document.getElementById("coDamage").value = c.damage_deduction || 0;
-        document.getElementById("coNotes").value = c.damage_notes || "통상 손모 외 특이 파손 없음";
+        document.getElementById("coWater").value = c.water_fee || 15000;
+        document.getElementById("coElectric").value = c.electric_fee || 20000;
+        document.getElementById("coGas").value = c.gas_fee || 10000;
+        document.getElementById("coCleaning").value = c.cleaning_fee || 70000;
+        document.getElementById("coRepair").value = c.repair_deduction || 0;
+        document.getElementById("coNotes").value = c.damage_notes || "통상 손모 외 특이 파손 없음 (상태 양호)";
+
+        document.getElementById("coRefundBank").value = c.refund_bank || "카카오뱅크";
+        document.getElementById("coRefundAccount").value = c.refund_account || "3333-01-2345678";
+        document.getElementById("coRefundHolder").value = c.refund_account_holder || data.tenant_name;
 
         calculateRefundInModal();
         document.getElementById("checkoutModal").style.display = "flex";
@@ -1050,49 +1582,140 @@
 
     function calculateRefundInModal() {
       const unpaid = parseInt(document.getElementById("coUnpaid").value) || 0;
-      const utility = parseInt(document.getElementById("coUtility").value) || 0;
-      const damage = parseInt(document.getElementById("coDamage").value) || 0;
-      const totalDeduction = unpaid + utility + damage;
+      const water = parseInt(document.getElementById("coWater").value) || 0;
+      const electric = parseInt(document.getElementById("coElectric").value) || 0;
+      const gas = parseInt(document.getElementById("coGas").value) || 0;
+      const utilityTotal = water + electric + gas;
+      
+      const cleaning = parseInt(document.getElementById("coCleaning").value) || 0;
+      const repair = parseInt(document.getElementById("coRepair").value) || 0;
+      const damageTotal = cleaning + repair;
+
+      const totalDeduction = unpaid + utilityTotal + damageTotal;
       const finalRefund = Math.max(0, currentOriginalDeposit - totalDeduction);
 
+      document.getElementById("coUtilitySubtotal").innerText = `${utilityTotal.toLocaleString()}원`;
+      document.getElementById("coDamageSubtotal").innerText = `${damageTotal.toLocaleString()}원`;
       document.getElementById("coTotalDeduction").innerText = `${totalDeduction.toLocaleString()}원`;
       document.getElementById("coFinalRefund").innerText = `${finalRefund.toLocaleString()}원`;
     }
 
-    async function completeCheckOutSubmit(btn) {
+    async function submitCheckOutInspection(btn) {
       if (!currentCheckOutRoom) return;
       const branch = document.getElementById("branchSelect").value;
       const unpaid = parseInt(document.getElementById("coUnpaid").value) || 0;
-      const utility = parseInt(document.getElementById("coUtility").value) || 0;
-      const damage = parseInt(document.getElementById("coDamage").value) || 0;
+      const water = parseInt(document.getElementById("coWater").value) || 0;
+      const electric = parseInt(document.getElementById("coElectric").value) || 0;
+      const gas = parseInt(document.getElementById("coGas").value) || 0;
+      const cleaning = parseInt(document.getElementById("coCleaning").value) || 0;
+      const repair = parseInt(document.getElementById("coRepair").value) || 0;
       const damage_notes = document.getElementById("coNotes").value.trim();
-
-      if (!confirm(`[${currentCheckOutRoom}호] 보증금 정산을 확정하고 호실을 즉시 '공실 매물'로 전환하시겠습니까?`)) return;
+      const refund_bank = document.getElementById("coRefundBank").value.trim();
+      const refund_account = document.getElementById("coRefundAccount").value.trim();
+      const refund_account_holder = document.getElementById("coRefundHolder").value.trim();
 
       await Bass.withLock(btn, async () => {
-        // 1. 검수 공제액 저장
-        await fetch(`/api/rent3/checkout/${branch}/${currentCheckOutRoom}/inspect`, {
+        const res = await fetch(`/api/rent3/checkout/${branch}/${currentCheckOutRoom}/inspect`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             unpaid_rent_deduction: unpaid,
-            utility_deduction: utility,
-            damage_deduction: damage,
-            damage_notes
+            water_fee: water,
+            electric_fee: electric,
+            gas_fee: gas,
+            utility_deduction: water + electric + gas,
+            cleaning_fee: cleaning,
+            repair_deduction: repair,
+            damage_deduction: cleaning + repair,
+            damage_notes,
+            refund_bank,
+            refund_account,
+            refund_account_holder
           })
         });
-
-        // 2. 보증금 반환 완료 & 공실 자동 전환
-        const res2 = await fetch(`/api/rent3/checkout/${branch}/${currentCheckOutRoom}/complete`, {
-          method: "POST"
-        });
-        const data2 = await res2.json();
-        if (data2.success) {
-          Bass.updateAppAlert(data2.message, "success");
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message + " (1:1 채팅방 자동 알림 발송 완료)", "success");
           closeCheckOutModal();
-          loadDashboard();
+          loadCheckouts();
+        } else {
+          Bass.updateAppAlert(data.detail || "검수 저장 실패", "error");
         }
       });
+    }
+
+    async function confirmCompleteCheckOut(roomId, refundAmount, bank, account) {
+      const txRef = prompt(`[${roomId}호] 보증금 ${refundAmount.toLocaleString()}원 송금을 완료하셨습니까?\n은행 송금 참조번호나 메모를 입력하세요:`, `TX-BANK-${new Date().toISOString().slice(0,10).replace(/-/g,'')}`);
+      if (!txRef) return;
+
+      const branch = document.getElementById("branchSelect").value;
+      try {
+        const res = await fetch(`/api/rent3/checkout/${branch}/${roomId}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tx_ref: txRef })
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          loadDashboard();
+          loadCheckouts();
+        } else {
+          Bass.updateAppAlert(data.detail || "완료 처리 실패", "error");
+        }
+      } catch (err) {
+        Bass.updateAppAlert(err.message, "error");
+      }
+    }
+
+    async function openCheckoutReceiptModal(roomId) {
+      const branch = document.getElementById("branchSelect").value;
+      try {
+        const res = await fetch(`/api/rent3/checkout/${branch}/${roomId}/receipt`);
+        const data = await res.json();
+        if (!data.success) {
+          Bass.updateAppAlert("영수증을 불러오지 못했습니다.", "error");
+          return;
+        }
+
+        document.getElementById("rcptSettlementNo").innerText = data.settlement_no;
+        document.getElementById("rcptRoom").innerText = data.room_number;
+        document.getElementById("rcptTenant").innerText = `${data.tenant_name} (${data.tenant_phone})`;
+        document.getElementById("rcptMoveOut").innerText = data.move_out_date;
+        document.getElementById("rcptOrigDeposit").innerText = `${data.original_deposit.toLocaleString()}원`;
+
+        // 공제 내역 표
+        const b = data.breakdown;
+        document.getElementById("rcptUnpaid").innerText = `${b.unpaid_rent.toLocaleString()}원`;
+        document.getElementById("rcptWater").innerText = `${b.utility.water.toLocaleString()}원`;
+        document.getElementById("rcptElectric").innerText = `${b.utility.electric.toLocaleString()}원`;
+        document.getElementById("rcptGas").innerText = `${b.utility.gas.toLocaleString()}원`;
+        document.getElementById("rcptUtilityTotal").innerText = `${b.utility.total.toLocaleString()}원`;
+
+        document.getElementById("rcptCleaning").innerText = `${b.restoration.cleaning.toLocaleString()}원`;
+        document.getElementById("rcptRepair").innerText = `${b.restoration.repair.toLocaleString()}원`;
+        document.getElementById("rcptRestorationNotes").innerText = b.restoration.notes || "통상 손모 외 특이 파손 없음";
+        document.getElementById("rcptRestorationTotal").innerText = `${b.restoration.total.toLocaleString()}원`;
+
+        document.getElementById("rcptTotalDeductions").innerText = `-${b.total_deductions.toLocaleString()}원`;
+        document.getElementById("rcptFinalRefund").innerText = `${data.final_refund_deposit.toLocaleString()}원`;
+
+        document.getElementById("rcptBank").innerText = `${data.refund_account.bank} ${data.refund_account.account} (예금주: ${data.refund_account.holder})`;
+        document.getElementById("rcptStatus").innerText = data.refund_completed ? `✅ 반환 송금완료 (${data.refund_completed_at})` : `⏳ 세입자 동의 완료 (송금 대기)`;
+        document.getElementById("rcptTxRef").innerText = data.refund_tx_ref || "미발행";
+
+        document.getElementById("checkoutReceiptModal").style.display = "flex";
+      } catch (err) {
+        Bass.updateAppAlert("영수증 오류: " + err.message, "error");
+      }
+    }
+
+    function closeCheckoutReceiptModal() {
+      document.getElementById("checkoutReceiptModal").style.display = "none";
+    }
+
+    function printCheckoutReceipt() {
+      window.print();
     }
 
     /* ─── ⏳ Lease Expiration & Online Renewal (재계약 관제) ─── */
@@ -1300,78 +1923,361 @@
       }
     }
 
+    async function loadTaxRoiDashboard() {
+      const mode = document.getElementById("taxRoiModeSelect")?.value || "SEPARATE_14";
+      try {
+        const res = await fetch(`/api/rent3/analytics/tax-roi?tax_mode=${mode}`);
+        const result = await res.json();
+        if (!result.success || !result.data) return;
+        const data = result.data;
+        const agg = data.aggregate;
+
+        // 1. Top Executive KPI Cards
+        const elAnnRev = document.getElementById("taxRoiAnnualRevenue");
+        if (elAnnRev) elAnnRev.innerText = (agg.annual_gross_revenue || 0).toLocaleString() + "원";
+        const elMonRev = document.getElementById("taxRoiMonthlyRevenue");
+        if (elMonRev) elMonRev.innerText = (agg.monthly_gross_revenue || 0).toLocaleString();
+        const elVacLoss = document.getElementById("taxRoiVacancyLoss");
+        if (elVacLoss) elVacLoss.innerText = (agg.annual_vacancy_loss || 0).toLocaleString() + "원";
+        const elVacRooms = document.getElementById("taxRoiVacantRooms");
+        if (elVacRooms) elVacRooms.innerText = agg.vacant_rooms || 0;
+        const elVacRate = document.getElementById("taxRoiVacancyRate");
+        if (elVacRate) elVacRate.innerText = agg.vacancy_rate || 0;
+        const elTotTax = document.getElementById("taxRoiTotalTax");
+        if (elTotTax) elTotTax.innerText = (agg.taxes.grand_total_tax || 0).toLocaleString() + "원";
+        const elIncTax = document.getElementById("taxRoiIncomeTax");
+        if (elIncTax) elIncTax.innerText = (agg.taxes.total_rental_income_tax || 0).toLocaleString() + "원";
+        const elNetCap = document.getElementById("taxRoiNetCapRate");
+        if (elNetCap) elNetCap.innerText = (agg.roi.avg_net_roi || 0) + "%";
+        const elNetProf = document.getElementById("taxRoiNetProfit");
+        if (elNetProf) elNetProf.innerText = (agg.roi.total_net_profit || 0).toLocaleString();
+
+        // 2. 3 Branches Side-by-Side Cards Grid
+        const grid = document.getElementById("branchComparisonGrid");
+        if (grid && data.branches) {
+          grid.innerHTML = data.branches.map(b => {
+            const isChic = b.branch_id === 'main';
+            const badgeColor = isChic ? 'var(--primary)' : (b.branch_id === 'sunho' ? '#fbbf24' : '#a78bfa');
+            const bgGlow = isChic ? 'rgba(56,189,248,0.06)' : (b.branch_id === 'sunho' ? 'rgba(245,158,11,0.06)' : 'rgba(167,139,250,0.06)');
+            const borderCol = isChic ? 'rgba(56,189,248,0.3)' : (b.branch_id === 'sunho' ? 'rgba(245,158,11,0.3)' : 'rgba(167,139,250,0.3)');
+
+            return `
+              <div style="background:${bgGlow}; border:1px solid ${borderCol}; border-radius:14px; padding:18px; display:flex; flex-direction:column; justify-content:space-between;">
+                <div>
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                    <div>
+                      <span style="font-size:17px; font-weight:800; color:#fff;">🏢 ${b.branch_name}</span>
+                      <span style="font-size:11px; color:var(--text-muted); margin-left:6px;">(${b.branch_type})</span>
+                    </div>
+                    <span style="font-size:11.5px; padding:3px 8px; border-radius:6px; background:rgba(255,255,255,0.08); color:${badgeColor}; font-weight:700;">
+                      실질 ROI ${b.roi.net_roi_pct}%
+                    </span>
+                  </div>
+
+                  <!-- Occupancy Progress Bar -->
+                  <div style="margin-bottom:14px;">
+                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
+                      <span style="color:var(--text-muted);">가동률 (입주 ${b.occupied_rooms} / 공실 ${b.vacant_rooms}개실)</span>
+                      <strong style="color:${b.occupancy_rate >= 90 ? '#34d399' : '#fbbf24'};">${b.occupancy_rate}%</strong>
+                    </div>
+                    <div style="height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                      <div style="height:100%; width:${b.occupancy_rate}%; background:${badgeColor}; border-radius:3px;"></div>
+                    </div>
+                  </div>
+
+                  <!-- Metrics List -->
+                  <div style="background:rgba(15,23,42,0.6); border-radius:10px; padding:12px; font-size:12.5px; display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between;">
+                      <span style="color:var(--text-muted);">월 총 수납액:</span>
+                      <strong style="color:#fff;">${b.monthly_gross_revenue.toLocaleString()}원</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                      <span style="color:var(--text-muted);">연간 총 수입:</span>
+                      <strong style="color:#34d399;">${b.annual_gross_revenue.toLocaleString()}원</strong>
+                    </div>
+                    <div style="display:flex; justify-content:space-between;">
+                      <span style="color:var(--text-muted);">연간 공실 손실:</span>
+                      <span style="color:#f87171; font-weight:600;">-${b.annual_vacancy_loss.toLocaleString()}원</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; border-top:1px dashed rgba(255,255,255,0.1); padding-top:6px; margin-top:2px;">
+                      <span style="color:var(--text-muted);">순운영이익(NOI):</span>
+                      <strong style="color:var(--primary);">${b.noi.toLocaleString()}원</strong>
+                    </div>
+                  </div>
+
+                  <!-- Tax Estimation Badge -->
+                  <div style="font-size:11.5px; color:#cbd5e1; background:rgba(0,0,0,0.25); border-radius:8px; padding:10px; line-height:1.5;">
+                    <div>🏛️ <strong>추정 세액:</strong> ${(b.taxes.total_estimated_tax || 0).toLocaleString()}원</div>
+                    <div style="color:var(--text-muted); font-size:11px;">
+                      • 소득세: ${(b.taxes.rental_income_tax || 0).toLocaleString()}원 | 부가세: 0원 (면세)
+                    </div>
+                    <div style="color:var(--text-muted); font-size:11px;">
+                      • 보유세(종부+재산): ${((b.taxes.property_tax || 0) + (b.taxes.comprehensive_property_tax || 0)).toLocaleString()}원
+                    </div>
+                  </div>
+                </div>
+
+                <div style="margin-top:14px; text-align:right;">
+                  <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; width:100%; justify-content:center;" onclick="document.getElementById('branchSelect').value='${b.branch_id}'; loadDashboard(); switchTab('tabRooms');">
+                    🔍 ${b.branch_name} 호실 대장 바로가기
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join("");
+        }
+
+        // 3. Tax & ROI Detail Table
+        const tbody = document.getElementById("taxRoiTableBody");
+        if (tbody && data.branches) {
+          tbody.innerHTML = data.branches.map(b => `
+            <tr>
+              <td><strong>🏢 ${b.branch_name}</strong><br><span style="font-size:11px; color:var(--text-muted);">${b.branch_type}</span></td>
+              <td>${b.occupied_rooms}실 / <span style="color:#f87171;">${b.vacant_rooms}실</span> (${b.occupancy_rate}%)</td>
+              <td>${b.monthly_gross_revenue.toLocaleString()}원</td>
+              <td><strong style="color:#fff;">${b.annual_gross_revenue.toLocaleString()}원</strong></td>
+              <td>${(b.taxes.rental_income_tax || 0).toLocaleString()}원</td>
+              <td>${((b.taxes.property_tax || 0) + (b.taxes.comprehensive_property_tax || 0)).toLocaleString()}원</td>
+              <td style="color:#34d399; font-weight:700;">${b.noi.toLocaleString()}원</td>
+              <td><span class="badge badge-confirmed" style="font-size:12px;">${b.roi.net_roi_pct}%</span></td>
+            </tr>
+          `).join("") + `
+            <tr style="background:rgba(255,255,255,0.04); font-weight:700; border-top:2px solid var(--card-border);">
+              <td>전사 3대 지점 합계</td>
+              <td>${agg.occupied_rooms}실 / <span style="color:#f87171;">${agg.vacant_rooms}실</span> (${agg.occupancy_rate}%)</td>
+              <td>${agg.monthly_gross_revenue.toLocaleString()}원</td>
+              <td><strong style="color:#34d399;">${agg.annual_gross_revenue.toLocaleString()}원</strong></td>
+              <td>${(agg.taxes.total_rental_income_tax || 0).toLocaleString()}원</td>
+              <td>${((agg.taxes.total_property_tax || 0) + (agg.taxes.total_comprehensive_tax || 0)).toLocaleString()}원</td>
+              <td style="color:var(--primary); font-weight:800;">${agg.total_noi.toLocaleString()}원</td>
+              <td><span class="badge" style="background:var(--primary); color:#0f172a; font-weight:800; font-size:12px;">평균 ${agg.roi.avg_net_roi}%</span></td>
+            </tr>
+          `;
+        }
+
+        // 4. Tax Strategy Advisor Tips
+        const tipsList = document.getElementById("taxAdvisorTipsList");
+        if (tipsList && data.tax_advisory_tips) {
+          tipsList.innerHTML = data.tax_advisory_tips.map(tip => `
+            <div style="background:rgba(15,23,42,0.8); border:1px solid rgba(255,255,255,0.06); border-radius:8px; padding:10px 12px;">
+              ${tip}
+            </div>
+          `).join("");
+        }
+      } catch (err) {
+        console.error("세무·수익률 데이터 로드 오류:", err);
+      }
+    }
+
     window.addEventListener("DOMContentLoaded", loadDashboard);
   </script>
 
   <!-- Check-Out & Deposit Settlement Modal -->
+  <!-- Modal: Upgraded CheckOut Inspection & Settlement Modal -->
   <div class="modal-overlay" id="checkoutModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); z-index:300; justify-content:center; align-items:center; padding:20px;">
-    <div class="modal" style="background:#131b2e; border:1px solid var(--card-border); border-radius:16px; max-width:560px; width:100%; padding:24px; max-height:90vh; overflow-y:auto;">
+    <div class="modal" style="background:#131b2e; border:1px solid var(--card-border); border-radius:16px; max-width:620px; width:100%; padding:24px; max-height:90vh; overflow-y:auto; box-shadow:0 25px 50px rgba(0,0,0,0.6);">
       <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
         <div>
-          <h3 style="font-size:18px; font-weight:800; color:#fff;" id="coTitle">퇴실 시설 검수 및 보증금 정산 명세서</h3>
-          <div style="font-size:12px; color:var(--text-muted);">임차인: <strong id="coTenant" style="color:var(--primary);">-</strong> | 기존 보증금: <strong id="coDeposit" style="color:#fff;">-</strong></div>
+          <h3 style="font-size:18px; font-weight:800; color:#fff;" id="coTitle">🚪 퇴실 시설 점검 & 보증금 정산 명세서</h3>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:3px;">
+            임차인: <strong id="coTenant" style="color:var(--primary);">-</strong> | 계약 보증금: <strong id="coDeposit" style="color:#fff;">-</strong>
+          </div>
         </div>
         <button onclick="closeCheckOutModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">✕</button>
       </div>
 
-      <!-- Facility Inspection Checklist (입실 사진 대조) -->
-      <div style="background:#1e293b; padding:12px 14px; border-radius:10px; margin-bottom:14px;">
-        <div style="font-size:13px; font-weight:700; color:var(--primary); margin-bottom:8px;">🔍 6대 주요 시설 퇴실 점검표 (입실 상태와 대조)</div>
+      <!-- 입실 점검 대조 메모 안내 -->
+      <div id="coCheckinRefBox" style="display:none; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:10px 14px; border-radius:8px; font-size:12px; color:#38bdf8; margin-bottom:14px;">
+        📌 입실 당시 점검 메모 불러오는 중...
+      </div>
+
+      <!-- 6대 주요 시설 퇴실 점검표 (통상 손모 자연마모 인정 안내) -->
+      <div style="background:#1e293b; padding:14px; border-radius:10px; margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <div style="font-size:13px; font-weight:700; color:var(--primary);">🔍 6대 주요 시설 상태 (입실 상태와 1:1 대조)</div>
+          <span style="font-size:11px; color:#34d399; font-weight:600;">🌿 통상 생활마모는 임대인 무상 부담</span>
+        </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:12px; color:#e2e8f0;">
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 시스템 에어컨 정상</label>
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 드럼 세탁기 급배수 정상</label>
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 빌트인 냉장고 청결</label>
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 벽지·장판 훼손 없음</label>
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 도어락/인터폰 정상</label>
-          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 욕실 수압/도기 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> ❄️ 에어컨 냉각/필터 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 🌀 세탁기 급배수 정상</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 🧊 냉장고 청결 및 냉각</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 🛋️ 벽지/바닥 통상 손모 인정</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 🔐 디지털 도어락 초기화</label>
+          <label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" checked> 🚿 욕실 수압/배관 원활</label>
         </div>
       </div>
 
-      <!-- Deductions Form -->
+      <!-- 공과금 & 원상복구 세부 공제 입력 폼 -->
       <div style="background:rgba(15,23,42,0.8); border:1px solid var(--card-border); border-radius:10px; padding:14px; margin-bottom:14px;">
-        <div style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px;">📉 정산 공제 항목 산출</div>
-        
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:13px; color:var(--text-muted);">미납 월세/관리비 공제:</span>
-          <div style="display:flex; align-items:center; gap:4px;">
-            <input type="number" id="coUnpaid" value="0" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+        <div style="font-size:13px; font-weight:700; color:#f8fafc; margin-bottom:10px;">📉 투명 공제 항목 세부 입력</div>
+
+        <!-- 1. 미납 월세 -->
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div>
+            <span style="font-size:13px; color:#f8fafc; font-weight:600;">미납 월세/관리비 (rent2 장부)</span>
+            <div style="font-size:11px; color:var(--text-muted);">미납 회차 없을 시 0원</div>
+          </div>
+          <input type="number" id="coUnpaid" value="0" style="width:120px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+        </div>
+
+        <!-- 2. 공과금 세부 (수도, 전기, 가스) -->
+        <div style="margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.06);">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:13px; color:#f8fafc; font-weight:600;">퇴실 당일 공과금 실비 검침</span>
+            <span id="coUtilitySubtotal" style="font-size:13px; color:#fbbf24; font-weight:700;">45,000원</span>
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+            <div>
+              <label style="font-size:11px; color:var(--text-muted);">수도요금</label>
+              <input type="number" id="coWater" value="15000" style="width:100%; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--text-muted);">한전 전기요금</label>
+              <input type="number" id="coElectric" value="20000" style="width:100%; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--text-muted);">도시가스비</label>
+              <input type="number" id="coGas" value="10000" style="width:100%; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+            </div>
           </div>
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:13px; color:var(--text-muted);">퇴실 당일 공과금 실비:</span>
-          <div style="display:flex; align-items:center; gap:4px;">
-            <input type="number" id="coUtility" value="45000" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+        <!-- 3. 원상복구 & 청소비 세부 -->
+        <div style="margin-bottom:10px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+            <span style="font-size:13px; color:#f8fafc; font-weight:600;">퇴실 청소 및 시설 원상복구 실비</span>
+            <span id="coDamageSubtotal" style="font-size:13px; color:#fbbf24; font-weight:700;">70,000원</span>
           </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:6px;">
+            <div>
+              <label style="font-size:11px; color:var(--text-muted);">전문 입주청소비</label>
+              <input type="number" id="coCleaning" value="70000" style="width:100%; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+            </div>
+            <div>
+              <label style="font-size:11px; color:var(--text-muted);">과실 파손 수리비 (A/S)</label>
+              <input type="number" id="coRepair" value="0" style="width:100%; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" oninput="calculateRefundInModal()">
+            </div>
+          </div>
+          <input type="text" id="coNotes" placeholder="원상복구 및 공과금 산출 근거 메모 (예: 생활손모 인정, 청소비 정산)" style="width:100%; padding:6px 10px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
         </div>
 
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-          <span style="font-size:13px; color:var(--text-muted);">시설 파손/원상복구 실비:</span>
-          <div style="display:flex; align-items:center; gap:4px;">
-            <input type="number" id="coDamage" value="0" style="width:110px; padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; text-align:right;" onchange="calculateRefundInModal()"> 원
+        <!-- 4. 세입자 반환 계좌 -->
+        <div style="padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+          <div style="font-size:12px; color:var(--text-muted); margin-bottom:6px;">보증금 반환 계좌 정보</div>
+          <div style="display:grid; grid-template-columns:110px 1fr 100px; gap:8px;">
+            <input type="text" id="coRefundBank" value="카카오뱅크" placeholder="은행" style="padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
+            <input type="text" id="coRefundAccount" value="3333-01-2345678" placeholder="계좌번호" style="padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
+            <input type="text" id="coRefundHolder" value="" placeholder="예금주" style="padding:6px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
           </div>
-        </div>
-
-        <div style="margin-top:6px;">
-          <input type="text" id="coNotes" placeholder="원상복구 및 공과금 특이사항 메모" style="width:100%; padding:6px 10px; background:#1e293b; border:1px solid var(--card-border); border-radius:6px; color:#fff; font-size:12px;">
         </div>
       </div>
 
-      <!-- Settlement Summary Result -->
+      <!-- Settlement Summary Result Box -->
       <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:10px; padding:14px; margin-bottom:16px;">
         <div style="display:flex; justify-content:space-between; font-size:13px; color:var(--text-muted); margin-bottom:4px;">
-          <span>총 공제 합계액:</span>
-          <span id="coTotalDeduction" style="color:#f87171; font-weight:700;">45,000원</span>
+          <span>총 공제 합계액 (미납+공과금+청소):</span>
+          <span id="coTotalDeduction" style="color:#f87171; font-weight:700;">115,000원</span>
         </div>
-        <div style="display:flex; justify-content:space-between; font-size:17px; font-weight:800; color:#fff;">
-          <span>최종 반환 보증금:</span>
-          <span id="coFinalRefund" style="color:#10b981; font-size:20px;">4,955,000원</span>
+        <div style="display:flex; justify-content:space-between; font-size:18px; font-weight:800; color:#fff;">
+          <span>최종 반환 보증금 (실수령액):</span>
+          <span id="coFinalRefund" style="color:#10b981; font-size:22px;">4,885,000원</span>
         </div>
       </div>
 
       <div style="display:flex; gap:10px;">
-        <button class="btn btn-primary" style="flex:1;" onclick="completeCheckOutSubmit(this)">🚪 보증금 반환 완료 & 공실 자동 전환</button>
-        <button class="btn btn-secondary" style="width:auto; padding:0 16px;" onclick="closeCheckOutModal()">닫기</button>
+        <button class="btn btn-secondary" style="width:auto; padding:0 16px;" onclick="closeCheckOutModal()">취소</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="submitCheckOutInspection(this)">📄 정산서 발행 & 세입자 1:1 채팅 전송</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Official Printable Settlement Receipt (보증금 반환 영수증) -->
+  <div class="modal-overlay" id="checkoutReceiptModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:350; justify-content:center; align-items:center; padding:20px;">
+    <div class="modal" style="background:#fff; color:#0f172a; border-radius:14px; max-width:620px; width:100%; padding:30px; max-height:90vh; overflow-y:auto; box-shadow:0 30px 60px rgba(0,0,0,0.7);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:2px solid #0f172a; padding-bottom:12px;">
+        <div>
+          <h2 style="font-size:20px; font-weight:900; margin:0; color:#0f172a;">공식 임대보증금 반환 및 퇴실 정산 명세서</h2>
+          <div style="font-size:12px; color:#64748b; margin-top:2px;">관리번호: <strong id="rcptSettlementNo">-</strong></div>
+        </div>
+        <button onclick="closeCheckoutReceiptModal()" style="background:none; border:none; color:#64748b; font-size:24px; cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Info Header -->
+      <table style="width:100%; border:1px solid #cbd5e1; border-collapse:collapse; font-size:13px; margin-bottom:16px;">
+        <tr style="background:#f8fafc;">
+          <th style="border:1px solid #cbd5e1; padding:8px; width:22%; color:#475569;">소재지 및 호실</th>
+          <td style="border:1px solid #cbd5e1; padding:8px; width:28%;" id="rcptRoom">-</td>
+          <th style="border:1px solid #cbd5e1; padding:8px; width:22%; color:#475569;">퇴실 일자</th>
+          <td style="border:1px solid #cbd5e1; padding:8px; width:28%;" id="rcptMoveOut">-</td>
+        </tr>
+        <tr>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">임차인(을)</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;" id="rcptTenant">-</td>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">원 계약 보증금</th>
+          <td style="border:1px solid #cbd5e1; padding:8px; font-weight:700;" id="rcptOrigDeposit">-</td>
+        </tr>
+      </table>
+
+      <!-- Breakdown Table -->
+      <h4 style="font-size:14px; margin:0 0 8px 0; color:#0f172a;">1. 정산 공제 세부 내역</h4>
+      <table style="width:100%; border:1px solid #cbd5e1; border-collapse:collapse; font-size:13px; margin-bottom:16px;">
+        <tr style="background:#f1f5f9; font-weight:700;">
+          <th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">항목</th>
+          <th style="border:1px solid #cbd5e1; padding:8px; text-align:right;">산출 내역</th>
+          <th style="border:1px solid #cbd5e1; padding:8px; text-align:right; width:120px;">공제 금액</th>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1; padding:8px;">미납 월세/관리비</td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right; color:#64748b;">FIFO 실시간 장부 기준</td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right;" id="rcptUnpaid">0원</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1; padding:8px;">당일 공과금 실비</td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right; color:#64748b;">
+            수도 <span id="rcptWater">-</span> / 전기 <span id="rcptElectric">-</span> / 가스 <span id="rcptGas">-</span>
+          </td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right;" id="rcptUtilityTotal">-</td>
+        </tr>
+        <tr>
+          <td style="border:1px solid #cbd5e1; padding:8px;">퇴실 청소 및 원상복구</td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right; color:#64748b;">
+            입주청소 <span id="rcptCleaning">-</span> / 수리 <span id="rcptRepair">-</span> (<span id="rcptRestorationNotes" style="font-size:11px;">-</span>)
+          </td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right;" id="rcptRestorationTotal">-</td>
+        </tr>
+        <tr style="background:#fef2f2; font-weight:700; color:#ef4444;">
+          <td colspan="2" style="border:1px solid #cbd5e1; padding:8px;">공제 합계 (A)</td>
+          <td style="border:1px solid #cbd5e1; padding:8px; text-align:right;" id="rcptTotalDeductions">-</td>
+        </tr>
+      </table>
+
+      <!-- Final Refund Banner -->
+      <div style="background:#ecfdf5; border:2px solid #10b981; border-radius:10px; padding:16px; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:12px; color:#047857; font-weight:700;">최종 반환 보증금 (원보증금 - 공제합계)</div>
+          <div style="font-size:11px; color:#059669; margin-top:2px;">반환 계좌: <span id="rcptBank">-</span></div>
+        </div>
+        <div style="font-size:24px; font-weight:900; color:#047857;" id="rcptFinalRefund">-</div>
+      </div>
+
+      <!-- Legal Assurance & Stamp -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; padding-top:12px; border-top:1px dashed #cbd5e1; font-size:12px; color:#475569;">
+        <div>
+          <div>• 정산 상태: <strong id="rcptStatus" style="color:#0f172a;">-</strong></div>
+          <div>• 송금 참조번호: <span id="rcptTxRef">-</span></div>
+          <div style="margin-top:4px; font-size:11px; color:#94a3b8;">* 본 명세서는 주택임대차보호법에 의거 상호 확인·동의된 공인 전산 영수증입니다.</div>
+        </div>
+        <div style="text-align:right; position:relative;">
+          <div style="font-size:13px; font-weight:700; color:#0f172a;">임대인: 김임대 (시크빌 본점)</div>
+          <div style="position:absolute; right:0; bottom:-8px; border:2px solid #ef4444; color:#ef4444; border-radius:50%; width:60px; height:60px; font-size:11px; font-weight:900; display:flex; align-items:center; justify-content:center; text-align:center; transform:rotate(-15deg); opacity:0.85; pointer-events:none;">
+            시크빌<br>정산확인
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+        <button class="btn btn-secondary" style="background:#e2e8f0; color:#0f172a;" onclick="closeCheckoutReceiptModal()">닫기</button>
+        <button class="btn btn-primary" onclick="printCheckoutReceipt()">🖨️ 영수증 인쇄 / PDF 저장</button>
       </div>
     </div>
   </div>
@@ -1445,6 +2351,276 @@
         <button class="btn btn-primary" id="btnSubmitRenewal" onclick="submitRenewalProposal(this)">🚀 재계약 제안 & 1:1 직통 채팅 발송</button>
       </div>
     </div>
+  <!-- Modal: Assign Contractor for A/S Ticket -->
+  <div id="assignContractorModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:#1e293b; border:1px solid var(--card-border); border-radius:16px; width:100%; max-width:520px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <h3 style="font-size:18px; font-weight:700; color:#fff;">👷 협력 수리업체 배정 & 방문일정</h3>
+        <button onclick="closeAssignContractorModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+      </div>
+
+      <input type="hidden" id="asAssignTicketId">
+
+      <div style="background:rgba(15,23,42,0.6); padding:14px; border-radius:10px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        <div><strong>호실 / 민원:</strong> <span id="asAssignRoomAndTitle" style="color:var(--primary); font-weight:700;">-</span></div>
+        <div><strong>세입자:</strong> <span id="asAssignTenant">-</span></div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">자주 찾는 협력업체 빠른 선택</label>
+        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+          <button type="button" class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); cursor:pointer;" onclick="selectPresetContractor('강남 종합설비 (김반장)', '010-3333-7777')">🔧 강남 종합설비</button>
+          <button type="button" class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); cursor:pointer;" onclick="selectPresetContractor('삼성/LG 에어컨 케어', '1588-3366')">❄️ 에어컨 케어</button>
+          <button type="button" class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); cursor:pointer;" onclick="selectPresetContractor('스마트 도어락 A/S', '010-8888-9999')">🔐 도어락 긴급출동</button>
+          <button type="button" class="tag" style="background:rgba(56,189,248,0.15); color:var(--primary); cursor:pointer;" onclick="selectPresetContractor('대성 친환경 보일러', '1588-8577')">🔥 보일러 설비</button>
+          <button type="button" class="tag" style="background:rgba(16,185,129,0.15); color:#34d399; cursor:pointer;" onclick="selectPresetContractor('건물주 직접 방문수리', '010-2345-6789')">🛠️ 직접 방문수리</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:12px;">
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">업체 / 기사명</label>
+          <input type="text" id="asContractorName" placeholder="예: 강남 종합설비" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;">
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">기사 연락처</label>
+          <input type="text" id="asContractorPhone" placeholder="예: 010-1234-5678" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;">
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">방문 예정 일시</label>
+        <input type="text" id="asScheduledVisitAt" placeholder="예: 2026-10-28 14:00 (방문 예정)" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;">
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">사전 조율 및 수리 메모</label>
+        <input type="text" id="asAdminNotes" placeholder="예: 세대 부재 시 비밀번호 안내 완료, 패킹 교체 예정" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;">
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn btn-secondary" onclick="closeAssignContractorModal()">취소</button>
+        <button class="btn btn-primary" onclick="submitAssignContractor(this)">🚀 기사 배정 및 세입자 채팅 안내</button>
+      </div>
+    </div>
   </div>
+
+  <!-- Modal: Complete Repair & Cost Settlement -->
+  <div id="completeRepairModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(8px); z-index:1000; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:#1e293b; border:1px solid var(--card-border); border-radius:16px; width:100%; max-width:540px; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px;">
+        <h3 style="font-size:18px; font-weight:700; color:#fff;">📸 수리 완료 보고 및 비용 정산</h3>
+        <button onclick="closeCompleteRepairModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+      </div>
+
+      <input type="hidden" id="asCompleteTicketId">
+
+      <div style="background:rgba(15,23,42,0.6); padding:14px; border-radius:10px; margin-bottom:16px; font-size:13px; line-height:1.6;">
+        <div><strong>호실 / 민원:</strong> <span id="asCompleteRoomAndTitle" style="color:var(--primary); font-weight:700;">-</span></div>
+        <div><strong>담당 기사:</strong> <span id="asCompleteContractor">-</span></div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">조치 내역 메모</label>
+        <textarea id="asRepairNotes" rows="2" placeholder="예: 밸브 교체 및 누수 차단 완료, 주변 청소 마침" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:13px;"></textarea>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">총 수리비 (원)</label>
+          <input type="number" id="asRepairCost" placeholder="예: 75000" style="width:100%; padding:10px; background:#0f172a; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:14px;" oninput="updateCostBurdenPreview()">
+        </div>
+        <div>
+          <label style="display:block; font-size:12px; color:var(--text-muted); margin-bottom:6px;">비용 부담 구분</label>
+          <select id="asCostBurdenSelect" class="branch-select" style="width:100%;" onchange="updateCostBurdenPreview()">
+            <option value="LANDLORD">임대인 100% 부담 (노후 자연마모)</option>
+            <option value="TENANT">세입자 100% 부담 (과실 파손)</option>
+            <option value="SHARED">50:50 상호 분담</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="asCostBurdenPreview" style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:8px; padding:10px; margin-bottom:16px; font-size:12px; color:#34d399;">
+        정산: 임대인 부담 0원 / 세입자 청구 0원
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:10px;">
+        <button class="btn btn-secondary" onclick="closeCompleteRepairModal()">취소</button>
+        <button class="btn btn-primary" onclick="submitCompleteRepair(this)">✅ 수리 완료 및 1:1 채팅 정산 통보</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Admin View Rent Payment Certificate for Year-End Tax (관리자 연말정산 증명서 모달) -->
+  <div class="modal-overlay" id="adminRentCertModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:360; justify-content:center; align-items:center; padding:20px;">
+    <div class="modal" id="printableAdminCertArea" style="background:#fff; color:#0f172a; border-radius:14px; max-width:680px; width:100%; padding:32px; max-height:92vh; overflow-y:auto; box-shadow:0 30px 60px rgba(0,0,0,0.8);">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:2px solid #0f172a; padding-bottom:12px;">
+        <div>
+          <h2 style="font-size:21px; font-weight:900; margin:0; color:#0f172a;">주택임대차 월세액 납입 증명서</h2>
+          <div style="font-size:12px; color:#64748b; margin-top:2px;">
+            [조세특례제한법 제95조의2 월세액 세액공제 제출용] · 발급번호: <strong id="adminCertNoText">-</strong>
+          </div>
+        </div>
+        <button onclick="closeAdminRentCertModal()" style="background:none; border:none; color:#64748b; font-size:24px; cursor:pointer;">✕</button>
+      </div>
+
+      <!-- Applicant & Landlord Table -->
+      <table style="width:100%; border:1px solid #cbd5e1; border-collapse:collapse; font-size:12.5px; margin-bottom:14px;">
+        <tr style="background:#f8fafc;">
+          <th style="border:1px solid #cbd5e1; padding:8px; width:18%; color:#475569;">신청인 (임차인)</th>
+          <td style="border:1px solid #cbd5e1; padding:8px; width:32%; font-weight:700;" id="adminCertTenantName">-</td>
+          <th style="border:1px solid #cbd5e1; padding:8px; width:18%; color:#475569;">주민등록번호</th>
+          <td style="border:1px solid #cbd5e1; padding:8px; width:32%;" id="adminCertTenantSsn">950101-1******</td>
+        </tr>
+        <tr>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">임대차 목적물</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;" colspan="3" id="adminCertAddress">-</td>
+        </tr>
+        <tr style="background:#f8fafc;">
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">약정 임대료</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;">보증금 <span id="adminCertDeposit">-</span> / 월 <span id="adminCertMonthlyRent" style="font-weight:700;">-</span></td>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">임대차 기간</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;" id="adminCertPeriod">-</td>
+        </tr>
+        <tr>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">임대인 상호/성명</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;" id="adminCertLandlordName">-</td>
+          <th style="border:1px solid #cbd5e1; padding:8px; color:#475569;">사업자등록번호</th>
+          <td style="border:1px solid #cbd5e1; padding:8px;" id="adminCertLandlordRegNo">120-81-12345</td>
+        </tr>
+      </table>
+
+      <!-- 12 Months Payment & Cash Receipt Detail -->
+      <h4 style="font-size:13.5px; margin:0 0 8px 0; color:#0f172a; display:flex; justify-content:space-between; align-items:center;">
+        <span>1. <span id="adminCertYearTitle">2026</span>년도 월세 납부 및 국세청 현금영수증 승인 내역</span>
+        <span style="font-size:11px; color:#10b981; font-weight:600;">✔ 국세청 현금영수증 자진발급 승인</span>
+      </h4>
+      <table style="width:100%; border:1px solid #cbd5e1; border-collapse:collapse; font-size:12px; margin-bottom:14px;">
+        <thead style="background:#f1f5f9; font-weight:700;">
+          <tr>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:center; width:45px;">회차</th>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:left;">귀속월</th>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:center;">실납부일자</th>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:right;">월세 납부액</th>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:center;">수납방식</th>
+            <th style="border:1px solid #cbd5e1; padding:7px; text-align:center;">국세청 승인번호</th>
+          </tr>
+        </thead>
+        <tbody id="adminCertTableBody">
+          <tr><td colspan="6" style="text-align:center; padding:16px; color:#64748b;">납부 내역을 집계 중입니다...</td></tr>
+        </tbody>
+      </table>
+
+      <!-- Total & Estimated Refund Box -->
+      <div style="background:#f0fdf4; border:2px solid #16a34a; border-radius:10px; padding:14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:12px; color:#15803d; font-weight:700;">연간 월세 총 납입액</div>
+          <div style="font-size:22px; font-weight:900; color:#166534;" id="adminCertTotalPaidAmount">- 원</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:11.5px; color:#15803d; font-weight:700;">예상 세액공제 환급액 (17% 기준)</div>
+          <div style="font-size:20px; font-weight:900; color:#047857;" id="adminCertEstimatedRefund">- 원</div>
+          <div style="font-size:10.5px; color:#64748b;">* 총급여 5,500만 원 이하 근로자 기준</div>
+        </div>
+      </div>
+
+      <!-- Legal Footer & Official Seal -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; padding-top:10px; border-top:1px dashed #cbd5e1; font-size:11px; color:#64748b;">
+        <div style="line-height:1.6;">
+          <div>• 본 증명서는 조세특례제한법 시행령 제95조의2에 따른 연말정산 공식 증빙 서류입니다.</div>
+          <div>• 발급일시: <span id="adminCertIssuedAt">-</span> | 발급시스템: Rent3 Smart Direct SaaS</div>
+        </div>
+        <div style="text-align:right; position:relative; min-width:130px;">
+          <div style="font-size:13px; font-weight:800; color:#0f172a;" id="adminCertSealLandlordName">시크빌 임대관리센터</div>
+          <!-- Red Round Stamp Seal -->
+          <div style="position:absolute; right:0; bottom:-6px; border:2.5px solid #dc2626; color:#dc2626; border-radius:50%; width:54px; height:54px; font-size:10.5px; font-weight:900; display:flex; align-items:center; justify-content:center; text-align:center; transform:rotate(-12deg); opacity:0.85; background:rgba(254,226,226,0.2);">
+            시크빌<br>직인
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:22px;">
+        <button class="btn btn-secondary" style="background:#e2e8f0; color:#0f172a; width:auto; padding:8px 16px;" onclick="closeAdminRentCertModal()">닫기</button>
+        <button class="btn btn-primary" style="width:auto; padding:8px 20px; font-weight:800;" onclick="printAdminRentCert()">🖨️ 증명서 인쇄 / PDF 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function openAdminRentCertModal() {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      const roomId = document.getElementById("certTargetRoomSelect")?.value || "201";
+
+      try {
+        const res = await fetch(`/api/rent3/certificate/rent-tax/${branch}/${roomId}?year=2026`);
+        const data = await res.json();
+        if (!data.success || !data.certificate) {
+          alert("증명서를 불러오지 못했습니다.");
+          return;
+        }
+
+        const c = data.certificate;
+        document.getElementById("adminCertNoText").innerText = c.cert_no;
+        document.getElementById("adminCertYearTitle").innerText = c.year;
+        document.getElementById("adminCertTenantName").innerText = c.tenant_name;
+        document.getElementById("adminCertTenantSsn").innerText = c.tenant_ssn_masked || "950101-1******";
+        document.getElementById("adminCertAddress").innerText = c.address;
+        document.getElementById("adminCertDeposit").innerText = (c.deposit || 0).toLocaleString() + "원";
+        document.getElementById("adminCertMonthlyRent").innerText = (c.monthly_rent || 0).toLocaleString() + "원";
+        document.getElementById("adminCertPeriod").innerText = c.lease_period;
+        document.getElementById("adminCertLandlordName").innerText = c.landlord_name;
+        document.getElementById("adminCertSealLandlordName").innerText = c.landlord_name;
+        document.getElementById("adminCertLandlordRegNo").innerText = c.landlord_reg_no;
+        document.getElementById("adminCertIssuedAt").innerText = c.issued_at;
+        document.getElementById("adminCertTotalPaidAmount").innerText = (c.total_paid_amount || 0).toLocaleString() + "원";
+        document.getElementById("adminCertEstimatedRefund").innerText = (c.estimated_tax_refund || 0).toLocaleString() + "원";
+
+        const tbody = document.getElementById("adminCertTableBody");
+        if (c.items && c.items.length > 0) {
+          tbody.innerHTML = c.items.map(it => `
+            <tr>
+              <td style="border:1px solid #cbd5e1; padding:6px; text-align:center;">${it.month}회</td>
+              <td style="border:1px solid #cbd5e1; padding:6px;">${it.period}</td>
+              <td style="border:1px solid #cbd5e1; padding:6px; text-align:center;">${it.paid_date}</td>
+              <td style="border:1px solid #cbd5e1; padding:6px; text-align:right; font-weight:700;">${(it.amount || 0).toLocaleString()}원</td>
+              <td style="border:1px solid #cbd5e1; padding:6px; text-align:center; font-size:11px; color:#475569;">${it.payment_method}</td>
+              <td style="border:1px solid #cbd5e1; padding:6px; text-align:center; font-family:monospace; font-size:11px; color:#0284c7; font-weight:700;">${it.cash_receipt_no}</td>
+            </tr>
+          `).join("");
+        } else {
+          tbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:16px;">납부 내역이 없습니다.</td></tr>`;
+        }
+
+        document.getElementById("adminRentCertModal").style.display = "flex";
+      } catch (err) {
+        alert("증명서 조회 오류: " + err.message);
+      }
+    }
+
+    function closeAdminRentCertModal() {
+      document.getElementById("adminRentCertModal").style.display = "none";
+    }
+
+    function printAdminRentCert() {
+      window.print();
+    }
+
+    async function sendCertToTenantChat(btn) {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      const roomId = document.getElementById("certTargetRoomSelect")?.value || "201";
+
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/certificate/send-chat/${branch}/${roomId}?year=2026`, {
+          method: "POST"
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(`📑 [${roomId}호] 연말정산 월세 납입 증명서 발급 안내가 1:1 대화방에 성공적으로 전송되었습니다!`, "success");
+        } else {
+          Bass.updateAppAlert(data.detail || "전송에 실패했습니다.", "error");
+        }
+      });
+    }
+  </script>
 </body>
 </html>

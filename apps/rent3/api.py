@@ -8,7 +8,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 
-from .domain import RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, CoSigningSession, ChatMessage, RoomAccessInfo, ParkingRegistration, MonthlyBill, PaymentReceipt, CheckOutRecord, RtmsContractReport, LeaseRenewal
+from .domain import (
+    RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, 
+    CoSigningSession, ChatMessage, RoomAccessInfo, ParkingRegistration, 
+    MonthlyBill, PaymentReceipt, CheckOutRecord, RtmsContractReport, 
+    LeaseRenewal, MaintenanceTicket, calculate_branch_tax_roi, calculate_portfolio_tax_roi,
+    RentPaymentCertificate, generate_rent_certificate
+)
 try:
     from apps.rent2.backend.domain.rent import Building
 except ImportError:
@@ -1097,15 +1103,140 @@ def get_payment_receipt(receipt_id: str):
 # ─────────────────────────────────────────────────────────────
 class CheckOutInspectReq(BaseModel):
     unpaid_rent_deduction: int = 0
+    water_fee: int = 15000
+    electric_fee: int = 20000
+    gas_fee: int = 10000
     utility_deduction: int = 45000
-    damage_deduction: int = 0
-    damage_notes: str = "통상 손모 외 특이 파손 없음"
-    checks: Dict[str, bool] = Field(default_factory=dict)
+    cleaning_fee: int = 70000
+    repair_deduction: int = 0
+    damage_deduction: int = 70000
+    damage_notes: str = "통상 손모 외 특이 파손 없음 (상태 양호)"
+    other_deduction: int = 0
+    checks: Dict[str, Any] = Field(default_factory=dict)
+    photos: List[str] = Field(default_factory=list)
+    refund_bank: str = "카카오뱅크"
+    refund_account: str = "3333-01-2345678"
+    refund_account_holder: str = ""
+
+
+class CheckOutAgreeReq(BaseModel):
+    signature: str
+    refund_bank: str = ""
+    refund_account: str = ""
+    refund_account_holder: str = ""
+
+
+class CheckOutCompleteReq(BaseModel):
+    tx_ref: str = ""
+
+
+@router.get("/checkout/list")
+def list_checkouts(branch: str = Query("main")):
+    """지점 전체 퇴실 정산 목록 및 KPI 통계 조회."""
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch]
+    
+    # 지점 내 관리 대상 호실들 추출 (신규 퇴실 점검 착수용)
+    room_options = []
+    if Building:
+        try:
+            b_obj = Building.get(branch)
+            if b_obj and hasattr(b_obj, "rooms"):
+                raw_rooms = b_obj.rooms() if callable(b_obj.rooms) else b_obj.rooms
+                if raw_rooms:
+                    for r_id, r in raw_rooms.items():
+                        t_name = getattr(r, "tenant_name", "") or ""
+                        dep = getattr(r, "deposit", 5000000) or 5000000
+                        room_options.append({
+                            "room_id": str(r_id),
+                            "tenant_name": t_name or "(공실)",
+                            "deposit": dep,
+                            "is_occupied": bool(getattr(r, "is_occupied", False) or t_name)
+                        })
+        except Exception:
+            pass
+
+    # 기본 데모 데이터 시딩 (목록이 비어있을 경우)
+    if not checkouts:
+        c1 = CheckOutRecord(
+            branch=branch,
+            room_id="201",
+            room_number="201호",
+            tenant_name="이지은",
+            tenant_phone="010-2345-6789",
+            move_in_date="2025-10-28",
+            move_out_date="2026-10-27",
+            original_deposit=5000000,
+            unpaid_rent_deduction=0,
+            water_fee=14000,
+            electric_fee=23000,
+            gas_fee=8000,
+            cleaning_fee=70000,
+            repair_deduction=0,
+            damage_notes="벽지 미세 생활 변색(자연마모 인정 - 임대인 무상 부담), 옵션 정상",
+            refund_bank="카카오뱅크",
+            refund_account="3333-02-9988776",
+            refund_account_holder="이지은",
+            status="AGREED",
+            tenant_agreed=True,
+            tenant_signature="SIG_IEUN_2026"
+        )
+        c1.calculate_refund()
+        c1.save("seed_checkout_c1")
+
+        c2 = CheckOutRecord(
+            branch=branch,
+            room_id="204",
+            room_number="204호",
+            tenant_name="강태양",
+            tenant_phone="010-5544-3322",
+            move_in_date="2024-10-15",
+            move_out_date="2026-10-15",
+            original_deposit=5000000,
+            unpaid_rent_deduction=0,
+            water_fee=16000,
+            electric_fee=19000,
+            gas_fee=12000,
+            cleaning_fee=70000,
+            repair_deduction=0,
+            damage_notes="옵션 양호 및 청소 완료",
+            refund_bank="토스뱅크",
+            refund_account="1000-8877-6655",
+            refund_account_holder="강태양",
+            status="COMPLETED",
+            tenant_agreed=True,
+            refund_completed=True,
+            refund_completed_at="2026-10-15 15:30:00",
+            refund_tx_ref="TX-BANK-20261015-098"
+        )
+        c2.calculate_refund()
+        c2.save("seed_checkout_c2")
+
+        checkouts = [c1, c2]
+
+    # KPI 계산
+    inspecting_count = len([c for c in checkouts if c.status == "INSPECTING" or c.status == "CALCULATED"])
+    agreed_count = len([c for c in checkouts if c.status == "AGREED"])
+    completed_count = len([c for c in checkouts if c.status == "COMPLETED"])
+    total_refund = sum(c.final_refund_deposit for c in checkouts if c.status == "COMPLETED")
+
+    sorted_checkouts = sorted(checkouts, key=lambda x: getattr(x, "created_at", ""), reverse=True)
+
+    return {
+        "branch": branch,
+        "kpi": {
+            "inspecting": inspecting_count,
+            "agreed": agreed_count,
+            "completed": completed_count,
+            "total_refund": total_refund
+        },
+        "rooms": room_options,
+        "checkouts": [c.model_dump() for c in sorted_checkouts]
+    }
 
 
 @router.get("/checkout/{branch}/{room_id}")
 def get_checkout_info(branch: str, room_id: str):
-    """퇴실 검수표, 입실 시 점검 사진 및 보증금 정산 명세서 조회."""
+    """퇴실 검수표, 입실 시 점검 사진 및 보증금 정산 명세서 상세 조회."""
     # 1. 기존 호실 정보 및 임차인 정보
     tenant_name = "홍길동"
     tenant_phone = "010-1234-5678"
@@ -1113,11 +1244,13 @@ def get_checkout_info(branch: str, room_id: str):
     if Building:
         try:
             b_obj = Building.get(branch)
-            if b_obj and hasattr(b_obj, "rooms") and room_id in b_obj.rooms:
-                room = b_obj.rooms[room_id]
-                tenant_name = getattr(room, "tenant_name", "홍길동") or "홍길동"
-                tenant_phone = getattr(room, "tenant_phone", "010-1234-5678") or "010-1234-5678"
-                deposit = getattr(room, "deposit", 5000000) or 5000000
+            if b_obj and hasattr(b_obj, "rooms"):
+                raw_rooms = b_obj.rooms() if callable(b_obj.rooms) else b_obj.rooms
+                if raw_rooms and room_id in raw_rooms:
+                    room = raw_rooms[room_id]
+                    tenant_name = getattr(room, "tenant_name", "홍길동") or "홍길동"
+                    tenant_phone = getattr(room, "tenant_phone", "010-1234-5678") or "010-1234-5678"
+                    deposit = getattr(room, "deposit", 5000000) or 5000000
         except Exception:
             pass
 
@@ -1137,12 +1270,20 @@ def get_checkout_info(branch: str, room_id: str):
         record = CheckOutRecord(
             branch=branch,
             room_id=room_id,
+            room_number=f"{room_id}호",
             tenant_name=tenant_name,
             tenant_phone=tenant_phone,
             original_deposit=deposit,
             unpaid_rent_deduction=unpaid_rent,
-            utility_deduction=45000,
-            damage_deduction=0
+            water_fee=15000,
+            electric_fee=20000,
+            gas_fee=10000,
+            cleaning_fee=70000,
+            repair_deduction=0,
+            damage_notes="통상 생활 손모 외 특이 파손 없음 (상태 양호)",
+            refund_bank="카카오뱅크",
+            refund_account="3333-01-2345678",
+            refund_account_holder=tenant_name
         )
         record.calculate_refund()
         record.save("seed_checkout_record")
@@ -1161,22 +1302,59 @@ def get_checkout_info(branch: str, room_id: str):
 
 @router.post("/checkout/{branch}/{room_id}/inspect")
 def inspect_checkout(branch: str, room_id: str, req: CheckOutInspectReq):
-    """임대인 시설 검수 및 공과금/원상복구 공제액 확정."""
+    """임대인 시설 검수 및 공과금/청소비/원상복구 공제액 확정 및 세입자 전송."""
     checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
     if checkouts:
         rec = checkouts[-1]
     else:
-        rec = CheckOutRecord(branch=branch, room_id=room_id)
+        rec = CheckOutRecord(branch=branch, room_id=room_id, room_number=f"{room_id}호")
 
     rec.unpaid_rent_deduction = req.unpaid_rent_deduction
-    rec.utility_deduction = req.utility_deduction
-    rec.damage_deduction = req.damage_deduction
+    rec.water_fee = req.water_fee
+    rec.electric_fee = req.electric_fee
+    rec.gas_fee = req.gas_fee
+    rec.cleaning_fee = req.cleaning_fee
+    rec.repair_deduction = req.repair_deduction
     rec.damage_notes = req.damage_notes
+    rec.other_deduction = req.other_deduction
     if req.checks:
         rec.inspection_checks = req.checks
+    if req.photos:
+        rec.inspection_photos = req.photos
+    if req.refund_bank:
+        rec.refund_bank = req.refund_bank
+    if req.refund_account:
+        rec.refund_account = req.refund_account
+    if req.refund_account_holder:
+        rec.refund_account_holder = req.refund_account_holder
+
     rec.calculate_refund()
-    rec.status = "AGREED"
+    rec.status = "CALCULATED"
     rec.save("checkout_inspected")
+
+    # 1:1 직통 채팅방에 명세서 발행 안내 자동 전송
+    try:
+        chat_msg = ChatMessage(
+            branch=branch,
+            room_id=room_id,
+            sender_role="landlord",
+            sender_name="김임대 (임대인)",
+            message=(
+                f"📄 [{room_id}호 퇴실 보증금 정산 공제 명세서가 발행되었습니다]\n"
+                f"• 기존 보증금: {rec.original_deposit:,}원\n"
+                f"• 공제 총액: {(rec.utility_deduction + rec.damage_deduction + rec.unpaid_rent_deduction + rec.other_deduction):,}원\n"
+                f"  - 당일 공과금 실비: {rec.utility_deduction:,}원 (수도 {rec.water_fee:,} / 전기 {rec.electric_fee:,} / 가스 {rec.gas_fee:,})\n"
+                f"  - 퇴실 청소 및 원상복구: {rec.damage_deduction:,}원 (청소 {rec.cleaning_fee:,} / 수리 {rec.repair_deduction:,})\n"
+                f"• 최종 반환 보증금: {rec.final_refund_deposit:,}원\n"
+                f"세입자 라운지에서 세부 명세를 확인하시고 동의 서명해 주시기 바랍니다."
+            ),
+            msg_type="checkout_settlement",
+            quick_action_url=f"/rent3/public.html?branch={branch}&room={room_id}#tenantCheckoutCard",
+            is_read=False
+        )
+        chat_msg.save(f"chat_checkout_inspect_{room_id}")
+    except Exception as e:
+        print(f"[CheckOut] 채팅 알림 오류: {e}")
 
     return {
         "success": True,
@@ -1185,20 +1363,116 @@ def inspect_checkout(branch: str, room_id: str, req: CheckOutInspectReq):
     }
 
 
+@router.post("/checkout/{branch}/{room_id}/tenant-agree")
+def tenant_agree_checkout(branch: str, room_id: str, req: CheckOutAgreeReq):
+    """세입자 정산 명세서 확인 및 동의 전자서명 날인."""
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    if not checkouts:
+        raise HTTPException(status_code=404, detail="퇴실 정산서를 찾을 수 없습니다.")
+
+    rec = checkouts[-1]
+    rec.agree_by_tenant(
+        signature=req.signature,
+        bank=req.refund_bank,
+        account=req.refund_account,
+        holder=req.refund_account_holder
+    )
+
+    # 임대인에게 동의 완료 알림 전송
+    try:
+        chat_msg = ChatMessage(
+            branch=branch,
+            room_id=room_id,
+            sender_role="tenant",
+            sender_name=f"{rec.tenant_name} (임차인)",
+            message=(
+                f"✍️ [{room_id}호 세입자 퇴실 정산 동의 완료]\n"
+                f"퇴실 공제 명세서(반환액: {rec.final_refund_deposit:,}원)에 동의 서명하였습니다.\n"
+                f"반환 계좌: {rec.refund_bank} {rec.refund_account} (예금주: {rec.refund_account_holder or rec.tenant_name})\n"
+                f"보증금 송금을 진행해 주시면 감사하겠습니다."
+            ),
+            msg_type="checkout_agreement",
+            is_read=False
+        )
+        chat_msg.save(f"chat_checkout_agree_{room_id}")
+    except Exception as e:
+        print(f"[CheckOut] 채팅 동의 알림 오류: {e}")
+
+    return {
+        "success": True,
+        "message": f"[{room_id}호] 정산서에 성공적으로 동의 서명하였습니다.",
+        "record": rec.model_dump()
+    }
+
+
 @router.post("/checkout/{branch}/{room_id}/complete")
-def complete_checkout(branch: str, room_id: str):
-    """보증금 반환 완료 승인 -> 호실 즉시 공실 전환 및 신규 공실 매물 자동 재등록."""
+def complete_checkout(branch: str, room_id: str, req: Optional[CheckOutCompleteReq] = None):
+    """보증금 반환 송금 완료 승인 -> 호실 즉시 공실 전환 및 신규 공실 매물 자동 재등록."""
     checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
     if not checkouts:
         raise HTTPException(status_code=404, detail="퇴실 정산 기록을 찾을 수 없습니다.")
 
     rec = checkouts[-1]
-    rec.complete_settlement()
+    tx_ref = req.tx_ref if req else ""
+    rec.complete_settlement(tx_ref=tx_ref)
 
     return {
         "success": True,
         "message": f"[{room_id}호] 보증금({rec.final_refund_deposit:,}원) 반환이 완료되었습니다. 호실이 '공실'로 전환되고 직거래 포털 매물로 자동 재등록되었습니다.",
         "record": rec.model_dump()
+    }
+
+
+@router.get("/checkout/{branch}/{room_id}/receipt")
+def get_checkout_receipt(branch: str, room_id: str):
+    """인쇄/PDF용 공식 퇴실 보증금 반환 영수증 및 정산 명세서 데이터."""
+    checkouts = [c for c in CheckOutRecord.all() if getattr(c, "branch", "") == branch and getattr(c, "room_id", "") == room_id]
+    if not checkouts:
+        raise HTTPException(status_code=404, detail="퇴실 정산 명세서를 찾을 수 없습니다.")
+
+    rec = checkouts[-1]
+    return {
+        "success": True,
+        "receipt_title": "공식 임대보증금 반환 및 퇴실 정산 명세서",
+        "settlement_no": rec.settlement_no,
+        "branch": rec.branch,
+        "room_number": getattr(rec, "room_number", f"{room_id}호"),
+        "tenant_name": rec.tenant_name,
+        "tenant_phone": rec.tenant_phone,
+        "move_out_date": rec.move_out_date,
+        "original_deposit": rec.original_deposit,
+        "breakdown": {
+            "unpaid_rent": rec.unpaid_rent_deduction,
+            "utility": {
+                "water": rec.water_fee,
+                "electric": rec.electric_fee,
+                "gas": rec.gas_fee,
+                "total": rec.utility_deduction
+            },
+            "restoration": {
+                "cleaning": rec.cleaning_fee,
+                "repair": rec.repair_deduction,
+                "notes": rec.damage_notes,
+                "total": rec.damage_deduction
+            },
+            "other": rec.other_deduction,
+            "total_deductions": rec.unpaid_rent_deduction + rec.utility_deduction + rec.damage_deduction + rec.other_deduction
+        },
+        "final_refund_deposit": rec.final_refund_deposit,
+        "refund_account": {
+            "bank": rec.refund_bank,
+            "account": rec.refund_account,
+            "holder": rec.refund_account_holder or rec.tenant_name
+        },
+        "status": rec.status,
+        "tenant_agreed": rec.tenant_agreed,
+        "tenant_signature": rec.tenant_signature,
+        "refund_completed": rec.refund_completed,
+        "refund_completed_at": rec.refund_completed_at,
+        "refund_tx_ref": rec.refund_tx_ref,
+        "landlord_name": "김임대 (시크빌 임대총괄)",
+        "landlord_phone": "010-8888-9999",
+        "official_seal": "시크빌 정산 확인필"
     }
 
 
@@ -1509,6 +1783,328 @@ def confirm_tacit_renewal(renewal_id: str):
         "message": "묵시적 갱신이 법적 효력에 따라 확정 처리되었습니다.",
         "renewal": renewal.model_dump()
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# 10. 정식 하자보수(A/S) 대장 및 협력 수리업체 배정·정산 API
+# ─────────────────────────────────────────────────────────────
+class TicketCreateReq(BaseModel):
+    branch: str = "main"
+    room_id: str
+    tenant_name: str
+    tenant_phone: str = ""
+    category: str = "facility"    # plumbing, electrical, appliance, door, facility
+    title: str
+    description: str
+    photos: List[str] = []
+
+class TicketAssignReq(BaseModel):
+    contractor_name: str
+    contractor_phone: str = ""
+    scheduled_visit_at: str
+    admin_notes: str = ""
+
+class TicketCompleteReq(BaseModel):
+    repair_notes: str
+    completion_photos: List[str] = []
+    repair_cost: int = 0
+    cost_burden: str = "LANDLORD" # LANDLORD, TENANT, SHARED
+
+
+@router.get("/maintenance/tickets")
+def get_maintenance_tickets(branch: str = Query("main")):
+    """지점별 전체 하자보수(A/S) 티켓 대장 및 진행현황 조회."""
+    tickets = [t for t in MaintenanceTicket.all() if getattr(t, "branch", "main") == branch]
+
+    # 초기 시드 데이터 생성 (티켓이 전혀 없는 경우)
+    if not tickets:
+        seed1 = MaintenanceTicket(
+            branch=branch,
+            room_id="203",
+            room_number="203호",
+            tenant_name="김임차",
+            tenant_phone="010-9999-8888",
+            category="plumbing",
+            title="싱크대 하부 수전 미세 누수",
+            description="설거지 후 하부 수납장에 물방울이 맺힙니다.",
+            status="ASSIGNED",
+            contractor_name="강남 종합설비 (김반장)",
+            contractor_phone="010-3333-7777",
+            scheduled_visit_at="2026-10-28 14:00",
+            admin_notes="패킹 및 밸브 교체 예정"
+        )
+        seed1.save("seed_ticket_1")
+
+        seed2 = MaintenanceTicket(
+            branch=branch,
+            room_id="201",
+            room_number="201호",
+            tenant_name="홍길동",
+            tenant_phone="010-1234-5678",
+            category="appliance",
+            title="시스템 에어컨 냉매 점검 요청",
+            description="송풍은 잘 되는데 냉방 효율이 다소 약합니다.",
+            status="RECEIVED"
+        )
+        seed2.save("seed_ticket_2")
+
+        seed3 = MaintenanceTicket(
+            branch=branch,
+            room_id="302",
+            room_number="302호",
+            tenant_name="박직객",
+            tenant_phone="010-5555-6666",
+            category="door",
+            title="현관 스마트 도어락 건전지 방전 및 키패드 교체",
+            description="도어락 경고음이 울리고 터치가 간헐적으로 안 됨",
+            status="COMPLETED",
+            contractor_name="스마트 도어락 A/S센터",
+            contractor_phone="010-8888-9999",
+            scheduled_visit_at="2026-10-26 11:00",
+            repair_notes="메인보드 배터리 단자 세척 및 신품 교체 완료",
+            repair_cost=55000,
+            cost_burden="LANDLORD",
+            landlord_share=55000,
+            tenant_share=0,
+            is_settled=True,
+            completed_at="2026-10-26 11:45:00"
+        )
+        seed3.save("seed_ticket_3")
+        tickets = [seed1, seed2, seed3]
+
+    # 통계 산출
+    received_count = sum(1 for t in tickets if t.status == "RECEIVED")
+    assigned_count = sum(1 for t in tickets if t.status == "ASSIGNED")
+    in_repair_count = sum(1 for t in tickets if t.status == "IN_REPAIR")
+    completed_count = sum(1 for t in tickets if t.status in ("COMPLETED", "CLOSED"))
+    total_repair_cost = sum(getattr(t, "repair_cost", 0) for t in tickets)
+
+    return {
+        "success": True,
+        "branch": branch,
+        "summary": {
+            "total_tickets": len(tickets),
+            "received_count": received_count,
+            "assigned_count": assigned_count,
+            "in_repair_count": in_repair_count,
+            "completed_count": completed_count,
+            "total_repair_cost": total_repair_cost
+        },
+        "items": [t.model_dump() for t in sorted(tickets, key=lambda x: getattr(x, "created_at", ""), reverse=True)]
+    }
+
+
+@router.post("/maintenance/tickets")
+def create_maintenance_ticket(req: TicketCreateReq):
+    """신규 하자보수(A/S) 티켓 접수."""
+    ticket = MaintenanceTicket(
+        branch=req.branch,
+        room_id=req.room_id,
+        room_number=f"{req.room_id}호",
+        tenant_name=req.tenant_name,
+        tenant_phone=req.tenant_phone,
+        category=req.category,
+        title=req.title,
+        description=req.description,
+        initial_photos=req.photos,
+        status="RECEIVED"
+    )
+    ticket.save("maintenance_ticket_created")
+
+    # 1:1 직통 채팅방에 알림 메시지 발송
+    chat = ChatMessage(
+        branch=req.branch,
+        room_id=req.room_id,
+        sender_role="bot",
+        sender_name="스마트임차 Rent3",
+        message=f"🛠️ [하자보수 접수 완료]\n접수번호: {ticket.ticket_no}\n제목: {ticket.title}\n접수 내용이 관제 센터에 정식 등록되었으며, 협력 수리업체 배정 후 방문일정을 안내해 드립니다."
+    )
+    chat.save("bot_sent_as_received")
+
+    return {
+        "success": True,
+        "message": f"하자보수 티켓[{ticket.ticket_no}]이 정상 접수되었습니다.",
+        "ticket": ticket.model_dump()
+    }
+
+
+@router.post("/maintenance/tickets/{ticket_id}/assign")
+def assign_ticket_contractor(ticket_id: str, req: TicketAssignReq):
+    """협력 수리업체 및 방문일정 배정."""
+    ticket = MaintenanceTicket.get(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="해당 하자보수 건을 찾을 수 없습니다.")
+
+    ticket.assign_contractor(
+        name=req.contractor_name,
+        phone=req.contractor_phone,
+        visit_at=req.scheduled_visit_at,
+        notes=req.admin_notes
+    )
+
+    # 1:1 직통 채팅방에 기사 배정 안내 발송
+    chat = ChatMessage(
+        branch=ticket.branch,
+        room_id=ticket.room_id,
+        sender_role="landlord",
+        sender_name="임대인(관제센터)",
+        message=(
+            f"🔧 [A/S 방문 일정 안내]\n"
+            f"신청하신 '{ticket.title}' 건에 협력 수리 기사님이 배정되었습니다.\n"
+            f"• 담당업체: {req.contractor_name}\n"
+            f"• 기사 연락처: {req.contractor_phone or '현장 방문 시 연락'}\n"
+            f"• 방문 예정일시: {req.scheduled_visit_at}\n"
+            f"방문 시 협조 부탁드립니다."
+        )
+    )
+    chat.save("bot_sent_as_assigned")
+
+    return {
+        "success": True,
+        "message": f"협력업체[{req.contractor_name}] 배정이 완료되었으며 세입자에게 방문일정이 안내되었습니다.",
+        "ticket": ticket.model_dump()
+    }
+
+
+@router.post("/maintenance/tickets/{ticket_id}/complete")
+def complete_ticket_repair(ticket_id: str, req: TicketCompleteReq):
+    """수리 완료 보고 및 비용 분담 산출."""
+    ticket = MaintenanceTicket.get(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="해당 하자보수 건을 찾을 수 없습니다.")
+
+    ticket.complete_repair(
+        notes=req.repair_notes,
+        photos=req.completion_photos,
+        cost=req.repair_cost,
+        burden=req.cost_burden
+    )
+
+    burden_text = "임대인 전액 무상 처리 (노후 자연 마모)" if req.cost_burden == "LANDLORD" else (
+        f"세입자 부담 ({req.repair_cost:,}원 - 사용자 과실)" if req.cost_burden == "TENANT" else (
+            f"50:50 분담 (임대인 {ticket.landlord_share:,}원 / 세입자 {ticket.tenant_share:,}원)"
+        )
+    )
+
+    # 1:1 직통 채팅방에 완료 알림 발송
+    chat = ChatMessage(
+        branch=ticket.branch,
+        room_id=ticket.room_id,
+        sender_role="landlord",
+        sender_name="임대인(관제센터)",
+        message=(
+            f"✅ [A/S 수리 완료 및 비용 정산 안내]\n"
+            f"'{ticket.title}' 건의 수리가 완료되었습니다.\n"
+            f"• 조치 내용: {req.repair_notes}\n"
+            f"• 총 수리비: {req.repair_cost:,}원\n"
+            f"• 비용 처리: {burden_text}\n"
+            f"시설 이용에 불편이 없으시길 바랍니다."
+        ),
+        photos=req.completion_photos[:2] if req.completion_photos else []
+    )
+    chat.save("bot_sent_as_completed")
+
+    return {
+        "success": True,
+        "message": "수리 완료 보고 및 비용 정산 처리가 완료되었습니다.",
+        "ticket": ticket.model_dump()
+    }
+
+
+@router.post("/maintenance/tickets/{ticket_id}/close")
+def close_maintenance_ticket(ticket_id: str):
+    """하자보수 티켓 정산 완료 및 최종 종결."""
+    ticket = MaintenanceTicket.get(ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="해당 하자보수 건을 찾을 수 없습니다.")
+
+    ticket.close_ticket()
+    return {
+        "success": True,
+        "message": f"하자보수 티켓[{ticket.ticket_no}]이 최종 정산 종결되었습니다.",
+        "ticket": ticket.model_dump()
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 16. 지점별(시크빌/선호아트빌/신비주택) 통합 세무·수익률 분석 API
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/analytics/tax-roi")
+def get_tax_roi_dashboard(tax_mode: str = Query("SEPARATE_14", description="SEPARATE_14 (14% 분리과세) | COMPREHENSIVE (종합과세)")):
+    """3대 지점 통합 세무(부가세 면세/임대소득세/종부세) 및 수익률(Cap Rate/ROI) 대시보드 지표."""
+    try:
+        report = calculate_portfolio_tax_roi(tax_mode=tax_mode)
+        return {
+            "success": True,
+            "data": report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"세무·수익률 분석 산출 오류: {str(e)}")
+
+
+@router.get("/analytics/tax-roi/{branch_id}")
+def get_branch_tax_roi(branch_id: str, tax_mode: str = Query("SEPARATE_14")):
+    """특정 지점 단일 세무·수익률 분석 보고서."""
+    if branch_id not in ("main", "sunho", "sinbi"):
+        raise HTTPException(status_code=400, detail=f"지원되지 않는 지점입니다: {branch_id}")
+    try:
+        report = calculate_branch_tax_roi(branch_id=branch_id, tax_mode=tax_mode)
+        return {
+            "success": True,
+            "data": report
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"지점 세무·수익률 분석 오류: {str(e)}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 17. 세입자 연말정산 월세 세액공제용 납입 증명서 & 현금영수증 API
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/certificate/rent-tax/{branch}/{room_id}")
+def get_rent_tax_certificate(branch: str, room_id: str, year: int = Query(2026)):
+    """연말정산용 월세 납입 증명서 및 국세청 현금영수증 내역 발급."""
+    try:
+        cert = generate_rent_certificate(branch=branch, room_id=room_id, year=year)
+        return {
+            "success": True,
+            "certificate": cert.model_dump()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"월세 납입 증명서 발급 실패: {str(e)}")
+
+
+@router.post("/certificate/send-chat/{branch}/{room_id}")
+def send_certificate_to_chat(branch: str, room_id: str, year: int = Query(2026)):
+    """월세 납입 증명서 발급 완료 통보를 1:1 직통 채팅방에 전송."""
+    cert = generate_rent_certificate(branch=branch, room_id=room_id, year=year)
+
+    chat = ChatMessage(
+        branch=branch,
+        room_id=room_id,
+        sender_role="landlord",
+        sender_name="임대인(관제센터)",
+        message=(
+            f"📑 [연말정산 월세 세액공제 공식 납입 증명서 발급 완료]\n"
+            f"• 증명서 번호: {cert.cert_no}\n"
+            f"• 대상 과세연도: {cert.year}년 (총 {len(cert.items)}개월분)\n"
+            f"• 연간 납입 총액: {cert.total_paid_amount:,}원\n"
+            f"• 예상 세액환급액: 약 {cert.estimated_tax_refund:,}원 (17% 세액공제 기준)\n"
+            f"• 법적 근거: 조세특례제한법 제95조의2\n"
+            f"세입자 라운지에서 '월세 납입 증명서'를 원클릭으로 열람 및 PDF/인쇄하실 수 있습니다."
+        )
+    )
+    chat.save("bot_sent_rent_certificate")
+
+    return {
+        "success": True,
+        "message": f"{room_id}호 임차인 대화방에 연말정산 증명서 발급 안내가 전송되었습니다.",
+        "cert_no": cert.cert_no
+    }
+
+
+
 
 
 
