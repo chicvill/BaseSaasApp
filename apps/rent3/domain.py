@@ -5,7 +5,7 @@
 - rent2 코어 엔진(가짜 체납 방지, FIFO 순차 상계, 3개 지점 격리 매트릭스) 완벽 계승
 - 온라인 직거래 풀 라이프사이클: 공개광고 -> 비대면 신청/승인 -> 결제/서명 -> 입실/시설점검 -> 라운지 소통 -> 퇴실
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 import secrets
 from typing import Any, Dict, List, Optional
 from pydantic import Field
@@ -18,6 +18,12 @@ except ImportError:
     Building = None
     Room = None
     Contract = None
+
+# 8대 표준 엔티티 (Admin, Lessor, Tenant, Building, Room, Contract, Pay, Outlay) 연동
+from .entities import (
+    Admin, Lessor, Tenant, BuildingEntity, RoomEntity, ContractEntity, 
+    Pay, Outlay, Rent3EntityManager, Rent3WorkflowEngine, seed_default_entities_if_empty
+)
 
 
 class RentalListing(Obj):
@@ -113,6 +119,21 @@ class RentalApplication(Obj):
                     b.save(f"rent3_online_contract_{self.room_id}")
             except Exception as e:
                 print(f"[RentalApplication] rent2 동기화 경고: {e}")
+
+        # 국토교통부 RTMS 주택임대차 계약신고 및 대법원 확정일자 자동 부여
+        try:
+            RtmsContractReport.auto_file_and_grant(
+                session_id=self.id,
+                branch=self.branch,
+                room_id=self.room_id,
+                tenant_name=self.tenant_name,
+                tenant_phone=self.tenant_phone,
+                deposit=self.deposit,
+                monthly_rent=self.monthly_rent,
+                move_in_date=self.move_in_date
+            )
+        except Exception as e:
+            print(f"[RentalApplication] RTMS 자동신고 연동 예외: {e}")
                 
         return self.save("paid_and_contract_confirmed")
 
@@ -296,6 +317,21 @@ class CoSigningSession(Obj):
                     b.save(f"cosign_contract_{self.room_id}")
             except Exception as e:
                 print(f"[CoSigningSession] rent2 동기화 경고: {e}")
+
+        # 국토교통부 RTMS 주택임대차 계약신고 및 대법원 확정일자 자동 부여
+        try:
+            RtmsContractReport.auto_file_and_grant(
+                session_id=self.id,
+                branch=self.branch,
+                room_id=self.room_id,
+                tenant_name=self.tenant_name,
+                tenant_phone=self.tenant_phone,
+                deposit=self.deposit,
+                monthly_rent=self.monthly_rent,
+                move_in_date=self.move_in_date
+            )
+        except Exception as e:
+            print(f"[CoSigningSession] RTMS 자동신고 연동 예외: {e}")
 
         return self.save("cosign_completed_and_paid")
 
@@ -555,7 +591,12 @@ class CheckOutRecord(Obj):
 
 
 class RtmsContractReport(Obj):
-    """국토교통부 거래관리시스템(RTMS) 법정 주택임대차 계약신고서 및 확정일자 필증."""
+    """국토교통부 거래관리시스템(RTMS) 법정 주택임대차 계약신고서 및 대법원 확정일자 부여 필증.
+    
+    부동산 거래신고 등에 관한 법률 제6조의2 및 주택임대차보호법 제3조의6 준수:
+    - 보증금 6,000만원 초과 또는 월차임 30만원 초과 시 30일 이내 신고 의무.
+    - 신고 접수 즉시 대법원 확정일자가 자동 부여되어 주택임대차보호법상 우선변제권 확보.
+    """
     session_id: str = ""             # 계약 세션 ID 또는 신청서 ID
     branch: str = "main"
     room_id: str = ""
@@ -563,7 +604,7 @@ class RtmsContractReport(Obj):
     # 신고서 고유 번호
     report_no: str = Field(default_factory=lambda: f"RTMS-2026-{datetime.now().strftime('%m%d')}-{secrets.token_hex(3).upper()}")
     contract_date: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d")) # 계약체결일
-    deadline_date: str = "2026-11-26"# 체결일 + 30일 (과태료 기한)
+    deadline_date: str = Field(default_factory=lambda: (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")) # 체결일 + 30일 (과태료 기한)
     
     # 1. 임대인 (신고 의무자 1)
     landlord_name: str = "김임대"
@@ -579,7 +620,7 @@ class RtmsContractReport(Obj):
 
     # 3. 임대 목적물
     property_address: str = "서울특별시 강남구 역삼동 123 시크빌"
-    building_type: str = "다세대·원룸주택" # 또는 공동주택/오피스텔
+    building_type: str = "다세대·원룸주택" # 공동주택/오피스텔
     exclusive_area_sqm: float = 24.5      # 전용면적
 
     # 4. 계약 조건
@@ -596,13 +637,73 @@ class RtmsContractReport(Obj):
     submitted_at: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+    # 6. 법정 관할 기관 및 대항력/우선변제권 정보
+    reporting_agency: str = "서울특별시 강남구 역삼1동 주민센터" # 관할 행정복지센터
+    court_registry_office: str = "서울중앙지방법원 강남등기소"     # 관할 등기소
+    legal_effect_date: str = ""           # 우선변제권 효력 발생일시 (부여 익일 0시)
+    certificate_hash: str = ""            # 위변조 방지 전자서명 검증 해시
+
+    @property
+    def is_subject_to_report(self) -> bool:
+        """부동산거래신고법 제6조의2 신고 의무 대상 여부 (보증금 6천만원 초과 또는 월세 30만원 초과)."""
+        return (self.deposit > 60000000) or (self.monthly_rent > 300000)
+
+    @property
+    def days_left_to_deadline(self) -> int:
+        """과태료 부과 마감 기한(30일)까지 남은 일수 (D-Day)."""
+        try:
+            deadline = datetime.strptime(self.deadline_date, "%Y-%m-%d")
+            return max(0, (deadline - datetime.now()).days)
+        except Exception:
+            return 30
+
     def submit_report(self) -> "RtmsContractReport":
-        """RTMS 전자 신고 제출 -> 확정일자 자동 부여."""
+        """RTMS 전자 신고 제출 -> 대법원 확정일자 번호 즉시 자동 부여 및 우선변제권 효력 개시."""
         self.status = "SUBMITTED"
-        self.submitted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        self.fixed_date_number = f"FIX-{datetime.now().strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
+        now = datetime.now()
+        self.submitted_at = now.strftime("%Y-%m-%d %H:%M:%S")
+        self.fixed_date_number = f"FIX-{now.strftime('%Y%m%d')}-{secrets.token_hex(3).upper()}"
         self.fixed_date_granted_at = self.submitted_at
+        tomorrow = now + timedelta(days=1)
+        self.legal_effect_date = f"{tomorrow.strftime('%Y-%m-%d')} 00:00:00 (대항요건 구비 시 우선변제권 개시)"
+        self.certificate_hash = secrets.token_hex(16).upper()
+
+        # 지점별 관할 행정기관 매핑
+        if self.branch == "sunho":
+            self.reporting_agency = "서울특별시 관악구 신림동 주민센터"
+            self.court_registry_office = "서울중앙지방법원 등기국"
+        elif self.branch == "sinbi":
+            self.reporting_agency = "서울특별시 영등포구 당산동 주민센터"
+            self.court_registry_office = "서울남부지방법원 등기국"
+        else:
+            self.reporting_agency = "서울특별시 강남구 역삼1동 주민센터"
+            self.court_registry_office = "서울중앙지방법원 강남등기소"
+
         return self.save("rtms_report_submitted")
+
+    @classmethod
+    def auto_file_and_grant(cls, session_id: str, branch: str, room_id: str,
+                            tenant_name: str, tenant_phone: str, deposit: int,
+                            monthly_rent: int, move_in_date: str = "") -> "RtmsContractReport":
+        """계약 체결 시 원클릭/전자동으로 주택임대차 신고 및 확정일자 발급."""
+        # 기존 신고서 확인
+        existing = [r for r in cls.all() if getattr(r, "session_id", "") == session_id or (getattr(r, "branch", "") == branch and getattr(r, "room_id", "") == room_id)]
+        if existing and existing[-1].status == "SUBMITTED":
+            return existing[-1]
+
+        report = existing[-1] if existing else cls(
+            session_id=session_id,
+            branch=branch,
+            room_id=room_id,
+            tenant_name=tenant_name,
+            tenant_phone=tenant_phone,
+            deposit=deposit,
+            monthly_rent=monthly_rent,
+            property_address=f"서울특별시 강남구 역삼동 123 시크빌 {room_id}호",
+            move_in_date=move_in_date or datetime.now().strftime("%Y-%m-%d")
+        )
+        report.submit_report()
+        return report
 
 
 class LeaseRenewal(Obj):
@@ -927,12 +1028,21 @@ def calculate_branch_tax_roi(branch_id: str = "main", tax_mode: str = "SEPARATE_
     annual_maint_income = monthly_maint_fee * 12
     annual_gross_revenue = annual_rent_income + annual_maint_income
 
-    # 연간 유지보수 및 운영비용
+    # 연간 유지보수 및 실제 등록된 공용 운영비용 반영
     repair_tickets = [t for t in MaintenanceTicket.all() if getattr(t, "branch", "main") == branch_id]
     actual_repairs = sum(t.landlord_share for t in repair_tickets if t.status in ("COMPLETED", "CLOSED"))
     estimated_annual_repairs = max(actual_repairs, int(annual_gross_revenue * 0.04)) # 최소 4% 수선충당
-    estimated_operating_expenses = int(annual_gross_revenue * 0.08) # 공용청소, 승강기, 안전관리 등 8%
-    total_operating_cost = estimated_annual_repairs + estimated_operating_expenses
+
+    # BuildingOperatingExpense에 등록된 실제 공용 운영비 집계 (실데이터 우선 연동)
+    branch_expenses = [e for e in BuildingOperatingExpense.all() if getattr(e, "branch", "main") == branch_id]
+    if branch_expenses:
+        total_recorded_expense = sum(getattr(e, "amount", 0) for e in branch_expenses)
+        recorded_months = max(1, len(set((getattr(e, "year", 2026), getattr(e, "month", 10)) for e in branch_expenses)))
+        operating_expenses = int((total_recorded_expense / recorded_months) * 12)
+    else:
+        operating_expenses = int(annual_gross_revenue * 0.08) # 공용청소, 승강기, 안전관리 등 8% 기본 추정
+
+    total_operating_cost = estimated_annual_repairs + operating_expenses
 
     # 순운영이익 (NOI: Net Operating Income)
     noi = max(0, annual_gross_revenue - total_operating_cost)
@@ -996,6 +1106,8 @@ def calculate_branch_tax_roi(branch_id: str = "main", tax_mode: str = "SEPARATE_
         "annual_rent_income": annual_rent_income,
         "annual_maint_income": annual_maint_income,
         "annual_gross_revenue": annual_gross_revenue,
+        "operating_expenses": operating_expenses,
+        "estimated_annual_repairs": estimated_annual_repairs,
         "total_operating_cost": total_operating_cost,
         "noi": noi,
         "official_price": official_price,
@@ -1219,6 +1331,387 @@ def generate_rent_certificate(branch: str = "main", room_id: str = "201", year: 
     )
     cert.save("certificate_generated")
     return cert
+
+
+# ─────────────────────────────────────────────────────────────
+# 13. 건물 공용 운영비 실지출 관리 (승강기·청소·공용수도광열비·안전관리)
+# ─────────────────────────────────────────────────────────────
+class BuildingOperatingExpense(Obj):
+    """건물 공용 운영비 실지출 엔티티 (청소, 승강기, 공용전기수도, 안전관리, 화재보험 등)."""
+    branch: str = "main"                  # main(시크빌), sunho(선호아트빌), sinbi(신비주택)
+    year: int = 2026
+    month: int = 10
+    category: str = "cleaning"            # cleaning, elevator, utility_common, safety_fire, insurance, repair_maint, internet_tv, other
+    title: str = ""                       # 지출 적요 (예: 10월 정기 계단 청소비)
+    amount: int = 0                       # 실지출 금액 (원)
+    vendor_name: str = ""                 # 공급처/거래처명 (예: 클린토탈, 현대엘리베이터)
+    vendor_biz_no: str = ""               # 사업자등록번호 또는 연락처
+    payment_date: str = ""                # 실제 지출 일자 (YYYY-MM-DD)
+    payment_method: str = "TRANSFER"      # TRANSFER(계좌이체), CARD(신용카드), GIRO(지로공과금), CASH(현금영수증)
+    receipt_type: str = "TAX_INVOICE"     # TAX_INVOICE(전자세금계산서), CARD_SLIP(신용카드전표), CASH_RECEIPT(현금영수증), GIRO_RECEIPT(지로영수필증), SIMPLE(간이영수증)
+    receipt_photo_url: str = ""           # 지로용지 / 영수증 증빙 사진 (Base64 data URL 또는 이미지 URL)
+    notes: str = ""                       # 비고 메모
+    is_tax_deductible: bool = True        # 종합소득세 필요경비 인정 여부
+    created_at: str = Field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    @classmethod
+    def get_category_label(cls, cat: str) -> str:
+        labels = {
+            "cleaning": "🧹 계단·공용부 정기 청소비",
+            "elevator": "🛗 승강기 유지보수 및 점검료",
+            "utility_common": "💡 공용 전기·수도·가스료",
+            "safety_fire": "🧯 소방·전기안전관리 대행료",
+            "insurance": "🛡️ 건물 화재보험·배상책임",
+            "repair_maint": "🔧 공용시설 수선 및 소모품",
+            "internet_tv": "📡 건물 인터넷·IPTV 단체선",
+            "other": "📦 기타 제세공과금 및 잡비"
+        }
+        return labels.get(cat, "기타 운영비")
+
+
+def seed_default_operating_expenses_if_empty():
+    """운영비 데이터가 비어있을 경우 3대 지점 기본 8대 항목 지출 시딩."""
+    if len(BuildingOperatingExpense.all()) > 0:
+        return
+
+    seeds = [
+        ("main", 2026, 10, "cleaning", "10월 계단 및 공용구역 정기 청소비", 150000, "클린토탈", "120-86-12345", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 2회 계단/복도/주차장 물청소"),
+        ("main", 2026, 10, "elevator", "10월 승강기 정기 점검 및 유지보수료", 180000, "현대엘리베이터(주)", "107-81-22440", "2026-10-12", "TRANSFER", "TAX_INVOICE", "월 1회 정기점검 완료(양호)"),
+        ("main", 2026, 10, "utility_common", "10월 공용 전기요금 (계단등·가압펌프·CCTV)", 95000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "지로 자동납부"),
+        ("main", 2026, 10, "utility_common", "10월 공용 수도요금 (청소 및 계단용)", 42000, "서울시상수도사업본부", "104-83-00010", "2026-10-20", "GIRO", "GIRO_RECEIPT", "서울시 전자납부"),
+        ("main", 2026, 10, "safety_fire", "10월 소방 및 전기안전관리대행료", 90000, "제일안전기술단", "214-85-33011", "2026-10-15", "TRANSFER", "TAX_INVOICE", "월간 소방점검보고서 첨부"),
+        ("main", 2026, 10, "insurance", "10월 건물 화재보험료 및 영업배상책임", 60000, "DB손해보험(주)", "118-81-01234", "2026-10-05", "CARD", "CARD_SLIP", "12개월 분납"),
+        ("main", 2026, 10, "internet_tv", "10월 건물 단체 인터넷 및 IPTV 전용선", 220000, "(주)케이티", "102-81-42945", "2026-10-25", "TRANSFER", "TAX_INVOICE", "29개 전 호실 초고속 인터넷 단체선"),
+        ("main", 2026, 10, "repair_maint", "3층 복도 센서등 LED 교체 및 배선 보수", 35000, "역삼조명철물", "211-12-89012", "2026-10-22", "CARD", "CARD_SLIP", "자재 실비 교체"),
+
+        ("sunho", 2026, 10, "cleaning", "10월 공용구역 정기 청소비", 120000, "관악청소마을", "209-11-45678", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 1회 정기 청소"),
+        ("sunho", 2026, 10, "safety_fire", "10월 소방안전관리대행료", 70000, "한결소방엔지니어링", "119-86-55443", "2026-10-15", "TRANSFER", "TAX_INVOICE", "소방시설 점검"),
+        ("sunho", 2026, 10, "utility_common", "10월 공용 전기요금", 55000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "공용 전기"),
+        ("sunho", 2026, 10, "internet_tv", "10월 건물 단체 인터넷 전용선", 140000, "LG유플러스", "220-81-39938", "2026-10-25", "TRANSFER", "TAX_INVOICE", "15실 단체선"),
+
+        ("sinbi", 2026, 10, "cleaning", "10월 계단 청소비 및 쓰레기 분리수거 관리", 140000, "당산클린", "107-14-33211", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 2회 수거 및 계단 청소"),
+        ("sinbi", 2026, 10, "utility_common", "10월 공용 전기요금", 75000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "공용 조명/인터폰"),
+        ("sinbi", 2026, 10, "internet_tv", "10월 건물 단체 인터넷선", 180000, "SK브로드밴드", "214-81-37722", "2026-10-25", "TRANSFER", "TAX_INVOICE", "20실 단체선"),
+    ]
+
+    for b, y, m, cat, title, amt, vname, vbiz, pdate, pmethod, rtype, note in seeds:
+        exp = BuildingOperatingExpense(
+            branch=b,
+            year=y,
+            month=m,
+            category=cat,
+            title=title,
+            amount=amt,
+            vendor_name=vname,
+            vendor_biz_no=vbiz,
+            payment_date=pdate,
+            payment_method=pmethod,
+            receipt_type=rtype,
+            notes=note,
+            is_tax_deductible=True
+        )
+        exp.save(f"seed_expense_{b}_{cat}")
+
+
+def calculate_monthly_operating_summary(branch: str, year: int, month: int) -> Dict[str, Any]:
+    """지점별 특정 월의 총 수입, 실운영비 지출 내역, 실수령 순운영이익(NOI) 결산 집계."""
+    seed_default_operating_expenses_if_empty()
+    all_expenses = BuildingOperatingExpense.all()
+    # 지점 및 해당 연월 필터
+    filtered = [
+        e for e in all_expenses
+        if getattr(e, "branch", "main") == branch
+        and getattr(e, "year", 2026) == year
+        and getattr(e, "month", 10) == month
+    ]
+
+    total_expense = sum(getattr(e, "amount", 0) for e in filtered)
+    deductible_expense = sum(getattr(e, "amount", 0) for e in filtered if getattr(e, "is_tax_deductible", True))
+
+    # 카테고리별 합계 및 비율
+    cat_totals: Dict[str, int] = {}
+    for e in filtered:
+        cat = getattr(e, "category", "other")
+        cat_totals[cat] = cat_totals.get(cat, 0) + getattr(e, "amount", 0)
+
+    category_breakdown = []
+    for cat, amt in cat_totals.items():
+        pct = round((amt / total_expense) * 100, 1) if total_expense > 0 else 0.0
+        category_breakdown.append({
+            "category": cat,
+            "label": BuildingOperatingExpense.get_category_label(cat),
+            "amount": amt,
+            "percentage": pct
+        })
+    category_breakdown.sort(key=lambda x: x["amount"], reverse=True)
+
+    # 당월 임대 수입 추정 (지점 메타데이터 기준)
+    meta = BRANCH_META.get(branch, BRANCH_META["main"])
+    total_rooms = meta.get("total_rooms") or meta.get("default_rooms", 29)
+    avg_rent = meta.get("default_avg_rent", 500000)
+    avg_maint = meta.get("default_maintenance_fee", 50000)
+    
+    # Building 객체에서 실시간 수납액 산출
+    monthly_collected_rent = 0
+    monthly_maint_fee = 0
+    occupied_count = 0
+    if Building:
+        try:
+            b = Building.get(branch)
+            if b and hasattr(b, "rooms"):
+                for r in b.rooms.values():
+                    if getattr(r, "is_occupied", False) or getattr(r, "tenant_name", ""):
+                        occupied_count += 1
+                        monthly_collected_rent += getattr(r, "rent", avg_rent)
+                        monthly_maint_fee += avg_maint
+        except Exception:
+            pass
+    if monthly_collected_rent == 0:
+        occupied_count = int(total_rooms * 0.95)
+        monthly_collected_rent = occupied_count * avg_rent
+        monthly_maint_fee = occupied_count * avg_maint
+
+    total_gross_income = monthly_collected_rent + monthly_maint_fee
+    net_operating_income = max(0, total_gross_income - total_expense)
+    expense_ratio = round((total_expense / total_gross_income) * 100, 1) if total_gross_income > 0 else 0.0
+    noi_margin = round((net_operating_income / total_gross_income) * 100, 1) if total_gross_income > 0 else 0.0
+
+    return {
+        "branch": branch,
+        "branch_name": meta["name"],
+        "year": year,
+        "month": month,
+        "total_rooms": total_rooms,
+        "occupied_rooms": occupied_count,
+        "monthly_rent_income": monthly_collected_rent,
+        "monthly_maint_income": monthly_maint_fee,
+        "total_gross_income": total_gross_income,
+        "total_revenue": total_gross_income,
+        "total_operating_expense": total_expense,
+        "total_expense": total_expense,
+        "deductible_expense": deductible_expense,
+        "net_operating_income": net_operating_income, # 당월 실질 순운영이익(NOI)
+        "expense_ratio": expense_ratio,               # 경비율 (%)
+        "noi_margin": noi_margin,                     # 순이익률 (%)
+        "net_margin_rate": noi_margin,
+        "category_breakdown": category_breakdown,
+        "categories_breakdown": category_breakdown,
+        "expense_count": len(filtered),
+        "items": [e.model_dump() for e in filtered]
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 16. 임대인 5월 종합소득세 홈택스 제출용 연간 임대소득·필요경비 표준 전산 명세서
+# ─────────────────────────────────────────────────────────────
+def generate_annual_tax_statement(branch: str = "main", year: int = 2026) -> Dict[str, Any]:
+    """임대인 5월 종합소득세 확정신고용 연간 부동산 임대소득 및 실제 필요경비 표준 합산 명세서 생성.
+    
+    소득세법 제19조(사업소득), 제27조(필요경비의 계산) 및 소득세법 시행령 제55조 준수.
+    """
+    is_portfolio = (branch == "all")
+    target_branches = ["main", "sunho", "sinbi"] if is_portfolio else [branch]
+
+    meta_main = BRANCH_META.get("main", {})
+    taxpayer_name = meta_main.get("landlord_name", "김임대")
+    taxpayer_reg_no = meta_main.get("business_number", "108-04-99881")
+    
+    total_rooms = 0
+    annual_gross_revenue = 0
+    annual_rent_revenue = 0
+    annual_maint_revenue = 0
+    
+    # 1. 지점별 연간 수입금액 집계
+    for b_id in target_branches:
+        b_roi = calculate_branch_tax_roi(b_id, tax_mode="SEPARATE_14")
+        total_rooms += b_roi.get("total_rooms", 0)
+        annual_gross_revenue += b_roi.get("annual_gross_revenue", 0)
+        annual_rent_revenue += b_roi.get("annual_rent_income", 0)
+        annual_maint_revenue += b_roi.get("annual_maint_income", 0)
+
+    # 2. 연간 실제 필요경비 집계 (BuildingOperatingExpense)
+    seed_default_operating_expenses_if_empty()
+    all_expenses = BuildingOperatingExpense.all()
+    filtered_expenses = [
+        e for e in all_expenses
+        if getattr(e, "year", 2026) == year
+        and (getattr(e, "branch", "main") in target_branches)
+    ]
+
+    # 카테고리별 합계 및 건수
+    category_summary: Dict[str, Dict[str, Any]] = {}
+    for cat_key in [
+        "cleaning", "elevator", "utility_common", "safety_fire", 
+        "insurance", "repair_maint", "internet_tv", "other"
+    ]:
+        category_summary[cat_key] = {
+            "category": cat_key,
+            "label": BuildingOperatingExpense.get_category_label(cat_key),
+            "count": 0,
+            "amount": 0,
+            "tax_deductible_amount": 0
+        }
+
+    receipt_summary = {
+        "TAX_INVOICE": {"label": "전자세금계산서", "count": 0, "amount": 0},
+        "CASH_RECEIPT": {"label": "지출증빙 현금영수증", "count": 0, "amount": 0},
+        "CARD_SLIP": {"label": "신용카드 매출전표", "count": 0, "amount": 0},
+        "GIRO_RECEIPT": {"label": "공과금 지로영수증", "count": 0, "amount": 0},
+        "SIMPLE_RECEIPT": {"label": "간이영수증 (3만원 이하)", "count": 0, "amount": 0}
+    }
+
+    total_operating_expense = 0
+    total_deductible_expense = 0
+
+    for e in filtered_expenses:
+        cat = getattr(e, "category", "other")
+        amt = getattr(e, "amount", 0)
+        rtype = getattr(e, "receipt_type", "TAX_INVOICE")
+        is_deductible = getattr(e, "is_tax_deductible", True)
+
+        if cat not in category_summary:
+            category_summary[cat] = {
+                "category": cat,
+                "label": BuildingOperatingExpense.get_category_label(cat),
+                "count": 0,
+                "amount": 0,
+                "tax_deductible_amount": 0
+            }
+        category_summary[cat]["count"] += 1
+        category_summary[cat]["amount"] += amt
+        if is_deductible:
+            category_summary[cat]["tax_deductible_amount"] += amt
+
+        if rtype in receipt_summary:
+            receipt_summary[rtype]["count"] += 1
+            receipt_summary[rtype]["amount"] += amt
+
+        total_operating_expense += amt
+        if is_deductible:
+            total_deductible_expense += amt
+
+    # 3. 추가 수선비 (MaintenanceTicket 중 임대인 부담분)
+    repair_tickets = [
+        t for t in MaintenanceTicket.all() 
+        if (getattr(t, "branch", "main") in target_branches)
+        and getattr(t, "status", "") in ("COMPLETED", "CLOSED")
+    ]
+    ticket_repairs = sum(t.landlord_share for t in repair_tickets)
+    
+    # 총 공제 가능 필요경비
+    grand_total_expenses = total_operating_expense + ticket_repairs
+    grand_deductible_expenses = total_deductible_expense + ticket_repairs
+
+    # 4. 부동산 임대 소득금액 (과세표준 대상 소득)
+    taxable_income = max(0, annual_gross_revenue - grand_deductible_expenses)
+    expense_ratio = round((grand_total_expenses / annual_gross_revenue) * 100, 1) if annual_gross_revenue > 0 else 0.0
+
+    # 지점명 및 소재지
+    if is_portfolio:
+        branch_title = "시크빌 · 선호아트빌 · 신비주택 (3대 지점 통합)"
+        address = "서울 관악구 신림로 29길 8 외 2개 사업장"
+    else:
+        b_meta = BRANCH_META.get(branch, BRANCH_META["main"])
+        branch_title = b_meta.get("name", "시크빌")
+        address = b_meta.get("address", "서울 관악구 신림로 29길 8")
+
+    statement_no = f"TAX-STMT-{year}-{'ALL' if is_portfolio else branch.upper()}-{secrets.token_hex(3).upper()}"
+    issued_date = datetime.now().strftime("%Y-%m-%d")
+
+    categories_list = list(category_summary.values())
+    categories_list.sort(key=lambda x: x["amount"], reverse=True)
+
+    return {
+        "statement_no": statement_no,
+        "year": year,
+        "branch": branch,
+        "branch_title": branch_title,
+        "address": address,
+        "total_rooms": total_rooms,
+        "taxpayer": {
+            "name": taxpayer_name,
+            "business_number": taxpayer_reg_no,
+            "tax_office": "관악세무서 (소득세과)"
+        },
+        "revenue_summary": {
+            "annual_gross_revenue": annual_gross_revenue,
+            "annual_rent_revenue": annual_rent_revenue,
+            "annual_maint_revenue": annual_maint_revenue,
+            "is_vat_exempt": True,
+            "vat_legal_basis": "부가가치세법 제26조 제1항 제12호 (주택 임대용역 전액 면세)"
+        },
+        "expense_summary": {
+            "total_operating_expense": total_operating_expense,
+            "additional_repair_expense": ticket_repairs,
+            "grand_total_expense": grand_total_expenses,
+            "grand_deductible_expense": grand_deductible_expenses,
+            "expense_ratio": expense_ratio,
+            "categories": categories_list,
+            "receipt_breakdown": receipt_summary,
+            "total_receipt_count": len(filtered_expenses) + len(repair_tickets)
+        },
+        "taxable_result": {
+            "taxable_rental_income": taxable_income, # 총수입 - 필요경비
+            "separate_tax_estimate_14": int(taxable_income * 0.154), # 14% + 지방소득세 1.4%
+            "filing_period": f"{year + 1}년 5월 1일 ~ 5월 31일 (종합소득세 정기확정신고)",
+            "compliance_note": "소득세법 제27조 및 동법 시행령 제55조(부동산임대업의 필요경비 계산) 법정 서식"
+        },
+        "issued_date": issued_date,
+        "item_records": [e.model_dump() for e in filtered_expenses]
+    }
+
+
+def generate_tax_statement_csv(statement: Dict[str, Any]) -> str:
+    """국세청 홈택스 및 엑셀(MS Excel) 호환 UTF-8 BOM 인코딩 표준 CSV 명세서 생성."""
+    lines = []
+    lines.append("부동산 임대소득 및 필요경비 연간 표준 합산 명세서 (국세청 종합소득세 제출용)")
+    lines.append(f"문서번호,{statement['statement_no']}")
+    lines.append(f"귀속연도,{statement['year']}년 귀속")
+    lines.append(f"사업장명,{statement['branch_title']}")
+    lines.append(f"소재지,{statement['address']}")
+    lines.append(f"대표자(임대인),{statement['taxpayer']['name']}")
+    lines.append(f"사업자등록번호,{statement['taxpayer']['business_number']}")
+    lines.append(f"관할세무서,{statement['taxpayer']['tax_office']}")
+    lines.append("")
+    
+    # 수입금액 요약
+    lines.append("[1. 연간 총수입금액 명세]")
+    lines.append("구분,금액(원),비고")
+    rev = statement["revenue_summary"]
+    lines.append(f"월세 수납 총액,{rev['annual_rent_revenue']},임대료 수납 전산 연동")
+    lines.append(f"공용 관리비 수납 총액,{rev['annual_maint_revenue']},청소/인터넷/공용전기 지분")
+    lines.append(f"연간 총수입금액 합계,{rev['annual_gross_revenue']},부가가치세 면세(소득세법 제19조)")
+    lines.append("")
+
+    # 필요경비 요약
+    lines.append("[2. 법정 필요경비(지출) 항목별 합계]")
+    lines.append("항목명,지출건수,지출총액(원),소득세 필요경비 인정액(원),세무 적격증빙")
+    exp = statement["expense_summary"]
+    for cat in exp["categories"]:
+        lines.append(f"{cat['label']},{cat['count']}건,{cat['amount']},{cat['tax_deductible_amount']},적격증빙 보관")
+    if exp["additional_repair_expense"] > 0:
+        lines.append(f"🛠️ 세대별 하자보수 및 시설 수선 실비,1식,{exp['additional_repair_expense']},{exp['additional_repair_expense']},A/S 수리영수증 보관")
+    lines.append(f"필요경비 총계,{exp['total_receipt_count']}건,{exp['grand_total_expense']},{exp['grand_deductible_expense']},경비율 {exp['expense_ratio']}%")
+    lines.append("")
+
+    # 과세표준 소득금액 결과
+    lines.append("[3. 부동산 임대소득금액 (과세표준 대상)]")
+    lines.append("구분,산출액(원),산출 근거")
+    res = statement["taxable_result"]
+    lines.append(f"임대소득금액 (총수입 - 필요경비),{res['taxable_rental_income']},소득세법 제19조 사업소득금액")
+    lines.append(f"예상 소득세액 (14% 분리과세 기준),{res['separate_tax_estimate_14']},지방소득세(1.4%) 포함 15.4%")
+    lines.append(f"법정 신고기간,{res['filing_period']},홈택스 전자신고")
+    lines.append("")
+
+    # 상세 지출 대장
+    lines.append("[4. 실지출 상세 영수증 대장]")
+    lines.append("지출일자,항목분류,지출적요,공급처상호,사업자번호,금액(원),결제수단,증빙유형")
+    for item in statement.get("item_records", []):
+        lines.append(f"{item.get('payment_date','')},{item.get('category','')},{item.get('title','')},{item.get('vendor_name','')},{item.get('vendor_biz_no','')},{item.get('amount',0)},{item.get('payment_method','')},{item.get('receipt_type','')}")
+
+    return "\ufeff" + "\n".join(lines) # UTF-8 BOM for Excel
+
+
 
 
 

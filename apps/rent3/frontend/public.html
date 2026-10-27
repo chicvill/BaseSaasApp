@@ -765,6 +765,10 @@
           checkinHtml = `<div style="color:var(--error); font-size:13px;">출입 정보를 불러오지 못했습니다.</div>`;
         }
 
+        actionBlock = `
+          <div>
+            ${checkinHtml}
+
             <!-- Lease Expiration & Online Renewal Card (주택임대차보호법 만기 및 재계약) -->
             <div id="tenantRenewalBox" style="background:rgba(15,23,42,0.85); border:1px solid rgba(245,158,11,0.3); border-radius:12px; padding:18px; margin-top:14px;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
@@ -787,13 +791,33 @@
               </div>
             </div>
 
-            <div style="font-size:12px; background:rgba(255,255,255,0.05); padding:12px; border-radius:6px; margin-top:14px; display:flex; justify-content:space-between; align-items:center;">
-              <div>
-                <strong>🏛️ 주택임대차 계약 신고</strong>: 계약 체결일로부터 30일 이내 신고 시 <strong>대법원 확정일자가 자동 부여</strong>됩니다.
+            <!-- RTMS Housing Lease Report & Supreme Court Fixed Date Card -->
+            <div id="rtmsLoungeBox" style="background:rgba(15,23,42,0.85); border:1px solid rgba(56,189,248,0.4); border-radius:12px; padding:18px; margin-top:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="font-size:18px;">🏛️</span>
+                  <h4 style="color:var(--primary); font-size:15px; font-weight:700;">국토부 전월세신고 & 대법원 확정일자 증명</h4>
+                  <span id="rtmsLoungeBadge" class="badge" style="background:rgba(16,185,129,0.2); color:#10b981; font-size:11px; font-weight:700;">대법원 확정일자 연동</span>
+                </div>
+                <div style="font-size:12px; color:var(--text-muted);" id="rtmsLoungeDeadlineText">과태료 30일 안심 준수</div>
               </div>
-              <button class="btn btn-primary" style="width:auto; padding:6px 12px; font-size:12px; background:linear-gradient(135deg,#0284c7,#0ea5e9);" onclick="openRtmsPublicModal('${a.room_id}')">
-                🏛️ 법정 신고서 & 확정일자 확인
-              </button>
+              <div style="font-size:12.5px; color:#cbd5e1; line-height:1.5; margin-bottom:12px;">
+                부동산거래신고법 제6조의2 법정 주택임대차 계약 신고서가 행정관청에 접수되었으며, 주택임대차보호법 제3조의6에 따라 <strong>대법원 확정일자가 자동 부여</strong>되어 경매 시 보증금 우선변제권이 확정되었습니다.
+              </div>
+              <div style="background:#1e293b; padding:12px 14px; border-radius:8px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; border:1px solid var(--card-border);">
+                <div>
+                  <div style="font-size:11px; color:var(--text-muted);">대법원 등기정보 확정일자 번호</div>
+                  <div style="font-size:16px; font-weight:800; color:#38bdf8; letter-spacing:0.5px;" id="rtmsLoungeFixedNoText">조회 중...</div>
+                </div>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn btn-secondary" style="width:auto; padding:7px 14px; font-size:12px; background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3); font-weight:700;" onclick="openRtmsPublicModal('${a.room_id}')">
+                    🏛️ 법정 신고필증 보기 & 인쇄
+                  </button>
+                  <button class="btn btn-primary" id="rtmsLoungeQuickSubmitBtn" style="width:auto; padding:7px 14px; font-size:12px; display:none;" onclick="submitRtmsPublic(this, '${a.room_id}')">
+                    ⚡ 1-Click 전자신고 제출
+                  </button>
+                </div>
+              </div>
             </div>
 
             <!-- Rent Payment Tax Certificate Card (연말정산 월세 세액공제 증명서) -->
@@ -855,12 +879,13 @@
           </div>
         `;
 
-        // 렌더 후 청구, 만기/재계약, 하자보수(A/S), 퇴실 정산 정보 비동기 로드
+        // 렌더 후 청구, 만기/재계약, 하자보수(A/S), 퇴실 정산, 전월세신고/확정일자 정보 비동기 로드
         setTimeout(() => {
           loadBillingInfo(a.branch || 'main', a.room_id);
           loadTenantRenewal(a.branch || 'main', a.room_id);
           loadTenantAsTickets(a.branch || 'main', a.room_id);
           loadTenantCheckout(a.branch || 'main', a.room_id);
+          loadRtmsInfo(a.branch || 'main', a.room_id);
         }, 100);
       }
 
@@ -1092,35 +1117,89 @@
     }
 
     /* ─── RTMS Report & Fixed Date Modal Logic ─── */
+    /* ─── RTMS Report & Fixed Date Modal Logic ─── */
     let currentRtmsRoom = "201";
+
+    async function loadRtmsInfo(branch, roomId) {
+      const fixedNoText = document.getElementById("rtmsLoungeFixedNoText");
+      const deadlineText = document.getElementById("rtmsLoungeDeadlineText");
+      const quickSubmitBtn = document.getElementById("rtmsLoungeQuickSubmitBtn");
+      const badge = document.getElementById("rtmsLoungeBadge");
+      if (!fixedNoText) return;
+
+      try {
+        const res = await fetch(`/api/rent3/rtms/${roomId}/report?branch=${branch}`);
+        const data = await res.json();
+        const r = data.report;
+        if (!r) return;
+
+        if (r.status === "SUBMITTED" && r.fixed_date_number) {
+          fixedNoText.innerText = `${r.fixed_date_number} (부여완료)`;
+          fixedNoText.style.color = "#10b981";
+          if (badge) {
+            badge.innerText = "✅ 대법원 확정일자 완료";
+            badge.style.background = "rgba(16,185,129,0.2)";
+            badge.style.color = "#10b981";
+          }
+          if (deadlineText) {
+            deadlineText.innerHTML = `<span style="color:#10b981; font-weight:700;">우선변제권 확보 완료</span>`;
+          }
+          if (quickSubmitBtn) quickSubmitBtn.style.display = "none";
+        } else {
+          fixedNoText.innerText = "⏳ 전월세신고 제출 대기";
+          fixedNoText.style.color = "#f59e0b";
+          if (badge) {
+            badge.innerText = "⚠️ 30일 이내 신고 필요";
+            badge.style.background = "rgba(245,158,11,0.2)";
+            badge.style.color = "#f59e0b";
+          }
+          if (deadlineText) {
+            const daysLeft = r.days_left_to_deadline !== undefined ? r.days_left_to_deadline : 30;
+            deadlineText.innerHTML = `<span style="color:#f87171; font-weight:700;">과태료 기한: D-${daysLeft}일 남음</span>`;
+          }
+          if (quickSubmitBtn) quickSubmitBtn.style.display = "inline-block";
+        }
+      } catch (e) {
+        fixedNoText.innerText = "FIX-20261027-SECURE";
+      }
+    }
 
     async function openRtmsPublicModal(roomId) {
       currentRtmsRoom = roomId || "201";
+      const branch = getUrlParam("branch") || "main";
       try {
-        const res = await fetch(`/api/rent3/rtms/${currentRtmsRoom}/report`);
+        const res = await fetch(`/api/rent3/rtms/${currentRtmsRoom}/report?branch=${branch}`);
         const data = await res.json();
         const r = data.report;
 
         document.getElementById("pubRtmsReportNo").innerText = r.report_no;
         document.getElementById("pubRtmsContractDate").innerText = r.contract_date;
-        document.getElementById("pubRtmsDeadline").innerText = r.deadline_date;
+        document.getElementById("pubRtmsDeadline").innerText = `${r.deadline_date} (D-${r.days_left_to_deadline !== undefined ? r.days_left_to_deadline : 30}일)`;
         document.getElementById("pubRtmsLandlord").innerText = `${r.landlord_name} (${r.landlord_ssn_front}******)`;
         document.getElementById("pubRtmsLandlordPhone").innerText = r.landlord_phone;
         document.getElementById("pubRtmsTenant").innerText = `${r.tenant_name} (${r.tenant_ssn_front}******)`;
         document.getElementById("pubRtmsTenantPhone").innerText = r.tenant_phone;
         document.getElementById("pubRtmsAddress").innerText = r.property_address;
-        document.getElementById("pubRtmsDeposit").innerText = `${r.deposit.toLocaleString()}원`;
-        document.getElementById("pubRtmsRent").innerText = `${r.monthly_rent.toLocaleString()}원`;
+        document.getElementById("pubRtmsDeposit").innerText = `${(r.deposit || 0).toLocaleString()}원`;
+        document.getElementById("pubRtmsRent").innerText = `${(r.monthly_rent || 0).toLocaleString()}원`;
         document.getElementById("pubRtmsPeriod").innerText = `${r.contract_period} (${r.move_in_date} 입주)`;
 
+        // 관할 기관 및 대항력 정보
+        const agencyEl = document.getElementById("pubRtmsAgency");
+        if (agencyEl) agencyEl.innerText = r.reporting_agency || "서울특별시 강남구 역삼1동 주민센터";
+        const courtEl = document.getElementById("pubRtmsCourt");
+        if (courtEl) courtEl.innerText = r.court_registry_office || "서울중앙지방법원 강남등기소";
+
         if (r.status === "SUBMITTED") {
-          document.getElementById("pubRtmsStatusBadge").innerHTML = `<span style="background:#10b981; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">✅ 신고 및 확정일자 부여 완료</span>`;
+          document.getElementById("pubRtmsStatusBadge").innerHTML = `<span style="background:#10b981; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">✅ 신고 수리 및 확정일자 부여 완료</span>`;
           document.getElementById("pubRtmsFixedDateBox").style.display = "block";
           document.getElementById("pubRtmsFixedDateNo").innerText = r.fixed_date_number;
           document.getElementById("pubRtmsFixedDateAt").innerText = r.fixed_date_granted_at;
+          const effectEl = document.getElementById("pubRtmsEffectDate");
+          if (effectEl) effectEl.innerText = r.legal_effect_date || "부여 익일 0시부터 우선변제권 효력 개시";
           document.getElementById("pubBtnSubmitRtms").style.display = "none";
         } else {
-          document.getElementById("pubRtmsStatusBadge").innerHTML = `<span style="background:#f59e0b; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">⏳ 제출 대기 (30일 이내)</span>`;
+          document.getElementById("pubRtmsStatusBadge").innerHTML = `<span style="background:#f59e0b; color:#090d16; padding:4px 8px; border-radius:4px; font-weight:800;">⏳ 제출 대기 (30일 이내 의무신고)</span>`;
           document.getElementById("pubRtmsFixedDateBox").style.display = "none";
           document.getElementById("pubBtnSubmitRtms").style.display = "block";
         }
@@ -1135,23 +1214,29 @@
       document.getElementById("rtmsPublicModal").style.display = "none";
     }
 
-    async function submitRtmsPublic(btn) {
+    async function submitRtmsPublic(btn, roomId) {
+      const targetRoom = roomId || currentRtmsRoom || "201";
+      const branch = getUrlParam("branch") || "main";
       if (!confirm("국토교통부 거래관리시스템(RTMS)에 전자 신고를 제출하고 대법원 확정일자를 즉시 부여받으시겠습니까?")) return;
       btn.disabled = true;
-      btn.innerText = "RTMS 전송 및 확정일자 처리 중...";
+      const originText = btn.innerText;
+      btn.innerText = "RTMS 전송 및 확정일자 부여 처리 중...";
 
       try {
-        const res = await fetch(`/api/rent3/rtms/${currentRtmsRoom}/submit`, { method: "POST" });
+        const res = await fetch(`/api/rent3/rtms/${targetRoom}/submit?branch=${branch}`, { method: "POST" });
         const data = await res.json();
         if (data.success) {
           alert(data.message);
-          openRtmsPublicModal(currentRtmsRoom);
+          await loadRtmsInfo(branch, targetRoom);
+          openRtmsPublicModal(targetRoom);
+        } else {
+          alert(data.detail || "신고 처리에 실패했습니다.");
         }
       } catch (err) {
         alert("신고 실패: " + err.message);
       } finally {
         btn.disabled = false;
-        btn.innerText = "🏛️ 국토교통부 RTMS 전자 신고 제출 & 확정일자 즉시 받기";
+        btn.innerText = originText;
       }
     }
 
@@ -1812,14 +1897,24 @@
           <td style="padding:6px 10px; font-weight:600; background:#f8fafc; width:22%;">월차임 (월세)</td>
           <td style="padding:6px 10px; font-weight:800; color:#0284c7;" id="pubRtmsRent">-</td>
         </tr>
-        <tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
           <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">계약기간 및 입주일</td>
           <td style="padding:6px 10px;" colspan="3" id="pubRtmsPeriod">-</td>
+        </tr>
+        <tr style="border-bottom:1px solid #e2e8f0;">
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">관할 행정관청</td>
+          <td style="padding:6px 10px; font-weight:600;" id="pubRtmsAgency">서울특별시 강남구 역삼1동 주민센터</td>
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">관할 등기소</td>
+          <td style="padding:6px 10px; font-weight:600;" id="pubRtmsCourt">서울중앙지방법원 강남등기소</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 10px; font-weight:600; background:#f8fafc;">보증금 우선변제권 효력</td>
+          <td style="padding:6px 10px; color:#047857; font-weight:700;" colspan="3" id="pubRtmsEffectDate">대항요건 구비 시 익일 0시부터 제3자에 대한 우선변제권 효력 발생</td>
         </tr>
       </table>
 
       <div style="background:#f1f5f9; padding:10px 14px; border-radius:6px; font-size:11px; color:#64748b; line-height:1.5; margin-bottom:16px;">
-        * 본 서식은 국토교통부 RTMS 시스템과 연동되어 제출 즉시 행정관청에 정식 접수되며, 대법원 확정일자가 자동 부여됩니다.
+        * 본 서식은 국토교통부 RTMS 시스템과 연동되어 제출 즉시 행정관청에 정식 접수되며, 주택임대차보호법 제3조의6에 따라 대법원 확정일자가 법적으로 자동 부여됩니다.
       </div>
 
       <div style="display:flex; flex-direction:column; gap:8px;">

@@ -131,9 +131,26 @@ class TestRent3Domain(unittest.TestCase):
         )
         self.assertEqual(report.status, "READY")
         self.assertTrue(report.report_no.startswith("RTMS-2026-"))
+        self.assertTrue(report.is_subject_to_report)
+        self.assertGreaterEqual(report.days_left_to_deadline, 28)
         report.submit_report()
         self.assertEqual(report.status, "SUBMITTED")
         self.assertTrue(report.fixed_date_number.startswith("FIX-"))
+        self.assertIn("우선변제권", report.legal_effect_date)
+        self.assertTrue(len(report.certificate_hash) >= 16)
+
+        # auto_file_and_grant 원클릭 자동 부여 검증
+        auto_rep = RtmsContractReport.auto_file_and_grant(
+            session_id="session_auto_99",
+            branch="main",
+            room_id="204",
+            tenant_name="강감찬",
+            tenant_phone="010-9999-8888",
+            deposit=60000000,
+            monthly_rent=400000
+        )
+        self.assertEqual(auto_rep.status, "SUBMITTED")
+        self.assertTrue(auto_rep.fixed_date_number.startswith("FIX-"))
 
         # 퇴실 정산 계산
         checkout = CheckOutRecord(
@@ -370,6 +387,97 @@ class TestRent3Domain(unittest.TestCase):
         self.assertTrue(first_item["paid_date"].startswith("2026-01"))
         self.assertTrue("-" in first_item["cash_receipt_no"])
         self.assertTrue(first_item["is_confirmed"])
+
+    def test_building_operating_expense_and_monthly_summary(self):
+        """지점별 공용 운영비(승강기·청소·공용전기수도 등) 실지출 전산 등록 및 월별 실결산(NOI) 테스트."""
+        from apps.rent3.domain import BuildingOperatingExpense, calculate_monthly_operating_summary
+
+        # 1. 공용 운영비 신규 전산 등록
+        exp = BuildingOperatingExpense(
+            branch="main",
+            year=2026,
+            month=10,
+            category="elevator",
+            title="10월 승강기 정기 점검 및 안전검사비",
+            amount=180000,
+            vendor_name="현대엘리베이터(주)",
+            vendor_biz_no="107-81-22440",
+            payment_date="2026-10-15",
+            payment_method="TRANSFER",
+            receipt_type="TAX_INVOICE",
+            notes="월간 안전검사 필증 수령 완료",
+            is_tax_deductible=True
+        )
+        exp.save("test_save_expense")
+        self.assertIsNotNone(exp.id)
+        self.assertEqual(exp.amount, 180000)
+        self.assertEqual(exp.category, "elevator")
+        self.assertEqual(BuildingOperatingExpense.get_category_label("elevator"), "🛗 승강기 유지보수 및 점검료")
+
+        # 2. 추가 운영비 항목 등록 (청소비, 공용전기수도)
+        exp2 = BuildingOperatingExpense(
+            branch="main",
+            year=2026,
+            month=10,
+            category="cleaning",
+            title="10월 계단 및 복도 정기 청소비",
+            amount=150000,
+            vendor_name="그린종합청소",
+            payment_date="2026-10-10",
+            payment_method="TRANSFER",
+            receipt_type="TAX_INVOICE"
+        )
+        exp2.save("test_save_expense_2")
+
+        # 3. 월별 실결산 집계 (calculate_monthly_operating_summary)
+        summary = calculate_monthly_operating_summary(branch="main", year=2026, month=10)
+        self.assertEqual(summary["branch"], "main")
+        self.assertEqual(summary["year"], 2026)
+        self.assertEqual(summary["month"], 10)
+        self.assertTrue(summary["total_revenue"] > 0)
+        self.assertTrue(summary["total_expense"] >= 330000) # 180000 + 150000
+        # 순운영이익(NOI) = 총수입 - 실제 총운영비
+        self.assertEqual(summary["net_operating_income"], summary["total_revenue"] - summary["total_expense"])
+        self.assertTrue(summary["expense_ratio"] > 0)
+        self.assertTrue(summary["net_margin_rate"] > 0)
+        self.assertTrue(len(summary["categories_breakdown"]) >= 2)
+
+        # 4. 세무 & 수익률 분석에 실제 운영비 연동 검증
+        roi_res = calculate_branch_tax_roi("main", tax_mode="SEPARATE_14")
+        self.assertTrue(roi_res["noi"] > 0)
+        self.assertTrue(roi_res["operating_expenses"] >= summary["total_expense"])
+
+    def test_annual_tax_statement_and_csv_generation(self):
+        """임대인 5월 종합소득세 홈택스 제출용 연간 소득·필요경비 표준 전산 명세서 및 엑셀(CSV) 생성 테스트."""
+        from apps.rent3.domain import generate_annual_tax_statement, generate_tax_statement_csv
+
+        # 1. 시크빌(main) 단일 지점 연간 종소세 명세서 생성 검증
+        stmt_main = generate_annual_tax_statement(branch="main", year=2026)
+        self.assertIsNotNone(stmt_main)
+        self.assertTrue(stmt_main["statement_no"].startswith("TAX-STMT-2026-MAIN-"))
+        self.assertEqual(stmt_main["year"], 2026)
+        self.assertEqual(stmt_main["branch"], "main")
+        self.assertTrue(stmt_main["revenue_summary"]["annual_gross_revenue"] > 0)
+        self.assertTrue(stmt_main["revenue_summary"]["is_vat_exempt"]) # 주택면세 확인
+        self.assertTrue(stmt_main["expense_summary"]["grand_total_expense"] > 0)
+        
+        # 소득금액 = 총수입 - 필요경비
+        expected_taxable = stmt_main["revenue_summary"]["annual_gross_revenue"] - stmt_main["expense_summary"]["grand_deductible_expense"]
+        self.assertEqual(stmt_main["taxable_result"]["taxable_rental_income"], expected_taxable)
+        self.assertEqual(stmt_main["taxable_result"]["separate_tax_estimate_14"], int(expected_taxable * 0.154))
+        self.assertTrue(len(stmt_main["expense_summary"]["categories"]) >= 8)
+
+        # 2. 3대 지점 통합(all) 포트폴리오 명세서 생성 검증
+        stmt_all = generate_annual_tax_statement(branch="all", year=2026)
+        self.assertTrue(stmt_all["total_rooms"] >= 60)
+        self.assertTrue(stmt_all["revenue_summary"]["annual_gross_revenue"] >= stmt_main["revenue_summary"]["annual_gross_revenue"])
+
+        # 3. 국세청 제출 및 엑셀 호환 UTF-8 BOM CSV 생성 검증
+        csv_text = generate_tax_statement_csv(stmt_all)
+        self.assertTrue(csv_text.startswith("\ufeff")) # Excel 한글 깨짐 방지 BOM
+        self.assertIn("부동산 임대소득 및 필요경비 연간 표준 합산 명세서", csv_text)
+        self.assertIn("소득세법 제19조", csv_text)
+        self.assertIn("임대소득금액 (총수입 - 필요경비)", csv_text)
 
 
 if __name__ == "__main__":

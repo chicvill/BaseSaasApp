@@ -186,6 +186,8 @@
       <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 하자보수(A/S) 대장 & 정산 (<span id="tabBadgeMaint">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabCheckout')">🚪 퇴실 정산 & 공실 전환 (<span id="tabBadgeCheckout">0</span>)</button>
       <button class="tab-btn" onclick="switchTab('tabTaxRoi')">📊 세무 & 수익률 분석</button>
+      <button class="tab-btn" id="btnTabExpenses" onclick="switchTab('tabExpenses')">🧾 공용 운영비 & 실결산 (<span id="tabBadgeExpenses">0</span>)</button>
+      <button class="tab-btn" id="btnTabEntities" onclick="switchTab('tabEntities')">🗄️ 8대 표준 데이터 객체 관리 (생성·검색·편집)</button>
       <button class="tab-btn" onclick="switchTab('tabRooms')">🏢 호실 현황 (rent2 계승)</button>
       <button class="tab-btn" onclick="switchTab('tabListings')">📢 공실 광고 관리</button>
     </div>
@@ -451,6 +453,7 @@
                 <option value="COMPREHENSIVE">종합과세 (누진세율 적용)</option>
               </select>
             </div>
+            <button class="btn btn-primary" style="background:linear-gradient(135deg, #0284c7, #0ea5e9); font-size:12.5px; padding:6px 14px;" onclick="openAnnualTaxStatementModal()">📑 5월 종소세 연간 명세서 / 엑셀</button>
             <button class="btn btn-secondary" onclick="loadTaxRoiDashboard()">🔄 새로고침</button>
           </div>
         </div>
@@ -575,11 +578,196 @@
       </div>
     </div>
 
+    <!-- Tab: Building Operating Expenses & Real Settlement (공용 운영비 & 실결산) -->
+    <div id="tabExpenses" class="tab-pane">
+      <div class="card">
+        <!-- Top Toolbar & Month Selector -->
+        <div class="card-title">
+          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+            <span>🧾 지점별 공용 운영비 실지출 대장 & 월별 실결산 (NOI)</span>
+            <div style="display:flex; align-items:center; gap:6px; background:#0f172a; padding:4px 10px; border-radius:8px; border:1px solid var(--card-border);">
+              <span style="font-size:12px; color:var(--text-muted);">결산 연월:</span>
+              <select id="expenseYearSelect" style="background:transparent; border:none; color:#fff; font-size:13px; font-weight:700; outline:none; cursor:pointer;" onchange="loadOperatingExpenses()">
+                <option value="2026">2026년</option>
+                <option value="2025">2025년</option>
+              </select>
+              <select id="expenseMonthSelect" style="background:transparent; border:none; color:var(--primary); font-size:13px; font-weight:800; outline:none; cursor:pointer;" onchange="loadOperatingExpenses()">
+                <option value="10" selected>10월</option>
+                <option value="9">9월</option>
+                <option value="8">8월</option>
+                <option value="7">7월</option>
+                <option value="6">6월</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary" onclick="openNewExpenseModal()">➕ 운영비 지출 등록</button>
+            <button class="btn btn-secondary" onclick="openMonthlyExpenseReportModal()">📄 월별 결산서 출력 / PDF</button>
+            <button class="btn btn-secondary" style="border-color:rgba(56,189,248,0.4); color:var(--primary);" onclick="openAnnualTaxStatementModal()">📑 연간 종소세 명세서</button>
+            <button class="btn btn-secondary" onclick="loadOperatingExpenses()">🔄 새로고침</button>
+          </div>
+        </div>
+
+        <!-- 4 Key Settlement KPIs -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:14px; margin-bottom:24px;">
+          <div style="background:#0f172a; padding:14px 18px; border-radius:10px; border:1px solid rgba(239,68,68,0.3);">
+            <div style="font-size:12px; color:#f87171; margin-bottom:4px; font-weight:600;">당월 총 공용 운영비 실지출</div>
+            <div style="font-size:22px; font-weight:800; color:#fff;" id="kpiExpTotal">- 원</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">등록 증빙 <span id="kpiExpCount">0</span>건</div>
+          </div>
+          <div style="background:#0f172a; padding:14px 18px; border-radius:10px; border:1px solid var(--card-border);">
+            <div style="font-size:12px; color:var(--text-muted); margin-bottom:4px; font-weight:600;">당월 임대 총 수납액 (월세+관리비)</div>
+            <div style="font-size:22px; font-weight:800; color:#fff;" id="kpiExpIncome">- 원</div>
+            <div style="font-size:11px; color:var(--primary); margin-top:2px;">가동률 연동 실시간</div>
+          </div>
+          <div style="background:#0f172a; padding:14px 18px; border-radius:10px; border:1px solid rgba(16,185,129,0.3);">
+            <div style="font-size:12px; color:#10b981; margin-bottom:4px; font-weight:600;">실제 순운영이익 (실질 NOI)</div>
+            <div style="font-size:22px; font-weight:800; color:#10b981;" id="kpiExpNoi">- 원</div>
+            <div style="font-size:11px; color:#a7f3d0; margin-top:2px;">실수령 순이익률 <span id="kpiExpMargin">-</span>%</div>
+          </div>
+          <div style="background:#0f172a; padding:14px 18px; border-radius:10px; border:1px solid rgba(56,189,248,0.3);">
+            <div style="font-size:12px; color:var(--primary); margin-bottom:4px; font-weight:600;">종소세 필요경비 인정액</div>
+            <div style="font-size:22px; font-weight:800; color:#38bdf8;" id="kpiExpDeductible">- 원</div>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">적격증빙 구비 100% 공제</div>
+          </div>
+        </div>
+
+        <!-- 2-Column Split: Categories Breakdown & Expenses Table -->
+        <div style="display:grid; grid-template-columns:320px 1fr; gap:20px; align-items:start;">
+          <!-- Left: Category Breakdown -->
+          <div style="background:rgba(15,23,42,0.6); border:1px solid var(--card-border); border-radius:12px; padding:18px;">
+            <div style="font-size:14px; font-weight:700; color:#fff; margin-bottom:14px; display:flex; justify-content:space-between;">
+              <span>항목별 지출 비중</span>
+              <span id="kpiExpRatioText" style="font-size:12px; color:#f87171; font-weight:700;">경비율 -%</span>
+            </div>
+            <div id="expenseCategoryList" style="display:flex; flex-direction:column; gap:12px;">
+              <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:12px;">집계 중...</div>
+            </div>
+          </div>
+
+          <!-- Right: Expenses Table -->
+          <div style="background:rgba(15,23,42,0.6); border:1px solid var(--card-border); border-radius:12px; padding:18px; overflow-x:auto;">
+            <div style="font-size:14px; font-weight:700; color:#fff; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+              <span>지출 항목별 상세 장부</span>
+              <span style="font-size:12px; color:var(--text-muted);">세무 증빙 보관 완료</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>지출일자</th>
+                  <th>분류</th>
+                  <th>지출 적요</th>
+                  <th>공급처(사업자번호)</th>
+                  <th>금액</th>
+                  <th>증빙구분</th>
+                  <th>조치</th>
+                </tr>
+              </thead>
+              <tbody id="expenseTbody">
+                <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">운영비 데이터를 불러오는 중입니다...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: 8 Standard Entities Management & Event Lifecycle -->
+    <div id="tabEntities" class="tab-pane">
+      <div class="card">
+        <div class="card-title" style="flex-wrap: wrap; gap: 12px;">
+          <div>
+            <span style="font-size: 18px; font-weight: 800; color: #fff;">🗄️ 8대 표준 데이터 객체 통합 관리 센터</span>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
+              Admin · Lessor · Tenant · Building · Room · Contract · Pay · Outlay 생성, 검색, 편집 및 16단계 이벤트 라이프사이클 처리
+            </div>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="openNewEntityModal()">➕ 신규 객체 등록</button>
+            <button class="btn btn-secondary" style="border-color: rgba(168,85,247,0.4); color: #c084fc;" onclick="openWorkflowModal()">⚡ 16단계 이벤트 실행기</button>
+            <button class="btn btn-secondary" onclick="loadEntitiesDashboard()">🔄 새로고침</button>
+          </div>
+        </div>
+
+        <!-- 8 Entity Count Badges -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px;">
+          <div onclick="switchEntitySubTab('admin')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntAdmin">
+            <div style="font-size: 11px; color: var(--text-muted);">Admin (관리인)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountAdmin">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('lessor')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntLessor">
+            <div style="font-size: 11px; color: var(--text-muted);">Lessor (임대인)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountLessor">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('tenant')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntTenant">
+            <div style="font-size: 11px; color: var(--text-muted);">Tenant (임차인)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountTenant">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('building')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntBuilding">
+            <div style="font-size: 11px; color: var(--text-muted);">Building (건물)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountBuilding">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('room')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntRoom">
+            <div style="font-size: 11px; color: var(--text-muted);">Room (임대상세)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountRoom">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('contract')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntContract">
+            <div style="font-size: 11px; color: var(--text-muted);">Contract (계약)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #38bdf8;" id="entCountContract">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('pay')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntPay">
+            <div style="font-size: 11px; color: var(--text-muted);">Pay (수납)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #10b981;" id="entCountPay">0</div>
+          </div>
+          <div onclick="switchEntitySubTab('outlay')" style="background: rgba(15,23,42,0.8); border: 1px solid var(--card-border); border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.2s;" id="cardEntOutlay">
+            <div style="font-size: 11px; color: var(--text-muted);">Outlay (지출)</div>
+            <div style="font-size: 18px; font-weight: 800; color: #f87171;" id="entCountOutlay">0</div>
+          </div>
+        </div>
+
+        <!-- Entity Type Selector Pills & Filter Toolbar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; background: rgba(15,23,42,0.5); padding: 12px 16px; border-radius: 10px; border: 1px solid var(--card-border);">
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;" id="entityPillsContainer">
+            <button class="btn btn-secondary entity-pill active" onclick="switchEntitySubTab('admin')">👑 관리인</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('lessor')">🏢 임대인</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('tenant')">🔑 임차인</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('building')">🏛️ 건물</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('room')">🚪 임대상세(호실)</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('contract')">📑 계약</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('pay')">💰 수납</button>
+            <button class="btn btn-secondary entity-pill" onclick="switchEntitySubTab('outlay')">🧾 지출</button>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" id="entitySearchKeyword" placeholder="🔍 성명, 전화번호, 호실, 적요 등 실시간 검색..." style="background: #0b1120; border: 1px solid var(--card-border); border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 13px; width: 260px;" oninput="onEntitySearchInput()">
+            <button class="btn btn-secondary" onclick="executeEntitySearch()">검색</button>
+          </div>
+        </div>
+
+        <!-- Entity Data Table -->
+        <div style="overflow-x: auto;">
+          <table>
+            <thead id="entityTableHead">
+              <!-- Dynamically populated by JS -->
+            </thead>
+            <tbody id="entityTableBody">
+              <tr><td colspan="8" style="text-align: center; padding: 30px; color: var(--text-muted);">데이터를 불러오는 중입니다...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Tab 3: Rooms (rent2 core) -->
     <div id="tabRooms" class="tab-pane">
       <div class="card">
         <div class="card-title">
-          <span>지점 호실 및 임차 현황 (rent2 데이터 연동)</span>
+          <span>🏢 지점 호실 및 임차 현황 (rent2 데이터 연동)</span>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary" style="background:linear-gradient(135deg,#0284c7,#0ea5e9); font-size:12.5px; padding:6px 14px;" onclick="openAdminRtmsModal()">
+              🏛️ 국토부 전월세신고 & 확정일자 관제
+            </button>
+            <button class="btn btn-secondary" onclick="loadDashboard()">🔄 새로고침</button>
+          </div>
         </div>
         <table>
           <thead>
@@ -745,6 +933,12 @@
     }
 
     function applyRoleBasedInitialView() {
+      const directTab = getUrlParam('tab');
+      if (directTab && document.getElementById(directTab)) {
+        switchTab(directTab);
+        return;
+      }
+
       const roleParam = getUrlParam('role') || localStorage.getItem('rent3_user_role') || 'admin';
       localStorage.setItem('rent3_user_role', roleParam);
 
@@ -796,6 +990,14 @@
 
       if (tabId === 'tabTaxRoi') {
         loadTaxRoiDashboard();
+      }
+
+      if (tabId === 'tabExpenses') {
+        loadOperatingExpenses();
+      }
+
+      if (tabId === 'tabEntities') {
+        loadEntitiesDashboard();
       }
 
       if (tabId === 'tabChats') {
@@ -854,6 +1056,7 @@
         loadRenewals();
         loadCheckouts();
         loadTaxRoiDashboard();
+        loadOperatingExpenses();
         applyRoleBasedInitialView();
       } catch (err) {
         Bass.updateAppAlert("대시보드 데이터를 불러오지 못했습니다: " + err.message, "error");
@@ -2616,7 +2819,696 @@
     </div>
   </div>
 
+  <!-- Admin RTMS Compliance & Fixed Date Monitoring Modal -->
+  <div class="modal-overlay" id="adminRtmsModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:1000; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#1e293b; border:1px solid var(--card-border); border-radius:16px; max-width:880px; width:100%; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5); max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+            <span>🏛️</span> 국토교통부 전월세신고 30일 과태료 안심 관제 & 대법원 확정일자 대장
+          </h3>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            부동산거래신고법 제6조의2(30일 이내 신고 의무) 준수 및 주택임대차보호법 제3조의6 대법원 확정일자 자동 연동
+          </div>
+        </div>
+        <button onclick="closeAdminRtmsModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+      </div>
+
+      <!-- KPI Status Bar -->
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+        <div style="background:#0f172a; padding:12px 16px; border-radius:10px; border:1px solid var(--card-border);">
+          <div style="font-size:11px; color:var(--text-muted);">총 관리 계약</div>
+          <div style="font-size:20px; font-weight:800; color:#fff;" id="adminRtmsTotalCount">- 건</div>
+        </div>
+        <div style="background:#0f172a; padding:12px 16px; border-radius:10px; border:1px solid rgba(16,185,129,0.3);">
+          <div style="font-size:11px; color:#10b981;">확정일자 완료 (우선변제권 확보)</div>
+          <div style="font-size:20px; font-weight:800; color:#10b981;" id="adminRtmsSubmittedCount">- 건</div>
+        </div>
+        <div style="background:#0f172a; padding:12px 16px; border-radius:10px; border:1px solid rgba(245,158,11,0.3);">
+          <div style="font-size:11px; color:#f59e0b;">신고 대기 (과태료 예방 D-Day)</div>
+          <div style="font-size:20px; font-weight:800; color:#f59e0b;" id="adminRtmsPendingCount">- 건</div>
+        </div>
+      </div>
+
+      <!-- Table of RTMS Reports -->
+      <table style="width:100%; border-collapse:collapse; font-size:13px; margin-bottom:20px;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--card-border); text-align:left; color:var(--text-muted);">
+            <th style="padding:10px 8px;">호실</th>
+            <th style="padding:10px 8px;">세입자</th>
+            <th style="padding:10px 8px;">보증금 / 월세</th>
+            <th style="padding:10px 8px;">체결일</th>
+            <th style="padding:10px 8px;">30일 과태료 기한</th>
+            <th style="padding:10px 8px;">확정일자 상태</th>
+            <th style="padding:10px 8px; text-align:right;">조치</th>
+          </tr>
+        </thead>
+        <tbody id="adminRtmsTbody">
+          <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">신고 현황을 집계 중입니다...</td></tr>
+        </tbody>
+      </table>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-secondary" style="padding:8px 16px;" onclick="closeAdminRtmsModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Expense Modal -->
+  <div class="modal-overlay" id="newExpenseModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:1000; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#1e293b; border:1px solid var(--card-border); border-radius:16px; max-width:620px; width:100%; padding:24px; box-shadow:0 20px 40px rgba(0,0,0,0.5); max-height:92vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom:1px solid var(--card-border); padding-bottom:12px;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+            <span>🧾</span> 공용 운영비 실지출 전산 등록
+          </h3>
+          <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+            승강기, 청소, 공용전기수도 등 지점 관리비 실지출을 등록하여 실질 순이익(NOI)과 소득세 필요경비에 반영합니다.
+          </div>
+        </div>
+        <button onclick="closeNewExpenseModal()" style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;">&times;</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">지점 선택</label>
+          <select id="expModalBranch" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+            <option value="main">시크빌 (본점 29실)</option>
+            <option value="sunho">선호아트빌 (15실)</option>
+            <option value="sinbi">신비주택 (20실)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">결산 연월</label>
+          <div style="display:flex; gap:6px;">
+            <select id="expModalYear" style="flex:1; padding:9px 8px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+              <option value="2026">2026년</option>
+              <option value="2025">2025년</option>
+            </select>
+            <select id="expModalMonth" style="flex:1; padding:9px 8px; background:#0f172a; border:1px solid var(--card-border); color:var(--primary); font-weight:700; border-radius:8px; font-size:13px;">
+              <option value="10" selected>10월</option>
+              <option value="9">9월</option>
+              <option value="8">8월</option>
+              <option value="7">7월</option>
+              <option value="6">6월</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">비용 분류 (8대 표준 항목)</label>
+          <select id="expModalCategory" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:var(--primary); border-radius:8px; font-size:13px; font-weight:700;">
+            <option value="cleaning">🧹 공용구역 정기 청소비</option>
+            <option value="elevator">🛗 승강기(엘리베이터) 유지관리</option>
+            <option value="utility_common">💡 공용 전기·수도요금</option>
+            <option value="safety_fire">🧯 소방·전기 안전관리대행</option>
+            <option value="insurance">🛡️ 건물 화재보험료</option>
+            <option value="repair_maint">🛠️ 공용시설 유지보수·수선</option>
+            <option value="internet_tv">📡 인터넷·IPTV 단체선</option>
+            <option value="other">📦 기타 일반 잡비</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">지출 일자</label>
+          <input type="date" id="expModalDate" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">지출 적요 (명목 / 용도)</label>
+        <input type="text" id="expModalTitle" placeholder="예: 10월 승강기 정기점검 및 안전진단 수수료" style="width:100%; padding:10px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">지출 금액 (원, VAT포함)</label>
+          <input type="number" id="expModalAmount" placeholder="예: 180000" style="width:100%; padding:10px 12px; background:#0f172a; border:1px solid var(--card-border); color:#38bdf8; font-size:15px; font-weight:800; border-radius:8px;">
+        </div>
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">공급 거래처 상호</label>
+          <input type="text" id="expModalVendorName" placeholder="예: 현대엘리베이터(주) 또는 한전" style="width:100%; padding:10px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">사업자등록번호 / 고객번호</label>
+          <input type="text" id="expModalVendorBiz" placeholder="예: 107-81-22440 (선택)" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+        </div>
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">결제 수단</label>
+          <select id="expModalPaymentMethod" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+            <option value="TRANSFER">계좌이체 (은행송금)</option>
+            <option value="CARD">법인/사업자 신용카드</option>
+            <option value="GIRO">지로/자동이체</option>
+            <option value="CASH">현금지출</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:14px;">
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">세무 증빙 구분</label>
+          <select id="expModalReceiptType" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#10b981; border-radius:8px; font-size:13px; font-weight:700;">
+            <option value="TAX_INVOICE">전자세금계산서 (100% 매입공제)</option>
+            <option value="CASH_RECEIPT">지출증빙 현금영수증</option>
+            <option value="CARD_SLIP">신용카드 매출전표</option>
+            <option value="GIRO_RECEIPT">지로영수증 (공과금)</option>
+            <option value="SIMPLE_RECEIPT">간이영수증 (3만원 이하)</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">영수증 첨부 (사진)</label>
+          <input type="file" id="expModalFile" accept="image/*" style="display:none;" onchange="handleExpenseReceiptSelect(this)">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button type="button" class="btn btn-secondary" style="font-size:12px; padding:7px 12px; width:auto;" onclick="document.getElementById('expModalFile').click()">📎 영수증 사진 첨부</button>
+            <span id="expModalFileStatus" style="font-size:11.5px; color:var(--text-muted);">미첨부</span>
+          </div>
+          <div id="expModalPreviewArea" style="display:none; margin-top:6px;">
+            <img id="expModalPreviewImg" src="" style="max-height:48px; border-radius:4px; border:1px solid var(--card-border);">
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:18px;">
+        <label style="font-size:12.5px; color:var(--text-muted); font-weight:600; display:block; margin-bottom:4px;">특이사항 및 점검 메모</label>
+        <input type="text" id="expModalNotes" placeholder="예: 3층 계단 센서등 점등 불량으로 전구 교체 완료" style="width:100%; padding:9px 12px; background:#0f172a; border:1px solid var(--card-border); color:#fff; border-radius:8px; font-size:13px;">
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="btn btn-secondary" style="padding:9px 18px;" onclick="closeNewExpenseModal()">취소</button>
+        <button class="btn btn-primary" style="padding:9px 22px; font-weight:700;" onclick="submitNewExpense(this)">💾 지출 장부 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monthly Expense Report Print Modal -->
+  <div class="modal-overlay" id="monthlyExpenseReportModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:1000; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#ffffff; color:#0f172a; border-radius:16px; max-width:820px; width:100%; padding:36px; box-shadow:0 25px 50px rgba(0,0,0,0.6); max-height:94vh; overflow-y:auto; font-family:'Pretendard', sans-serif;">
+      <!-- Report Header -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #0f172a; padding-bottom:14px; margin-bottom:20px;">
+        <div>
+          <div style="font-size:12px; color:#64748b; font-weight:700; letter-spacing:1px;">OFFICIAL MONTHLY OPERATING EXPENSE & NOI REPORT</div>
+          <h2 style="font-size:24px; font-weight:900; color:#0f172a; margin-top:2px;">
+            <span id="rptBranchName">시크빌 본점</span> <span id="rptYearMonth">2026년 10월</span> 공용 운영비 실지출 결산서
+          </h2>
+          <div style="font-size:12px; color:#475569; margin-top:4px;">
+            발행 지점: <strong id="rptBranchAddress">서울 관악구 신림로 29길 8</strong> | 관리 호실: <span id="rptRoomsCount">29실</span>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:11.5px; color:#64748b;">문서번호: <span id="rptDocNo" style="font-family:monospace; font-weight:700; color:#0284c7;">R3-EXP-202610-01</span></div>
+          <div style="font-size:11.5px; color:#64748b; margin-top:2px;">결산일시: <span id="rptGeneratedAt">2026-10-27</span></div>
+        </div>
+      </div>
+
+      <!-- 3 Executive Key Metrics Box -->
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:24px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px;">
+        <div style="text-align:center; border-right:1px solid #e2e8f0; padding-right:10px;">
+          <div style="font-size:12px; color:#64748b; font-weight:700;">① 당월 임대 총 수납액</div>
+          <div style="font-size:20px; font-weight:900; color:#0f172a; margin-top:4px;" id="rptTotalIncome">- 원</div>
+          <div style="font-size:11px; color:#0284c7; margin-top:2px;">(월세 + 공용관리비)</div>
+        </div>
+        <div style="text-align:center; border-right:1px solid #e2e8f0; padding-right:10px;">
+          <div style="font-size:12px; color:#dc2626; font-weight:700;">② 당월 실지출 총 공용운영비</div>
+          <div style="font-size:20px; font-weight:900; color:#dc2626; margin-top:4px;" id="rptTotalExpense">- 원</div>
+          <div style="font-size:11px; color:#ef4444; margin-top:2px;">경비율 <span id="rptExpenseRatio">-</span>%</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:12px; color:#16a34a; font-weight:700;">③ 실질 순운영이익 (NOI)</div>
+          <div style="font-size:20px; font-weight:900; color:#16a34a; margin-top:4px;" id="rptNetNoi">- 원</div>
+          <div style="font-size:11px; color:#15803d; margin-top:2px;">순이익 마진 <span id="rptMarginRatio">-</span>%</div>
+        </div>
+      </div>
+
+      <!-- Categories Summary Table -->
+      <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:10px;">
+        📊 8대 표준 항목별 지출 집계
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:24px; border-top:2px solid #0f172a;">
+        <thead>
+          <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1; text-align:left; color:#334155;">
+            <th style="padding:8px 10px;">항목명</th>
+            <th style="padding:8px 10px; text-align:right;">건수</th>
+            <th style="padding:8px 10px; text-align:right;">지출 합계</th>
+            <th style="padding:8px 10px; text-align:right;">지출 비중</th>
+            <th style="padding:8px 10px;">세무 증빙</th>
+          </tr>
+        </thead>
+        <tbody id="rptCategoryTbody">
+          <!-- Dynamically populated -->
+        </tbody>
+      </table>
+
+      <!-- Itemized Ledger -->
+      <div style="font-size:14px; font-weight:800; color:#0f172a; margin-bottom:10px;">
+        📋 실지출 상세 영수증 장부
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:24px; border-top:1px solid #cbd5e1;">
+        <thead>
+          <tr style="background:#f8fafc; border-bottom:1px solid #cbd5e1; text-align:left; color:#475569;">
+            <th style="padding:6px 8px;">지출일</th>
+            <th style="padding:6px 8px;">분류</th>
+            <th style="padding:6px 8px;">적요</th>
+            <th style="padding:6px 8px;">공급처</th>
+            <th style="padding:6px 8px; text-align:right;">금액</th>
+            <th style="padding:6px 8px; text-align:center;">증빙</th>
+          </tr>
+        </thead>
+        <tbody id="rptDetailTbody">
+          <!-- Dynamically populated -->
+        </tbody>
+      </table>
+
+      <!-- Official Footer & Stamp Seal -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; border-top:1px dashed #cbd5e1; padding-top:14px; font-size:11px; color:#64748b;">
+        <div style="line-height:1.6;">
+          <div>• 본 결산서는 Rent3 SaaS 스마트 임대차 관제 엔진에서 실시간 지출 증빙을 기반으로 전산 산출되었습니다.</div>
+          <div>• 소득세법 제27조(필요경비의 계산) 및 부가가치세법상 적격증빙 보관 기준을 준수합니다.</div>
+        </div>
+        <div style="text-align:right; position:relative; min-width:140px;">
+          <div style="font-size:13px; font-weight:800; color:#0f172a;" id="rptLandlordName">시크빌 임대관리센터</div>
+          <div style="position:absolute; right:0; bottom:-8px; border:2.5px solid #dc2626; color:#dc2626; border-radius:50%; width:54px; height:54px; font-size:10.5px; font-weight:900; display:flex; align-items:center; justify-content:center; text-align:center; transform:rotate(-12deg); opacity:0.85; background:rgba(254,226,226,0.2);">
+            시크빌<br>직인
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+        <button class="btn btn-secondary" style="background:#e2e8f0; color:#0f172a; width:auto; padding:8px 16px;" onclick="closeMonthlyExpenseReportModal()">닫기</button>
+        <button class="btn btn-primary" style="width:auto; padding:8px 20px; font-weight:800;" onclick="printMonthlyExpenseReport()">🖨️ 결산서 인쇄 / PDF 저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Annual Tax Statement (종합소득세 연간 소득·경비 명세서) Modal -->
+  <div class="modal-overlay" id="annualTaxStatementModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(10px); z-index:1000; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#ffffff; color:#0f172a; border-radius:16px; max-width:880px; width:100%; padding:36px; box-shadow:0 25px 50px rgba(0,0,0,0.6); max-height:94vh; overflow-y:auto; font-family:'Pretendard', sans-serif;">
+      
+      <!-- Top Action Toolbar -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:12px 16px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:12.5px; font-weight:700; color:#475569;">조회 대상:</span>
+          <select id="taxStmtBranchSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; font-weight:700; color:#0f172a; background:#fff; cursor:pointer;" onchange="loadAnnualTaxStatementData()">
+            <option value="main">시크빌 본점 (29실)</option>
+            <option value="sunho">선호아트빌 (15실)</option>
+            <option value="sinbi">신비주택 (20실)</option>
+            <option value="all" selected>👑 3대 지점 통합 (64실 전사)</option>
+          </select>
+          <select id="taxStmtYearSelect" style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; font-weight:700; color:#0284c7; background:#fff; cursor:pointer;" onchange="loadAnnualTaxStatementData()">
+            <option value="2026" selected>2026년 귀속</option>
+            <option value="2025">2025년 귀속</option>
+          </select>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-primary" style="background:#0284c7; color:#fff; font-size:12px; padding:6px 12px;" onclick="downloadAnnualTaxStatementCsv()">📊 엑셀/CSV 다운로드</button>
+          <button class="btn btn-secondary" style="background:#f1f5f9; color:#0f172a; font-size:12px; padding:6px 12px; border:1px solid #cbd5e1;" onclick="printAnnualTaxStatement()">🖨️ 인쇄 / PDF</button>
+          <button style="background:none; border:none; color:#64748b; font-size:20px; cursor:pointer; margin-left:6px;" onclick="closeAnnualTaxStatementModal()">&times;</button>
+        </div>
+      </div>
+
+      <!-- Formal Document Header -->
+      <div style="text-align:center; border-bottom:2px solid #0f172a; padding-bottom:16px; margin-bottom:20px; position:relative;">
+        <div style="font-size:11px; color:#64748b; letter-spacing:1px; font-weight:700;">[소득세법 시행령 제55조 제1항 관련 법정 서식 준용]</div>
+        <h2 style="font-size:23px; font-weight:900; color:#0f172a; margin:4px 0 2px 0;">부동산 임대소득 및 필요경비 연간 표준 합산 명세서</h2>
+        <div style="font-size:13px; color:#475569; font-weight:600;">(국세청 5월 종합소득세 정기확정신고 및 세무사 제출용)</div>
+        
+        <div style="display:flex; justify-content:space-between; margin-top:14px; font-size:11.5px; color:#64748b; text-align:left;">
+          <div>문서번호: <span id="stmtDocNo" style="font-family:monospace; font-weight:700; color:#0284c7;">-</span></div>
+          <div>귀속연도: <strong id="stmtYearText" style="color:#0f172a;">2026년</strong> | 관할세무서: <strong id="stmtTaxOffice">관악세무서 (소득세과)</strong></div>
+        </div>
+      </div>
+
+      <!-- 1. 사업자 및 사업장 기본사항 -->
+      <div style="font-size:13.5px; font-weight:800; color:#0f172a; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <span>①</span> 사업자 및 임대 사업장 인적사항
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:20px; border:1px solid #cbd5e1;">
+        <tbody>
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <th style="background:#f8fafc; padding:8px 10px; width:120px; text-align:left; border-right:1px solid #e2e8f0; color:#475569;">상호(지점명)</th>
+            <td style="padding:8px 10px; font-weight:700; border-right:1px solid #e2e8f0;" id="stmtBranchTitle">-</td>
+            <th style="background:#f8fafc; padding:8px 10px; width:120px; text-align:left; border-right:1px solid #e2e8f0; color:#475569;">사업자등록번호</th>
+            <td style="padding:8px 10px; font-family:monospace; font-weight:700;" id="stmtBizNo">108-04-99881</td>
+          </tr>
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <th style="background:#f8fafc; padding:8px 10px; text-align:left; border-right:1px solid #e2e8f0; color:#475569;">대표자(성명)</th>
+            <td style="padding:8px 10px; font-weight:700; border-right:1px solid #e2e8f0;" id="stmtOwnerName">김임대</td>
+            <th style="background:#f8fafc; padding:8px 10px; text-align:left; border-right:1px solid #e2e8f0; color:#475569;">관리 호실수</th>
+            <td style="padding:8px 10px; font-weight:700;" id="stmtRoomsCount">64실</td>
+          </tr>
+          <tr>
+            <th style="background:#f8fafc; padding:8px 10px; text-align:left; border-right:1px solid #e2e8f0; color:#475569;">사업장 소재지</th>
+            <td colspan="3" style="padding:8px 10px; color:#334155;" id="stmtAddress">서울 관악구 신림로 29길 8 외 2개 사업장</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 2. 연간 총수입금액 명세 -->
+      <div style="font-size:13.5px; font-weight:800; color:#0f172a; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+        <span>②</span> 연간 부동산 임대 총수입금액 명세
+        <span style="font-size:11px; font-weight:600; color:#16a34a; background:#f0fdf4; padding:2px 8px; border-radius:4px; border:1px solid #bbf7d0;">부가가치세 전액 면세 (법 제26조)</span>
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:20px; border:1px solid #cbd5e1;">
+        <thead>
+          <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1; text-align:left; color:#334155;">
+            <th style="padding:8px 10px;">수입 항목</th>
+            <th style="padding:8px 10px; text-align:right;">연간 수납액</th>
+            <th style="padding:8px 10px; text-align:right;">비중</th>
+            <th style="padding:8px 10px;">세무 처리 기준</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:8px 10px; font-weight:600;">1. 월세 임대료 수납 총액</td>
+            <td style="padding:8px 10px; text-align:right; font-weight:700; color:#0f172a;" id="stmtRentRev">- 원</td>
+            <td style="padding:8px 10px; text-align:right; color:#64748b;" id="stmtRentPct">-%</td>
+            <td style="padding:8px 10px; font-size:11.5px; color:#475569;">전산 호실별 장부 실시간 연동 (가짜체납 방지)</td>
+          </tr>
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:8px 10px; font-weight:600;">2. 공용 관리비 수납 총액</td>
+            <td style="padding:8px 10px; text-align:right; font-weight:700; color:#0f172a;" id="stmtMaintRev">- 원</td>
+            <td style="padding:8px 10px; text-align:right; color:#64748b;" id="stmtMaintPct">-%</td>
+            <td style="padding:8px 10px; font-size:11.5px; color:#475569;">공용전기·인터넷·청소 실비 충당 수납액</td>
+          </tr>
+          <tr style="background:#f8fafc; font-weight:800;">
+            <td style="padding:9px 10px; color:#0f172a;">[연간 총수입금액 합계]</td>
+            <td style="padding:9px 10px; text-align:right; font-size:14px; color:#0284c7;" id="stmtTotalGrossRev">- 원</td>
+            <td style="padding:9px 10px; text-align:right; color:#0284c7;">100.0%</td>
+            <td style="padding:9px 10px; font-size:11.5px; color:#16a34a;">소득세법 제19조 사업소득 총수입금액</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- 3. 법정 필요경비(지출) 항목별 합계 -->
+      <div style="font-size:13.5px; font-weight:800; color:#0f172a; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+        <div><span>③</span> 소득세법 제27조 법정 실제 필요경비(지출) 합산 대장</div>
+        <div style="font-size:11.5px; color:#64748b;">적격증빙 보관 건수: <strong id="stmtReceiptTotalCount" style="color:#0f172a;">0건</strong></div>
+      </div>
+      <table style="width:100%; border-collapse:collapse; font-size:12px; margin-bottom:20px; border:1px solid #cbd5e1;">
+        <thead>
+          <tr style="background:#f1f5f9; border-bottom:1px solid #cbd5e1; text-align:left; color:#334155;">
+            <th style="padding:7px 9px;">비용 분류 항목</th>
+            <th style="padding:7px 9px; text-align:right;">건수</th>
+            <th style="padding:7px 9px; text-align:right;">연간 지출액</th>
+            <th style="padding:7px 9px; text-align:right;">필요경비 인정액</th>
+            <th style="padding:7px 9px; text-align:center;">증빙유형</th>
+          </tr>
+        </thead>
+        <tbody id="stmtCategoryTbody">
+          <!-- Dynamically populated -->
+        </tbody>
+        <tfoot>
+          <tr style="background:#fef2f2; font-weight:800; border-top:2px solid #ef4444;">
+            <td style="padding:8px 9px; color:#991b1b;">[총 필요경비 합계]</td>
+            <td style="padding:8px 9px; text-align:right; color:#991b1b;" id="stmtTotalExpCount">0건</td>
+            <td style="padding:8px 9px; text-align:right; color:#dc2626; font-size:13px;" id="stmtGrandTotalExp">- 원</td>
+            <td style="padding:8px 9px; text-align:right; color:#dc2626; font-size:13px;" id="stmtGrandDeductibleExp">- 원</td>
+            <td style="padding:8px 9px; text-align:center; color:#16a34a; font-size:11px;">100% 공제 인정</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <!-- 4. 부동산 임대소득금액 결과 박스 (과세표준 대상) -->
+      <div style="background:#f8fafc; border:2px solid #0284c7; border-radius:12px; padding:18px; margin-bottom:22px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin-bottom:12px;">
+          <span style="font-size:14px; font-weight:900; color:#0f172a;">④ 5월 종합소득세 과세표준 대상 소득금액 결과</span>
+          <span style="font-size:12px; color:#0284c7; font-weight:700;">실질 필요경비율: <span id="stmtExpenseRatioText">0.0%</span></span>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px;">
+          <div>
+            <div style="font-size:11.5px; color:#64748b;">A. 연간 총수입금액</div>
+            <div style="font-size:17px; font-weight:800; color:#0f172a; margin-top:2px;" id="stmtResGrossRev">- 원</div>
+          </div>
+          <div>
+            <div style="font-size:11.5px; color:#dc2626;">B. 차감 필요경비 합계</div>
+            <div style="font-size:17px; font-weight:800; color:#dc2626; margin-top:2px;" id="stmtResTotalExp">- 원</div>
+          </div>
+          <div>
+            <div style="font-size:11.5px; color:#16a34a; font-weight:700;">C. 부동산 임대 소득금액 (A - B)</div>
+            <div style="font-size:20px; font-weight:900; color:#15803d; margin-top:2px;" id="stmtResTaxableIncome">- 원</div>
+          </div>
+        </div>
+        <div style="margin-top:12px; padding-top:10px; border-top:1px dashed #cbd5e1; font-size:11.5px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+          <span>• 14% 분리과세 적용 시 추정 소득세액: <strong id="stmtResSeparateTax" style="color:#0284c7;">- 원</strong> (지방소득세 포함 15.4%)</span>
+          <span style="color:#64748b;">신고기한: 2027년 5월 1일 ~ 5월 31일</span>
+        </div>
+      </div>
+
+      <!-- Legal Footer & Official Stamp -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; border-top:1px dashed #cbd5e1; padding-top:14px; font-size:11px; color:#64748b;">
+        <div style="line-height:1.6;">
+          <div>• 본 명세서는 Rent3 스마트 임대차 관제 엔진의 실제 지출 전자영수증 대장을 기반으로 전산 산출되었습니다.</div>
+          <div>• 소득세법 제27조(필요경비의 계산) 및 동법 시행령 제55조에 따른 세무서식 기준을 준수합니다.</div>
+          <div>• 발급일자: <span id="stmtIssuedDate">2026-10-27</span> | 시스템: BaseSaasApp Rent3 Smart Cloud</div>
+        </div>
+        <div style="text-align:right; position:relative; min-width:140px;">
+          <div style="font-size:13px; font-weight:800; color:#0f172a;" id="stmtSealCenterName">시크빌 임대관리센터</div>
+          <div style="position:absolute; right:0; bottom:-6px; border:2.5px solid #dc2626; color:#dc2626; border-radius:50%; width:54px; height:54px; font-size:10.5px; font-weight:900; display:flex; align-items:center; justify-content:center; text-align:center; transform:rotate(-12deg); opacity:0.85; background:rgba(254,226,226,0.2);">
+            시크빌<br>직인
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:24px;">
+        <button class="btn btn-secondary" style="background:#e2e8f0; color:#0f172a; width:auto; padding:8px 16px;" onclick="closeAnnualTaxStatementModal()">닫기</button>
+        <button class="btn btn-primary" style="background:#0284c7; width:auto; padding:8px 18px; font-weight:800;" onclick="downloadAnnualTaxStatementCsv()">📊 엑셀/CSV 다운로드</button>
+        <button class="btn btn-primary" style="width:auto; padding:8px 20px; font-weight:800;" onclick="printAnnualTaxStatement()">🖨️ A4 명세서 인쇄 / PDF 저장</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 8 Standard Entities CRUD Modal (객체 생성 및 편집) -->
+  <div class="modal-overlay" id="entityModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.8); backdrop-filter:blur(8px); z-index:1050; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#1e293b; color:#fff; border-radius:16px; border:1px solid var(--card-border); max-width:640px; width:100%; padding:28px; box-shadow:0 25px 50px rgba(0,0,0,0.7); max-height:90vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border); padding-bottom:14px; margin-bottom:18px;">
+        <div>
+          <h3 id="entityModalTitle" style="font-size:18px; font-weight:800; color:#38bdf8;">신규 객체 등록</h3>
+          <div id="entityModalSub" style="font-size:12px; color:var(--text-muted);">표준 데이터 스키마에 맞춰 정보를 입력합니다.</div>
+        </div>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;" onclick="closeEntityModal()">&times;</button>
+      </div>
+
+      <form id="entityModalForm" onsubmit="event.preventDefault(); submitEntityForm();" style="display:flex; flex-direction:column; gap:14px;">
+        <input type="hidden" id="entFormMode" value="create">
+        <input type="hidden" id="entFormType" value="room">
+        <input type="hidden" id="entFormId" value="">
+
+        <div id="entityFormFields" style="display:flex; flex-direction:column; gap:14px;">
+          <!-- Dynamically populated form fields -->
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--card-border); padding-top:16px;">
+          <button type="button" class="btn btn-secondary" style="width:auto; padding:8px 16px;" onclick="closeEntityModal()">취소</button>
+          <button type="submit" class="btn btn-primary" style="width:auto; padding:8px 22px; font-weight:800;" id="btnEntityModalSubmit">저장하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 16-Step Event Lifecycle Interactive Simulator Modal -->
+  <div class="modal-overlay" id="workflowModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(8px); z-index:1060; justify-content:center; align-items:center; padding:16px;">
+    <div style="background:#0f172a; color:#fff; border-radius:16px; border:1px solid #38bdf8; max-width:820px; width:100%; padding:28px; box-shadow:0 25px 50px rgba(0,0,0,0.8); max-height:92vh; overflow-y:auto;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--card-border); padding-bottom:14px; margin-bottom:18px;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; color:#38bdf8;">⚡ 16단계 비즈니스 이벤트 라이프사이클 실행기</h3>
+          <div style="font-size:12px; color:var(--text-muted);">앱 게시부터 임대인·임차인 가입, 등기부 검증, 계약, 전입, 수납 및 세무자료 생성까지 완결 처리</div>
+        </div>
+        <button style="background:none; border:none; color:var(--text-muted); font-size:22px; cursor:pointer;" onclick="closeWorkflowModal()">&times;</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px;" id="workflowStepsGrid">
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">1. 앱 게시 & 링크 확인</div>
+            <div style="font-size:11px; color:var(--text-muted);">구글 플레이 & 웹 홈페이지</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('app_publish_info')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">2. 임대인 회원가입</div>
+            <div style="font-size:11px; color:var(--text-muted);">본인확인 ➔ id_lessor 발급</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('register_lessor')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">3. 임대 매물 등록 & 게시</div>
+            <div style="font-size:11px; color:var(--text-muted);">id_room 등록 ➔ 홈페이지 게시</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('publish_room')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">4. 임차인 회원가입</div>
+            <div style="font-size:11px; color:var(--text-muted);">본인확인 ➔ id_tenant 발급</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('register_tenant')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">5. 등기부등본 열람 & 확인</div>
+            <div style="font-size:11px; color:var(--text-muted);">임대인 열람 ➔ 임차인 크로스체크</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('verify_registry')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">6. 계약 체결 (id_contract)</div>
+            <div style="font-size:11px; color:var(--text-muted);">현물/옵션 확인 ➔ 계약서 등록</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('sign_contract')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">7. 계약금 송금 & 영수증</div>
+            <div style="font-size:11px; color:var(--text-muted);">영수증 캡쳐 ➔ 계약 확정</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('remit_deposit')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">8. 전입 & 도어락 비번 전달</div>
+            <div style="font-size:11px; color:var(--text-muted);">공과금 정산 & 분리수거 안내</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('checkin')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">9. 1개월 후 임차료 수납 (id_pay)</div>
+            <div style="font-size:11px; color:var(--text-muted);">임차료 등록 ➔ 세입자 화면 확인</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('record_pay')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#fff;">10. 경비 지출 등록 (id_outlay)</div>
+            <div style="font-size:11px; color:var(--text-muted);">청소비, 승강기, 공동전기 등</div>
+          </div>
+          <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px;" onclick="runWorkflowAction('record_outlay')">실행</button>
+        </div>
+
+        <div style="background:#1e293b; padding:12px 14px; border-radius:10px; border:1px solid var(--card-border); grid-column: span 2; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:13px; font-weight:700; color:#10b981;">11. 부가세/종부세/소득세 결산 자료 생성</div>
+            <div style="font-size:11px; color:var(--text-muted);">연간 총수입금액, 법정 필요경비, 임대소득금액 실시간 산출</div>
+          </div>
+          <button class="btn btn-primary" style="padding:6px 14px; font-size:12.5px; font-weight:800;" onclick="runWorkflowAction('generate_tax')">실행</button>
+        </div>
+      </div>
+
+      <!-- Execution Console Log -->
+      <div style="background:#000; border:1px solid #334155; border-radius:10px; padding:14px; font-family:monospace; font-size:12px; color:#38bdf8; max-height:200px; overflow-y:auto;" id="workflowConsoleLog">
+        > 워크플로우 엔진 대기 중입니다. 원하는 단계를 실행해 보세요.
+      </div>
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button class="btn btn-secondary" style="width:auto; padding:8px 18px;" onclick="closeWorkflowModal()">닫기</button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    async function openAdminRtmsModal() {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      const modal = document.getElementById("adminRtmsModal");
+      modal.style.display = "flex";
+
+      try {
+        const res = await fetch(`/api/rent3/admin/rtms/pending?branch=${branch}`);
+        const data = await res.json();
+        const reports = data.reports || [];
+
+        const submittedCount = reports.filter(r => r.status === 'SUBMITTED').length;
+        const pendingCount = reports.filter(r => r.status !== 'SUBMITTED').length;
+
+        document.getElementById("adminRtmsTotalCount").innerText = `${reports.length || 0}건`;
+        document.getElementById("adminRtmsSubmittedCount").innerText = `${submittedCount}건`;
+        document.getElementById("adminRtmsPendingCount").innerText = `${pendingCount}건`;
+
+        const tbody = document.getElementById("adminRtmsTbody");
+        if (reports.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">현재 관리 지점의 주택임대차 신고 내역이 없습니다.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = reports.map(r => {
+          const isSubmitted = (r.status === 'SUBMITTED');
+          const daysLeft = r.days_left_to_deadline !== undefined ? r.days_left_to_deadline : 30;
+          return `
+            <tr style="border-bottom:1px solid rgba(255,255,255,0.06);">
+              <td style="padding:10px 8px; font-weight:700;">${r.room_id}호</td>
+              <td style="padding:10px 8px;">${r.tenant_name} (${r.tenant_phone ? r.tenant_phone.slice(-4) : '****'})</td>
+              <td style="padding:10px 8px;">${(r.deposit||0).toLocaleString()} / ${(r.monthly_rent||0).toLocaleString()}</td>
+              <td style="padding:10px 8px; color:var(--text-muted); font-size:12px;">${r.contract_date || '-'}</td>
+              <td style="padding:10px 8px;">
+                <span class="badge ${isSubmitted ? 'badge-confirmed' : (daysLeft <= 7 ? 'badge-rejected' : 'badge-pending')}" style="font-size:11px;">
+                  ${isSubmitted ? '안심 준수' : `D-${daysLeft}일 남음`}
+                </span>
+              </td>
+              <td style="padding:10px 8px;">
+                ${isSubmitted ? `
+                  <div style="font-size:12px; font-weight:700; color:#10b981;">✅ 확정일자 부여완료</div>
+                  <div style="font-size:11px; color:#38bdf8; font-family:monospace;">${r.fixed_date_number || '-'}</div>
+                ` : `
+                  <span style="font-size:12px; color:var(--warning); font-weight:600;">⏳ 전자신고 대기</span>
+                `}
+              </td>
+              <td style="padding:10px 8px; text-align:right;">
+                <div style="display:inline-flex; gap:6px;">
+                  ${!isSubmitted ? `
+                    <button class="btn btn-primary" style="padding:4px 10px; font-size:12px;" onclick="submitAdminRtmsOne('${r.room_id}', this)">
+                      ⚡ 즉시 대리 신고
+                    </button>
+                  ` : `
+                    <button class="btn btn-secondary" style="padding:4px 10px; font-size:12px; background:rgba(56,189,248,0.15); color:var(--primary); border:1px solid rgba(56,189,248,0.3);" onclick="viewAdminRtmsReceipt('${r.room_id}')">
+                      📄 필증 확인
+                    </button>
+                  `}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        document.getElementById("adminRtmsTbody").innerHTML = `<tr><td colspan="7" style="color:var(--error); text-align:center; padding:20px;">신고 대장을 불러오지 못했습니다: ${err.message}</td></tr>`;
+      }
+    }
+
+    function closeAdminRtmsModal() {
+      document.getElementById("adminRtmsModal").style.display = "none";
+    }
+
+    async function submitAdminRtmsOne(roomId, btn) {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      await Bass.withLock(btn, async () => {
+        const res = await fetch(`/api/rent3/rtms/${roomId}/submit?branch=${branch}`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          openAdminRtmsModal();
+        } else {
+          Bass.updateAppAlert(data.detail || "신고 처리 실패", "error");
+        }
+      });
+    }
+
+    function viewAdminRtmsReceipt(roomId) {
+      window.open(`public.html?view=tenant&room=${roomId}`, '_blank');
+    }
     async function openAdminRentCertModal() {
       const branch = document.getElementById("branchSelect")?.value || "main";
       const roomId = document.getElementById("certTargetRoomSelect")?.value || "201";
@@ -2690,6 +3582,866 @@
           Bass.updateAppAlert(data.detail || "전송에 실패했습니다.", "error");
         }
       });
+    }
+
+    // ==========================================
+    // 🧾 공용 운영비 실지출 대장 & 월별 결산 (NOI) JS 엔진
+    // ==========================================
+    let currentExpenseSummaryCache = null;
+    let currentExpenseListCache = [];
+    let expenseReceiptDataUrl = "";
+
+    async function loadOperatingExpenses() {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      const year = parseInt(document.getElementById("expenseYearSelect")?.value || "2026");
+      const month = parseInt(document.getElementById("expenseMonthSelect")?.value || "10");
+
+      try {
+        // 1. 월별 결산 요약 (수입 대 지출 NOI) 조회
+        const summaryRes = await fetch(`/api/rent3/expenses/monthly-summary?branch=${branch}&year=${year}&month=${month}`);
+        const summaryData = await summaryRes.json();
+        const s = summaryData.summary;
+        currentExpenseSummaryCache = s;
+
+        if (s) {
+          document.getElementById("kpiExpTotal").innerText = `${(s.total_expense || 0).toLocaleString()} 원`;
+          document.getElementById("kpiExpIncome").innerText = `${(s.total_revenue || 0).toLocaleString()} 원`;
+          document.getElementById("kpiExpNoi").innerText = `${(s.net_operating_income || 0).toLocaleString()} 원`;
+          document.getElementById("kpiExpMargin").innerText = (s.net_margin_rate || 0).toFixed(1);
+          document.getElementById("kpiExpDeductible").innerText = `${(s.deductible_expense || 0).toLocaleString()} 원`;
+          document.getElementById("kpiExpCount").innerText = s.expense_count || 0;
+          document.getElementById("kpiExpRatioText").innerText = `경비율 ${(s.expense_ratio || 0).toFixed(1)}%`;
+          
+          const badgeExpenses = document.getElementById("tabBadgeExpenses");
+          if (badgeExpenses) badgeExpenses.innerText = s.expense_count || 0;
+
+          // 항목별 비중 바 렌더링
+          const catListEl = document.getElementById("expenseCategoryList");
+          if (s.categories_breakdown && s.categories_breakdown.length > 0) {
+            catListEl.innerHTML = s.categories_breakdown.map(cat => {
+              const pct = cat.percentage || 0;
+              return `
+                <div>
+                  <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:4px;">
+                    <span style="color:#e2e8f0; font-weight:600;">${cat.label}</span>
+                    <span style="color:#38bdf8; font-weight:700;">${(cat.amount || 0).toLocaleString()}원 <span style="font-size:11px; color:var(--text-muted);">(${pct.toFixed(1)}%)</span></span>
+                  </div>
+                  <div style="background:#1e293b; height:6px; border-radius:3px; overflow:hidden;">
+                    <div style="background:linear-gradient(90deg, #38bdf8, #818cf8); height:100%; width:${Math.min(pct, 100)}%;"></div>
+                  </div>
+                </div>
+              `;
+            }).join("");
+          } else {
+            catListEl.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted); font-size:12px;">등록된 지출 내역이 없습니다.</div>`;
+          }
+        }
+
+        // 2. 상세 지출 대장 목록 조회
+        const listRes = await fetch(`/api/rent3/expenses/list?branch=${branch}&year=${year}&month=${month}`);
+        const listData = await listRes.json();
+        const expenses = listData.expenses || [];
+        currentExpenseListCache = expenses;
+
+        const tbody = document.getElementById("expenseTbody");
+        if (expenses.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">해당 연월에 등록된 지출 내역이 없습니다. [➕ 운영비 지출 등록] 버튼을 눌러 등록해보세요.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = expenses.map(e => {
+          let receiptLabel = "기타증빙";
+          let receiptColor = "#94a3b8";
+          if (e.receipt_type === "TAX_INVOICE") { receiptLabel = "세금계산서"; receiptColor = "#10b981"; }
+          else if (e.receipt_type === "CASH_RECEIPT") { receiptLabel = "현금영수증"; receiptColor = "#38bdf8"; }
+          else if (e.receipt_type === "CARD_SLIP") { receiptLabel = "신용카드"; receiptColor = "#818cf8"; }
+          else if (e.receipt_type === "GIRO_RECEIPT") { receiptLabel = "공과금지로"; receiptColor = "#f59e0b"; }
+          else if (e.receipt_type === "SIMPLE_RECEIPT") { receiptLabel = "간이영수증"; receiptColor = "#e2e8f0"; }
+
+          return `
+            <tr>
+              <td style="color:var(--text-muted); font-size:12.5px;">${e.payment_date || '-'}</td>
+              <td><span class="badge" style="background:rgba(56,189,248,0.12); color:var(--primary); font-size:11px;">${e.category_label}</span></td>
+              <td>
+                <div style="font-weight:700; color:#fff;">${e.title}</div>
+                ${e.notes ? `<div style="font-size:11px; color:var(--text-muted);">${e.notes}</div>` : ''}
+              </td>
+              <td>
+                <div style="font-size:13px; font-weight:600;">${e.vendor_name || '-'}</div>
+                <div style="font-size:11px; color:var(--text-muted);">${e.vendor_biz_no || ''}</div>
+              </td>
+              <td style="font-size:14px; font-weight:800; color:#f87171;">${(e.amount || 0).toLocaleString()}원</td>
+              <td>
+                <span class="badge" style="border:1px solid ${receiptColor}; color:${receiptColor}; font-size:11px;">${receiptLabel}</span>
+                ${e.receipt_photo_url ? `<span style="cursor:pointer; font-size:13px; margin-left:4px;" title="영수증 사진 보기" onclick="window.open('${e.receipt_photo_url}','_blank')">📷</span>` : ''}
+              </td>
+              <td>
+                <button class="btn btn-danger" style="padding:4px 8px; font-size:11px;" onclick="deleteExpenseItem('${e.id}')">삭제</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+      } catch (err) {
+        Bass.updateAppAlert(`운영비 결산 집계 오류: ${err.message}`, "error");
+      }
+    }
+
+    function openNewExpenseModal() {
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      const year = document.getElementById("expenseYearSelect")?.value || "2026";
+      const month = document.getElementById("expenseMonthSelect")?.value || "10";
+
+      document.getElementById("expModalBranch").value = branch;
+      document.getElementById("expModalYear").value = year;
+      document.getElementById("expModalMonth").value = month;
+      
+      const today = new Date().toISOString().split("T")[0];
+      document.getElementById("expModalDate").value = today;
+      document.getElementById("expModalTitle").value = "";
+      document.getElementById("expModalAmount").value = "";
+      document.getElementById("expModalVendorName").value = "";
+      document.getElementById("expModalVendorBiz").value = "";
+      document.getElementById("expModalNotes").value = "";
+      document.getElementById("expModalFileStatus").innerText = "미첨부";
+      document.getElementById("expModalPreviewArea").style.display = "none";
+      expenseReceiptDataUrl = "";
+
+      document.getElementById("newExpenseModal").style.display = "flex";
+    }
+
+    function closeNewExpenseModal() {
+      document.getElementById("newExpenseModal").style.display = "none";
+    }
+
+    function handleExpenseReceiptSelect(input) {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        expenseReceiptDataUrl = e.target.result;
+        document.getElementById("expModalFileStatus").innerText = `첨부됨 (${(file.size/1024).toFixed(1)} KB)`;
+        document.getElementById("expModalPreviewImg").src = expenseReceiptDataUrl;
+        document.getElementById("expModalPreviewArea").style.display = "block";
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function submitNewExpense(btn) {
+      const branch = document.getElementById("expModalBranch").value;
+      const year = parseInt(document.getElementById("expModalYear").value);
+      const month = parseInt(document.getElementById("expModalMonth").value);
+      const category = document.getElementById("expModalCategory").value;
+      const payment_date = document.getElementById("expModalDate").value;
+      const title = document.getElementById("expModalTitle").value.trim();
+      const amount = parseInt(document.getElementById("expModalAmount").value);
+      const vendor_name = document.getElementById("expModalVendorName").value.trim();
+      const vendor_biz_no = document.getElementById("expModalVendorBiz").value.trim();
+      const payment_method = document.getElementById("expModalPaymentMethod").value;
+      const receipt_type = document.getElementById("expModalReceiptType").value;
+      const notes = document.getElementById("expModalNotes").value.trim();
+
+      if (!title || !amount || isNaN(amount) || amount <= 0) {
+        Bass.updateAppAlert("적요와 올바른 지출 금액을 입력해주세요.", "warning");
+        return;
+      }
+
+      await Bass.withLock(btn, async () => {
+        const payload = {
+          branch,
+          year,
+          month,
+          category,
+          title,
+          amount,
+          vendor_name,
+          vendor_biz_no,
+          payment_date,
+          payment_method,
+          receipt_type,
+          receipt_photo_url: expenseReceiptDataUrl,
+          notes,
+          is_tax_deductible: true
+        };
+
+        const res = await fetch("/api/rent3/expenses/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          closeNewExpenseModal();
+          // 현재 셀렉트박스를 등록한 연월로 동기화
+          const yearSel = document.getElementById("expenseYearSelect");
+          const monthSel = document.getElementById("expenseMonthSelect");
+          if (yearSel) yearSel.value = String(year);
+          if (monthSel) monthSel.value = String(month);
+          loadOperatingExpenses();
+          loadTaxRoiDashboard(); // 세무 ROI 연동 갱신
+        } else {
+          Bass.updateAppAlert(data.detail || "지출 등록 실패", "error");
+        }
+      });
+    }
+
+    async function deleteExpenseItem(expenseId) {
+      if (!confirm("해당 지출 내역을 삭제하시겠습니까? 지출 결산과 순운영이익(NOI)에서 제외됩니다.")) return;
+      try {
+        const res = await fetch(`/api/rent3/expenses/${expenseId}`, { method: "DELETE" });
+        const data = await res.json();
+        if (data.success) {
+          Bass.updateAppAlert(data.message, "success");
+          loadOperatingExpenses();
+          loadTaxRoiDashboard();
+        } else {
+          Bass.updateAppAlert(data.detail || "삭제 실패", "error");
+        }
+      } catch (err) {
+        Bass.updateAppAlert(`삭제 오류: ${err.message}`, "error");
+      }
+    }
+
+    function openMonthlyExpenseReportModal() {
+      const s = currentExpenseSummaryCache;
+      const expenses = currentExpenseListCache;
+      if (!s) {
+        alert("결산 데이터를 먼저 불러와주세요.");
+        return;
+      }
+
+      const branch = document.getElementById("branchSelect")?.value || "main";
+      let bName = "시크빌 본점";
+      let bAddr = "서울 관악구 신림로 29길 8";
+      let bRooms = "29실";
+      if (branch === "sunho") { bName = "선호아트빌"; bAddr = "서울 관악구 봉천로 12길 14"; bRooms = "15실"; }
+      if (branch === "sinbi") { bName = "신비주택"; bAddr = "서울 영등포구 영등포로 35길 9"; bRooms = "20실"; }
+
+      document.getElementById("rptBranchName").innerText = bName;
+      document.getElementById("rptYearMonth").innerText = `${s.year}년 ${s.month}월`;
+      document.getElementById("rptBranchAddress").innerText = bAddr;
+      document.getElementById("rptRoomsCount").innerText = bRooms;
+      document.getElementById("rptDocNo").innerText = `R3-EXP-${s.year}${String(s.month).padStart(2,'0')}-${branch.toUpperCase()}`;
+      document.getElementById("rptGeneratedAt").innerText = new Date().toISOString().split("T")[0];
+
+      document.getElementById("rptTotalIncome").innerText = `${(s.total_revenue || 0).toLocaleString()} 원`;
+      document.getElementById("rptTotalExpense").innerText = `${(s.total_expense || 0).toLocaleString()} 원`;
+      document.getElementById("rptExpenseRatio").innerText = (s.expense_ratio || 0).toFixed(1);
+      document.getElementById("rptNetNoi").innerText = `${(s.net_operating_income || 0).toLocaleString()} 원`;
+      document.getElementById("rptMarginRatio").innerText = (s.net_margin_rate || 0).toFixed(1);
+      document.getElementById("rptLandlordName").innerText = `${bName} 임대관리센터`;
+
+      // 카테고리 breakdown 테이블 채우기
+      const catTbody = document.getElementById("rptCategoryTbody");
+      if (s.categories_breakdown && s.categories_breakdown.length > 0) {
+        catTbody.innerHTML = s.categories_breakdown.map(cat => `
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:7px 10px; font-weight:700; color:#1e293b;">${cat.label}</td>
+            <td style="padding:7px 10px; text-align:right;">${cat.count}건</td>
+            <td style="padding:7px 10px; text-align:right; font-weight:700; color:#dc2626;">${(cat.amount || 0).toLocaleString()}원</td>
+            <td style="padding:7px 10px; text-align:right; font-weight:600; color:#0284c7;">${(cat.percentage || 0).toFixed(1)}%</td>
+            <td style="padding:7px 10px; color:#16a34a; font-size:11.5px;">적격증빙 구비</td>
+          </tr>
+        `).join("");
+      } else {
+        catTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:14px; color:#64748b;">항목별 지출이 없습니다.</td></tr>`;
+      }
+
+      // 지출 상세 테이블 채우기
+      const detTbody = document.getElementById("rptDetailTbody");
+      if (expenses && expenses.length > 0) {
+        detTbody.innerHTML = expenses.map(e => `
+          <tr style="border-bottom:1px solid #f1f5f9;">
+            <td style="padding:6px 8px; color:#64748b;">${e.payment_date || '-'}</td>
+            <td style="padding:6px 8px; font-weight:600;">${e.category_label}</td>
+            <td style="padding:6px 8px; color:#0f172a;">${e.title}</td>
+            <td style="padding:6px 8px; color:#475569;">${e.vendor_name || '-'}</td>
+            <td style="padding:6px 8px; text-align:right; font-weight:700; color:#b91c1c;">${(e.amount || 0).toLocaleString()}원</td>
+            <td style="padding:6px 8px; text-align:center; font-size:11px; color:#0284c7;">${e.receipt_type}</td>
+          </tr>
+        `).join("");
+      } else {
+        detTbody.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:14px; color:#64748b;">상세 영수증이 없습니다.</td></tr>`;
+      }
+
+      document.getElementById("monthlyExpenseReportModal").style.display = "flex";
+    }
+
+    function closeMonthlyExpenseReportModal() {
+      document.getElementById("monthlyExpenseReportModal").style.display = "none";
+    }
+
+    function printMonthlyExpenseReport() {
+      window.print();
+    }
+
+    // ==========================================
+    // 📑 임대인 5월 종합소득세 연간 소득·경비 명세서 JS 엔진
+    // ==========================================
+    let currentAnnualTaxStatementCache = null;
+
+    async function openAnnualTaxStatementModal(defaultBranch, defaultYear) {
+      const branchSel = document.getElementById("taxStmtBranchSelect");
+      const yearSel = document.getElementById("taxStmtYearSelect");
+
+      if (defaultBranch && branchSel) branchSel.value = defaultBranch;
+      if (defaultYear && yearSel) yearSel.value = String(defaultYear);
+
+      document.getElementById("annualTaxStatementModal").style.display = "flex";
+      await loadAnnualTaxStatementData();
+    }
+
+    function closeAnnualTaxStatementModal() {
+      document.getElementById("annualTaxStatementModal").style.display = "none";
+    }
+
+    async function loadAnnualTaxStatementData() {
+      const branch = document.getElementById("taxStmtBranchSelect")?.value || "all";
+      const year = parseInt(document.getElementById("taxStmtYearSelect")?.value || "2026");
+
+      try {
+        const res = await fetch(`/api/rent3/tax/annual-statement?branch=${branch}&year=${year}`);
+        const data = await res.json();
+        if (!data.success || !data.statement) {
+          alert("명세서를 불러오지 못했습니다.");
+          return;
+        }
+
+        const s = data.statement;
+        currentAnnualTaxStatementCache = s;
+
+        document.getElementById("stmtDocNo").innerText = s.statement_no;
+        document.getElementById("stmtYearText").innerText = `${s.year}년`;
+        document.getElementById("stmtTaxOffice").innerText = s.taxpayer.tax_office;
+
+        document.getElementById("stmtBranchTitle").innerText = s.branch_title;
+        document.getElementById("stmtBizNo").innerText = s.taxpayer.business_number;
+        document.getElementById("stmtOwnerName").innerText = s.taxpayer.name;
+        document.getElementById("stmtRoomsCount").innerText = `${s.total_rooms}실`;
+        document.getElementById("stmtAddress").innerText = s.address;
+
+        const rev = s.revenue_summary;
+        document.getElementById("stmtRentRev").innerText = `${(rev.annual_rent_revenue || 0).toLocaleString()} 원`;
+        document.getElementById("stmtMaintRev").innerText = `${(rev.annual_maint_revenue || 0).toLocaleString()} 원`;
+        document.getElementById("stmtTotalGrossRev").innerText = `${(rev.annual_gross_revenue || 0).toLocaleString()} 원`;
+        
+        const rentPct = rev.annual_gross_revenue > 0 ? ((rev.annual_rent_revenue / rev.annual_gross_revenue) * 100).toFixed(1) : 0;
+        const maintPct = rev.annual_gross_revenue > 0 ? ((rev.annual_maint_revenue / rev.annual_gross_revenue) * 100).toFixed(1) : 0;
+        document.getElementById("stmtRentPct").innerText = `${rentPct}%`;
+        document.getElementById("stmtMaintPct").innerText = `${maintPct}%`;
+
+        const exp = s.expense_summary;
+        document.getElementById("stmtReceiptTotalCount").innerText = `${exp.total_receipt_count || 0}건`;
+        document.getElementById("stmtTotalExpCount").innerText = `${exp.total_receipt_count || 0}건`;
+        document.getElementById("stmtGrandTotalExp").innerText = `${(exp.grand_total_expense || 0).toLocaleString()} 원`;
+        document.getElementById("stmtGrandDeductibleExp").innerText = `${(exp.grand_deductible_expense || 0).toLocaleString()} 원`;
+        document.getElementById("stmtExpenseRatioText").innerText = `${(exp.expense_ratio || 0).toFixed(1)}%`;
+
+        const catTbody = document.getElementById("stmtCategoryTbody");
+        let catRows = (exp.categories || []).map(cat => `
+          <tr style="border-bottom:1px solid #e2e8f0;">
+            <td style="padding:6px 9px; font-weight:600; color:#1e293b;">${cat.label}</td>
+            <td style="padding:6px 9px; text-align:right; color:#64748b;">${cat.count}건</td>
+            <td style="padding:6px 9px; text-align:right; font-weight:700; color:#b91c1c;">${(cat.amount || 0).toLocaleString()}원</td>
+            <td style="padding:6px 9px; text-align:right; font-weight:700; color:#0f172a;">${(cat.tax_deductible_amount || 0).toLocaleString()}원</td>
+            <td style="padding:6px 9px; text-align:center; font-size:11px; color:#16a34a;">적격증빙 구비</td>
+          </tr>
+        `).join("");
+
+        if (exp.additional_repair_expense > 0) {
+          catRows += `
+            <tr style="border-bottom:1px solid #e2e8f0; background:#fff7ed;">
+              <td style="padding:6px 9px; font-weight:700; color:#c2410c;">🛠️ 세대별 하자보수 및 시설 수선 실비</td>
+              <td style="padding:6px 9px; text-align:right; color:#c2410c;">1식</td>
+              <td style="padding:6px 9px; text-align:right; font-weight:700; color:#c2410c;">${(exp.additional_repair_expense || 0).toLocaleString()}원</td>
+              <td style="padding:6px 9px; text-align:right; font-weight:700; color:#c2410c;">${(exp.additional_repair_expense || 0).toLocaleString()}원</td>
+              <td style="padding:6px 9px; text-align:center; font-size:11px; color:#c2410c;">A/S 대장 영수증</td>
+            </tr>
+          `;
+        }
+        catTbody.innerHTML = catRows || `<tr><td colspan="5" style="text-align:center; padding:12px; color:#64748b;">지출 내역이 없습니다.</td></tr>`;
+
+        const resResult = s.taxable_result;
+        document.getElementById("stmtResGrossRev").innerText = `${(rev.annual_gross_revenue || 0).toLocaleString()} 원`;
+        document.getElementById("stmtResTotalExp").innerText = `${(exp.grand_deductible_expense || 0).toLocaleString()} 원`;
+        document.getElementById("stmtResTaxableIncome").innerText = `${(resResult.taxable_rental_income || 0).toLocaleString()} 원`;
+        document.getElementById("stmtResSeparateTax").innerText = `${(resResult.separate_tax_estimate_14 || 0).toLocaleString()} 원`;
+        document.getElementById("stmtIssuedDate").innerText = s.issued_date;
+        document.getElementById("stmtSealCenterName").innerText = `${s.branch_title} 임대관리센터`;
+
+      } catch (err) {
+        alert("명세서 조회 오류: " + err.message);
+      }
+    }
+
+    function downloadAnnualTaxStatementCsv() {
+      const branch = document.getElementById("taxStmtBranchSelect")?.value || "all";
+      const year = parseInt(document.getElementById("taxStmtYearSelect")?.value || "2026");
+      window.location.href = `/api/rent3/tax/annual-statement/export-csv?branch=${branch}&year=${year}`;
+    }
+
+    function printAnnualTaxStatement() {
+      window.print();
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 🗄️ 8대 표준 데이터 객체 관리 & 16단계 워크플로우 엔진 스크립트
+    // ─────────────────────────────────────────────────────────────
+    let currentEntityType = 'admin';
+    let cachedEntities = [];
+    let entitySearchDebounceTimer = null;
+
+    const ENTITY_CONFIG = {
+      admin: {
+        name: 'Admin (관리인)',
+        badgeId: 'entCountAdmin',
+        idField: 'id',
+        columns: ['ID', '성명', '전화번호', '계좌번호', '사업자 번호', 'email', '조치'],
+        fields: [
+          { key: 'name', label: '성명', type: 'text', required: true, default: '' },
+          { key: 'phone', label: '전화번호', type: 'text', required: true, default: '010-' },
+          { key: 'account_number', label: '계좌번호', type: 'text', default: '' },
+          { key: 'business_number', label: '사업자 번호', type: 'text', default: '' },
+          { key: 'email', label: 'email', type: 'email', default: '' }
+        ]
+      },
+      lessor: {
+        name: 'Lessor (임대인)',
+        badgeId: 'entCountLessor',
+        idField: 'id_lessor',
+        columns: ['임대인ID', '성명', '전화번호', '계좌번호', '앱 사용료', '가입일자', '사업자 번호', 'email', '조치'],
+        fields: [
+          { key: 'name', label: '성명', type: 'text', required: true, default: '' },
+          { key: 'phone', label: '전화번호', type: 'text', required: true, default: '010-' },
+          { key: 'account_number', label: '계좌번호', type: 'text', default: '' },
+          { key: 'app_fee', label: '앱 사용료 (원)', type: 'number', default: 33000 },
+          { key: 'joined_at', label: '가입일자', type: 'date', default: '2026-10-28' },
+          { key: 'business_number', label: '사업자 번호', type: 'text', default: '' },
+          { key: 'email', label: 'email', type: 'email', default: '' },
+          { key: 'branch', label: '소속 지점 (main/sunho/sinbi)', type: 'text', default: 'main' }
+        ]
+      },
+      tenant: {
+        name: 'Tenant (임차인)',
+        badgeId: 'entCountTenant',
+        idField: 'id_tenant',
+        columns: ['임차인ID', '성명', '전화번호', '계좌번호', '차량번호', '도어락 비번', '사업자 번호', 'email', '조치'],
+        fields: [
+          { key: 'name', label: '성명', type: 'text', required: true, default: '' },
+          { key: 'phone', label: '전화번호', type: 'text', required: true, default: '010-' },
+          { key: 'account_number', label: '계좌번호', type: 'text', default: '' },
+          { key: 'car_number', label: '차량번호', type: 'text', default: '' },
+          { key: 'doorlock_pwd', label: '도어락 비번', type: 'text', default: '1234*' },
+          { key: 'business_number', label: '사업자 번호 (세액공제용)', type: 'text', default: '' },
+          { key: 'email', label: 'email', type: 'email', default: '' }
+        ]
+      },
+      building: {
+        name: 'Building (건물)',
+        badgeId: 'entCountBuilding',
+        idField: 'id_building',
+        columns: ['건물ID', '건물명', '주소', '소유 임대인ID', '소속 지점', '총 호실', '조치'],
+        fields: [
+          { key: 'building_name', label: '건물명', type: 'text', required: true, default: '' },
+          { key: 'address', label: '주소', type: 'text', required: true, default: '' },
+          { key: 'id_lessor', label: '소유 임대인 ID (id_lessor)', type: 'text', default: '' },
+          { key: 'branch', label: '소속 지점 키', type: 'text', default: 'main' },
+          { key: 'total_rooms', label: '총 호실 수', type: 'number', default: 20 }
+        ]
+      },
+      room: {
+        name: 'Room (임대상세)',
+        badgeId: 'entCountRoom',
+        idField: 'id_room',
+        columns: ['호실ID', '호실명', '건물ID', '임차인ID', '등기부확인', '상태 설명', '보증금/월세', '조치'],
+        fields: [
+          { key: 'name', label: '호실명 (예: 201호)', type: 'text', required: true, default: '' },
+          { key: 'id_building', label: '건물 ID (id_building)', type: 'text', default: '' },
+          { key: 'id_tenant', label: '입주 임차인 ID (공실 시 공백)', type: 'text', default: '' },
+          { key: 'status_description', label: '상태 설명', type: 'text', default: '남향 풀옵션, 신규 도배장판 완료' },
+          { key: 'deposit', label: '보증금 (원)', type: 'number', default: 5000000 },
+          { key: 'monthly_rent', label: '임차료 (원)', type: 'number', default: 500000 },
+          { key: 'maintenance_fee', label: '관리비 (원)', type: 'number', default: 50000 }
+        ]
+      },
+      contract: {
+        name: 'Contract (계약)',
+        badgeId: 'entCountContract',
+        idField: 'id_contract',
+        columns: ['계약ID', '호실ID', '임차인ID', '계약일', '계약금', '전입일', '임차기간', '보증금/임차료', '구분', '조치'],
+        fields: [
+          { key: 'id_room', label: '호실 ID (id_room)', type: 'text', required: true, default: '' },
+          { key: 'id_tenant', label: '임차인 ID (id_tenant)', type: 'text', required: true, default: '' },
+          { key: 'contract_date', label: '계약일', type: 'date', default: '2026-10-28' },
+          { key: 'contract_deposit', label: '계약금 (원)', type: 'number', default: 300000 },
+          { key: 'move_in_date', label: '전입일', type: 'date', default: '2026-11-01' },
+          { key: 'lease_term', label: '임차기간', type: 'text', default: '12개월' },
+          { key: 'deposit', label: '보증금 (원)', type: 'number', default: 5000000 },
+          { key: 'monthly_rent', label: '임차료 (원)', type: 'number', default: 500000 },
+          { key: 'maintenance_fee', label: '관리비 (원)', type: 'number', default: 50000 },
+          { key: 'rent_type', label: '전세/월세', type: 'text', default: '월세' },
+          { key: 'payment_timing', label: '선불/후불', type: 'text', default: '후불' }
+        ]
+      },
+      pay: {
+        name: 'Pay (수납)',
+        badgeId: 'entCountPay',
+        idField: 'id_pay',
+        columns: ['수납ID', '호실ID', '적용년월', '납부일', '임차료', '관리비', '총 납부액', '영수증번호', '조치'],
+        fields: [
+          { key: 'id_room', label: '호실 ID (id_room)', type: 'text', required: true, default: '' },
+          { key: 'billing_month', label: '적용년월 (예: 2026.10)', type: 'text', required: true, default: '2026.10' },
+          { key: 'paid_date', label: '납부일', type: 'date', default: '2026-10-28' },
+          { key: 'monthly_rent', label: '임차료 (원)', type: 'number', default: 500000 },
+          { key: 'maintenance_fee', label: '관리비 (원)', type: 'number', default: 50000 },
+          { key: 'vat', label: '부가세 (원)', type: 'number', default: 0 }
+        ]
+      },
+      outlay: {
+        name: 'Outlay (지출)',
+        badgeId: 'entCountOutlay',
+        idField: 'id_outlay',
+        columns: ['지출ID', '호실/공용', '적요', '일자', '금액', '분류', '공급처', '조치'],
+        fields: [
+          { key: 'id_room', label: '호실 ID 또는 공용(COMMON)', type: 'text', required: true, default: 'COMMON' },
+          { key: 'summary', label: '적요 (청소비, 차량유지비, 공동전기 등)', type: 'text', required: true, default: '' },
+          { key: 'expense_date', label: '지출 일자', type: 'date', default: '2026-10-28' },
+          { key: 'amount', label: '금액 (원)', type: 'number', required: true, default: 100000 },
+          { key: 'category', label: '분류 (cleaning/elevator/utility_common/repair_maint 등)', type: 'text', default: 'cleaning' },
+          { key: 'vendor_name', label: '공급업체/거래처', type: 'text', default: '' }
+        ]
+      }
+    };
+
+    async function loadEntitiesDashboard() {
+      try {
+        const res = await fetch('/api/rent3/entities/summary/dashboard');
+        const data = await res.json();
+        if (data.counts) {
+          document.getElementById('entCountAdmin').innerText = data.counts.admins || 0;
+          document.getElementById('entCountLessor').innerText = data.counts.lessors || 0;
+          document.getElementById('entCountTenant').innerText = data.counts.tenants || 0;
+          document.getElementById('entCountBuilding').innerText = data.counts.buildings || 0;
+          document.getElementById('entCountRoom').innerText = data.counts.rooms || 0;
+          document.getElementById('entCountContract').innerText = data.counts.contracts || 0;
+          document.getElementById('entCountPay').innerText = data.counts.pays || 0;
+          document.getElementById('entCountOutlay').innerText = data.counts.outlays || 0;
+        }
+        await loadEntitiesTable();
+      } catch (err) {
+        console.error('loadEntitiesDashboard error:', err);
+      }
+    }
+
+    function switchEntitySubTab(type) {
+      currentEntityType = type;
+      document.querySelectorAll('#entityPillsContainer .entity-pill').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick')?.includes(type)) {
+          btn.classList.add('active');
+        }
+      });
+      loadEntitiesTable();
+    }
+
+    async function loadEntitiesTable(query = '') {
+      const cfg = ENTITY_CONFIG[currentEntityType];
+      const thead = document.getElementById('entityTableHead');
+      const tbody = document.getElementById('entityTableBody');
+      
+      thead.innerHTML = `<tr>${cfg.columns.map(c => `<th>${c}</th>`).join('')}</tr>`;
+      tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center; padding:30px; color:var(--text-muted);">불러오는 중...</td></tr>`;
+
+      try {
+        const url = `/api/rent3/entities/${currentEntityType}?query=${encodeURIComponent(query)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        cachedEntities = data.items || [];
+        renderEntitiesTable(cachedEntities);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center; padding:30px; color:#ef4444;">조회 실패: ${err.message}</td></tr>`;
+      }
+    }
+
+    function renderEntitiesTable(items) {
+      const cfg = ENTITY_CONFIG[currentEntityType];
+      const tbody = document.getElementById('entityTableBody');
+      
+      if (!items || items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="${cfg.columns.length}" style="text-align:center; padding:30px; color:var(--text-muted);">등록된 ${cfg.name} 객체가 없습니다.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map(item => {
+        const customId = item[cfg.idField] || item.id;
+        let cells = '';
+
+        if (currentEntityType === 'admin') {
+          cells = `
+            <td><code>${item.id}</code></td>
+            <td><strong>${item.name || ''}</strong></td>
+            <td>${item.phone || ''}</td>
+            <td>${item.account_number || ''}</td>
+            <td>${item.business_number || ''}</td>
+            <td>${item.email || ''}</td>
+          `;
+        } else if (currentEntityType === 'lessor') {
+          cells = `
+            <td><code>${item.id_lessor}</code></td>
+            <td><strong>${item.name || ''}</strong></td>
+            <td>${item.phone || ''}</td>
+            <td>${item.account_number || ''}</td>
+            <td style="color:#38bdf8; font-weight:700;">${(item.app_fee || 0).toLocaleString()}원</td>
+            <td>${item.joined_at || ''}</td>
+            <td>${item.business_number || ''}</td>
+            <td>${item.email || ''}</td>
+          `;
+        } else if (currentEntityType === 'tenant') {
+          cells = `
+            <td><code>${item.id_tenant}</code></td>
+            <td><strong>${item.name || ''}</strong></td>
+            <td>${item.phone || ''}</td>
+            <td>${item.account_number || ''}</td>
+            <td>${item.car_number || '-'}</td>
+            <td><code style="color:#f59e0b;">${item.doorlock_pwd || ''}</code></td>
+            <td>${item.business_number || '-'}</td>
+            <td>${item.email || ''}</td>
+          `;
+        } else if (currentEntityType === 'building') {
+          cells = `
+            <td><code>${item.id_building}</code></td>
+            <td><strong>${item.building_name || ''}</strong></td>
+            <td>${item.address || ''}</td>
+            <td><code>${item.id_lessor || '-'}</code></td>
+            <td><span class="badge badge-info">${item.branch || 'main'}</span></td>
+            <td>${item.total_rooms || 0}실</td>
+          `;
+        } else if (currentEntityType === 'room') {
+          const regChecked = item.registry_checked 
+            ? `<span style="color:#10b981; font-weight:700;">✅ 확인완료</span>` 
+            : `<span style="color:#f87171;">미확인</span>`;
+          cells = `
+            <td><code>${item.id_room}</code></td>
+            <td><strong>${item.name || ''}</strong></td>
+            <td><code>${item.id_building || '-'}</code></td>
+            <td>${item.id_tenant ? `<code>${item.id_tenant}</code>` : '<span style="color:#38bdf8;">공실</span>'}</td>
+            <td>${regChecked}</td>
+            <td style="font-size:12px; color:var(--text-muted);">${item.status_description || ''}</td>
+            <td><strong>${((item.deposit||0)/10000).toLocaleString()}만 / ${(item.monthly_rent||0).toLocaleString()}원</strong></td>
+          `;
+        } else if (currentEntityType === 'contract') {
+          cells = `
+            <td><code>${item.id_contract}</code></td>
+            <td><code>${item.id_room || ''}</code></td>
+            <td><code>${item.id_tenant || ''}</code></td>
+            <td>${item.contract_date || ''}</td>
+            <td style="color:#10b981; font-weight:700;">${(item.contract_deposit || 0).toLocaleString()}원</td>
+            <td>${item.move_in_date || ''}</td>
+            <td>${item.lease_term || ''}</td>
+            <td><strong>${((item.deposit||0)/10000).toLocaleString()}만 / ${(item.monthly_rent||0).toLocaleString()}원</strong></td>
+            <td><span class="badge badge-info">${item.rent_type || '월세'} (${item.payment_timing || '후불'})</span></td>
+          `;
+        } else if (currentEntityType === 'pay') {
+          cells = `
+            <td><code>${item.id_pay}</code></td>
+            <td><code>${item.id_room || ''}</code></td>
+            <td><strong>${item.billing_month || ''}</strong></td>
+            <td>${item.paid_date || ''}</td>
+            <td>${(item.monthly_rent || 0).toLocaleString()}원</td>
+            <td>${(item.maintenance_fee || 0).toLocaleString()}원</td>
+            <td style="color:#10b981; font-weight:800;">${(item.total_amount || 0).toLocaleString()}원</td>
+            <td><code style="font-size:11px;">${item.receipt_number || '-'}</code></td>
+          `;
+        } else if (currentEntityType === 'outlay') {
+          cells = `
+            <td><code>${item.id_outlay}</code></td>
+            <td><code>${item.id_room || 'COMMON'}</code></td>
+            <td><strong>${item.summary || item.summary_desc || ''}</strong></td>
+            <td>${item.expense_date || ''}</td>
+            <td style="color:#f87171; font-weight:800;">-${(item.amount || 0).toLocaleString()}원</td>
+            <td><span class="badge badge-warning">${item.category || ''}</span></td>
+            <td>${item.vendor_name || '-'}</td>
+          `;
+        }
+
+        return `
+          <tr>
+            ${cells}
+            <td>
+              <div style="display:flex; gap:6px;">
+                <button class="btn btn-secondary" style="padding:3px 8px; font-size:11px;" onclick="openEditEntityModal('${currentEntityType}', '${customId}')">✏️ 편집</button>
+                <button class="btn btn-secondary" style="padding:3px 8px; font-size:11px; border-color:rgba(239,68,68,0.4); color:#f87171;" onclick="deleteEntityRecord('${currentEntityType}', '${customId}')">🗑️ 삭제</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function onEntitySearchInput() {
+      if (entitySearchDebounceTimer) clearTimeout(entitySearchDebounceTimer);
+      entitySearchDebounceTimer = setTimeout(() => {
+        const q = document.getElementById('entitySearchKeyword')?.value || '';
+        loadEntitiesTable(q);
+      }, 300);
+    }
+
+    function executeEntitySearch() {
+      const q = document.getElementById('entitySearchKeyword')?.value || '';
+      loadEntitiesTable(q);
+    }
+
+    function openNewEntityModal() {
+      const cfg = ENTITY_CONFIG[currentEntityType];
+      document.getElementById('entFormMode').value = 'create';
+      document.getElementById('entFormType').value = currentEntityType;
+      document.getElementById('entFormId').value = '';
+      document.getElementById('entityModalTitle').innerText = `➕ 신규 ${cfg.name} 등록`;
+      document.getElementById('entityModalSub').innerText = '객체의 필드 값을 입력하여 데이터베이스에 저장합니다.';
+      document.getElementById('btnEntityModalSubmit').innerText = '저장하기';
+
+      renderFormFields(cfg.fields, {});
+      document.getElementById('entityModal').style.display = 'flex';
+    }
+
+    function openEditEntityModal(type, customId) {
+      const cfg = ENTITY_CONFIG[type];
+      const item = cachedEntities.find(i => (i[cfg.idField] === customId || i.id === customId));
+      if (!item) {
+        alert('객체 정보를 찾을 수 없습니다.');
+        return;
+      }
+
+      document.getElementById('entFormMode').value = 'update';
+      document.getElementById('entFormType').value = type;
+      document.getElementById('entFormId').value = customId;
+      document.getElementById('entityModalTitle').innerText = `✏️ ${cfg.name} 편집 (${customId})`;
+      document.getElementById('entityModalSub').innerText = '기존 객체 필드 값을 수정합니다.';
+      document.getElementById('btnEntityModalSubmit').innerText = '수정 완료';
+
+      renderFormFields(cfg.fields, item);
+      document.getElementById('entityModal').style.display = 'flex';
+    }
+
+    function renderFormFields(fields, data) {
+      const container = document.getElementById('entityFormFields');
+      container.innerHTML = fields.map(f => {
+        let val = data[f.key];
+        if (val === undefined || val === null) {
+          if (f.key === 'summary' && data.summary_desc) val = data.summary_desc;
+          else val = f.default;
+        }
+
+        return `
+          <div style="display:flex; flex-direction:column; gap:4px;">
+            <label style="font-size:12.5px; font-weight:700; color:#cbd5e1;">${f.label} ${f.required ? '<span style="color:#f87171;">*</span>' : ''}</label>
+            <input type="${f.type}" id="field_${f.key}" value="${val}" style="background:#0b1120; border:1px solid var(--card-border); border-radius:8px; padding:8px 12px; color:#fff; font-size:13px;" ${f.required ? 'required' : ''}>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function closeEntityModal() {
+      document.getElementById('entityModal').style.display = 'none';
+    }
+
+    async function submitEntityForm() {
+      const mode = document.getElementById('entFormMode').value;
+      const type = document.getElementById('entFormType').value;
+      const customId = document.getElementById('entFormId').value;
+      const cfg = ENTITY_CONFIG[type];
+
+      const payload = {};
+      cfg.fields.forEach(f => {
+        const el = document.getElementById(`field_${f.key}`);
+        if (el) {
+          if (f.type === 'number') {
+            payload[f.key] = parseInt(el.value) || 0;
+          } else {
+            payload[f.key] = el.value;
+          }
+        }
+      });
+
+      try {
+        let url = `/api/rent3/entities/${type}`;
+        let method = 'POST';
+        if (mode === 'update') {
+          url = `/api/rent3/entities/${type}/${customId}`;
+          method = 'PUT';
+        }
+
+        const res = await fetch(url, {
+          method: method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (!result.success) {
+          alert('저장 실패: ' + (result.detail || '알 수 없는 오류'));
+          return;
+        }
+
+        closeEntityModal();
+        Bass.updateAppAlert(`✅ ${cfg.name} 객체가 성공적으로 저장되었습니다.`, 'success');
+        loadEntitiesDashboard();
+      } catch (err) {
+        alert('통신 오류: ' + err.message);
+      }
+    }
+
+    async function deleteEntityRecord(type, customId) {
+      const cfg = ENTITY_CONFIG[type];
+      if (!confirm(`정말로 ${cfg.name} 객체(${customId})를 삭제하시겠습니까?`)) {
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/rent3/entities/${type}/${customId}`, { method: 'DELETE' });
+        const result = await res.json();
+        if (!result.success) {
+          alert('삭제 실패: ' + (result.detail || '알 수 없는 오류'));
+          return;
+        }
+        Bass.updateAppAlert(`🗑️ ${cfg.name} 객체(${customId})가 삭제되었습니다.`, 'warning');
+        loadEntitiesDashboard();
+      } catch (err) {
+        alert('삭제 오류: ' + err.message);
+      }
+    }
+
+    // ── 16단계 워크플로우 시뮬레이터 함수 ──
+    function openWorkflowModal() {
+      document.getElementById('workflowModal').style.display = 'flex';
+    }
+
+    function closeWorkflowModal() {
+      document.getElementById('workflowModal').style.display = 'none';
+    }
+
+    async function runWorkflowAction(actionName) {
+      const logBox = document.getElementById('workflowConsoleLog');
+      logBox.innerHTML += `\n> [${new Date().toLocaleTimeString()}] 액션 '${actionName}' 실행 요청 중...`;
+      logBox.scrollTop = logBox.scrollHeight;
+
+      try {
+        const res = await fetch(`/api/rent3/entities/workflow/${actionName}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        const result = await res.json();
+        if (result.success) {
+          logBox.innerHTML += `\n✅ 성공: ${JSON.stringify(result, null, 2)}`;
+          loadEntitiesDashboard();
+        } else {
+          logBox.innerHTML += `\n❌ 실패: ${JSON.stringify(result)}`;
+        }
+      } catch (err) {
+        logBox.innerHTML += `\n❌ 네트워크 에러: ${err.message}`;
+      }
+      logBox.scrollTop = logBox.scrollHeight;
     }
 
     window.addEventListener("DOMContentLoaded", () => {

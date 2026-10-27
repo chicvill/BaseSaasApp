@@ -5,7 +5,7 @@ BaseSaasApp 게이트웨이 표준 규격에 따라 마운트됩니다.
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Response
 from pydantic import BaseModel, Field
 
 from .domain import (
@@ -13,7 +13,13 @@ from .domain import (
     CoSigningSession, ChatMessage, RoomAccessInfo, ParkingRegistration, 
     MonthlyBill, PaymentReceipt, CheckOutRecord, RtmsContractReport, 
     LeaseRenewal, MaintenanceTicket, calculate_branch_tax_roi, calculate_portfolio_tax_roi,
-    RentPaymentCertificate, generate_rent_certificate
+    RentPaymentCertificate, generate_rent_certificate,
+    BuildingOperatingExpense, calculate_monthly_operating_summary,
+    generate_annual_tax_statement, generate_tax_statement_csv
+)
+from .entities import (
+    Admin, Lessor, Tenant, BuildingEntity, RoomEntity, ContractEntity,
+    Pay, Outlay, Rent3EntityManager, Rent3WorkflowEngine, seed_default_entities_if_empty
 )
 try:
     from apps.rent2.backend.domain.rent import Building
@@ -272,18 +278,21 @@ def get_admin_overview(branch: str = Query("main")):
         try:
             b = Building.get(branch)
             if b and hasattr(b, "rooms"):
-                room_count = len(b.rooms)
-                for r_id, r in b.rooms.items():
-                    is_occ = bool(getattr(r, "tenant_name", ""))
-                    if is_occ:
-                        occupied_count += 1
-                    rooms_summary.append({
-                        "room_id": r_id,
-                        "tenant_name": getattr(r, "tenant_name", "공실"),
-                        "rent": getattr(r, "rent", 0),
-                        "deposit": getattr(r, "deposit", 0),
-                        "is_occupied": is_occ
-                    })
+                rooms_data = b.rooms() if callable(b.rooms) else b.rooms
+                if isinstance(rooms_data, dict):
+                    room_count = len(rooms_data)
+                    for r_id, r in rooms_data.items():
+                        tenant = r.get("name") if isinstance(r, dict) else getattr(r, "tenant_name", "")
+                        is_occ = bool(tenant and tenant != "공실")
+                        if is_occ:
+                            occupied_count += 1
+                        rooms_summary.append({
+                            "room_id": str(r_id),
+                            "tenant_name": tenant or "공실",
+                            "rent": r.get("rent", 0) if isinstance(r, dict) else getattr(r, "rent", 0),
+                            "deposit": r.get("deposit", 0) if isinstance(r, dict) else getattr(r, "deposit", 0),
+                            "is_occupied": is_occ
+                        })
         except Exception as e:
             print(f"[AdminOverview] rent2 Building 연동 경고: {e}")
 
@@ -1508,13 +1517,12 @@ def get_checkout_receipt(branch: str, room_id: str):
 @router.get("/rtms/{target_id}/report")
 def get_rtms_report(target_id: str, branch: str = Query("main")):
     """국토부 법정 주택임대차 계약신고서 및 확정일자 데이터 조회 (없으면 자동 완성 생성)."""
-    # target_id가 세션 ID, 신청서 ID, 또는 호실 번호일 수 있음
     reports = [r for r in RtmsContractReport.all() if getattr(r, "session_id", "") == target_id or getattr(r, "room_id", "") == target_id]
     
     if reports:
         report = reports[-1]
     else:
-        # 데이터 자동 조회 (CoSigningSession 또는 Room)
+        # 데이터 자동 조회 (CoSigningSession, RentalApplication 또는 Room)
         tenant_name = "홍길동"
         tenant_phone = "010-1234-5678"
         deposit = 5000000
@@ -1530,6 +1538,15 @@ def get_rtms_report(target_id: str, branch: str = Query("main")):
                 deposit = s.deposit or deposit
                 monthly_rent = s.monthly_rent or monthly_rent
 
+        if RentalApplication:
+            for a in RentalApplication.all():
+                if getattr(a, "room_id", "") == room_id:
+                    tenant_name = getattr(a, "tenant_name", tenant_name)
+                    tenant_phone = getattr(a, "tenant_phone", tenant_phone)
+                    deposit = getattr(a, "deposit", deposit)
+                    monthly_rent = getattr(a, "monthly_rent", monthly_rent)
+                    break
+
         report = RtmsContractReport(
             session_id=target_id,
             branch=branch,
@@ -1542,15 +1559,19 @@ def get_rtms_report(target_id: str, branch: str = Query("main")):
         )
         report.save("seed_rtms_report")
 
+    report_data = report.model_dump()
+    report_data["is_subject_to_report"] = report.is_subject_to_report
+    report_data["days_left_to_deadline"] = report.days_left_to_deadline
+
     return {
         "success": True,
-        "report": report.model_dump()
+        "report": report_data
     }
 
 
 @router.post("/rtms/{target_id}/submit")
 def submit_rtms_report(target_id: str, branch: str = Query("main")):
-    """국토교통부 거래관리시스템(RTMS) 전자 신고 제출 -> 대법원 확정일자 번호 즉시 부여."""
+    """국토교통부 거래관리시스템(RTMS) 전자 신고 제출 -> 대법원 확정일자 번호 즉시 부여 & 1:1 대화방 자동 공지."""
     reports = [r for r in RtmsContractReport.all() if getattr(r, "session_id", "") == target_id or getattr(r, "room_id", "") == target_id]
     if reports:
         report = reports[-1]
@@ -1558,10 +1579,30 @@ def submit_rtms_report(target_id: str, branch: str = Query("main")):
         report = RtmsContractReport(session_id=target_id, branch=branch, room_id=target_id if len(target_id) <= 4 else "201")
 
     report.submit_report()
+
+    # 1:1 대화방에 확정일자 부여 완료 공지 메시지 등록
+    try:
+        msg = ChatMessage(
+            branch=report.branch,
+            room_id=report.room_id,
+            sender_role="landlord",
+            sender_name="김임대 (임대인)",
+            message=f"🏛️ [국토교통부] 주택임대차 계약신고가 정상 접수되어 대법원 확정일자가 부여되었습니다.\n• 확정일자 번호: {report.fixed_date_number}\n• 부여일시: {report.fixed_date_granted_at}\n• 우선변제권 효력: {report.legal_effect_date}\n세입자 라운지에서 공식 신고필증을 언제든 인쇄·열람하실 수 있습니다.",
+            msg_type="system_notice",
+            quick_action_url=f"public.html?view=tenant&room={report.room_id}"
+        )
+        msg.save("rtms_chat_notice")
+    except Exception as e:
+        print(f"[RTMS] 채팅 알림 등록 예외: {e}")
+
+    report_data = report.model_dump()
+    report_data["is_subject_to_report"] = report.is_subject_to_report
+    report_data["days_left_to_deadline"] = report.days_left_to_deadline
+
     return {
         "success": True,
         "message": f"주택임대차 계약 신고가 국토교통부(RTMS)에 정상 수리되었습니다. 대법원 확정일자 번호[{report.fixed_date_number}]가 부여되어 보증금 우선변제권이 확보되었습니다.",
-        "report": report.model_dump()
+        "report": report_data
     }
 
 
@@ -1575,7 +1616,13 @@ def get_admin_pending_rtms(branch: str = Query("main")):
         "branch": branch,
         "total_contracts": len(reports),
         "pending_count": len(unsubmitted),
-        "reports": [r.model_dump() for r in reports]
+        "reports": [
+            {
+                **r.model_dump(),
+                "is_subject_to_report": r.is_subject_to_report,
+                "days_left_to_deadline": r.days_left_to_deadline
+            } for r in reports
+        ]
     }
 
 
@@ -2128,6 +2175,418 @@ def send_certificate_to_chat(branch: str, room_id: str, year: int = Query(2026))
         "message": f"{room_id}호 임차인 대화방에 연말정산 증명서 발급 안내가 전송되었습니다.",
         "cert_no": cert.cert_no
     }
+
+
+# ─────────────────────────────────────────────────────────────
+# 15. 건물 공용 운영비 실지출 관리 & 월별 실결산 (NOI) APIs
+# ─────────────────────────────────────────────────────────────
+class ExpenseCreateReq(BaseModel):
+    branch: str = "main"
+    year: int = 2026
+    month: int = 10
+    category: str = "cleaning"
+    title: str
+    amount: int
+    vendor_name: str = ""
+    vendor_biz_no: str = ""
+    payment_date: str = ""
+    payment_method: str = "TRANSFER"
+    receipt_type: str = "TAX_INVOICE"
+    receipt_photo_url: str = ""
+    notes: str = ""
+    is_tax_deductible: bool = True
+
+
+def _seed_operating_expenses_if_empty():
+    """지점별 현실적인 공용 운영비 초기 시드 데이터 생성."""
+    if len(BuildingOperatingExpense.all()) > 0:
+        return
+
+    seeds = [
+        # main (시크빌 본점 29실)
+        ("main", 2026, 10, "cleaning", "10월 계단 및 공용구역 정기 청소비", 150000, "클린토탈", "120-86-12345", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 2회 계단/복도/주차장 물청소"),
+        ("main", 2026, 10, "elevator", "10월 승강기 정기 점검 및 유지보수료", 180000, "현대엘리베이터(주)", "107-81-22440", "2026-10-12", "TRANSFER", "TAX_INVOICE", "월 1회 정기점검 완료(양호)"),
+        ("main", 2026, 10, "utility_common", "10월 공용 전기요금 (계단등·가압펌프·CCTV)", 95000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "지로 자동납부"),
+        ("main", 2026, 10, "utility_common", "10월 공용 수도요금 (청소 및 계단용)", 42000, "서울시상수도사업본부", "104-83-00010", "2026-10-20", "GIRO", "GIRO_RECEIPT", "서울시 전자납부"),
+        ("main", 2026, 10, "safety_fire", "10월 소방 및 전기안전관리대행료", 90000, "제일안전기술단", "214-85-33011", "2026-10-15", "TRANSFER", "TAX_INVOICE", "월간 소방점검보고서 첨부"),
+        ("main", 2026, 10, "insurance", "10월 건물 화재보험료 및 영업배상책임", 60000, "DB손해보험(주)", "118-81-01234", "2026-10-05", "CARD", "CARD_SLIP", "12개월 분납"),
+        ("main", 2026, 10, "internet_tv", "10월 건물 단체 인터넷 및 IPTV 전용선", 220000, "(주)케이티", "102-81-42945", "2026-10-25", "TRANSFER", "TAX_INVOICE", "29개 전 호실 초고속 인터넷 단체선"),
+        ("main", 2026, 10, "repair_maint", "3층 복도 센서등 LED 교체 및 배선 보수", 35000, "역삼조명철물", "211-12-89012", "2026-10-22", "CARD", "CARD_SLIP", "자재 실비 교체"),
+
+        # sunho (선호아트빌 15실)
+        ("sunho", 2026, 10, "cleaning", "10월 공용구역 정기 청소비", 120000, "관악청소마을", "209-11-45678", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 1회 정기 청소"),
+        ("sunho", 2026, 10, "safety_fire", "10월 소방안전관리대행료", 70000, "한결소방엔지니어링", "119-86-55443", "2026-10-15", "TRANSFER", "TAX_INVOICE", "소방시설 점검"),
+        ("sunho", 2026, 10, "utility_common", "10월 공용 전기요금", 55000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "공용 전기"),
+        ("sunho", 2026, 10, "internet_tv", "10월 건물 단체 인터넷 전용선", 140000, "LG유플러스", "220-81-39938", "2026-10-25", "TRANSFER", "TAX_INVOICE", "15실 단체선"),
+
+        # sinbi (신비주택 20실)
+        ("sinbi", 2026, 10, "cleaning", "10월 계단 청소비 및 쓰레기 분리수거 관리", 140000, "당산클린", "107-14-33211", "2026-10-10", "TRANSFER", "TAX_INVOICE", "주 2회 수거 및 계단 청소"),
+        ("sinbi", 2026, 10, "utility_common", "10월 공용 전기요금", 75000, "한국전력공사", "116-81-19030", "2026-10-18", "GIRO", "GIRO_RECEIPT", "공용 조명/인터폰"),
+        ("sinbi", 2026, 10, "internet_tv", "10월 건물 단체 인터넷선", 180000, "SK브로드밴드", "214-81-37722", "2026-10-25", "TRANSFER", "TAX_INVOICE", "20실 단체선"),
+    ]
+
+    for b, y, m, cat, title, amt, vname, vbiz, pdate, pmethod, rtype, note in seeds:
+        exp = BuildingOperatingExpense(
+            branch=b,
+            year=y,
+            month=m,
+            category=cat,
+            title=title,
+            amount=amt,
+            vendor_name=vname,
+            vendor_biz_no=vbiz,
+            payment_date=pdate,
+            payment_method=pmethod,
+            receipt_type=rtype,
+            notes=note,
+            is_tax_deductible=True
+        )
+        exp.save(f"seed_expense_{b}_{cat}")
+
+
+@router.get("/expenses/list")
+def get_expenses_list(branch: str = Query("main"), year: int = Query(2026), month: int = Query(10)):
+    """지점별, 연월별 공용 운영비 지출 대장 목록 조회."""
+    _seed_operating_expenses_if_empty()
+
+    all_expenses = BuildingOperatingExpense.all()
+    filtered = [
+        e for e in all_expenses
+        if getattr(e, "branch", "main") == branch
+        and getattr(e, "year", 2026) == year
+        and getattr(e, "month", 10) == month
+    ]
+    # 지출일자 내림차순 정렬
+    filtered.sort(key=lambda x: getattr(x, "payment_date", "") or "", reverse=True)
+
+    total_amount = sum(getattr(e, "amount", 0) for e in filtered)
+    deductible_amount = sum(getattr(e, "amount", 0) for e in filtered if getattr(e, "is_tax_deductible", True))
+
+    items = []
+    for e in filtered:
+        cat = getattr(e, "category", "other")
+        items.append({
+            **e.model_dump(),
+            "category_label": BuildingOperatingExpense.get_category_label(cat)
+        })
+
+    return {
+        "success": True,
+        "branch": branch,
+        "year": year,
+        "month": month,
+        "total_count": len(items),
+        "total_amount": total_amount,
+        "deductible_amount": deductible_amount,
+        "expenses": items
+    }
+
+
+@router.post("/expenses/create")
+def create_operating_expense(req: ExpenseCreateReq):
+    """신규 공용 운영비 지출 등록."""
+    pdate = req.payment_date or datetime.now().strftime("%Y-%m-%d")
+    exp = BuildingOperatingExpense(
+        branch=req.branch,
+        year=req.year,
+        month=req.month,
+        category=req.category,
+        title=req.title,
+        amount=req.amount,
+        vendor_name=req.vendor_name,
+        vendor_biz_no=req.vendor_biz_no,
+        payment_date=pdate,
+        payment_method=req.payment_method,
+        receipt_type=req.receipt_type,
+        receipt_photo_url=req.receipt_photo_url,
+        notes=req.notes,
+        is_tax_deductible=req.is_tax_deductible
+    )
+    exp.save("expense_created")
+    return {
+        "success": True,
+        "message": f"[{exp.title}] {exp.amount:,}원 지출 등록이 완료되었습니다.",
+        "expense_id": exp.id
+    }
+
+
+@router.delete("/expenses/{expense_id}")
+def delete_operating_expense(expense_id: str):
+    """공용 운영비 지출 삭제."""
+    exp = BuildingOperatingExpense.get(expense_id)
+    if not exp:
+        raise HTTPException(status_code=404, detail="지출 항목을 찾을 수 없습니다.")
+    exp.delete("expense_deleted")
+    return {
+        "success": True,
+        "message": "지출 항목이 성공적으로 삭제되었습니다."
+    }
+
+
+@router.get("/expenses/monthly-summary")
+def get_monthly_operating_summary(branch: str = Query("main"), year: int = Query(2026), month: int = Query(10)):
+    """월별 임대차 총 수입 대 실운영비 결산서 (실제 순운영이익 NOI 및 경비율 도출)."""
+    _seed_operating_expenses_if_empty()
+    summary = calculate_monthly_operating_summary(branch, year, month)
+    return {
+        "success": True,
+        "summary": summary
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 16. 임대인 5월 종합소득세 홈택스 제출용 연간 임대소득·필요경비 표준 전산 명세서 API
+# ─────────────────────────────────────────────────────────────
+@router.get("/tax/annual-statement")
+def get_annual_tax_statement(branch: str = Query("main"), year: int = Query(2026)):
+    """임대인 5월 종합소득세 확정신고용 연간 소득·필요경비 표준 전산 명세서 JSON 조회."""
+    _seed_operating_expenses_if_empty()
+    statement = generate_annual_tax_statement(branch, year)
+    return {
+        "success": True,
+        "statement": statement
+    }
+
+
+@router.get("/tax/annual-statement/export-csv")
+def export_annual_tax_statement_csv(branch: str = Query("main"), year: int = Query(2026)):
+    """국세청 홈택스 제출 및 엑셀(MS Excel) 호환 UTF-8 BOM 인코딩 표준 CSV 명세서 다운로드."""
+    _seed_operating_expenses_if_empty()
+    statement = generate_annual_tax_statement(branch, year)
+    csv_content = generate_tax_statement_csv(statement)
+    filename = f"tax_statement_{year}_{branch}.csv"
+    return Response(
+        content=csv_content.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"'
+        }
+    )
+
+
+# ─────────────────────────────────────────────────────────────
+# 17. 8대 표준 엔티티 (Admin, Lessor, Tenant, Building, Room, Contract, Pay, Outlay) CRUD & 검색 API
+# ─────────────────────────────────────────────────────────────
+@router.get("/entities/summary/dashboard")
+def get_entities_summary_dashboard():
+    """8대 표준 엔티티 전체 등록 건수 및 최신 요약 데이터 조회."""
+    seed_default_entities_if_empty()
+    return {
+        "success": True,
+        "counts": {
+            "admins": len(Admin.all()),
+            "lessors": len(Lessor.all()),
+            "tenants": len(Tenant.all()),
+            "buildings": len(BuildingEntity.all()),
+            "rooms": len(RoomEntity.all()),
+            "contracts": len(ContractEntity.all()),
+            "pays": len(Pay.all()),
+            "outlays": len(Outlay.all())
+        },
+        "workflow_steps_count": 16,
+        "system_status": "READY"
+    }
+
+
+@router.get("/entities/{entity_type}")
+def list_entities(
+    entity_type: str, 
+    query: str = Query("", description="검색 키워드 (성명, 전화번호, 호실명, 적요 등)"),
+    branch: Optional[str] = Query(None, description="소속 지점 필터")
+):
+    """지정된 엔티티 타입의 전체 목록 조회 및 키워드 검색."""
+    seed_default_entities_if_empty()
+    try:
+        filters = {}
+        if branch:
+            filters["branch"] = branch
+        items = Rent3EntityManager.search(entity_type, query=query, filters=filters)
+        return {
+            "success": True,
+            "entity_type": entity_type.lower(),
+            "count": len(items),
+            "items": [item.model_dump() for item in items]
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/entities/{entity_type}/{custom_id}")
+def get_entity_detail(entity_type: str, custom_id: str):
+    """단일 엔티티 고유 ID 또는 시스템 ID 기반 상세 조회."""
+    seed_default_entities_if_empty()
+    item = Rent3EntityManager.find_by_custom_id(entity_type, custom_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"{entity_type} 객체({custom_id})를 찾을 수 없습니다.")
+    return {
+        "success": True,
+        "entity_type": entity_type.lower(),
+        "item": item.model_dump()
+    }
+
+
+@router.post("/entities/{entity_type}")
+def create_entity(entity_type: str, payload: Dict[str, Any] = Body(...)):
+    """신규 엔티티 객체 생성."""
+    seed_default_entities_if_empty()
+    try:
+        item = Rent3EntityManager.create(entity_type, payload)
+        return {
+            "success": True,
+            "message": f"{entity_type} 객체가 성공적으로 생성되었습니다.",
+            "item": item.model_dump()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"객체 생성 실패: {str(e)}")
+
+
+@router.put("/entities/{entity_type}/{custom_id}")
+def update_entity(entity_type: str, custom_id: str, payload: Dict[str, Any] = Body(...)):
+    """기존 엔티티 객체 필드 수정/편집."""
+    seed_default_entities_if_empty()
+    try:
+        updated = Rent3EntityManager.update(entity_type, custom_id, payload)
+        return {
+            "success": True,
+            "message": f"{entity_type} 객체({custom_id})가 성공적으로 수정되었습니다.",
+            "item": updated.model_dump()
+        }
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"객체 수정 실패: {str(e)}")
+
+
+@router.delete("/entities/{entity_type}/{custom_id}")
+def delete_entity(entity_type: str, custom_id: str):
+    """엔티티 객체 삭제."""
+    seed_default_entities_if_empty()
+    deleted = Rent3EntityManager.delete(entity_type, custom_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"{entity_type} 객체({custom_id})를 찾을 수 없거나 삭제에 실패했습니다.")
+    return {
+        "success": True,
+        "message": f"{entity_type} 객체({custom_id})가 삭제되었습니다."
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# 18. 16단계 이벤트 라이프사이클 액션 실행 API
+# ─────────────────────────────────────────────────────────────
+@router.post("/entities/workflow/{action_name}")
+def execute_workflow_action(action_name: str, payload: Dict[str, Any] = Body(default={})):
+    """사용자 이벤트 라이프사이클 단계별 액션 처리."""
+    seed_default_entities_if_empty()
+    try:
+        if action_name == "app_publish_info":
+            res = Rent3WorkflowEngine.step1_app_published_info()
+            return {"success": True, "result": res}
+            
+        elif action_name == "register_lessor":
+            lessor = Rent3WorkflowEngine.step2_register_lessor(
+                name=payload.get("name", "신규임대인"),
+                phone=payload.get("phone", "010-0000-0000"),
+                account_number=payload.get("account_number", "은행 000-00-00000"),
+                business_number=payload.get("business_number", "000-00-00000"),
+                email=payload.get("email", "lessor@example.com"),
+                branch=payload.get("branch", "main")
+            )
+            return {"success": True, "lessor": lessor.model_dump()}
+
+        elif action_name == "publish_room":
+            room = Rent3WorkflowEngine.step3_publish_room_listing(
+                id_building=payload.get("id_building", ""),
+                name=payload.get("name", "신규호실"),
+                deposit=payload.get("deposit", 5000000),
+                monthly_rent=payload.get("monthly_rent", 500000),
+                maintenance_fee=payload.get("maintenance_fee", 50000),
+                status_description=payload.get("status_description", "깨끗한 풀옵션 원룸"),
+                options=payload.get("options", None)
+            )
+            return {"success": True, "room": room.model_dump()}
+
+        elif action_name == "register_tenant":
+            tenant = Rent3WorkflowEngine.step4_register_tenant(
+                name=payload.get("name", "신규임차인"),
+                phone=payload.get("phone", "010-1111-2222"),
+                account_number=payload.get("account_number", "계좌 111-222-333"),
+                car_number=payload.get("car_number", ""),
+                email=payload.get("email", "tenant@example.com"),
+                business_number=payload.get("business_number", "")
+            )
+            return {"success": True, "tenant": tenant.model_dump()}
+
+        elif action_name == "verify_registry":
+            check_res = Rent3WorkflowEngine.step5_verify_and_crosscheck_registry(
+                id_room=payload.get("id_room", ""),
+                id_lessor=payload.get("id_lessor", ""),
+                id_tenant=payload.get("id_tenant", ""),
+                issue_number=payload.get("issue_number", ""),
+                mortgage_amount=payload.get("mortgage_amount", 0)
+            )
+            return {"success": True, "check_info": check_res}
+
+        elif action_name == "sign_contract":
+            ct = Rent3WorkflowEngine.step8_sign_contract(
+                id_room=payload.get("id_room", ""),
+                id_tenant=payload.get("id_tenant", ""),
+                move_in_date=payload.get("move_in_date", datetime.now().strftime("%Y-%m-%d")),
+                lease_term=payload.get("lease_term", "12개월"),
+                deposit=payload.get("deposit", 5000000),
+                monthly_rent=payload.get("monthly_rent", 500000),
+                maintenance_fee=payload.get("maintenance_fee", 50000),
+                rent_type=payload.get("rent_type", "월세"),
+                payment_timing=payload.get("payment_timing", "후불")
+            )
+            return {"success": True, "contract": ct.model_dump()}
+
+        elif action_name == "remit_deposit":
+            dep_res = Rent3WorkflowEngine.step9_remit_contract_deposit(
+                id_contract=payload.get("id_contract", ""),
+                capture_img_url=payload.get("capture_img_url", "")
+            )
+            return dep_res
+
+        elif action_name == "checkin":
+            cin_res = Rent3WorkflowEngine.step10_process_checkin(
+                id_room=payload.get("id_room", ""),
+                id_tenant=payload.get("id_tenant", ""),
+                doorlock_pwd=payload.get("doorlock_pwd", "2026*")
+            )
+            return cin_res
+
+        elif action_name == "record_pay":
+            pay = Rent3WorkflowEngine.step12_record_monthly_pay(
+                id_room=payload.get("id_room", ""),
+                billing_month=payload.get("billing_month", "2026.10"),
+                monthly_rent=payload.get("monthly_rent", 500000),
+                maintenance_fee=payload.get("maintenance_fee", 50000),
+                vat=payload.get("vat", 0)
+            )
+            return {"success": True, "pay": pay.model_dump()}
+
+        elif action_name == "record_outlay":
+            outlay = Rent3WorkflowEngine.step13_record_outlay(
+                id_room=payload.get("id_room", "COMMON"),
+                summary=payload.get("summary", "공용 관리 지출"),
+                amount=payload.get("amount", 100000),
+                category=payload.get("category", "cleaning"),
+                vendor_name=payload.get("vendor_name", "협력업체")
+            )
+            return {"success": True, "outlay": outlay.model_dump()}
+
+        elif action_name == "generate_tax":
+            tax_res = Rent3WorkflowEngine.step14_generate_tax_materials(
+                year=payload.get("year", 2026)
+            )
+            return {"success": True, "tax_materials": tax_res}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"알 수 없는 워크플로우 액션: {action_name}")
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"워크플로우 실행 오류: {str(e)}")
+
 
 
 

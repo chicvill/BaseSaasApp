@@ -1,0 +1,15 @@
+# pyrefly.toml — Pyrefly language server & static type checker configuration
+
+search-path = [
+    ".",
+    "apps"
+]
+
+site-package-path = [
+    "C:/Users/USER/AppData/Local/Programs/Python/Python314/Lib/site-packages",
+    "C:/Users/USER/AppData/Local/Python/pythoncore-3.14-64/Lib/site-packages"
+]
+
+python-version = "3.14"
+python-platform = "windows"
+skip-interpreter-query = false
