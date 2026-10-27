@@ -1,5 +1,5 @@
 """
-run.py — BassSaasApp 통합 실행 스크립트.
+run.py — BaseSaasApp 통합 실행 스크립트.
 
 사용법:
     # 1. 통합 SaaS 모드 (포털 + 자동 발견된 모든 마이크로앱 서빙)
@@ -27,7 +27,7 @@ from core.gateway import create_gateway
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BassSaasApp 플랫폼 실행기")
+    parser = argparse.ArgumentParser(description="BaseSaasApp 플랫폼 실행기")
     parser.add_argument("--host", default="0.0.0.0", help="바인딩 호스트 (기본: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")), help="바인딩 포트 (기본: 환경변수 PORT 또는 8000)")
     parser.add_argument("--app", default=None, help="독립 실행할 단일 앱 ID (예: laundry)")
@@ -38,7 +38,7 @@ def main():
     only_apps = [args.app] if args.app else None
 
     print("=" * 60)
-    print("🚀 BassSaasApp 멀티 테넌트 SaaS 플랫폼 가동")
+    print("🚀 BaseSaasApp 멀티 테넌트 SaaS 플랫폼 가동")
     print(f"• 실행 모드 : {'[단독 Standalone 모드]' if standalone else '[통합 SaaS 게이트웨이 모드]'}")
     if standalone:
         print(f"• 서비스 앱 : {args.app} (루트 / 에서 서빙)")

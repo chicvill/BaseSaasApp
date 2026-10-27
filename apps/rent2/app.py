@@ -1,7 +1,7 @@
 """
 apps/rent2/app.py — 스마트 모바일 원룸임차 관리 앱 정의서.
 
-BassSaasApp의 BaseSaaSApp 표준 규격을 상속받아 게이트웨이가 자동 인식 및 마운트합니다.
+BaseSaasApp의 BaseSaaSApp 표준 규격을 상속받아 게이트웨이가 자동 인식 및 마운트합니다.
 운영 및 비즈니스 규칙은 .agents/skills/bass-rent2-ops/SKILL.md 를 따릅니다.
 """
 import os

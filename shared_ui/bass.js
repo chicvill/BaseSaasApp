@@ -1,4 +1,4 @@
-/* shared_ui/bass.js — BassSaasApp 공통 프론트엔드 런타임
+/* shared_ui/bass.js — BaseSaasApp 공통 프론트엔드 런타임
  *
  *   Bass.apiBase("laundry")            → 통합 모드 "/api/laundry", 독립 모드 "/api"
  *   await Bass.api("laundry", "/machines", { method: "POST", body: {...} })

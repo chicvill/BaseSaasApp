@@ -1,5 +1,5 @@
 """
-core — BassSaasApp 플랫폼 커널.
+core — BaseSaasApp 플랫폼 커널.
 
 앱 개발자가 import 하는 것은 거의 이것뿐이다:
     from core import BaseSaaSApp, Obj, DomainError, Conflict, Mismatch, require_role

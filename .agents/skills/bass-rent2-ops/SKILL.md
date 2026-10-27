@@ -1,6 +1,6 @@
 ---
 name: bass-rent2-ops
-description: Operational business rules, domain invariants, and verification instructions for the BassSaasApp Smart Rent2 (스마트 원룸임차 관리) application (apps/rent2). Review and update this skill before modifying rent2 features.
+description: Operational business rules, domain invariants, and verification instructions for the BaseSaasApp Smart Rent2 (스마트 원룸임차 관리) application (apps/rent2). Review and update this skill before modifying rent2 features.
 ---
 
 # Bass Rent2 (스마트 모바일 원룸임차 관리) 도메인 운영규칙 Skill

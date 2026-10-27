@@ -1,9 +1,9 @@
 ---
 name: bass-tax-ops
-description: Operational business rules, 5-role collaboration governance, tax calculation logic (VAT and Comprehensive Property Tax), and self-upgrading verification instructions for the BassSaasApp Smart Tax application (apps/tax).
+description: Operational business rules, 5-role collaboration governance, tax calculation logic (VAT and Comprehensive Property Tax), and self-upgrading verification instructions for the BaseSaasApp Smart Tax application (apps/tax).
 ---
 
-# ⚖️ BassSaasApp 스마트 부동산 세무 (Tax) & 5역할 협업 운영 스킬
+# ⚖️ BaseSaasApp 스마트 부동산 세무 (Tax) & 5역할 협업 운영 스킬
 
 본 스킬은 부동산 임대사업자의 부가가치세(VAT) 자동 집계, 종합부동산세(종부세) 누진 산출, `apps/rent2` 수납 데이터 실시간 연동, 그리고 **5역할 협업(Five-Role Collaboration) 거버넌스**를 플랫폼 내에 안착시키기 위한 표준 운영 헌법입니다.
 

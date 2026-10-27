@@ -1,9 +1,9 @@
 ---
-name: basssaasapp-governor
-description: Master operations, architectural standards, and Skill-First governance rules for the BassSaasApp object-oriented micro-SaaS platform. Use this skill when creating new apps, migrating legacy apps, or modifying platform core capabilities.
+name: basesaasapp-governor
+description: Master operations, architectural standards, and Skill-First governance rules for the BaseSaasApp object-oriented micro-SaaS platform. Use this skill when creating new apps, migrating legacy apps, or modifying platform core capabilities.
 ---
 
-# BassSaasApp Master Platform Governor Skill
+# BaseSaasApp Master Platform Governor Skill
 
 본 스킬은 50~100개 마이크로 SaaS 앱을 하나의 통일된 체계로 관리하기 위한 **플랫폼 총괄 헌법이자 거버넌스 엔진**입니다.
 

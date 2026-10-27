@@ -1,5 +1,5 @@
 """
-tests/test_platform.py — BassSaasApp 플랫폼 핵심 기능 종합 검증 스위트.
+tests/test_platform.py — BaseSaasApp 플랫폼 핵심 기능 종합 검증 스위트.
 
 검증 항목:
   1. Kernel Obj 스키마리스 문서 스토어 & 이력 로깅

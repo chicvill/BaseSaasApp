@@ -1,6 +1,6 @@
 ---
 name: bass-selfstudy2-ops
-description: Operational business rules, domain invariants, and verification instructions for the BassSaasApp Smart SelfStudy2 application (apps/selfstudy2). Review and update this skill before modifying selfstudy features.
+description: Operational business rules, domain invariants, and verification instructions for the BaseSaasApp Smart SelfStudy2 application (apps/selfstudy2). Review and update this skill before modifying selfstudy features.
 ---
 
 # Bass SelfStudy2 (관리형 독서실 관제) 도메인 운영규칙 Skill

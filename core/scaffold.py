@@ -146,7 +146,7 @@ INDEX_HTML_TEMPLATE = '''<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{app_name} | BassSaasApp</title>
+  <title>{app_name} | BaseSaasApp</title>
   <link rel="stylesheet" href="/shared/ui/base.css">
   <style>
     header.top {{ display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 26px 0 12px; flex-wrap: wrap; }}
@@ -275,7 +275,7 @@ name: bass-{app_id}-ops
 description: Operational business rules, domain invariants, 5-role collaboration governance, and verification instructions for {app_name} (apps/{app_id}).
 ---
 
-# {icon} BassSaasApp {app_name} ({app_id}) 운영 거버넌스 스킬
+# {icon} BaseSaasApp {app_name} ({app_id}) 운영 거버넌스 스킬
 
 본 스킬은 `{app_name}` 마이크로 SaaS 앱의 비즈니스 불변 규칙과 5역할 협업 사이클을 준수하기 위한 공식 운영 명세서입니다.
 

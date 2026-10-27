@@ -1,6 +1,6 @@
 ---
 name: bass-laundry-ops
-description: Operational business rules, domain invariants, and verification instructions for the BassSaasApp Smart 24h Laundry (무인빨래방) application (apps/laundry). Review and update this skill before modifying laundry features.
+description: Operational business rules, domain invariants, and verification instructions for the BaseSaasApp Smart 24h Laundry (무인빨래방) application (apps/laundry). Review and update this skill before modifying laundry features.
 ---
 
 # Bass Laundry (스마트 24시 무인빨래방) 도메인 운영규칙 Skill

@@ -1,6 +1,6 @@
 ---
 name: bass-studycafe2-ops
-description: Operational business rules, domain invariants, and verification instructions for the BassSaasApp Smart StudyCafe2 application (apps/studycafe2). Review and update this skill before modifying studycafe features.
+description: Operational business rules, domain invariants, and verification instructions for the BaseSaasApp Smart StudyCafe2 application (apps/studycafe2). Review and update this skill before modifying studycafe features.
 ---
 
 # Bass StudyCafe2 (무인 스터디카페 관제) 도메인 운영규칙 Skill

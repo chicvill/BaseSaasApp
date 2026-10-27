@@ -41,7 +41,7 @@ def create_gateway(apps_root: Optional[str] = None, db_path: Optional[str] = Non
         yield
         manager.shutdown()
 
-    title = "BassSaasApp Gateway" if not standalone else f"BassSaasApp Standalone — {', '.join(only or [])}"
+    title = "BaseSaasApp Gateway" if not standalone else f"BaseSaasApp Standalone — {', '.join(only or [])}"
     app = FastAPI(title=title, version="1.0.0", lifespan=lifespan,
                   description="BaseSaaSApp 객체를 자동 발견하여 마운트하는 제로터치 멀티앱 SaaS 게이트웨이")
     app.state.manager = manager

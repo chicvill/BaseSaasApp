@@ -28,7 +28,7 @@ def log_stage(stage_num: int, title: str):
 
 def main():
     print("=" * 65)
-    print("🚀 BassSaasApp 스마트 세무 (apps/tax) 5단계 무결성 검증 파이프라인")
+    print("🚀 BaseSaasApp 스마트 세무 (apps/tax) 5단계 무결성 검증 파이프라인")
     print("   [5-Role Collaboration & Tax Self-Upgrading Pipeline]")
     print("=" * 65)
 

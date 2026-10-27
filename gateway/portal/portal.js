@@ -119,7 +119,7 @@
   $("copy-cmd").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText($("create-cmd").textContent);
-      Bass.updateAppAlert("success", "명령을 클립보드에 복사했습니다.", "BassSaasApp 폴더에서 터미널에 붙여넣어 실행하세요.");
+      Bass.updateAppAlert("success", "명령을 클립보드에 복사했습니다.", "BaseSaasApp 폴더에서 터미널에 붙여넣어 실행하세요.");
     } catch (_) {
       Bass.updateAppAlert("warning", "브라우저가 클립보드 접근을 막았습니다.", "명령을 직접 드래그해서 복사해 주세요.");
     }
