@@ -109,14 +109,16 @@ class RentalApplication(Obj):
         if Building:
             try:
                 b = Building.get(self.branch)
-                if b and hasattr(b, "rooms") and self.room_id in b.rooms:
-                    room = b.rooms[self.room_id]
-                    room.tenant_name = self.tenant_name
-                    room.tenant_phone = self.tenant_phone
-                    room.deposit = self.deposit
-                    room.rent = self.monthly_rent
-                    room.move_in = self.move_in_date
-                    b.save(f"rent3_online_contract_{self.room_id}")
+                u_num = int(self.room_id) if str(self.room_id).isdigit() else None
+                if b and u_num is not None and hasattr(b, "unit"):
+                    u = b.unit(u_num)
+                    u.update({
+                        "name": self.tenant_name,
+                        "phone": self.tenant_phone,
+                        "deposit": self.deposit,
+                        "rent": self.monthly_rent,
+                        "move_in": self.move_in_date
+                    })
             except Exception as e:
                 print(f"[RentalApplication] rent2 동기화 경고: {e}")
 
@@ -307,14 +309,16 @@ class CoSigningSession(Obj):
         if Building:
             try:
                 b = Building.get(self.branch)
-                if b and hasattr(b, "rooms") and self.room_id in b.rooms:
-                    room = b.rooms[self.room_id]
-                    room.tenant_name = self.tenant_name
-                    room.tenant_phone = self.tenant_phone
-                    room.deposit = self.deposit
-                    room.rent = self.monthly_rent
-                    room.move_in = self.move_in_date
-                    b.save(f"cosign_contract_{self.room_id}")
+                u_num = int(self.room_id) if str(self.room_id).isdigit() else None
+                if b and u_num is not None and hasattr(b, "unit"):
+                    u = b.unit(u_num)
+                    u.update({
+                        "name": self.tenant_name,
+                        "phone": self.tenant_phone,
+                        "deposit": self.deposit,
+                        "rent": self.monthly_rent,
+                        "move_in": self.move_in_date
+                    })
             except Exception as e:
                 print(f"[CoSigningSession] rent2 동기화 경고: {e}")
 
@@ -519,27 +523,10 @@ class CheckOutRecord(Obj):
         if Building:
             try:
                 b = Building.get(self.branch)
-                if b and hasattr(b, "rooms"):
-                    raw_rooms = b.rooms() if callable(b.rooms) else b.rooms
-                    if raw_rooms and self.room_id in raw_rooms:
-                        room = raw_rooms[self.room_id]
-                        room.tenant_name = ""
-                        room.tenant_phone = ""
-                        room.is_occupied = False
-                        room.status = "공실"
-                        b.save(f"checkout_vacancy_{self.room_id}")
-                # 계약서(Contract)가 활성 상태이면 종료 처리
-                if b and hasattr(b, "unit"):
-                    try:
-                        u_num = int(self.room_id) if str(self.room_id).isdigit() else None
-                        if u_num is not None:
-                            u = b.unit(u_num)
-                            if u and hasattr(u, "active"):
-                                act_c = u.active()
-                                if act_c:
-                                    act_c.end(self.move_out_date)
-                    except Exception:
-                        pass
+                u_num = int(self.room_id) if str(self.room_id).isdigit() else None
+                if b and u_num is not None and hasattr(b, "unit"):
+                    u = b.unit(u_num)
+                    u.update({"name": "", "move_out": self.move_out_date})
             except Exception as e:
                 print(f"[CheckOut] rent2 공실화 경고: {e}")
 
@@ -824,11 +811,10 @@ class LeaseRenewal(Obj):
         if Building:
             try:
                 b = Building.get(self.branch)
-                if b and hasattr(b, "rooms") and self.room_id in b.rooms:
-                    room = b.rooms[self.room_id]
-                    room.deposit = self.new_deposit
-                    room.rent = self.new_rent
-                    b.save(f"rent3_renewal_sync_{self.room_id}")
+                u_num = int(self.room_id) if str(self.room_id).isdigit() else None
+                if b and u_num is not None and hasattr(b, "unit"):
+                    u = b.unit(u_num)
+                    u.update({"deposit": self.new_deposit, "rent": self.new_rent})
             except Exception as e:
                 print(f"[LeaseRenewal] rent2 동기화 오류: {e}")
 
@@ -977,25 +963,22 @@ def calculate_branch_tax_roi(branch_id: str = "main", tax_mode: str = "SEPARATE_
 
     has_live_rent2 = False
     try:
-        from apps.rent2.backend.domain.rent import Building, Room, Contract
+        from apps.rent2.backend.domain.rent import Building
         b = Building.get(branch_id)
-        if b and hasattr(b, "units") and len(b.units) > 0:
-            total_rooms = len(b.units)
-            all_rooms = Room.find(branch_id)
-            room_map = {r.unit: r for r in all_rooms}
-            
-            for u in b.units:
-                rm = room_map.get(u)
-                if rm and rm.is_occupied:
-                    occupied_rooms += 1
-                    monthly_collected_rent += rm.monthly_rent or meta["default_avg_rent"]
-                    total_deposits += rm.deposit or meta["default_avg_deposit"]
-                    monthly_maint_fee += rm.maintenance_fee or meta["default_maintenance_fee"]
-                elif rm and not rm.is_occupied:
-                    vacant_rooms += 1
-                else:
-                    vacant_rooms += 1
-            has_live_rent2 = True
+        if b and hasattr(b, "view"):
+            units = b.view()
+            if units:
+                total_rooms = len(units)
+                for u in units:
+                    act = u.active()
+                    if act and act.tenant_name:
+                        occupied_rooms += 1
+                        monthly_collected_rent += act.monthly_rent or meta["default_avg_rent"]
+                        total_deposits += act.deposit or meta["default_avg_deposit"]
+                        monthly_maint_fee += act.maintenance or meta["default_maintenance_fee"]
+                    else:
+                        vacant_rooms += 1
+                has_live_rent2 = True
     except Exception:
         has_live_rent2 = False
 
@@ -1061,20 +1044,20 @@ def calculate_branch_tax_roi(branch_id: str = "main", tax_mode: str = "SEPARATE_
         expense_rate = 0.50
         basic_deduction = 2_000_000
         tax_base = max(0, int(annual_rent_income * (1.0 - expense_rate)) - basic_deduction)
-        rental_income_tax = int(round(tax_base * 0.14 * 1.1)) # 지방소득세 10% 포함
+        rental_income_tax = round(tax_base * 0.14 * 1.1) # 지방소득세 10% 포함
         tax_computation_desc = "분리과세(14%+지방세10%) 적용 (수입금액 - 필요경비50% - 기본공제200만) × 15.4%"
     else: # 종합과세 (추정 누진 15%)
         tax_base = max(0, int(annual_rent_income * 0.60))
-        rental_income_tax = int(round(tax_base * 0.15 * 1.1))
+        rental_income_tax = round(tax_base * 0.15 * 1.1)
         tax_computation_desc = "종합과세(추정 한계세율 15%+지방세10%) 적용"
 
     # 3) 재산세 추정
     official_price = meta["official_price"]
-    property_tax_base = int(round(official_price * 0.60))
-    estimated_property_tax = int(round(property_tax_base * 0.0025))
+    property_tax_base = round(official_price * 0.60)
+    estimated_property_tax = round(property_tax_base * 0.0025)
 
     # 4) 종부세 안분 추정
-    estimated_comprehensive_property_tax = int(round(max(0, (official_price - 300_000_000) * 0.60 * 0.007)))
+    estimated_comprehensive_property_tax = round(max(0.0, (official_price - 300_000_000) * 0.60 * 0.007))
 
     total_estimated_tax = estimated_vat + rental_income_tax + estimated_property_tax + estimated_comprehensive_property_tax
 
@@ -1256,19 +1239,20 @@ def generate_rent_certificate(branch: str = "main", room_id: str = "201", year: 
 
     # rent2 Room 연동 시도
     try:
-        from apps.rent2.backend.domain.rent import Room, Contract
+        from apps.rent2.backend.domain.rent import Room
         r = Room.get(f"{branch}:{room_id}") or Room.get(f"{room_id}")
-        if r:
-            monthly_rent = r.monthly_rent or monthly_rent
-            deposit = r.deposit or deposit
-            tenant_name = r.tenant_name or tenant_name
-            phone = r.tenant_phone or phone
+        if r and r.contract:
+            c = r.contract
+            monthly_rent = c.get("rent") or c.get("monthly_rent") or monthly_rent
+            deposit = c.get("deposit") or deposit
+            tenant_name = c.get("tenant_name") or tenant_name
+            phone = c.get("phone") or phone
     except Exception:
         pass
 
     # 최근 입주신청서 정보 보완
     all_apps = RentalApplication.all()
-    room_apps = [a for a in all_apps if getattr(a, "branch", "main") == branch and str(getattr(a, "room_id", "")) == str(room_id) and getattr(a, "status", "") in ("PAID_CONFIRMED", "CHECKED_IN")]
+    room_apps = [a for a in all_apps if getattr(a, "branch", "main") == branch and getattr(a, "room_id", "") == room_id and getattr(a, "status", "") in ("PAID_CONFIRMED", "CHECKED_IN")]
     if room_apps:
         latest = sorted(room_apps, key=lambda x: getattr(x, "created_at", "") or "", reverse=True)[0]
         tenant_name = latest.tenant_name or tenant_name
@@ -1303,7 +1287,7 @@ def generate_rent_certificate(branch: str = "main", room_id: str = "201", year: 
         total_paid += monthly_rent
 
     deduction_rate = 17.0 # 17% 기준 (총급여 5,500만원 이하)
-    estimated_refund = int(round(total_paid * (deduction_rate / 100.0)))
+    estimated_refund = round(total_paid * (deduction_rate / 100.0))
     cert_no = f"CERT-{year}-{branch.upper()}-{room_id}"
     address = BRANCH_ADDRESSES.get(branch, BRANCH_ADDRESSES["main"]) + f" {room_id}호"
 
@@ -1447,7 +1431,7 @@ def calculate_monthly_operating_summary(branch: str, year: int, month: int) -> D
 
     # 당월 임대 수입 추정 (지점 메타데이터 기준)
     meta = BRANCH_META.get(branch, BRANCH_META["main"])
-    total_rooms = meta.get("total_rooms") or meta.get("default_rooms", 29)
+    total_rooms: int = int(meta.get("total_rooms") or meta.get("default_rooms", 29))
     avg_rent = meta.get("default_avg_rent", 500000)
     avg_maint = meta.get("default_maintenance_fee", 50000)
     
@@ -1458,12 +1442,13 @@ def calculate_monthly_operating_summary(branch: str, year: int, month: int) -> D
     if Building:
         try:
             b = Building.get(branch)
-            if b and hasattr(b, "rooms"):
-                for r in b.rooms.values():
-                    if getattr(r, "is_occupied", False) or getattr(r, "tenant_name", ""):
+            if b and hasattr(b, "view"):
+                for u in b.view():
+                    act = u.active()
+                    if act and act.tenant_name:
                         occupied_count += 1
-                        monthly_collected_rent += getattr(r, "rent", avg_rent)
-                        monthly_maint_fee += avg_maint
+                        monthly_collected_rent += act.monthly_rent or avg_rent
+                        monthly_maint_fee += act.maintenance or avg_maint
         except Exception:
             pass
     if monthly_collected_rent == 0:
@@ -1552,7 +1537,7 @@ def generate_annual_tax_statement(branch: str = "main", year: int = 2026) -> Dic
             "tax_deductible_amount": 0
         }
 
-    receipt_summary = {
+    receipt_summary: Dict[str, Dict[str, Any]] = {
         "TAX_INVOICE": {"label": "전자세금계산서", "count": 0, "amount": 0},
         "CASH_RECEIPT": {"label": "지출증빙 현금영수증", "count": 0, "amount": 0},
         "CARD_SLIP": {"label": "신용카드 매출전표", "count": 0, "amount": 0},
