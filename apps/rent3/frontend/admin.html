@@ -295,7 +295,7 @@
       </a>
 
       <div class="header-btns">
-        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToPcMode()">
+        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToDashboard()">
           ⚙️ 11대 전체관제
         </button>
         <button class="btn btn-alarm" onclick="openAdminChatModal()">
@@ -525,7 +525,7 @@
         <div class="kv-row"><span>🧾 Outlay (공용 지출 전산)</span><strong id="cntOutlay">12 건</strong></div>
       </div>
 
-      <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:14px;" onclick="window.location.href='index.html#tabEntities'">
+      <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:14px;" onclick="window.location.href='public.html#tabEntities'">
         ⚙️ 8대 엔티티 정밀 CRUD 관리 (열기)
       </button>
     </div>
@@ -693,8 +693,8 @@
       if (b1) b1.style.display = "none";
     }
 
-    function goToPcMode() {
-      window.location.href = "index.html?role=admin";
+    function goToDashboard() {
+      window.location.href = "public.html?role=admin";
     }
 
     // 1. 통합 세무·수익률 실데이터 연동 (API)

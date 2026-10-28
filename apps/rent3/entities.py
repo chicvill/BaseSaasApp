@@ -415,8 +415,8 @@ class Rent3WorkflowEngine:
         return {
             "app_name": "Smart Rent3 (차세대 비대면 직거래 & 올인원 건물관리)",
             "google_play_link": "https://play.google.com/store/apps/details?id=com.basesaas.rent3",
-            "home_url": "http://localhost:8000/rent3/public.html",
-            "admin_url": "http://localhost:8000/rent3/index.html?role=admin",
+            "home_url": "http://localhost:8000/rent3/index.html",
+            "admin_url": "http://localhost:8000/rent3/public.html?role=admin",
             "status": "PUBLISHED_ACTIVE"
         }
 

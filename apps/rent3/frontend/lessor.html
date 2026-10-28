@@ -300,7 +300,7 @@
       </a>
 
       <div class="header-btns">
-        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToPcMode()">
+        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToDashboard()">
           ⚙️ 11대 전체관제
         </button>
         <button class="btn btn-alarm" onclick="openLessorChatModal()">
@@ -731,8 +731,8 @@
       if (b1) b1.style.display = "none";
     }
 
-    function goToPcMode() {
-      window.location.href = `index.html?role=landlord&branch=${currentBranch}`;
+    function goToDashboard() {
+      window.location.href = `public.html?role=landlord&branch=${currentBranch}`;
     }
 
     // 1. 임대인 개요 데이터 실시간 로드 (API 연동)

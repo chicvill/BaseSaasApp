@@ -57,7 +57,7 @@ description: Operational business rules, domain invariants, and verification ins
    - 공개 매물 카드에 `[📞 전화걸기](tel:...)` 직통 링크 및 `[💬 1:1 방문약속]` 모달 제공.
 2. **카카오톡·문자 대체 앱내 1:1 실시간 직통 메신저 & 방문투어 조율 (In-App Messenger)**:
    - **외부 발송 비용 0원 인앱 완결**: 유료 카카오 알림톡이나 SMS 문자 발송 없이, 앱 내부 1:1 메신저를 통해 임대인과 예비/입주 세입자가 실시간으로 대화 소통.
-   - **양방향 실시간 폴링 동기화**: 임차인 포털(`public.html`) 및 임대인 관제 대시보드(`index.html`) 간 2.5초 주기 자동 갱신 및 메시지 수신/읽음 상태(`is_read`) 실시간 추적.
+   - **양방향 실시간 폴링 동기화**: 임차인 포털(`index.html`) 및 임대인 관제 대시보드(`public.html`) 간 2.5초 주기 자동 갱신 및 메시지 수신/읽음 상태(`is_read`) 실시간 추적.
    - **원클릭 퀵 액션 템플릿 연계**:
      - `투어 일정 수락`: 일시 자동 확인 및 1층 대면 투어 확정 안내.
      - `전자계약서 발송`: 현장 동행 5단계 Co-Signing 룸 링크(`quick_action_url`) 원클릭 전달.
@@ -145,7 +145,7 @@ description: Operational business rules, domain invariants, and verification ins
     - **국세청 현금영수증 승인번호 (CASH-2026-XXXX) 실시간 연동**:
       - 조세특례제한법 제126조의2에 따른 현금영수증 자진발급 승인번호를 월별 납입 내역에 1:1 표기하여 국세청 전산 검증 통과.
     - **임대인 공식 직인 날인 및 원클릭 인쇄/PDF 저장**:
-      - 세입자 라운지(public.html) 및 관리자 관제 센터(index.html)에서 즉시 1-Click 발급·인쇄 가능.
+      - 세입자 라운지(index.html) 및 관리자 관제 센터(public.html)에서 즉시 1-Click 발급·인쇄 가능.
       - 1:1 직통 인앱 메신저를 통해 세입자 대화방으로 발급 안내 알림 자동 발송.
 
 13. **역할별 맞춤형 첫 페이지 랜딩 및 스마트폰 모바일 뷰포트 통합 거버넌스 (Mobile Viewport Unified & Role-Based Landing)**:
@@ -156,10 +156,10 @@ description: Operational business rules, domain invariants, and verification ins
       - 모든 서브 페이지(`home.html`, `tenant.html`, `lessor.html`, `admin.html`)의 불필요한 'PC모드' 딱지를 제거하고 통일된 `[⚙️ 전체관제]` 링크로 연결.
     - **모든 사용자가 동일한 관제 대시보드에서 시작하지 않음**: 로그인 목적, 역할, 권한에 따라 가장 빈번하게 사용하는 업무 화면이 로그인 즉시 첫 페이지(First-Page)로 오픈되어야 한다.
     - **4대 역할별 첫 페이지 표준 (Landing Standard)**:
-      - 📢 **누구나 (일반 방문자 / 예비임차인)**: `public.html` ➔ 복비 0원 즉시 입주 매물 광고 쇼케이스 & 사진/옵션 확인 & 1:1 방문투어 예약이 1순위로 열림.
-      - 🔑 **임차인 (입주 세입자)**: `public.html?view=tenant&room=201` (또는 `tenant.html`) ➔ 월별 납입현황(미납 0원/영수증) & 계약 만기일 D-Day & 도어락 비번 보기 & 17% 세액공제 증명서 발급 & 1:1 채팅방이 첫 페이지로 최상단 전면 배열.
-      - 🏢 **임대인 (건물주/지점장)**: `index.html?role=landlord` ➔ 호실별 임대료 수납 장부(`tabRooms`)가 첫 페이지로 즉시 열리며 가짜 체납 방지 FIFO 수납, 온라인 입주신청 심사, 만기 재계약 관리 진행.
-      - 👑 **총괄 관리자 (Admin)**: `index.html?role=admin` ➔ 건물별 사용료 현황 & 3대 지점 통합 세무·수익률 분석(`tabTaxRoi`)이 첫 페이지로 즉시 열려 포트폴리오 NOI 및 연간 수익률 관제.
+      - 📢 **누구나 (일반 방문자 / 예비임차인)**: `index.html` ➔ 복비 0원 즉시 입주 매물 광고 쇼케이스 & 사진/옵션 확인 & 1:1 방문투어 예약이 1순위로 열림.
+      - 🔑 **임차인 (입주 세입자)**: `index.html?view=tenant&room=201` (또는 `tenant.html`) ➔ 월별 납입현황(미납 0원/영수증) & 계약 만기일 D-Day & 도어락 비번 보기 & 17% 세액공제 증명서 발급 & 1:1 채팅방이 첫 페이지로 최상단 전면 배열.
+      - 🏢 **임대인 (건물주/지점장)**: `public.html?role=landlord` (또는 `lessor.html`) ➔ 호실별 임대료 수납 장부(`tabRooms`)가 첫 페이지로 즉시 열리며 가짜 체납 방지 FIFO 수납, 온라인 입주신청 심사, 만기 재계약 관리 진행.
+      - 👑 **총괄 관리자 (Admin)**: `public.html?role=admin` (또는 `admin.html`) ➔ 건물별 사용료 현황 & 3대 지점 통합 세무·수익률 분석(`tabTaxRoi`)이 첫 페이지로 즉시 열려 포트폴리오 NOI 및 연간 수익률 관제.
     - **접속 게이트웨이 및 원클릭 역할 전환 (Role Switcher)**:
       - `login.html`: 4개 역할 카드로 구성된 공식 접속 게이트웨이 제공.
       - 모든 화면 상단 헤더에 통일된 `[🔀 역할 전환: Admin ↔ 임대인 ↔ 임차인 ↔ 누구나]` 드롭다운 및 게이트웨이 바로가기 바 탑재.
@@ -173,8 +173,8 @@ description: Operational business rules, domain invariants, and verification ins
       - 주택임대차보호법 제3조의6에 따라 **대법원 확정일자 고유번호(`FIX-20261027-XXXX`) 즉시 부여** 및 익일 0시 우선변제권 효력 개시 통보.
       - 임대인-임차인 1:1 직통 채팅방에 확정일자 부여 완료 공지 메시지 자동 전송.
     - **법정 신고필증 뷰어 & 임대인 30일 안심 관제 대장**:
-      - 세입자 마이홈(`public.html`): 조세특례법 및 부동산거래신고법 별지 제1호의2서식 공식 신고필증 확인 및 원클릭 인쇄/PDF 저장.
-      - 임대인 대시보드(`index.html`): 지점별 전체 호실의 신고 상태(부여완료/D-Day 대기) 관제 및 1-Click 대리 전자신고 모달 제공.
+      - 세입자 마이홈(`index.html`): 조세특례법 및 부동산거래신고법 별지 제1호의2서식 공식 신고필증 확인 및 원클릭 인쇄/PDF 저장.
+      - 임대인 대시보드(`public.html`): 지점별 전체 호실의 신고 상태(부여완료/D-Day 대기) 관제 및 1-Click 대리 전자신고 모달 제공.
 
 15. **지점별 공용 운영비(승강기·청소·공용전기수도 등) 전산 등록 & 월별 실지출 결산부 (`BuildingOperatingExpense`)**:
     - **8대 표준 공용 운영비 분류 체계**:

@@ -567,7 +567,7 @@ class CheckOutRecord(Obj):
                     f"그동안 시크빌과 함께해 주셔서 진심으로 감사드립니다."
                 ),
                 msg_type="checkout_settlement",
-                quick_action_url=f"/rent3/public.html?branch={self.branch}&room={self.room_id}#receiptModal",
+                quick_action_url=f"/rent3/index.html?branch={self.branch}&room={self.room_id}#receiptModal",
                 is_read=False
             )
             chat_msg.save(f"chat_checkout_{self.room_id}")

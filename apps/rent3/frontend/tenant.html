@@ -309,7 +309,7 @@
       </a>
 
       <div class="header-btns">
-        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToPcMode()">
+        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToDashboard()">
           📱 전체관제
         </button>
         <!-- 임대인, 관리자와 채팅 (알림-버튼) -->
@@ -731,8 +731,8 @@
       loadChatMessages();
     }
 
-    function goToPcMode() {
-      window.location.href = `public.html?view=tenant&branch=${currentBranch}&room=${currentRoom}`;
+    function goToDashboard() {
+      window.location.href = `index.html?view=tenant&branch=${currentBranch}&room=${currentRoom}`;
     }
 
     // 1. 실시간 청구서 및 납부 내역 조회 (API 연동)
