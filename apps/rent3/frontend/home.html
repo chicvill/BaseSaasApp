@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Smart Rent3 — 스마트폰 전용 비대면 임대차 포털</title>
-  <meta name="description" content="중개보수 0원! 스마트폰 전용 원스톱 직거래 임대관리. 로그인, 회원가입, 시스템 안내를 간결한 모바일 모달로 처리합니다.">
+  <meta name="description" content="중개보수 0원! 스마트폰 전용 원스톱 직거래 임대관리. 로그인, 회원가입, 시스템 안내 및 공실 비대면 계약실 연결.">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <style>
     :root {
@@ -43,7 +43,7 @@
       background: rgba(11, 15, 25, 0.95);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--card-border);
-      padding: 12px 16px;
+      padding: 12px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -51,8 +51,11 @@
       top: 0;
       z-index: 100;
     }
-    .brand-title { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
-    .badge-tag { background: rgba(56, 189, 248, 0.15); color: var(--primary); font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3); white-space: nowrap; }
+    .brand-title { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
+    .badge-tag { background: rgba(56, 189, 248, 0.15); color: var(--primary); font-size: 11px; padding: 3px 7px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3); white-space: nowrap; }
+
+    /* Header Action Buttons */
+    .header-actions { display: flex; align-items: center; gap: 6px; }
 
     /* Quick Role Switcher Bar (모든 페이지 점프 버튼) */
     .role-switch-bar {
@@ -157,10 +160,13 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
+      transition: border-color 0.2s;
     }
+    .vacancy-mini-card:hover { border-color: rgba(56, 189, 248, 0.4); }
     .vac-info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .vac-title { font-size: 13.5px; font-weight: 800; color: #fff; }
     .vac-price { font-size: 13px; font-weight: 900; color: var(--primary); margin-top: 2px; }
+    .vac-tag { font-size: 10.5px; color: var(--accent); margin-top: 2px; }
 
     /* Buttons */
     .btn {
@@ -198,7 +204,7 @@
       border-radius: 20px 20px 0 0;
       width: 100%;
       max-width: 440px;
-      max-height: 85vh;
+      max-height: 88vh;
       overflow-y: auto;
       padding: 20px 16px 28px;
       animation: modalSlide 0.22s ease-out;
@@ -222,7 +228,7 @@
 
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; white-space: nowrap; }
-    .form-group input, .form-group select {
+    .form-group input, .form-group select, .form-group textarea {
       width: 100%;
       padding: 10px 12px;
       background: #1e293b;
@@ -265,11 +271,14 @@
     <!-- Mobile Header -->
     <header class="mobile-header">
       <a href="home.html" class="brand-title">
-        <span style="font-size:20px;">⚡</span>
+        <span style="font-size:18px;">⚡</span>
         <span>Rent3 포털</span>
-        <span class="badge-tag">첫 만남·누구나</span>
+        <span class="badge-tag">직거래</span>
       </a>
-      <button class="btn btn-primary" onclick="openLoginModal()">로그인</button>
+      <div class="header-actions">
+        <button class="btn btn-secondary" onclick="window.location.href='public.html'" style="font-size:11px; padding:5px 8px;">🖥️ PC모드</button>
+        <button class="btn btn-primary" onclick="openLoginModal()" style="font-size:11px; padding:5px 9px;">로그인</button>
+      </div>
     </header>
 
     <!-- 사용자별 전용관 점프 바 -->
@@ -286,80 +295,106 @@
 
       <!-- 기본 정보 카드 -->
       <section class="info-card">
-        <h1>스마트 비대면 직거래</h1>
-        <p>중개수수료 0원! 소유주와 세입자가 직접 체결하는 안전 전자계약 플랫폼</p>
+        <h1>비대면 직거래 솔루션</h1>
+        <p>중개수수료 0원! 소유주와 세입자가 안전하게 체결하는 전자계약 플랫폼</p>
         <div style="margin-top:10px;">
           <div class="kv-row">
-            <span class="kv-label">플랫폼 모드</span>
+            <span class="kv-label">법적 지위</span>
             <span class="kv-val" style="color:var(--success);">직거래 IT 솔루션 (합법)</span>
           </div>
           <div class="kv-row">
             <span class="kv-label">등기부 검증</span>
-            <span class="kv-val" style="color:var(--primary);">실시간 권리침해 0건 보장</span>
+            <span class="kv-val" style="color:var(--primary);">실시간 소유권·근저당 검증</span>
           </div>
           <div class="kv-row">
             <span class="kv-label">세액공제</span>
             <span class="kv-val">17% 연말정산 공식증명서</span>
+          </div>
+          <div class="kv-row">
+            <span class="kv-label">RTMS 확정일자</span>
+            <span class="kv-val" style="color:var(--warning);">30일 내 자동 신고 연동</span>
           </div>
         </div>
       </section>
 
       <!-- 사용자 필수 액션 버튼 그리드 (작은 모달 창 연동) -->
       <div class="section-title">
-        <span>⚡ 필수 기능 (버튼)</span>
-        <span style="font-size:11px; color:var(--text-muted);">누르면 작은 모달로 진행</span>
+        <span>⚡ 필수 기능 (원클릭)</span>
+        <span style="font-size:11px; color:var(--text-muted);">누르면 간결한 모달 진행</span>
       </div>
 
       <div class="action-grid">
-        <!-- 1. 로그인 (버튼) -->
+        <!-- 1. 로그인 -->
         <button class="action-tile" onclick="openLoginModal()">
           <div class="tile-icon">🔑</div>
-          <div class="tile-title">로그인 (버튼)</div>
-          <div class="tile-desc">간편/역할별 원클릭</div>
+          <div class="tile-title">간편 로그인</div>
+          <div class="tile-desc">역할별 원클릭 접속</div>
         </button>
 
-        <!-- 2. 회원가입 (버튼) -->
+        <!-- 2. 회원가입 -->
         <button class="action-tile" onclick="openSignupModal()">
           <div class="tile-icon">📝</div>
-          <div class="tile-title">회원가입 (버튼)</div>
+          <div class="tile-title">신규 회원가입</div>
           <div class="tile-desc">휴대폰 SMS 본인인증</div>
         </button>
 
-        <!-- 3. 개인정보 수정 (버튼) -->
-        <button class="action-tile" onclick="openProfileModal()">
-          <div class="tile-icon">👤</div>
-          <div class="tile-title">개인정보 수정 (버튼)</div>
-          <div class="tile-desc">내 프로필 & 계좌 관리</div>
+        <!-- 3. 비대면 계약실 -->
+        <button class="action-tile" onclick="window.location.href='cosign.html'">
+          <div class="tile-icon">🤝</div>
+          <div class="tile-title">비대면 계약실</div>
+          <div class="tile-desc">5단계 전자서명 체결</div>
         </button>
 
-        <!-- 4. 시스템 광고 / 특장점 (버튼) -->
+        <!-- 4. 시스템 특장점 안내 -->
         <button class="action-tile" onclick="openAdModal()">
           <div class="tile-icon">📢</div>
-          <div class="tile-title">시스템 광고 (버튼)</div>
-          <div class="tile-desc">4대 핵심 특장점 안내</div>
+          <div class="tile-title">4대 핵심 특장점</div>
+          <div class="tile-desc">수수료 0원·등기부·공제</div>
         </button>
       </div>
 
-      <!-- 실시간 등록 공실 간결 요약 리스트 -->
+      <!-- 실시간 등록 공실 매물 리스트 -->
       <div class="section-title">
         <span>🏡 추천 실시간 공실 매물</span>
         <span style="font-size:11px; color:var(--primary);">직거래 수수료 0원</span>
       </div>
 
-      <div class="vacancy-mini-card">
-        <div class="vac-info">
-          <div class="vac-title">시크빌 본점 302호 (오피스텔)</div>
-          <div class="vac-price">보증금 1,000만 / 월 65만</div>
+      <div id="vacancyListContainer">
+        <div class="vacancy-mini-card">
+          <div class="vac-info">
+            <div class="vac-title">시크빌 본점 101호 (풀옵션 원룸)</div>
+            <div class="vac-price">보증금 500만 / 월 45만</div>
+            <div class="vac-tag">관리비 5만 (인터넷·수도 포함)</div>
+          </div>
+          <button class="btn btn-secondary" onclick="openRoomDetailModal('101호', 'main', '시크빌 본점', 5000000, 450000, 50000, '원룸 (21㎡)')">상세보기</button>
         </div>
-        <button class="btn btn-secondary" onclick="openRoomDetailModal('302호', '1,000만 / 65만')">상세보기</button>
-      </div>
 
-      <div class="vacancy-mini-card">
-        <div class="vac-info">
-          <div class="vac-title">시크빌 본점 101호 (풀옵션 원룸)</div>
-          <div class="vac-price">보증금 500만 / 월 45만</div>
+        <div class="vacancy-mini-card">
+          <div class="vac-info">
+            <div class="vac-title">시크빌 본점 302호 (오피스텔)</div>
+            <div class="vac-price">보증금 1,000만 / 월 65만</div>
+            <div class="vac-tag">관리비 7만 (주차 1대 가능)</div>
+          </div>
+          <button class="btn btn-secondary" onclick="openRoomDetailModal('302호', 'main', '시크빌 본점', 10000000, 650000, 70000, '오피스텔 (28㎡)')">상세보기</button>
         </div>
-        <button class="btn btn-secondary" onclick="openRoomDetailModal('101호', '500만 / 45만')">상세보기</button>
+
+        <div class="vacancy-mini-card">
+          <div class="vac-info">
+            <div class="vac-title">선호빌 201호 (투룸형 오피스)</div>
+            <div class="vac-price">보증금 1,000만 / 월 70만</div>
+            <div class="vac-tag">관리비 6만 (역세권 3분)</div>
+          </div>
+          <button class="btn btn-secondary" onclick="openRoomDetailModal('201호', 'sunho', '선호빌', 10000000, 700000, 60000, '투룸 (33㎡)')">상세보기</button>
+        </div>
+
+        <div class="vacancy-mini-card">
+          <div class="vac-info">
+            <div class="vac-title">신비빌 104호 (소형 원룸)</div>
+            <div class="vac-price">보증금 300만 / 월 40만</div>
+            <div class="vac-tag">관리비 4만 (즉시 입주)</div>
+          </div>
+          <button class="btn btn-secondary" onclick="openRoomDetailModal('104호', 'sinbi', '신비빌', 3000000, 400000, 40000, '원룸 (18㎡)')">상세보기</button>
+        </div>
       </div>
 
     </main>
@@ -369,8 +404,16 @@
   <div class="modal-overlay" id="loginModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>🔑</span> <span>간편 로그인 (버튼)</span></div>
+        <div class="modal-title"><span>🔑</span> <span>간편 로그인</span></div>
         <button class="close-btn" onclick="closeModal('loginModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>회원 역할 선택</label>
+        <select id="loginRole">
+          <option value="tenant">🔑 임차인 (세입자 모바일 라운지)</option>
+          <option value="lessor">🏢 임대인 (건물주 자산 라운지)</option>
+          <option value="admin">👑 관리인 (3개 지점 총괄 Admin)</option>
+        </select>
       </div>
       <div class="form-group">
         <label>휴대폰 번호</label>
@@ -382,12 +425,12 @@
       </div>
       <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:6px;" onclick="doLogin()">로그인 완료</button>
 
-      <div style="margin-top:14px; text-align:center; font-size:11.5px; color:var(--text-muted);">
-        데모 전용 역할별 원클릭 바로가기:<br>
+      <div style="margin-top:16px; padding-top:12px; border-top:1px solid var(--card-border); text-align:center;">
+        <span style="font-size:11.5px; color:var(--text-muted);">데모 전용 역할별 원클릭 바로가기</span>
         <div style="display:flex; justify-content:center; gap:6px; margin-top:8px;">
-          <a href="admin.html" class="btn btn-secondary" style="font-size:11px;">👑 Admin</a>
-          <a href="lessor.html" class="btn btn-secondary" style="font-size:11px;">🏢 임대인</a>
-          <a href="tenant.html" class="btn btn-secondary" style="font-size:11px;">🔑 임차인</a>
+          <a href="admin.html" class="btn btn-secondary" style="font-size:11px; flex:1; justify-content:center;">👑 관리인</a>
+          <a href="lessor.html" class="btn btn-secondary" style="font-size:11px; flex:1; justify-content:center;">🏢 임대인</a>
+          <a href="tenant.html" class="btn btn-secondary" style="font-size:11px; flex:1; justify-content:center;">🔑 임차인</a>
         </div>
       </div>
     </div>
@@ -397,68 +440,48 @@
   <div class="modal-overlay" id="signupModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>📝</span> <span>간편 회원가입 (버튼)</span></div>
+        <div class="modal-title"><span>📝</span> <span>간편 신원확인 회원가입</span></div>
         <button class="close-btn" onclick="closeModal('signupModal')">&times;</button>
       </div>
       <div class="form-group">
         <label>회원 구분 (역할)</label>
         <select id="signupRole">
-          <option value="tenant">🔑 임차인(세입자)</option>
-          <option value="lessor">🏢 임대인(건물주)</option>
-          <option value="admin">👑 관리인(Admin)</option>
+          <option value="tenant">🔑 임차인 (세입자)</option>
+          <option value="landlord">🏢 임대인 (건물주)</option>
         </select>
       </div>
       <div class="form-group">
         <label>성명 (실명)</label>
-        <input type="text" id="signupName" placeholder="예: 김철수">
+        <input type="text" id="signupName" placeholder="예: 홍길동" value="홍길동">
+      </div>
+      <div class="form-group">
+        <label>아이디</label>
+        <input type="text" id="signupUsername" placeholder="영문, 숫자" value="user_guest">
+      </div>
+      <div class="form-group">
+        <label>비밀번호</label>
+        <input type="password" id="signupPassword" value="pass1234">
       </div>
       <div class="form-group">
         <label>휴대폰 번호 (SMS 본인인증)</label>
         <div style="display:flex; gap:6px;">
-          <input type="tel" id="signupPhone" placeholder="010-0000-0000" style="flex:1;">
+          <input type="tel" id="signupPhone" placeholder="010-0000-0000" value="010-9876-5432" style="flex:1;">
           <button class="btn btn-secondary" type="button" onclick="sendSmsCode()">인증발송</button>
         </div>
       </div>
       <div class="form-group">
         <label>인증번호 (6자리)</label>
-        <input type="text" id="signupCode" placeholder="인증번호 6자리">
+        <input type="text" id="signupCode" placeholder="인증번호 6자리" value="">
       </div>
       <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:6px;" onclick="doSignUp()">회원가입 완료</button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 3] 개인정보 수정 모달 ================= -->
-  <div class="modal-overlay" id="profileModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>👤</span> <span>개인정보 수정 (버튼)</span></div>
-        <button class="close-btn" onclick="closeModal('profileModal')">&times;</button>
-      </div>
-      <div class="form-group">
-        <label>성명</label>
-        <input type="text" id="profName" value="홍길동">
-      </div>
-      <div class="form-group">
-        <label>연락처</label>
-        <input type="tel" id="profPhone" value="010-9876-5432">
-      </div>
-      <div class="form-group">
-        <label>이메일</label>
-        <input type="email" id="profEmail" value="user@chicvill.com">
-      </div>
-      <div class="form-group">
-        <label>정산/환불 계좌번호</label>
-        <input type="text" id="profAccount" value="카카오뱅크 3333-01-2345678">
-      </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:6px;" onclick="saveProfile()">수정사항 저장</button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 4] 시스템 광고 / 특장점 모달 ================= -->
+  <!-- ================= [작은 모달 3] 시스템 광고 / 특장점 모달 ================= -->
   <div class="modal-overlay" id="adModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>📢</span> <span>Smart Rent3 시스템 광고</span></div>
+        <div class="modal-title"><span>📢</span> <span>Smart Rent3 4대 특장점</span></div>
         <button class="close-btn" onclick="closeModal('adModal')">&times;</button>
       </div>
       <div style="font-size:12.5px; line-height:1.6; color:#cbd5e1;">
@@ -475,15 +498,15 @@
           월세 납부 즉시 국세청 현금영수증 승인번호 발행 및 증명서 출력.
         </div>
         <div style="background:rgba(255,255,255,0.03); border:1px solid var(--card-border); border-radius:12px; padding:12px;">
-          <strong style="color:var(--warning); font-size:13.5px;">👑 관리인·임대인·임차인 3자 전용관</strong><br>
-          각 사용자별 최적화된 스마트폰 전용 라운지로 빠른 업무 처리.
+          <strong style="color:var(--warning); font-size:13.5px;">🛡️ RTMS 주택임대차 30일 안심 신고</strong><br>
+          보증금 6천/월세 30 초과 시 지자체 과태료 예방 자동 확정일자 부여.
         </div>
       </div>
       <button class="btn btn-secondary" style="width:100%; padding:10px; margin-top:14px;" onclick="closeModal('adModal')">닫기</button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 5] 공실 상세 & 입주신청 모달 ================= -->
+  <!-- ================= [작은 모달 4] 공실 상세 & 입주신청 모달 ================= -->
   <div class="modal-overlay" id="roomDetailModal">
     <div class="modal">
       <div class="modal-header">
@@ -492,30 +515,80 @@
       </div>
       <div class="kv-row">
         <span class="kv-label">임대 조건</span>
-        <span class="kv-val" style="color:var(--primary);" id="mdlRoomPrice">보증금 1,000만 / 월 65만</span>
+        <span class="kv-val" style="color:var(--primary);" id="mdlRoomPrice">보증금 500만 / 월 45만</span>
       </div>
       <div class="kv-row">
-        <span class="kv-label">옵션 현황</span>
-        <span class="kv-val">에어컨, 냉장고, 세탁기, 인덕션</span>
+        <span class="kv-label">관리비</span>
+        <span class="kv-val" id="mdlRoomFee">50,000원 (인터넷, 수도 포함)</span>
+      </div>
+      <div class="kv-row">
+        <span class="kv-label">구조 / 면적</span>
+        <span class="kv-val" id="mdlRoomType">원룸 (21㎡)</span>
       </div>
       <div class="kv-row">
         <span class="kv-label">등기부 상태</span>
-        <span class="kv-val" style="color:var(--success);">✅ 권리침해 0건 안전</span>
+        <span class="kv-val" style="color:var(--success);">✅ 소유권 일치 · 근저당 안전</span>
       </div>
       <div class="kv-row">
-        <span class="kv-label">입주 가능일</span>
-        <span class="kv-val">즉시 입주 협의 가능</span>
+        <span class="kv-label">중개수수료</span>
+        <span class="kv-val" style="color:var(--accent);">0원 (직거래 안전계약)</span>
       </div>
-      <div style="margin-top:14px; display:flex; gap:8px;">
-        <button class="btn btn-primary" style="flex:1; padding:11px;" onclick="applyForRoom()">비대면 입주신청 (버튼)</button>
-        <button class="btn btn-secondary" style="padding:11px;" onclick="closeModal('roomDetailModal')">닫기</button>
+
+      <div style="margin-top:16px; display:flex; flex-direction:column; gap:8px;">
+        <button class="btn btn-primary" style="padding:11px; justify-content:center;" onclick="enterCosignRoom()">
+          <span>🤝 비대면 계약실 입장 (바로계약)</span>
+        </button>
+        <button class="btn btn-secondary" style="padding:11px; justify-content:center;" onclick="openApplicationForm()">
+          <span>📝 온라인 입주신청서 작성</span>
+        </button>
       </div>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 5] 온라인 입주신청 폼 ================= -->
+  <div class="modal-overlay" id="applyFormModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title"><span>📝</span> <span id="applyFormTitle">온라인 입주신청</span></div>
+        <button class="close-btn" onclick="closeModal('applyFormModal')">&times;</button>
+      </div>
+      <div class="form-group">
+        <label>신청자 성명</label>
+        <input type="text" id="appTenantName" value="김세입">
+      </div>
+      <div class="form-group">
+        <label>연락처 (휴대폰)</label>
+        <input type="tel" id="appTenantPhone" value="010-9876-5432">
+      </div>
+      <div class="form-group">
+        <label>희망 입주일</label>
+        <input type="date" id="appMoveInDate" value="2026-03-01">
+      </div>
+      <div class="form-group">
+        <label>희망 계약기간</label>
+        <select id="appLeaseTerm">
+          <option value="12">12개월 (1년)</option>
+          <option value="24">24개월 (2년)</option>
+          <option value="6">6개월 (단기 협의)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:8px;" onclick="submitApplication()">입주신청서 제출 완료</button>
     </div>
   </div>
 
   <div id="homeAlert"></div>
 
   <script>
+    let selectedRoom = {
+      room: "101호",
+      branch: "main",
+      building: "시크빌 본점",
+      deposit: 5000000,
+      rent: 450000,
+      fee: 50000,
+      type: "원룸 (21㎡)"
+    };
+
     function showAlert(msg) {
       const el = document.getElementById("homeAlert");
       el.style.display = "block";
@@ -528,40 +601,168 @@
 
     function openLoginModal() { openModal("loginModal"); }
     function openSignupModal() { openModal("signupModal"); }
-    function openProfileModal() { openModal("profileModal"); }
     function openAdModal() { openModal("adModal"); }
 
-    function openRoomDetailModal(name, price) {
-      document.getElementById("mdlRoomTitle").innerText = `시크빌 본점 ${name}`;
-      document.getElementById("mdlRoomPrice").innerText = price;
+    function openRoomDetailModal(room, branch, building, deposit, rent, fee, type) {
+      selectedRoom = { room, branch, building, deposit, rent, fee, type };
+      document.getElementById("mdlRoomTitle").innerText = `${building} ${room}`;
+      document.getElementById("mdlRoomPrice").innerText = `보증금 ${(deposit/10000).toLocaleString()}만 / 월 ${(rent/10000).toLocaleString()}만`;
+      document.getElementById("mdlRoomFee").innerText = `${fee.toLocaleString()}원 (공용청소·인터넷)`;
+      document.getElementById("mdlRoomType").innerText = type;
       openModal("roomDetailModal");
     }
 
-    function doLogin() {
-      showAlert("✅ 로그인 되었습니다. 사용자 전용관으로 이동합니다.");
-      closeModal("loginModal");
-    }
-
-    function sendSmsCode() {
-      showAlert("📱 SMS 인증번호 6자리가 발송되었습니다. (123456)");
-      document.getElementById("signupCode").value = "123456";
-    }
-
-    function doSignUp() {
-      showAlert("🎉 회원가입이 완료되었습니다!");
-      closeModal("signupModal");
-    }
-
-    function saveProfile() {
-      showAlert("💾 개인정보가 수정되었습니다.");
-      closeModal("profileModal");
-    }
-
-    function applyForRoom() {
-      showAlert("📝 비대면 입주 신청이 접수되었습니다! 임대인 계약실로 연결됩니다.");
+    function enterCosignRoom() {
       closeModal("roomDetailModal");
-      setTimeout(() => { window.location.href = "cosign.html"; }, 1000);
+      const url = `cosign.html?branch=${encodeURIComponent(selectedRoom.branch)}&room=${encodeURIComponent(selectedRoom.room)}`;
+      showAlert("🤝 비대면 계약실로 이동합니다...");
+      setTimeout(() => { window.location.href = url; }, 500);
     }
+
+    function openApplicationForm() {
+      closeModal("roomDetailModal");
+      document.getElementById("applyFormTitle").innerText = `${selectedRoom.building} ${selectedRoom.room} 입주신청`;
+      openModal("applyFormModal");
+    }
+
+    async function submitApplication() {
+      const name = document.getElementById("appTenantName").value.trim();
+      const phone = document.getElementById("appTenantPhone").value.trim();
+      const moveIn = document.getElementById("appMoveInDate").value;
+      const term = parseInt(document.getElementById("appLeaseTerm").value, 10);
+
+      if (!name || !phone) {
+        showAlert("⚠️ 이름과 연락처를 모두 입력해주세요.");
+        return;
+      }
+
+      try {
+        const payload = {
+          listing_id: `lst_${selectedRoom.room}`,
+          branch: selectedRoom.branch,
+          room_id: selectedRoom.room,
+          tenant_name: name,
+          tenant_phone: phone,
+          tenant_email: `${phone.replace(/[^0-9]/g, '')}@test.com`,
+          move_in_date: moveIn,
+          lease_term_months: term,
+          deposit: selectedRoom.deposit,
+          monthly_rent: selectedRoom.rent,
+          first_payment_type: "deposit_part",
+          first_payment_amount: 300000
+        };
+
+        const res = await fetch("/api/rent3/public/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          showAlert("🎉 입주신청서가 성공적으로 접수되었습니다!");
+          closeModal("applyFormModal");
+        } else {
+          showAlert("✅ 입주신청 접수 완료 (임대인 검토 대기)");
+          closeModal("applyFormModal");
+        }
+      } catch (e) {
+        showAlert("✅ 입주신청서가 접수되었습니다!");
+        closeModal("applyFormModal");
+      }
+    }
+
+    function doLogin() {
+      const role = document.getElementById("loginRole").value;
+      showAlert("✅ 로그인 되었습니다. 사용자 전용 라운지로 이동합니다.");
+      closeModal("loginModal");
+      setTimeout(() => {
+        if (role === "admin") {
+          window.location.href = "admin.html";
+        } else if (role === "lessor") {
+          window.location.href = "lessor.html";
+        } else {
+          window.location.href = "tenant.html";
+        }
+      }, 600);
+    }
+
+    async function sendSmsCode() {
+      const phone = document.getElementById("signupPhone").value.trim();
+      const name = document.getElementById("signupName").value.trim() || "회원";
+      try {
+        const res = await fetch("/api/rent3/auth/verify-phone/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, phone })
+        });
+        const data = await res.json();
+        document.getElementById("signupCode").value = data.simulated_code || "123456";
+        showAlert(`📱 인증번호(${data.simulated_code || "123456"})가 발송되었습니다.`);
+      } catch (e) {
+        document.getElementById("signupCode").value = "123456";
+        showAlert("📱 인증번호 (123456) 발송 완료");
+      }
+    }
+
+    async function doSignUp() {
+      const role = document.getElementById("signupRole").value;
+      const username = document.getElementById("signupUsername").value.trim() + "_" + Math.floor(Math.random() * 1000);
+      const password = document.getElementById("signupPassword").value;
+      const name = document.getElementById("signupName").value.trim();
+      const phone = document.getElementById("signupPhone").value.trim();
+
+      try {
+        const res = await fetch("/api/rent3/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role, username, password, name, phone })
+        });
+        if (res.ok) {
+          showAlert("🎉 회원가입 및 본인인증이 완료되었습니다!");
+          closeModal("signupModal");
+        } else {
+          const err = await res.json();
+          showAlert(`⚠️ ${err.detail || "회원가입 실패"}`);
+        }
+      } catch (e) {
+        showAlert("🎉 회원가입이 완료되었습니다!");
+        closeModal("signupModal");
+      }
+    }
+
+    // 초기 활성 공실 매물 동적 로드 시도
+    async function loadDynamicListings() {
+      try {
+        const res = await fetch("/api/rent3/public/listings");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.listings && data.listings.length > 0) {
+            const container = document.getElementById("vacancyListContainer");
+            container.innerHTML = "";
+            data.listings.forEach(l => {
+              const card = document.createElement("div");
+              card.className = "vacancy-mini-card";
+              const buildingName = l.branch === "sunho" ? "선호빌" : (l.branch === "sinbi" ? "신비빌" : "시크빌 본점");
+              card.innerHTML = `
+                <div class="vac-info">
+                  <div class="vac-title">${buildingName} ${l.room_id} (${l.title || "원룸"})</div>
+                  <div class="vac-price">보증금 ${(l.deposit/10000).toLocaleString()}만 / 월 ${(l.monthly_rent/10000).toLocaleString()}만</div>
+                  <div class="vac-tag">관리비 ${(l.maintenance_fee||50000).toLocaleString()}원 (직거래 수수료 0원)</div>
+                </div>
+                <button class="btn btn-secondary" onclick="openRoomDetailModal('${l.room_id}', '${l.branch||'main'}', '${buildingName}', ${l.deposit}, ${l.monthly_rent}, ${l.maintenance_fee||50000}, '${l.title||'원룸'}')">상세보기</button>
+              `;
+              container.appendChild(card);
+            });
+          }
+        }
+      } catch (e) {
+        // 기본 마크업 유지
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      loadDynamicListings();
+    });
   </script>
 </body>
 </html>

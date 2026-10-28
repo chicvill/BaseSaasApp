@@ -2,6 +2,7 @@
 
 하위 호환성 유지: 모든 URL 경로는 기존 `/api/rent3/...` 스펙을 100% 보존합니다.
 """
+import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Body, Response
@@ -11,8 +12,9 @@ from ..domain import (
     RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, 
     ChatMessage, RoomAccessInfo, ParkingRegistration, 
     MonthlyBill, PaymentReceipt, CheckOutRecord, RtmsContractReport, 
-    LeaseRenewal, MaintenanceTicket
+    LeaseRenewal, MaintenanceTicket, CoSigningSession
 )
+from .public_apps import ListingCreateReq
 try:
     from apps.rent2.backend.domain.rent import Building
 except ImportError:
@@ -1163,6 +1165,7 @@ class RenewalProposeReq(BaseModel):
     branch: str = "main"
     room_id: str
     renewal_type: str = "EXPLICIT"  # EXPLICIT, TACIT, TERMINATE
+    original_rent: Optional[int] = None
     new_deposit: int
     new_rent: int
     new_maintenance: int = 50000
@@ -1280,7 +1283,29 @@ def propose_renewal(req: RenewalProposeReq):
     if records:
         renewal = records[-1]
     else:
-        renewal = LeaseRenewal(branch=req.branch, room_id=req.room_id, room_number=f"{req.room_id}호")
+        orig_rent = req.original_rent or 500000
+        orig_deposit = 5000000
+        if Building:
+            try:
+                b = Building.get(req.branch)
+                if b and hasattr(b, "rooms"):
+                    raw_rooms = b.rooms() if callable(b.rooms) else (b.rooms or {})
+                    r_info = raw_rooms.get(req.room_id) or raw_rooms.get(str(req.room_id))
+                    if r_info:
+                        orig_rent = (r_info.get("rent") if isinstance(r_info, dict) else getattr(r_info, "rent", None)) or orig_rent
+                        orig_deposit = (r_info.get("deposit") if isinstance(r_info, dict) else getattr(r_info, "deposit", None)) or orig_deposit
+            except Exception:
+                pass
+        renewal = LeaseRenewal(
+            branch=req.branch,
+            room_id=req.room_id,
+            room_number=f"{req.room_id}호",
+            original_rent=orig_rent,
+            original_deposit=orig_deposit
+        )
+
+    if req.original_rent is not None and req.original_rent > 0:
+        renewal.original_rent = req.original_rent
 
     # 2. 5% 상한선 검증 (EXPLICIT 인상 시)
     if req.renewal_type == "EXPLICIT" and renewal.original_rent > 0:

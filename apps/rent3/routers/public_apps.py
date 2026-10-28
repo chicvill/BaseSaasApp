@@ -472,5 +472,7 @@ def register_user(req: SignUpReq):
             "verified_by": req.verified_by,
             "message": f"[{user.name}]님의 회원가입 및 신원확인이 완료되었습니다."
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

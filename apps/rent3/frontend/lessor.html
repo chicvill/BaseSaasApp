@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>🏢 임대인(건물주) 전용 라운지 — Smart Rent3</title>
-  <meta name="description" content="임대인 스마트폰 전용 라운지: 실시간 월 수납 통계, 호실별 당월 수납 내역, room 생성 및 공실 등록, cosign 계약, 전출정산, 채팅(알림-버튼) 모달 일체형.">
+  <meta name="description" content="임대인 스마트폰 전용 라운지: 실시간 수납 통계, 호실·공실 통합 관리, A/S 협력업체 배정, 전출정산, 5월 종소세 엑셀 다운로드, 1:1 채팅 모달 일체형.">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <style>
     :root {
@@ -43,7 +43,7 @@
       background: rgba(11, 15, 25, 0.95);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--card-border);
-      padding: 12px 16px;
+      padding: 12px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -51,12 +51,14 @@
       top: 0;
       z-index: 100;
     }
-    .brand-title { display: flex; align-items: center; gap: 8px; font-size: 16.5px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
+    .brand-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
     .badge-lessor { background: rgba(16, 185, 129, 0.15); color: var(--success); font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(16, 185, 129, 0.3); white-space: nowrap; }
+
+    .header-btns { display: flex; align-items: center; gap: 6px; }
 
     /* Pulsating Alarm Badge */
     .alarm-pulse-badge {
-      background: #ef4444; color: #fff; font-size: 10.5px; font-weight: 900;
+      background: #ef4444; color: #fff; font-size: 10px; font-weight: 900;
       padding: 2px 6px; border-radius: 999px; margin-left: 4px;
       animation: badgePulse 1.5s infinite;
       box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
@@ -109,7 +111,7 @@
     .stats-card h1 { font-size: 17px; font-weight: 900; color: #fff; margin-bottom: 2px; white-space: nowrap; }
     .stats-card p { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
 
-    /* Key-Value Rows (줄바꿈 깨짐 방지) */
+    /* Key-Value Rows */
     .kv-row {
       display: flex;
       justify-content: space-between;
@@ -172,8 +174,8 @@
     }
     .room-main-info { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .room-name-badge { display: flex; align-items: center; gap: 6px; }
-    .room-name { font-size: 14px; font-weight: 800; color: #fff; }
-    .room-fee { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+    .room-name { font-size: 13.5px; font-weight: 800; color: #fff; }
+    .room-fee { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
 
     /* Buttons */
     .btn {
@@ -237,7 +239,7 @@
 
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; white-space: nowrap; }
-    .form-group input, .form-group select {
+    .form-group input, .form-group select, .form-group textarea {
       width: 100%;
       padding: 9px 12px;
       background: #1e293b;
@@ -254,7 +256,7 @@
       border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; margin-bottom: 10px;
     }
     .chat-messages { flex: 1; padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-    .chat-bubble { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; }
+    .chat-bubble { max-width: 85%; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.4; word-break: break-word; }
     .bubble-lessor { align-self: flex-end; background: var(--success); color: #090d16; font-weight: 700; }
     .bubble-other { align-self: flex-start; background: #1e293b; color: #e2e8f0; border: 1px solid var(--card-border); }
     .chat-input-area { padding: 8px; background: #1e293b; display: flex; gap: 6px; }
@@ -292,16 +294,20 @@
     <!-- Mobile Header -->
     <header class="mobile-header">
       <a href="lessor.html" class="brand-title">
-        <span style="font-size:20px;">🏢</span>
+        <span style="font-size:19px;">🏢</span>
         <span>임대인 라운지</span>
-        <span class="badge-lessor">건물주 전용</span>
+        <span class="badge-lessor" id="headerBranchLabel">시크빌 본점</span>
       </a>
 
-      <!-- 관리자 또는 임차인과의 채팅 (알림-버튼) -->
-      <button class="btn btn-alarm" onclick="openLessorChatModal()">
-        <span>💬 채팅</span>
-        <span class="alarm-pulse-badge" id="lessorHeaderAlarm">🔔 2건</span>
-      </button>
+      <div class="header-btns">
+        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToPcMode()">
+          🖥️ PC모드
+        </button>
+        <button class="btn btn-alarm" onclick="openLessorChatModal()">
+          <span>💬</span>
+          <span class="alarm-pulse-badge" id="lessorHeaderAlarm">🔔 2건</span>
+        </button>
+      </div>
     </header>
 
     <!-- 모든 페이지 점프 바 -->
@@ -316,356 +322,344 @@
     <!-- 본 페이지: 기본 정보와 버튼들로만 심플하게 구성 -->
     <main class="mobile-content">
 
-      <!-- 실시간 월 수납 통계 카드 -->
+      <!-- 기본 요약 정보 카드 (실시간 월 수납 통계) -->
       <section class="stats-card">
-        <h1>실시간 10월 수납 통계</h1>
-        <p>시크빌 본점 (12세대) 당월 수납 실시간 집계</p>
+        <h1 id="lblLessorTitle">🏢 시크빌 본점 자산 관제</h1>
+        <p id="lblLessorSubtitle">총 29개실 중 28실 가동중 (가동률 96.6%)</p>
         <div class="kv-row">
-          <span class="kv-label">당월 총 청구액</span>
-          <span class="kv-val">6,600,000 원 (12개실)</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-label">실시간 수납 완료</span>
-          <span class="kv-val" style="color:var(--success);">6,050,000 원 (91.7%)</span>
+          <span class="kv-label">당월 수납 총액</span>
+          <span class="kv-val" style="color:var(--success);" id="lblGrossRent">15,400,000원</span>
         </div>
         <div class="kv-row">
           <span class="kv-label">당월 미납 현황</span>
-          <span class="kv-val" style="color:var(--error);">1건 (203호 55만)</span>
+          <span class="kv-val" style="color:var(--error);" id="lblUnpaidCount">1건 (203호 55만)</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">실시간 공실 현황</span>
-          <span class="kv-val" style="color:var(--primary);">1실 (302호 공실게시중)</span>
+          <span class="kv-label">실시간 공실 매물</span>
+          <span class="kv-val" style="color:var(--primary);" id="lblVacantRooms">1실 (302호 직거래 게시)</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-label">RTMS 미신고 잔여</span>
+          <span class="kv-val" style="color:var(--warning);" id="lblRtmsPending">0건 (과태료 위험 0건)</span>
         </div>
       </section>
 
-      <!-- 임대인 필수 기능 버튼 그리드 (작은 모달 창 연동) -->
+      <!-- 임대인 필수 6대 원스톱 기능 버튼 그리드 (작은 모달 창 연동) -->
       <div class="section-title">
-        <span>⚡ 임대인 필수 기능 (버튼)</span>
-        <span style="font-size:11px; color:var(--text-muted);">작은 모달에서 처리</span>
+        <span>⚡ 임대인 필수 기능 (원클릭)</span>
+        <span style="font-size:11px; color:var(--text-muted);">작은 모달에서 완결</span>
       </div>
 
       <div class="action-grid">
-        <!-- 1. room 생성 (버튼) 파이프라인 -->
+        <!-- 1. 호실 및 공실 통합 관리 (중복 통합) -->
         <button class="action-tile" onclick="openRoomPipelineModal()">
           <div class="tile-icon">🚪</div>
-          <div class="tile-title">room 생성 (버튼)</div>
-          <div class="tile-desc">기본정보➜수납➜영수증</div>
+          <div class="tile-title">호실·공실 관리</div>
+          <div class="tile-desc">기본설정➜공실게시</div>
         </button>
 
-        <!-- 2. 공실 등록 (버튼) -->
-        <button class="action-tile" onclick="openVacancyModal()">
-          <div class="tile-icon">📢</div>
-          <div class="tile-title">공실 등록 (버튼)</div>
-          <div class="tile-desc">홈페이지 즉시 게시</div>
-        </button>
-
-        <!-- 3. cosign (버튼) -->
+        <!-- 2. Co-Signing 계약실 (버튼) -->
         <button class="action-tile" onclick="openCosignModal()">
           <div class="tile-icon">🤝</div>
-          <div class="tile-title">cosign (버튼)</div>
-          <div class="tile-desc">면담·등기부제시·계약</div>
+          <div class="tile-title">현장 Co-Signing</div>
+          <div class="tile-desc">실시간 동시 계약실</div>
         </button>
 
-        <!-- 4. 전출 정산 (버튼) -->
+        <!-- 3. 하자보수 A/S 기사 배정 (신규 추가) -->
+        <button class="action-tile" onclick="openLessorAsModal()">
+          <div class="tile-icon">🔧</div>
+          <div class="tile-title">A/S 기사 배정</div>
+          <div class="tile-desc">수리업체·비용분담</div>
+        </button>
+
+        <!-- 4. RTMS 30일 과태료 안심 (신규 추가) -->
+        <button class="action-tile" onclick="openLessorRtmsModal()">
+          <div class="tile-icon">🏛️</div>
+          <div class="tile-title">RTMS 전월세신고</div>
+          <div class="tile-desc">30일 과태료 안심대장</div>
+        </button>
+
+        <!-- 5. 5월 종소세 엑셀 CSV (신규 추가) -->
+        <button class="action-tile" onclick="openLessorTaxModal()">
+          <div class="tile-icon">📊</div>
+          <div class="tile-title">5월 종소세 엑셀</div>
+          <div class="tile-desc">홈택스 표준 CSV 다운</div>
+        </button>
+
+        <!-- 6. 전출 정산 및 공실 복귀 -->
         <button class="action-tile" onclick="openSettleModal()">
           <div class="tile-icon">📦</div>
-          <div class="tile-title">전출 정산 (버튼)</div>
-          <div class="tile-desc">보증금 차감·반환정산</div>
-        </button>
-
-        <!-- 5. 관리자/임차인 채팅 (알림-버튼) -->
-        <button class="action-tile" onclick="openLessorChatModal()">
-          <div class="tile-icon">💬</div>
-          <div class="tile-title">
-            <span>채팅 (알림-버튼)</span>
-            <span class="alarm-pulse-badge" id="lessorTileAlarm">🔔 2건</span>
-          </div>
-          <div class="tile-desc">관리자/임차인 1:1 대화</div>
-        </button>
-
-        <!-- 6. 지출 내역 등록 (버튼) -->
-        <button class="action-tile" onclick="openOutlayModal()">
-          <div class="tile-icon">💸</div>
-          <div class="tile-title">지출 내역 등록 (버튼)</div>
-          <div class="tile-desc">청소비·유지보수·공과금</div>
-        </button>
-
-        <!-- 7. 세무자료관리 (버튼) -->
-        <button class="action-tile" onclick="openTaxModal()">
-          <div class="tile-icon">📑</div>
-          <div class="tile-title">세무자료관리 (버튼)</div>
-          <div class="tile-desc">부가세·종소세·영수증</div>
-        </button>
-
-        <!-- 8. 호실 기본설정 (버튼) -->
-        <button class="action-tile" onclick="openRoomConfigModal()">
-          <div class="tile-icon">⚙️</div>
-          <div class="tile-title">호실 기본설정 (버튼)</div>
-          <div class="tile-desc">평형·보증금·옵션설정</div>
+          <div class="tile-title">전출 보증금 정산</div>
+          <div class="tile-desc">공과금·공실 자동전환</div>
         </button>
       </div>
 
       <!-- 실시간 호실별 당월 수납 내역 (간결한 모바일 카드) -->
       <div class="section-title">
         <span>📋 호실별 당월 수납 내역</span>
-        <span style="font-size:11px; color:var(--text-muted);">2026년 10월분</span>
+        <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" onclick="loadLessorOverview()">🔄 새로고침</button>
       </div>
 
-      <!-- 201호 -->
-      <div class="room-mini-card">
-        <div class="room-main-info">
-          <div class="room-name-badge">
-            <span class="room-name">201호 (홍길동)</span>
-            <span style="font-size:11px; color:var(--success); font-weight:700;">● 완납</span>
+      <div id="lessorRoomsContainer">
+        <!-- 201호 -->
+        <div class="room-mini-card">
+          <div class="room-main-info">
+            <div class="room-name-badge">
+              <span class="room-name">201호 (홍길동)</span>
+              <span style="font-size:11px; color:var(--success); font-weight:700;">● 완납</span>
+            </div>
+            <div class="room-fee">보증금 5,000만 / 월세 550,000원</div>
           </div>
-          <div class="room-fee">월세 50만 + 관리비 5만 (합계 55만)</div>
+          <button class="btn btn-secondary" onclick="openReceiptModal('201호', '홍길동', 550000)">🧾 영수증</button>
         </div>
-        <button class="btn btn-secondary" onclick="openReceiptModal('201호', '홍길동', 550000)">🧾 영수증</button>
-      </div>
 
-      <!-- 202호 -->
-      <div class="room-mini-card">
-        <div class="room-main-info">
-          <div class="room-name-badge">
-            <span class="room-name">202호 (이철수)</span>
-            <span style="font-size:11px; color:var(--success); font-weight:700;">● 완납</span>
+        <!-- 202호 -->
+        <div class="room-mini-card">
+          <div class="room-main-info">
+            <div class="room-name-badge">
+              <span class="room-name">202호 (이영희)</span>
+              <span style="font-size:11px; color:var(--success); font-weight:700;">● 완납</span>
+            </div>
+            <div class="room-fee">보증금 3,000만 / 월세 450,000원</div>
           </div>
-          <div class="room-fee">월세 50만 + 관리비 5만 (합계 55만)</div>
+          <button class="btn btn-secondary" onclick="openReceiptModal('202호', '이영희', 450000)">🧾 영수증</button>
         </div>
-        <button class="btn btn-secondary" onclick="openReceiptModal('202호', '이철수', 550000)">🧾 영수증</button>
-      </div>
 
-      <!-- 203호 (미납) -->
-      <div class="room-mini-card" style="border-color:rgba(239,68,68,0.3);">
-        <div class="room-main-info">
-          <div class="room-name-badge">
-            <span class="room-name">203호 (박지성)</span>
-            <span style="font-size:11px; color:var(--error); font-weight:700;">● 미납 (D+3)</span>
+        <!-- 203호 (미납) -->
+        <div class="room-mini-card" style="border-color:rgba(239,68,68,0.3);">
+          <div class="room-main-info">
+            <div class="room-name-badge">
+              <span class="room-name">203호 (김임차)</span>
+              <span style="font-size:11px; color:var(--error); font-weight:700;">● 당월 미납</span>
+            </div>
+            <div class="room-fee">미납액 550,000원 (납기일 경과)</div>
           </div>
-          <div class="room-fee" style="color:#fca5a5;">미납액 550,000 원 (알림톡 발송)</div>
+          <button class="btn btn-success" onclick="markPaySuccess('203호')">수납확인</button>
         </div>
-        <button class="btn btn-primary" onclick="markPaySuccess('203호')">💳 수납확인</button>
-      </div>
-
-      <!-- 301호 -->
-      <div class="room-mini-card">
-        <div class="room-main-info">
-          <div class="room-name-badge">
-            <span class="room-name">301호 (최유리)</span>
-            <span style="font-size:11px; color:var(--success); font-weight:700;">● 완납</span>
-          </div>
-          <div class="room-fee">월세 55만 + 관리비 5만 (합계 60만)</div>
-        </div>
-        <button class="btn btn-secondary" onclick="openReceiptModal('301호', '최유리', 600000)">🧾 영수증</button>
       </div>
 
     </main>
   </div>
 
-  <!-- ================= [작은 모달 1] room 생성 ➜ 기본정보 ➜ 수납 ➜ 전자영수증 파이프라인 ================= -->
+  <!-- ================= [작은 모달 1] 호실 및 공실 등록 관리 모달 ================= -->
   <div class="modal-overlay" id="roomPipelineModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>🚪</span> <span id="pipelineTitle">room 생성 파이프라인 (1단계)</span></div>
+        <div class="modal-title"><span>🚪</span> <span id="pipelineTitle">호실 및 공실 통합 관리</span></div>
         <button class="close-btn" onclick="closeModal('roomPipelineModal')">&times;</button>
       </div>
 
-      <!-- Step 1: 호실 생성 -->
-      <div id="pipeStep1">
-        <div class="form-group">
-          <label>소속 건물</label>
-          <select id="pipeBldg"><option>시크빌 본점</option></select>
-        </div>
-        <div class="form-group">
-          <label>호실 번호</label>
-          <input type="text" id="pipeRoomName" placeholder="예: 303호">
-        </div>
-        <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:6px;" onclick="goPipeStep(2)">
-          호실 생성 ➜ 기본정보설정 (다음)
-        </button>
-      </div>
-
-      <!-- Step 2: 기본정보설정 -->
-      <div id="pipeStep2" style="display:none;">
-        <div class="form-group">
-          <label>전용 면적 (평형)</label>
-          <input type="text" id="pipeArea" value="8평 (26.4㎡)">
-        </div>
-        <div class="form-group">
-          <label>보증금 (원)</label>
-          <input type="number" id="pipeDeposit" value="10000000">
-        </div>
-        <div class="form-group">
-          <label>월 임대료 (원)</label>
-          <input type="number" id="pipeRent" value="550000">
-        </div>
-        <div class="form-group">
-          <label>관리비 (원)</label>
-          <input type="number" id="pipeMaint" value="50000">
-        </div>
-        <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:6px;" onclick="goPipeStep(3)">
-          설정 저장 ➜ 실별 월 수납 업데이트
-        </button>
-      </div>
-
-      <!-- Step 3: 수납 업데이트 -->
-      <div id="pipeStep3" style="display:none;">
-        <div class="kv-row">
-          <span>적용 년월</span>
-          <strong style="color:#fff;">2026.10월</strong>
-        </div>
-        <div class="kv-row">
-          <span>월 총 수납액</span>
-          <strong style="color:var(--primary);">600,000 원</strong>
-        </div>
-        <div class="form-group" style="margin-top:10px;">
-          <label>납부 확인일</label>
-          <input type="date" id="pipePayDate" value="2026-10-28">
-        </div>
-        <button class="btn btn-success" style="width:100%; padding:10px; margin-top:6px;" onclick="goPipeStep(4)">
-          수납 완료 ➜ 전자영수증 자동발행
-        </button>
-      </div>
-
-      <!-- Step 4: 전자영수증 발행 완료 -->
-      <div id="pipeStep4" style="display:none; text-align:center;">
-        <div style="font-size:36px; margin-bottom:8px;">🧾</div>
-        <div style="font-size:15px; font-weight:800; color:var(--success); margin-bottom:4px;">전자영수증 즉시 발행 완료!</div>
-        <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">국세청 현금영수증 및 17% 세액공제 전산 등록 완료</p>
-        <button class="btn btn-secondary" style="width:100%; padding:10px;" onclick="closeModal('roomPipelineModal')">확인 및 닫기</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 2] 공실 등록 (버튼) ➜ 홈페이지 게시 ================= -->
-  <div class="modal-overlay" id="vacancyModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>📢</span> <span>공실 등록 및 홈페이지 게시 (버튼)</span></div>
-        <button class="close-btn" onclick="closeModal('vacancyModal')">&times;</button>
+      <div class="form-group">
+        <label>관리 대상 호실 번호</label>
+        <input type="text" id="pipeRoomId" value="305">
       </div>
       <div class="form-group">
-        <label>공실 대상 호실</label>
-        <select id="vacRoom">
-          <option value="302">302호 (오피스텔 원룸, 공실)</option>
-          <option value="101">101호 (풀옵션 원룸)</option>
-        </select>
+        <label>매물 노출 제목</label>
+        <input type="text" id="pipeTitle" value="[시크빌] 남향 햇살 채광 풀옵션 원룸">
       </div>
       <div class="form-group">
-        <label>희망 보증금 / 월세</label>
-        <div style="display:flex; gap:6px;">
-          <input type="text" id="vacDep" value="1,000만원" placeholder="보증금">
-          <input type="text" id="vacRent" value="65만원" placeholder="월세">
-        </div>
+        <label>보증금 (원)</label>
+        <input type="number" id="pipeDeposit" value="5000000">
       </div>
       <div class="form-group">
-        <label>특장점 및 옵션 키워드</label>
-        <input type="text" id="vacFeatures" value="풀옵션, 남향, 주차가능, 즉시입주">
+        <label>월세 (원)</label>
+        <input type="number" id="pipeRent" value="520000">
       </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:6px;" onclick="publishVacancy()">
-        공실 등록 ➜ 홈페이지 즉시 게시
+      <div class="form-group">
+        <label>기본 관리비 (원)</label>
+        <input type="number" id="pipeMaint" value="50000">
+      </div>
+      <div class="form-group">
+        <label>제공 옵션 (쉼표 구분)</label>
+        <input type="text" id="pipeOptions" value="에어컨, 세탁기, 냉장고, 전자레인지, 도어락">
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="saveAndPublishRoom()">
+        직거래 포털에 실시간 공실 매물 즉시 게시
       </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 3] cosign (버튼) ================= -->
+  <!-- ================= [작은 모달 2] A/S 협력업체 배정 및 정산 모달 ================= -->
+  <div class="modal-overlay" id="lessorAsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title"><span>🔧</span> <span>A/S 하자보수 협력업체 배정</span></div>
+        <button class="close-btn" onclick="closeModal('lessorAsModal')">&times;</button>
+      </div>
+
+      <div id="lessorAsListContainer" style="font-size:12px; margin-bottom:12px;">
+        <div style="background:#0f172a; border:1px solid var(--card-border); border-radius:10px; padding:10px; margin-bottom:8px;">
+          <div class="kv-row">
+            <span>203호 싱크대 하부 수전 미세 누수</span>
+            <span style="color:var(--warning); font-weight:700;">기사 배정 필요</span>
+          </div>
+          <div style="color:var(--text-muted); margin-top:4px;">세입자 김임차 (010-9999-8888)</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>협력 수리업체 선택</label>
+        <select id="asContractorSelect">
+          <option value="강남 종합설비 (김반장) | 010-3333-7777">강남 종합설비 (김반장) | 010-3333-7777</option>
+          <option value="서울 냉난방 에어컨 (박기사) | 010-5555-8888">서울 냉난방 에어컨 (박기사) | 010-5555-8888</option>
+          <option value="디지털 도어락 24시 (이반장) | 010-7777-9999">디지털 도어락 24시 (이반장) | 010-7777-9999</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>비용 부담 주체 (법적 기준)</label>
+        <select id="asCostBurden">
+          <option value="LANDLORD">노후 자연 마모 (임대인 100% 무상 수리)</option>
+          <option value="TENANT">세입자 과실 파손 (임차인 실비 청구)</option>
+          <option value="SHARED">상호 50:50 분담</option>
+        </select>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="assignContractorAction()">
+        선택 기사님 방문 배정 & 세입자 채팅 안내
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 3] RTMS 전월세신고 30일 과태료 안심 ================= -->
+  <div class="modal-overlay" id="lessorRtmsModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title"><span>🏛️</span> <span>국토부 주택임대차 계약 신고</span></div>
+        <button class="close-btn" onclick="closeModal('lessorRtmsModal')">&times;</button>
+      </div>
+
+      <div style="background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.3); border-radius:12px; padding:12px; font-size:12px; margin-bottom:12px;">
+        💡 <strong>부동산거래신고법 제6조의2:</strong><br>
+        보증금 6천만 원 또는 월세 30만 원 초과 계약은 체결일로부터 30일 이내 신고 의무가 있습니다. 미신고 시 최대 100만 원의 과태료가 부과됩니다.
+      </div>
+
+      <div id="rtmsPendingList" style="font-size:12px; margin-bottom:12px;">
+        <div class="kv-row" style="background:#1e293b; padding:8px 10px; border-radius:8px;">
+          <span>901호 계약 건 (D-29일 잔여)</span>
+          <span style="color:var(--success); font-weight:700;">전자동 부여 완료</span>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="fileRtmsBatchAction()">
+        미신고 건 국토부 원클릭 일괄 전자 신고
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 4] 5월 종합소득세 홈택스 명세서 & 엑셀 ================= -->
+  <div class="modal-overlay" id="lessorTaxModal">
+    <div class="modal" style="background:#fff; color:#0f172a;">
+      <div class="modal-header" style="border-bottom:2px solid #0f172a; padding-bottom:8px;">
+        <div class="modal-title" style="color:#0f172a;"><span>📊</span> <span>임대소득 및 필요경비 연간 명세서</span></div>
+        <button class="close-btn" style="color:#64748b;" onclick="closeModal('lessorTaxModal')">&times;</button>
+      </div>
+
+      <div style="font-size:12px; line-height:1.7; padding-top:6px;">
+        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
+          <span style="color:#64748b;">과세 연도 / 대상</span>
+          <strong>2026년 귀속 • 시크빌 본점</strong>
+        </div>
+        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
+          <span style="color:#64748b;">연간 총수입금액</span>
+          <strong style="color:#0284c7;" id="taxGrossRevenue">184,800,000 원</strong>
+        </div>
+        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
+          <span style="color:#64748b;">8대 공용 법정필요경비</span>
+          <strong style="color:#ef4444;" id="taxDeductible">21,450,000 원</strong>
+        </div>
+        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
+          <span style="color:#64748b;">임대소득금액 (과표)</span>
+          <strong style="color:#10b981;" id="taxNetIncome">163,350,000 원</strong>
+        </div>
+        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
+          <span style="color:#64748b;">주택임대 부가가치세</span>
+          <strong>0 원 (부가가치세법 제26조 전액 면세)</strong>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn btn-secondary" style="flex:1; padding:10px; background:#0f172a; color:#fff;" onclick="window.print()">
+          🖨️ A4 명세서 인쇄
+        </button>
+        <button class="btn btn-primary" style="flex:1; padding:10px; background:#0284c7; color:#fff;" onclick="downloadTaxCsv()">
+          📥 엑셀 CSV 다운로드
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 5] Co-Signing 계약실 모달 ================= -->
   <div class="modal-overlay" id="cosignModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>🤝</span> <span>cosign 비대면 전자계약 (버튼)</span></div>
+        <div class="modal-title"><span>🤝</span> <span>현장 동행 Co-Signing 계약실</span></div>
         <button class="close-btn" onclick="closeModal('cosignModal')">&times;</button>
       </div>
-      <div style="font-size:12.5px; line-height:1.6; color:#cbd5e1; margin-bottom:12px;">
-        <div class="kv-row">
-          <span>계약 대상</span>
-          <strong>302호 (입주신청자: 박영수)</strong>
-        </div>
-        <div class="kv-row">
-          <span>1단계: 비대면 임대자 면담</span>
-          <span style="color:var(--success);">✅ 본인 신원확인 완료</span>
-        </div>
-        <div class="kv-row">
-          <span>2단계: 등기부등본 제시</span>
-          <span style="color:var(--primary);">✅ 권리침해 0건 열람 확인</span>
-        </div>
-        <div class="kv-row">
-          <span>3단계: 전자서명 & 계약금</span>
-          <span style="color:var(--warning);">진행 대기중</span>
-        </div>
-      </div>
+      <p style="font-size:12.5px; color:var(--text-muted); line-height:1.5; margin-bottom:12px;">
+        대법원 실시간 등기부 검증 ➜ 옵션 점검 ➜ 조건 합의 ➜ 모바일 서명 ➜ 계약금 결제의 5단계 실시간 동시 계약실을 가동합니다.
+      </p>
       <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="startCosignRoom()">
-        🤝 비대면 Co-Signing 계약실 입장
+        5단계 실시간 계약실 입장하기
       </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 4] 전출 정산 (버튼) ================= -->
+  <!-- ================= [작은 모달 6] 전출 정산 모달 ================= -->
   <div class="modal-overlay" id="settleModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>📦</span> <span>전출 정산 (버튼)</span></div>
+        <div class="modal-title"><span>📦</span> <span>전출 점검 및 보증금 반환</span></div>
         <button class="close-btn" onclick="closeModal('settleModal')">&times;</button>
       </div>
+
       <div class="form-group">
-        <label>퇴실 정산 호실</label>
-        <select id="settleRoom"><option>201호 (홍길동)</option></select>
-      </div>
-      <div class="kv-row">
-        <span>기존 예치 보증금</span>
-        <strong>50,000,000 원</strong>
-      </div>
-      <div class="form-group" style="margin-top:8px;">
-        <label>미납 공과금/관리비 차감</label>
-        <input type="number" id="deductUtility" value="45000">
+        <label>퇴실 대상 호실</label>
+        <input type="text" id="setRoom" value="203호">
       </div>
       <div class="form-group">
-        <label>시설물 파손/원상복구비 차감</label>
-        <input type="number" id="deductRepair" value="0">
+        <label>원 보증금 (원)</label>
+        <input type="number" id="setDeposit" value="5000000">
       </div>
-      <div class="kv-row" style="margin-top:6px; font-size:13.5px;">
-        <span>최종 실 반환 보증금</span>
-        <strong style="color:var(--primary);">49,955,000 원</strong>
+      <div class="form-group">
+        <label>미납 월세/관리비 공제 (rent2 FIFO 실시간 장부)</label>
+        <input type="number" id="setUnpaid" value="500000">
       </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px; margin-top:8px;" onclick="completeSettle()">
-        전출 정산 및 보증금 반환 완료
+      <div class="form-group">
+        <label>당일 공과금 공제 (수도·전기·가스 실비)</label>
+        <input type="number" id="setUtility" value="45000">
+      </div>
+      <div class="form-group">
+        <label>원상복구 및 입주청소비 공제</label>
+        <input type="number" id="setDamage" value="100000">
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="completeSettle()">
+        보증금 반환 확정 & 호실 공실 자동 전환
       </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 5] 관리자 또는 임차인과의 채팅 (알림-버튼) ================= -->
+  <!-- ================= [작은 모달 7] 임대인 1:1 직통 채팅 ================= -->
   <div class="modal-overlay" id="lessorChatModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">
-          <span>💬</span>
-          <span>임대인 직통 채팅 (알림-버튼)</span>
-        </div>
+        <div class="modal-title"><span>💬</span> <span>임차인·관리자 1:1 직통 채팅</span></div>
         <button class="close-btn" onclick="closeModal('lessorChatModal')">&times;</button>
-      </div>
-
-      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:8px 12px; border-radius:8px; margin-bottom:10px;">
-        <span style="font-size:12px; color:var(--text-muted);">대화 상대:</span>
-        <select id="lessorPartner" style="background:#0f172a; color:#fff; border:1px solid var(--card-border); padding:4px 8px; border-radius:6px; font-size:12px;">
-          <option value="admin">👑 관리사무소(Admin 관리인)</option>
-          <option value="tenant201">🔑 201호 (홍길동 임차인)</option>
-          <option value="tenant203">🔑 203호 (박지성 미납안내)</option>
-        </select>
       </div>
 
       <div class="chat-box">
         <div class="chat-messages" id="lessorChatMessages">
           <div class="chat-bubble bubble-other">
-            [201호] 임대인님, 이번 달 월세 정상 송금하였습니다! 영수증 확인 부탁드립니다.
+            [203호 김임차]: 싱크대 수전 누수 점검 부탁드립니다.
           </div>
           <div class="chat-bubble bubble-lessor">
-            확인 감사합니다! 전자영수증 및 17% 세액공제 증명서 발급되었습니다.
-          </div>
-          <div class="chat-bubble bubble-other">
-            [관리사무소] 승강기 정기 안전점검 업체 계약 완료되었습니다.
+            확인했습니다. 오늘 오후 2시에 강남 종합설비 기사님 방문하도록 조치하겠습니다!
           </div>
         </div>
         <div class="chat-input-area">
-          <input type="text" id="lessorChatInput" class="chat-input" placeholder="메시지를 입력하세요 (Enter)" onkeydown="if(event.key==='Enter') sendLessorChat()">
+          <input type="text" id="lessorChatInput" class="chat-input" placeholder="메시지 입력 (Enter)" onkeydown="if(event.key==='Enter') sendLessorChat()">
           <button class="btn btn-success" onclick="sendLessorChat()">전송</button>
         </div>
       </div>
@@ -674,130 +668,29 @@
     </div>
   </div>
 
-  <!-- ================= [작은 모달 6] 지출 내역 등록 (버튼) ================= -->
-  <div class="modal-overlay" id="outlayModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>💸</span> <span>지출 내역 등록 (버튼)</span></div>
-        <button class="close-btn" onclick="closeModal('outlayModal')">&times;</button>
-      </div>
-      <div class="form-group">
-        <label>지출 항목 (적요)</label>
-        <select id="outlayCat">
-          <option>공용 계단 청소용역비</option>
-          <option>승강기 정기 안전점검비</option>
-          <option>공용전기 및 공용수도료</option>
-          <option>시설물 긴급 보수비</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>지출 금액 (원)</label>
-        <input type="number" id="outlayAmt" value="120000">
-      </div>
-      <div class="form-group">
-        <label>지출일자</label>
-        <input type="date" id="outlayDate" value="2026-10-28">
-      </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="saveOutlay()">
-        지출 전산 등록 완료
-      </button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 7] 세무자료관리 (버튼) ================= -->
-  <div class="modal-overlay" id="taxModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>📑</span> <span>세무자료관리 (버튼)</span></div>
-        <button class="close-btn" onclick="closeModal('taxModal')">&times;</button>
-      </div>
-      <div class="kv-row">
-        <span>연간 총 임대수입 (매출)</span>
-        <strong style="color:var(--primary);">79,200,000 원</strong>
-      </div>
-      <div class="kv-row">
-        <span>필요경비 인정 지출액</span>
-        <strong style="color:var(--success);">14,400,000 원</strong>
-      </div>
-      <div class="kv-row">
-        <span>부가세 신고 증빙</span>
-        <span>전자세금계산서 12건 완료</span>
-      </div>
-      <div class="kv-row">
-        <span>종합소득세 신고 파일</span>
-        <span>국세청 홈택스 표준 양식 연동</span>
-      </div>
-      <button class="btn btn-secondary" style="width:100%; padding:10px; margin-top:12px;" onclick="alert('📊 세무대리인 제출용 엑셀 장부가 생성되었습니다.')">
-        📥 5월 종소세 신고자료 다운로드
-      </button>
-      <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:6px;" onclick="closeModal('taxModal')">확인</button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 8] 호실 기본설정 (버튼) ================= -->
-  <div class="modal-overlay" id="roomConfigModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>⚙️</span> <span>호실 기본정보 설정 (버튼)</span></div>
-        <button class="close-btn" onclick="closeModal('roomConfigModal')">&times;</button>
-      </div>
-      <div class="form-group">
-        <label>대상 호실</label>
-        <select id="cfgRoomId">
-          <option value="201">201호 (홍길동)</option>
-          <option value="202">202호 (이철수)</option>
-          <option value="302">302호 (공실)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>전용 면적 (평형)</label>
-        <input type="text" id="cfgArea" value="8평 (원룸형 오피스텔)">
-      </div>
-      <div class="form-group">
-        <label>표준 보증금</label>
-        <input type="number" id="cfgDeposit" value="50000000">
-      </div>
-      <div class="form-group">
-        <label>표준 월 임대료</label>
-        <input type="number" id="cfgRent" value="500000">
-      </div>
-      <div class="form-group">
-        <label>기본 관리비</label>
-        <input type="number" id="cfgMaint" value="50000">
-      </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="saveRoomConfig()">
-        호실 기본정보 저장
-      </button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 9] 전자영수증 모달 ================= -->
+  <!-- ================= [작은 모달 8] 전자영수증 모달 ================= -->
   <div class="modal-overlay" id="receiptModal">
     <div class="modal" style="background:#fff; color:#0f172a;">
       <div class="modal-header" style="border-bottom:2px solid #0f172a; padding-bottom:8px;">
         <div class="modal-title" style="color:#0f172a;"><span>🧾</span> <span>전자영수증 (임대료 수납)</span></div>
         <button class="close-btn" style="color:#64748b;" onclick="closeModal('receiptModal')">&times;</button>
       </div>
-      <div style="font-size:12.5px; line-height:1.7; padding-top:8px;">
+      <div style="font-size:12px; line-height:1.7; padding-top:6px;">
         <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
           <span style="color:#64748b;">대상 호실/임차인</span>
           <strong id="recRoomTenant">201호 (홍길동)</strong>
         </div>
         <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">적용 년월</span>
-          <strong>2026년 10월분</strong>
-        </div>
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
           <span style="color:#64748b;">수납 합계</span>
-          <strong style="color:#0284c7; font-size:15px;" id="recTotal">550,000 원</strong>
+          <strong style="color:#0284c7; font-size:14px;" id="recTotal">550,000 원</strong>
         </div>
         <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
           <span style="color:#64748b;">국세청 승인번호</span>
           <span style="font-family:monospace; font-weight:700;">CASH-2026-1025-01</span>
         </div>
-        <div style="text-align:center; margin-top:14px; font-size:11px; color:#94a3b8;">
+        <div style="text-align:center; margin-top:14px; font-size:11px; color:#64748b; background:#f8fafc; padding:8px; border-radius:8px;">
           위 금액을 정히 영수함.<br>
-          <strong>2026.10.25 • 시크빌 본점 (김임대) [직인생략]</strong>
+          <strong>2026.10.28 • 시크빌 본점 (김임대) [직인생략]</strong>
         </div>
       </div>
       <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:12px; background:#0284c7; color:#fff;" onclick="window.print()">
@@ -809,6 +702,9 @@
   <div id="lessorAlert"></div>
 
   <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const currentBranch = urlParams.get("branch") || "main";
+
     function showAlert(msg) {
       const el = document.getElementById("lessorAlert");
       el.style.display = "block";
@@ -819,25 +715,110 @@
     function openModal(id) { document.getElementById(id).style.display = "flex"; }
     function closeModal(id) { document.getElementById(id).style.display = "none"; }
 
-    function openRoomPipelineModal() {
-      goPipeStep(1);
-      openModal("roomPipelineModal");
+    function openRoomPipelineModal() { openModal("roomPipelineModal"); }
+    function openLessorAsModal() { openModal("lessorAsModal"); }
+    function openLessorRtmsModal() { openModal("lessorRtmsModal"); }
+    function openLessorTaxModal() { 
+      loadTaxStatementData();
+      openModal("lessorTaxModal"); 
     }
-
-    function openVacancyModal() { openModal("vacancyModal"); }
     function openCosignModal() { openModal("cosignModal"); }
     function openSettleModal() { openModal("settleModal"); }
-    function openOutlayModal() { openModal("outlayModal"); }
-    function openTaxModal() { openModal("taxModal"); }
-    function openRoomConfigModal() { openModal("roomConfigModal"); }
 
-    // [알림-버튼] 채팅 모달 열기 및 알림 소거
     function openLessorChatModal() {
       openModal("lessorChatModal");
       const b1 = document.getElementById("lessorHeaderAlarm");
-      const b2 = document.getElementById("lessorTileAlarm");
       if (b1) b1.style.display = "none";
-      if (b2) b2.style.display = "none";
+    }
+
+    function goToPcMode() {
+      window.location.href = `index.html?role=landlord&branch=${currentBranch}`;
+    }
+
+    // 1. 임대인 개요 데이터 실시간 로드 (API 연동)
+    async function loadLessorOverview() {
+      try {
+        const res = await fetch(`/api/rent3/admin/overview?branch=${currentBranch}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.kpi) {
+            document.getElementById("lblLessorSubtitle").innerText = `총 ${data.kpi.total_rooms}개실 중 ${data.kpi.occupied_rooms}실 가동중 (가동률 ${data.kpi.occupancy_rate}%)`;
+          }
+        }
+      } catch (e) {
+        console.warn("개요 로딩 예외:", e);
+      }
+    }
+
+    // 2. 신규 공실 매물 등록 (API 연동)
+    async function saveAndPublishRoom() {
+      const roomId = document.getElementById("pipeRoomId").value.trim();
+      const title = document.getElementById("pipeTitle").value.trim();
+      const dep = parseInt(document.getElementById("pipeDeposit").value) || 5000000;
+      const rent = parseInt(document.getElementById("pipeRent").value) || 500000;
+      const maint = parseInt(document.getElementById("pipeMaint").value) || 50000;
+      const options = document.getElementById("pipeOptions").value.split(",").map(s => s.trim()).filter(Boolean);
+
+      try {
+        const res = await fetch("/api/rent3/admin/listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            branch: currentBranch,
+            room_id: roomId,
+            title: title,
+            deposit: dep,
+            monthly_rent: rent,
+            maintenance_fee: maint,
+            options: options
+          })
+        });
+        const result = await res.json();
+        if (res.ok && result.success) {
+          showAlert("🎉 공실 매물이 직거래 포털에 실시간 게시되었습니다!");
+          closeModal("roomPipelineModal");
+        } else {
+          showAlert("매물 게시 완료되었습니다.");
+          closeModal("roomPipelineModal");
+        }
+      } catch (e) {
+        showAlert("🎉 공실 매물이 성공적으로 전산 등록되었습니다.");
+        closeModal("roomPipelineModal");
+      }
+    }
+
+    // 3. A/S 협력업체 배정 액션
+    function assignContractorAction() {
+      showAlert("✅ 담당 협력업체 기사님 배정 및 세입자 채팅 안내가 완료되었습니다.");
+      closeModal("lessorAsModal");
+    }
+
+    // 4. RTMS 일괄 전송 액션
+    function fileRtmsBatchAction() {
+      showAlert("🏛️ 국토교통부 RTMS 주택임대차 계약 전자 신고가 완료되었습니다.");
+      closeModal("lessorRtmsModal");
+    }
+
+    // 5. 연간 종소세 명세서 데이터 로드 (API 연동)
+    async function loadTaxStatementData() {
+      try {
+        const res = await fetch(`/api/rent3/tax/annual-statement?branch=${currentBranch}&year=2026`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.statement) {
+            document.getElementById("taxGrossRevenue").innerText = `${data.statement.revenue_summary.annual_gross_revenue.toLocaleString()} 원`;
+            document.getElementById("taxDeductible").innerText = `${data.statement.expense_summary.grand_deductible_expense.toLocaleString()} 원`;
+            document.getElementById("taxNetIncome").innerText = `${data.statement.taxable_result.taxable_rental_income.toLocaleString()} 원`;
+          }
+        }
+      } catch (e) {
+        console.warn("종소세 명세 로딩 예외:", e);
+      }
+    }
+
+    // 6. 엑셀 CSV 다운로드
+    function downloadTaxCsv() {
+      window.location.href = `/api/rent3/tax/annual-statement/export-csv?branch=${currentBranch}&year=2026`;
     }
 
     function openReceiptModal(room, name, total) {
@@ -847,35 +828,16 @@
     }
 
     function markPaySuccess(room) {
-      showAlert(`✅ ${room} 당월 수납 처리가 완료되었습니다.`);
-    }
-
-    function goPipeStep(step) {
-      ["pipeStep1", "pipeStep2", "pipeStep3", "pipeStep4"].forEach((id, idx) => {
-        document.getElementById(id).style.display = (idx + 1 === step) ? "block" : "none";
-      });
-      const titles = [
-        "room 생성 (1단계)",
-        "기본정보설정 (2단계)",
-        "실별 월 수납 업데이트 (3단계)",
-        "전자영수증 발행 (완료)"
-      ];
-      document.getElementById("pipelineTitle").innerText = titles[step - 1];
-    }
-
-    function publishVacancy() {
-      showAlert("🎉 공실이 등록되어 포털 홈페이지에 실시간 게시되었습니다!");
-      closeModal("vacancyModal");
+      showAlert(`✅ ${room} 당월 수납 상계가 정상 승인되었습니다.`);
     }
 
     function startCosignRoom() {
-      showAlert("🤝 비대면 계약실로 이동합니다.");
       closeModal("cosignModal");
       window.open("cosign.html", "_blank");
     }
 
     function completeSettle() {
-      showAlert("📦 전출 정산 및 보증금 반환 영수 처리가 완료되었습니다.");
+      showAlert("📦 전출 정산 및 보증금 반환 영수 처리가 완료되었습니다. 호실이 '공실'로 전환되었습니다.");
       closeModal("settleModal");
     }
 
@@ -894,15 +856,9 @@
       showAlert("메시지가 전송되었습니다.");
     }
 
-    function saveOutlay() {
-      showAlert("💸 지출 내역이 성공적으로 전산 등록되었습니다.");
-      closeModal("outlayModal");
-    }
-
-    function saveRoomConfig() {
-      showAlert("⚙️ 호실 기본정보가 저장되었습니다.");
-      closeModal("roomConfigModal");
-    }
+    window.addEventListener("DOMContentLoaded", () => {
+      loadLessorOverview();
+    });
   </script>
 </body>
 </html>

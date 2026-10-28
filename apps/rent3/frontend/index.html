@@ -78,7 +78,211 @@
     .kpi-label { font-size: 13px; color: var(--text-muted); margin-bottom: 6px; }
     .kpi-value { font-size: 26px; font-weight: 800; color: #fff; }
 
-    .nav-tabs { display: flex; gap: 8px; border-bottom: 1px solid var(--card-border); margin-bottom: 24px; }
+    /* Hamburger Button & Drawer Navigation */
+    .hamburger-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: #cbd5e1;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: inline-flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      transition: all 0.2s;
+      flex-shrink: 0;
+    }
+    .hamburger-btn:hover {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .hamburger-btn .bar {
+      width: 20px;
+      height: 2.2px;
+      background: currentColor;
+      border-radius: 2px;
+      transition: all 0.2s;
+    }
+
+    /* Sub Navigation Bar (Replaces crowded 11 tabs) */
+    .sub-nav-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 10px 16px;
+      margin-bottom: 24px;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .menu-trigger-btn {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(30, 41, 59, 0.8));
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 700;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .menu-trigger-btn:hover {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.3), rgba(30, 41, 59, 0.9));
+      transform: translateY(-1px);
+    }
+    .current-menu-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14.5px;
+      font-weight: 800;
+      color: var(--primary);
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      padding: 6px 14px;
+      border-radius: 8px;
+    }
+    .quick-menu-select {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid var(--card-border);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13.5px;
+      font-weight: 600;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* Off-canvas Drawer & Backdrop */
+    .drawer-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(6px);
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    .drawer-backdrop.open {
+      display: block;
+      opacity: 1;
+    }
+    .menu-drawer {
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 350px;
+      max-width: 88vw;
+      background: #0d1322;
+      border-right: 1px solid rgba(255, 255, 255, 0.12);
+      z-index: 1001;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(-100%);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 20px 0 50px rgba(0, 0, 0, 0.8);
+    }
+    .menu-drawer.open {
+      transform: translateX(0);
+    }
+    .drawer-header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .drawer-title {
+      font-size: 17px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .drawer-close {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 22px;
+      cursor: pointer;
+      padding: 4px;
+      transition: color 0.2s;
+    }
+    .drawer-close:hover { color: #fff; }
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 14px;
+    }
+    .drawer-group-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 16px 8px 6px;
+    }
+    .drawer-group-title:first-child { margin-top: 4px; }
+    .drawer-menu-item {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 11px 14px;
+      margin-bottom: 4px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      color: #cbd5e1;
+      font-size: 13.5px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.18s;
+    }
+    .drawer-menu-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #fff;
+    }
+    .drawer-menu-item.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: var(--primary);
+      font-weight: 700;
+    }
+    .drawer-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+    }
+    .drawer-menu-item.active .drawer-badge {
+      background: rgba(56, 189, 248, 0.25);
+      color: var(--primary);
+    }
+    .drawer-footer {
+      padding: 14px 16px;
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      gap: 8px;
+      background: rgba(11, 15, 25, 0.6);
+    }
+
     .tab-btn {
       padding: 12px 20px; background: none; border: none; color: var(--text-muted);
       font-size: 15px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
@@ -114,6 +318,11 @@
   <!-- Header -->
   <header>
     <div class="brand">
+      <button class="hamburger-btn" onclick="toggleDrawer()" title="전체 메뉴 열기">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+      </button>
       <span class="brand-icon">🏡</span>
       <div>
         <div style="display:flex; align-items:center; gap:8px;">
@@ -180,20 +389,107 @@
       </div>
     </div>
 
-    <!-- Nav Tabs -->
-    <div class="nav-tabs">
-      <button class="tab-btn active" onclick="switchTab('tabApplications')">📋 비대면 입주신청 심사 (<span id="tabBadgeApp">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabChats')">💬 직거래 문의 & 방문예약 (<span id="tabBadgeChat">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabRenewals')">⏳ 만기 & 재계약 관제 (<span id="tabBadgeRenewals">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabParking')">🚗 주차 & 도어락 관제 (<span id="tabBadgeParking">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabMaintenance')">🛠️ 하자보수(A/S) 대장 & 정산 (<span id="tabBadgeMaint">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabCheckout')">🚪 퇴실 정산 & 공실 전환 (<span id="tabBadgeCheckout">0</span>)</button>
-      <button class="tab-btn" onclick="switchTab('tabTaxRoi')">📊 세무 & 수익률 분석</button>
-      <button class="tab-btn" id="btnTabExpenses" onclick="switchTab('tabExpenses')">🧾 공용 운영비 & 실결산 (<span id="tabBadgeExpenses">0</span>)</button>
-      <button class="tab-btn" id="btnTabEntities" onclick="switchTab('tabEntities')">🗄️ 8대 표준 데이터 객체 관리 (생성·검색·편집)</button>
-      <button class="tab-btn" onclick="switchTab('tabRooms')">🏢 호실 현황 (rent2 계승)</button>
-      <button class="tab-btn" onclick="switchTab('tabListings')">📢 공실 광고 관리</button>
+    <!-- 햄버거 메뉴 바 (11대 메뉴 통합 컨트롤 바) -->
+    <div class="sub-nav-bar">
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <button class="menu-trigger-btn" onclick="toggleDrawer()">
+          <span>☰</span> <span>전체 메뉴 (11대 관제)</span>
+        </button>
+        <div class="current-menu-pill">
+          <span style="font-size:12px; color:var(--text-muted); font-weight:600;">현재 화면:</span>
+          <span id="currentActiveMenuTitle">📊 세무 & 수익률 분석</span>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:12px; color:var(--text-muted); font-weight:600;">빠른 메뉴 전환:</span>
+        <select id="quickMenuSelect" class="quick-menu-select" onchange="switchTab(this.value)">
+          <optgroup label="🚀 입주 & 세입자 소통">
+            <option value="tabApplications">📋 비대면 입주신청 심사</option>
+            <option value="tabChats">💬 직거래 문의 & 방문예약</option>
+            <option value="tabListings">📢 공실 광고 관리</option>
+          </optgroup>
+          <optgroup label="🏢 계약 & 호실 관제">
+            <option value="tabRenewals">⏳ 만기 & 재계약 관제</option>
+            <option value="tabParking">🚗 주차 & 도어락 관제</option>
+            <option value="tabMaintenance">🛠️ 하자보수(A/S) 대장 & 정산</option>
+            <option value="tabCheckout">🚪 퇴실 정산 & 공실 전환</option>
+            <option value="tabRooms">🏢 호실 현황 (rent2 계승)</option>
+          </optgroup>
+          <optgroup label="📊 재무 & 플랫폼 관리">
+            <option value="tabTaxRoi" selected>📊 세무 & 수익률 분석</option>
+            <option value="tabExpenses">🧾 공용 운영비 & 실결산</option>
+            <option value="tabEntities">🗄️ 8대 표준 데이터 객체 관리</option>
+          </optgroup>
+        </select>
+        <button class="btn btn-secondary" onclick="toggleDrawer()" style="font-size:12.5px; padding:7px 12px;">📂 메뉴 열기</button>
+      </div>
     </div>
+
+    <!-- 햄버거 슬라이드 드로어 메뉴 & 오버레이 -->
+    <div id="drawerBackdrop" class="drawer-backdrop" onclick="closeDrawer()"></div>
+    <aside id="menuDrawer" class="menu-drawer">
+      <div class="drawer-header">
+        <div class="drawer-title">
+          <span>🏡</span> <span>Rent3 관제 메뉴</span>
+        </div>
+        <button class="drawer-close" onclick="closeDrawer()">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div style="margin-bottom:12px;">
+          <input type="text" id="drawerSearch" placeholder="🔍 메뉴 검색..." oninput="filterDrawerMenu(this.value)" style="width:100%; padding:8px 12px; background:#1e293b; border:1px solid var(--card-border); border-radius:8px; color:#fff; font-size:13px; outline:none;">
+        </div>
+
+        <div class="drawer-group-title">🚀 입주 & 소통 관제</div>
+        <button class="drawer-menu-item tab-btn" data-tab="tabApplications" onclick="switchTab('tabApplications')">
+          <span class="item-text">📋 비대면 입주신청 심사</span>
+          <span class="drawer-badge" id="tabBadgeApp">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabChats" onclick="switchTab('tabChats')">
+          <span class="item-text">💬 직거래 문의 & 방문예약</span>
+          <span class="drawer-badge" id="tabBadgeChat">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabListings" onclick="switchTab('tabListings')">
+          <span class="item-text">📢 공실 광고 관리</span>
+        </button>
+
+        <div class="drawer-group-title">🏢 계약 & 호실 관제</div>
+        <button class="drawer-menu-item tab-btn" data-tab="tabRenewals" onclick="switchTab('tabRenewals')">
+          <span class="item-text">⏳ 만기 & 재계약 관제</span>
+          <span class="drawer-badge" id="tabBadgeRenewals">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabParking" onclick="switchTab('tabParking')">
+          <span class="item-text">🚗 주차 & 도어락 관제</span>
+          <span class="drawer-badge" id="tabBadgeParking">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabMaintenance" onclick="switchTab('tabMaintenance')">
+          <span class="item-text">🛠️ 하자보수(A/S) 대장 & 정산</span>
+          <span class="drawer-badge" id="tabBadgeMaint">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabCheckout" onclick="switchTab('tabCheckout')">
+          <span class="item-text">🚪 퇴실 정산 & 공실 전환</span>
+          <span class="drawer-badge" id="tabBadgeCheckout">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" data-tab="tabRooms" onclick="switchTab('tabRooms')">
+          <span class="item-text">🏢 호실 현황 (rent2 계승)</span>
+        </button>
+
+        <div class="drawer-group-title">📊 재무 & 플랫폼 관리</div>
+        <button class="drawer-menu-item tab-btn active" data-tab="tabTaxRoi" onclick="switchTab('tabTaxRoi')">
+          <span class="item-text">📊 세무 & 수익률 분석</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" id="btnTabExpenses" data-tab="tabExpenses" onclick="switchTab('tabExpenses')">
+          <span class="item-text">🧾 공용 운영비 & 실결산</span>
+          <span class="drawer-badge" id="tabBadgeExpenses">0</span>
+        </button>
+        <button class="drawer-menu-item tab-btn" id="btnTabEntities" data-tab="tabEntities" onclick="switchTab('tabEntities')">
+          <span class="item-text">🗄️ 8대 표준 데이터 객체 관리</span>
+        </button>
+      </div>
+      <div class="drawer-footer">
+        <a href="home.html" class="btn btn-secondary" style="flex:1; justify-content:center; font-size:12px; text-decoration:none;">📱 모바일 홈</a>
+        <a href="public.html" class="btn btn-secondary" style="flex:1; justify-content:center; font-size:12px; text-decoration:none;">📢 직거래 포털</a>
+      </div>
+    </aside>
 
     <!-- Tab 1: Applications -->
     <div id="tabApplications" class="tab-pane active">
@@ -978,18 +1274,71 @@
 
     let adminChatPollTimer = null;
 
+    function openDrawer() {
+      const d = document.getElementById('menuDrawer');
+      const b = document.getElementById('drawerBackdrop');
+      if (d) d.classList.add('open');
+      if (b) b.classList.add('open');
+    }
+
+    function closeDrawer() {
+      const d = document.getElementById('menuDrawer');
+      const b = document.getElementById('drawerBackdrop');
+      if (d) d.classList.remove('open');
+      if (b) b.classList.remove('open');
+    }
+
+    function toggleDrawer() {
+      const d = document.getElementById('menuDrawer');
+      if (d && d.classList.contains('open')) {
+        closeDrawer();
+      } else {
+        openDrawer();
+      }
+    }
+
+    function filterDrawerMenu(keyword) {
+      keyword = (keyword || '').toLowerCase().trim();
+      document.querySelectorAll('.drawer-menu-item').forEach(item => {
+        const text = item.innerText.toLowerCase();
+        item.style.display = text.includes(keyword) ? 'flex' : 'none';
+      });
+    }
+
     function switchTab(tabId) {
       document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       const targetPane = document.getElementById(tabId);
       if (targetPane) targetPane.classList.add("active");
 
-      // 활성화 버튼 표시
+      // 활성화 버튼 및 드로어 아이템 표시
       document.querySelectorAll(".tab-btn").forEach(b => {
         if (b.getAttribute("onclick") && b.getAttribute("onclick").includes(tabId)) {
           b.classList.add("active");
         }
       });
+
+      // 상단 현재 메뉴 타이틀 & 셀렉트 박스 동기화
+      const tabTitleMap = {
+        'tabApplications': '📋 비대면 입주신청 심사',
+        'tabChats': '💬 직거래 문의 & 방문예약',
+        'tabListings': '📢 공실 광고 관리',
+        'tabRenewals': '⏳ 만기 & 재계약 관제',
+        'tabParking': '🚗 주차 & 도어락 관제',
+        'tabMaintenance': '🛠️ 하자보수(A/S) 대장 & 정산',
+        'tabCheckout': '🚪 퇴실 정산 & 공실 전환',
+        'tabRooms': '🏢 호실 현황 (rent2 계승)',
+        'tabTaxRoi': '📊 세무 & 수익률 분석',
+        'tabExpenses': '🧾 공용 운영비 & 실결산',
+        'tabEntities': '🗄️ 8대 표준 데이터 객체 관리'
+      };
+      const curTitle = tabTitleMap[tabId] || '📋 관제 메뉴';
+      const curTitleEl = document.getElementById('currentActiveMenuTitle');
+      if (curTitleEl) curTitleEl.innerText = curTitle;
+      const quickSel = document.getElementById('quickMenuSelect');
+      if (quickSel) quickSel.value = tabId;
+
+      closeDrawer();
 
       if (tabId === 'tabTaxRoi') {
         loadTaxRoiDashboard();

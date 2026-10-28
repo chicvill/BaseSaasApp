@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>👑 Admin 관리인 센터 — Smart Rent3</title>
-  <meta name="description" content="관리인 스마트폰 전용 센터: building 생성 및 기본설정, 앱 사용료 납부 통계, 임대인/임차인 채팅(알림-버튼) 모달 일체형.">
+  <meta name="description" content="관리인 스마트폰 전용 센터: 3대 지점(64실) 통합 포트폴리오 관제, 세무 ROI 분석, 8대 표준 엔티티, 앱 사용료 통계, 1:1 채팅 모달 일체형.">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <style>
     :root {
@@ -43,7 +43,7 @@
       background: rgba(11, 15, 25, 0.95);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--card-border);
-      padding: 12px 16px;
+      padding: 12px 14px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -51,12 +51,14 @@
       top: 0;
       z-index: 100;
     }
-    .brand-title { display: flex; align-items: center; gap: 8px; font-size: 16.5px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
+    .brand-title { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; color: #fff; text-decoration: none; white-space: nowrap; }
     .badge-admin { background: rgba(56, 189, 248, 0.15); color: var(--primary); font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 700; border: 1px solid rgba(56, 189, 248, 0.3); white-space: nowrap; }
+
+    .header-btns { display: flex; align-items: center; gap: 6px; }
 
     /* Pulsating Alarm Badge */
     .alarm-pulse-badge {
-      background: #ef4444; color: #fff; font-size: 10.5px; font-weight: 900;
+      background: #ef4444; color: #fff; font-size: 10px; font-weight: 900;
       padding: 2px 6px; border-radius: 999px; margin-left: 4px;
       animation: badgePulse 1.5s infinite;
       box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
@@ -135,7 +137,7 @@
       white-space: nowrap;
     }
 
-    /* Action Tiles Grid */
+    /* Action Grid */
     .action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -164,17 +166,17 @@
       background: var(--card-bg);
       border: 1px solid var(--card-border);
       border-radius: 14px;
-      padding: 14px;
+      padding: 13px 14px;
       margin-bottom: 10px;
     }
-    .bldg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; white-space: nowrap; }
-    .bldg-name { font-size: 15px; font-weight: 800; color: #fff; }
-    .bldg-actions { display: flex; gap: 6px; margin-top: 10px; }
+    .bldg-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; white-space: nowrap; }
+    .bldg-name { font-size: 14.5px; font-weight: 800; color: #fff; }
+    .bldg-actions { display: flex; gap: 6px; margin-top: 8px; }
 
     /* Buttons */
     .btn {
-      padding: 7px 11px;
-      font-size: 12px;
+      padding: 6px 11px;
+      font-size: 11.5px;
       font-weight: 700;
       border-radius: 8px;
       cursor: pointer;
@@ -234,7 +236,7 @@
     .form-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; white-space: nowrap; }
     .form-group input, .form-group select {
       width: 100%;
-      padding: 10px 12px;
+      padding: 9px 12px;
       background: #1e293b;
       border: 1px solid var(--card-border);
       border-radius: 8px;
@@ -243,7 +245,7 @@
       outline: none;
     }
 
-    /* Inline Chat */
+    /* Chat Inside Modal */
     .chat-box {
       display: flex; flex-direction: column; height: 280px; background: #0f172a;
       border: 1px solid var(--card-border); border-radius: 12px; overflow: hidden; margin-bottom: 10px;
@@ -287,318 +289,371 @@
     <!-- Mobile Header -->
     <header class="mobile-header">
       <a href="admin.html" class="brand-title">
-        <span style="font-size:20px;">👑</span>
-        <span>Admin 관리인</span>
-        <span class="badge-admin">총괄 관제</span>
+        <span style="font-size:19px;">👑</span>
+        <span>Admin 총괄 센터</span>
+        <span class="badge-admin">전사 관제</span>
       </a>
-      
-      <!-- 임대인, 임차인과 채팅 (알림-버튼) -->
-      <button class="btn btn-alarm" onclick="openAdminChatModal()">
-        <span>💬 채팅</span>
-        <span class="alarm-pulse-badge" id="adminHeaderAlarm">🔔 2건</span>
-      </button>
+
+      <div class="header-btns">
+        <button class="btn btn-secondary" style="font-size:11px; padding:4px 8px;" onclick="goToPcMode()">
+          🖥️ PC모드
+        </button>
+        <button class="btn btn-alarm" onclick="openAdminChatModal()">
+          <span>💬</span>
+          <span class="alarm-pulse-badge" id="adminHeaderAlarm">🔔 2건</span>
+        </button>
+      </div>
     </header>
 
     <!-- 모든 페이지 점프 가능한 버튼들 -->
     <nav class="role-switch-bar">
-      <a href="home.html" class="role-btn">🏠 홈(누구나)</a>
+      <a href="home.html" class="role-btn">🏠 홈</a>
       <a href="admin.html" class="role-btn active">👑 Admin</a>
       <a href="lessor.html" class="role-btn">🏢 임대인</a>
       <a href="tenant.html" class="role-btn">🔑 임차인</a>
-      <button class="role-btn" onclick="openJumpModal()">🚀 점프</button>
+      <a href="cosign.html" target="_blank" class="role-btn">🤝 계약실</a>
     </nav>
 
     <!-- 본 페이지: 기본 정보와 버튼들로만 심플하게 구성 -->
     <main class="mobile-content">
 
-      <!-- 기본 요약 정보 카드 -->
+      <!-- 기본 요약 정보 카드 (3대 지점 통합 관제) -->
       <section class="info-card">
-        <h1>건물 및 앱 사용료 총괄</h1>
-        <p>시크빌 본점 외 1개 지점의 전산 및 사용료 관리</p>
+        <h1>전사 3대 지점 통합 포트폴리오</h1>
+        <p>시크빌(29실) • 선호아트빌(15실) • 신비주택(20실)</p>
         <div class="kv-row">
           <span class="kv-label">총 관리 건물/호실</span>
-          <span class="kv-val" style="color:var(--primary);">1개동 / 12호실 (공실 1실)</span>
+          <span class="kv-val" style="color:var(--primary);">3개 지점 / 총 64호실 (가동률 95.3%)</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">당월 앱 사용료 현황</span>
-          <span class="kv-val" style="color:var(--success);">30,000원 (100% 정상 완납)</span>
+          <span class="kv-label">연간 순운영이익 (NOI)</span>
+          <span class="kv-val" style="color:var(--success);">328,450,000 원</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">최근 납부일시</span>
-          <span class="kv-val">2026-10-25 10:30 (자동결제)</span>
+          <span class="kv-label">평균 순투자수익률 (Net ROI)</span>
+          <span class="kv-val" style="color:#38bdf8;">8.42% (Cap Rate 7.8%)</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">대표 임대인</span>
-          <span class="kv-val">김임대 (010-8888-9999)</span>
+          <span class="kv-label">당월 앱 SaaS 솔루션비</span>
+          <span class="kv-val" style="color:var(--success);">192,000원 (100% 정상 완납)</span>
         </div>
       </section>
 
-      <!-- 관리인 필수 기능 버튼 그리드 (작은 모달 연동) -->
+      <!-- 관리인 필수 6대 원스톱 기능 버튼 그리드 -->
       <div class="section-title">
-        <span>⚡ 관리인 필수 기능 (버튼)</span>
-        <span style="font-size:11px; color:var(--text-muted);">작은 모달에서 처리</span>
+        <span>⚡ 관리인 필수 기능 (원클릭)</span>
+        <span style="font-size:11px; color:var(--text-muted);">작은 모달에서 완결</span>
       </div>
 
       <div class="action-grid">
-        <!-- 1. 새 building 생성 (버튼) -->
+        <!-- 1. 3대 지점 통합 세무·수익률 분석 (신규 추가) -->
+        <button class="action-tile" onclick="openTaxRoiModal()">
+          <div class="tile-icon">📈</div>
+          <div class="tile-title">통합 세무·수익률</div>
+          <div class="tile-desc">NOI·Cap Rate·종소세</div>
+        </button>
+
+        <!-- 2. 8대 표준 엔티티 관리 (신규 추가) -->
+        <button class="action-tile" onclick="openEntitiesModal()">
+          <div class="tile-icon">📦</div>
+          <div class="tile-title">8대 엔티티 관리</div>
+          <div class="tile-desc">Lessor·Tenant·Room</div>
+        </button>
+
+        <!-- 3. 새 building 생성 (버튼) -->
         <button class="action-tile" onclick="openBuildingCreateModal()">
           <div class="tile-icon">🏢</div>
-          <div class="tile-title">새 building 생성 (버튼)</div>
-          <div class="tile-desc">건물명/주소 ➜ 기본설정</div>
+          <div class="tile-title">새 building 등록</div>
+          <div class="tile-desc">지점명/주소 신규생성</div>
         </button>
 
-        <!-- 2. 기본 설정 (버튼) -->
-        <button class="action-tile" onclick="openBuildingConfigModal()">
-          <div class="tile-icon">⚙️</div>
-          <div class="tile-title">건물 기본 설정 (버튼)</div>
-          <div class="tile-desc">기본 관리비/비번/연락처</div>
-        </button>
-
-        <!-- 3. 건물별 앱 사용료 납부 통계 (버튼) -->
+        <!-- 4. 건물별 앱 사용료 납부 통계 (버튼) -->
         <button class="action-tile" onclick="openAppFeeStatsModal()">
           <div class="tile-icon">📊</div>
-          <div class="tile-title">앱 사용료 통계 (버튼)</div>
-          <div class="tile-desc">건물별 납부/미납 통계</div>
+          <div class="tile-title">앱 사용료 통계</div>
+          <div class="tile-desc">호실당 월 관리솔루션비</div>
         </button>
 
-        <!-- 4. 임대인, 임차인과 채팅 (알림-버튼) -->
+        <!-- 5. 건물 기본 설정 (버튼) -->
+        <button class="action-tile" onclick="openBuildingConfigModal()">
+          <div class="tile-icon">⚙️</div>
+          <div class="tile-title">건물 기본 설정</div>
+          <div class="tile-desc">관리비·출입비번 관리</div>
+        </button>
+
+        <!-- 6. 전사 통합 채팅 (버튼) -->
         <button class="action-tile" onclick="openAdminChatModal()">
           <div class="tile-icon">💬</div>
           <div class="tile-title">
-            <span>채팅 (알림-버튼)</span>
+            <span>통합 알림 채팅</span>
             <span class="alarm-pulse-badge" id="adminTileAlarm">🔔 2건</span>
           </div>
-          <div class="tile-desc">임대인·임차인 1:1 대화</div>
+          <div class="tile-desc">임대인/임차인 직통</div>
         </button>
       </div>
 
-      <!-- 관리 건물 간결 요약 카드 -->
+      <!-- 지점별 간결 카드 리스트 (3대 지점) -->
       <div class="section-title">
-        <span>🏢 관리 대상 건물 현황</span>
-        <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px;" onclick="openBuildingCreateModal()">+ 건물 추가</button>
+        <span>🏛️ 지점별 운영 현황</span>
+        <span style="font-size:11px; color:var(--text-muted);">실시간 전산 가동</span>
       </div>
 
+      <!-- 1. 시크빌 본점 -->
       <div class="bldg-card">
         <div class="bldg-header">
-          <div class="bldg-name">🏢 시크빌 본점 (봉천동)</div>
-          <span style="font-size:11.5px; color:var(--success); font-weight:700;">✅ 사용료 완납</span>
+          <span class="bldg-name">🏢 시크빌 본점 (main)</span>
+          <span style="font-size:11px; color:var(--success); font-weight:700;">가동률 96.6%</span>
         </div>
         <div class="kv-row">
-          <span class="kv-label">규모</span>
-          <span class="kv-val">지하1층~지상5층 (12세대)</span>
+          <span>호실 / 임대인</span>
+          <strong>29개실 (공실 1실) • 김임대</strong>
         </div>
         <div class="kv-row">
-          <span class="kv-label">월 앱 사용료</span>
-          <span class="kv-val" style="color:var(--primary);">30,000 원/월</span>
+          <span>당월 앱 솔루션비</span>
+          <span style="color:var(--success);">87,000원 (정상 완납)</span>
         </div>
         <div class="bldg-actions">
-          <button class="btn btn-secondary" style="flex:1;" onclick="openBuildingConfigModal()">⚙️ 기본 설정</button>
-          <button class="btn btn-secondary" style="flex:1;" onclick="openAppFeeStatsModal()">📊 사용료 통계</button>
-          <button class="btn btn-primary" onclick="openAdminReceiptModal()">🧾 영수증</button>
+          <button class="btn btn-secondary" onclick="window.location.href='lessor.html?branch=main'">🏢 지점 관리</button>
+          <button class="btn btn-primary" onclick="openBuildingConfigModal('main')">⚙️ 설정</button>
+        </div>
+      </div>
+
+      <!-- 2. 선호아트빌 -->
+      <div class="bldg-card">
+        <div class="bldg-header">
+          <span class="bldg-name">🏢 선호아트빌 (sunho)</span>
+          <span style="font-size:11px; color:var(--success); font-weight:700;">가동률 93.3%</span>
+        </div>
+        <div class="kv-row">
+          <span>호실 / 임대인</span>
+          <strong>15개실 (공실 1실) • 이선호</strong>
+        </div>
+        <div class="kv-row">
+          <span>당월 앱 솔루션비</span>
+          <span style="color:var(--success);">45,000원 (정상 완납)</span>
+        </div>
+        <div class="bldg-actions">
+          <button class="btn btn-secondary" onclick="window.location.href='lessor.html?branch=sunho'">🏢 지점 관리</button>
+          <button class="btn btn-primary" onclick="openBuildingConfigModal('sunho')">⚙️ 설정</button>
+        </div>
+      </div>
+
+      <!-- 3. 신비주택 -->
+      <div class="bldg-card">
+        <div class="bldg-header">
+          <span class="bldg-name">🏢 신비주택 (sinbi)</span>
+          <span style="font-size:11px; color:var(--success); font-weight:700;">가동률 95.0%</span>
+        </div>
+        <div class="kv-row">
+          <span>호실 / 임대인</span>
+          <strong>20개실 (공실 1실) • 박신비</strong>
+        </div>
+        <div class="kv-row">
+          <span>당월 앱 솔루션비</span>
+          <span style="color:var(--success);">60,000원 (정상 완납)</span>
+        </div>
+        <div class="bldg-actions">
+          <button class="btn btn-secondary" onclick="window.location.href='lessor.html?branch=sinbi'">🏢 지점 관리</button>
+          <button class="btn btn-primary" onclick="openBuildingConfigModal('sinbi')">⚙️ 설정</button>
         </div>
       </div>
 
     </main>
   </div>
 
-  <!-- ================= [작은 모달 1] 새 building 생성 ➜ 기본 설정 파이프라인 ================= -->
+  <!-- ================= [작은 모달 1] 3대 지점 통합 세무·수익률 분석 ================= -->
+  <div class="modal-overlay" id="adminTaxRoiModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title"><span>📈</span> <span>3대 지점 통합 세무·수익률 분석</span></div>
+        <button class="close-btn" onclick="closeModal('adminTaxRoiModal')">&times;</button>
+      </div>
+
+      <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:12px; padding:12px; margin-bottom:12px; font-size:12px;">
+        <div class="kv-row">
+          <span>전사 총 관리 호실</span>
+          <strong id="roiTotalRooms">64 개실</strong>
+        </div>
+        <div class="kv-row">
+          <span>연간 순운영이익 (NOI)</span>
+          <strong style="color:var(--success);" id="roiNoiAmount">328,450,000 원</strong>
+        </div>
+        <div class="kv-row">
+          <span>명목 Cap Rate</span>
+          <strong style="color:var(--primary);" id="roiCapRate">7.82 %</strong>
+        </div>
+        <div class="kv-row">
+          <span>실질 순투자수익률 (Net ROI)</span>
+          <strong style="color:#10b981;" id="roiNetRoi">8.42 %</strong>
+        </div>
+        <div class="kv-row">
+          <span>주택임대 부가가치세</span>
+          <span>0 원 (전액 면세)</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>소득세 시뮬레이션 모드</label>
+        <select id="roiTaxMode" onchange="fetchTaxRoiData()">
+          <option value="SEPARATE_14">14% 분리과세 (지방세 포함 15.4% 혜택)</option>
+          <option value="COMPREHENSIVE">종합과세 (누진세율 6%~45%)</option>
+        </select>
+      </div>
+
+      <button class="btn btn-secondary" style="width:100%; padding:10px;" onclick="closeModal('adminTaxRoiModal')">
+        닫기
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 2] 8대 표준 엔티티 카운트 ================= -->
+  <div class="modal-overlay" id="adminEntitiesModal">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title"><span>📦</span> <span>8대 표준 엔티티 전산 현황</span></div>
+        <button class="close-btn" onclick="closeModal('adminEntitiesModal')">&times;</button>
+      </div>
+
+      <div style="font-size:12px;">
+        <div class="kv-row"><span>👑 Admin (총괄 관리인)</span><strong id="cntAdmin">1 명</strong></div>
+        <div class="kv-row"><span>🏢 Lessor (지점 임대인)</span><strong id="cntLessor">3 명</strong></div>
+        <div class="kv-row"><span>🔑 Tenant (등록 임차인)</span><strong id="cntTenant">61 명</strong></div>
+        <div class="kv-row"><span>🏛️ Building (관리 건물)</span><strong id="cntBuilding">3 동</strong></div>
+        <div class="kv-row"><span>🚪 Room (호실 원장)</span><strong id="cntRoom">64 실</strong></div>
+        <div class="kv-row"><span>📑 Contract (전자 계약)</span><strong id="cntContract">61 건</strong></div>
+        <div class="kv-row"><span>💰 Pay (당월 수납 대장)</span><strong id="cntPay">60 건</strong></div>
+        <div class="kv-row"><span>🧾 Outlay (공용 지출 전산)</span><strong id="cntOutlay">12 건</strong></div>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:14px;" onclick="window.location.href='index.html#tabEntities'">
+        🖥️ PC 모드에서 8대 엔티티 정밀 CRUD 관리
+      </button>
+    </div>
+  </div>
+
+  <!-- ================= [작은 모달 3] 새 building 생성 ================= -->
   <div class="modal-overlay" id="buildingCreateModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>🏢</span> <span>새로운 building 생성 (버튼)</span></div>
+        <div class="modal-title"><span>🏢</span> <span>새 빌딩(지점) 등록</span></div>
         <button class="close-btn" onclick="closeModal('buildingCreateModal')">&times;</button>
+      </div>
+
+      <div class="form-group">
+        <label>지점 코드 식별자 (영문소문자)</label>
+        <input type="text" id="newBldgCode" placeholder="예: gangnam">
       </div>
       <div class="form-group">
         <label>건물명</label>
-        <input type="text" id="newBldgName" placeholder="예: 시크빌 신림 2호점">
+        <input type="text" id="newBldgName" placeholder="예: 강남 드림하우스">
       </div>
       <div class="form-group">
         <label>소재지 주소</label>
-        <input type="text" id="newBldgAddr" placeholder="예: 서울특별시 관악구 신림로 123">
+        <input type="text" id="newBldgAddress" placeholder="예: 서울시 강남구 테헤란로 123">
       </div>
       <div class="form-group">
-        <label>임대인 ID (소유주 연결)</label>
-        <input type="text" id="newBldgLessor" value="LESSOR-001" placeholder="소유주 ID">
+        <label>총 호실 수</label>
+        <input type="number" id="newBldgRooms" value="20">
       </div>
-      <div class="form-group">
-        <label>월 앱 사용료</label>
-        <input type="number" id="newBldgFee" value="30000">
-      </div>
-      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="createBuildingStep()">
-        생성 완료 ➜ 기본 설정으로 이동
+
+      <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="saveNewBuilding()">
+        신규 지점 전산 개설 승인
       </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 2] 건물 기본 설정 모달 ================= -->
+  <!-- ================= [작은 모달 4] 건물 기본 설정 ================= -->
   <div class="modal-overlay" id="buildingConfigModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>⚙️</span> <span>건물 기본 설정 (버튼)</span></div>
+        <div class="modal-title"><span>⚙️</span> <span>지점 기본 출입 및 운영 설정</span></div>
         <button class="close-btn" onclick="closeModal('buildingConfigModal')">&times;</button>
       </div>
+
       <div class="form-group">
-        <label>설정 대상 건물</label>
-        <select id="cfgBldgSelect">
-          <option value="BLDG-001">시크빌 본점 (봉천동 888-12)</option>
+        <label>대상 지점</label>
+        <select id="cfgBranchSelect">
+          <option value="main">시크빌 본점 (main)</option>
+          <option value="sunho">선호아트빌 (sunho)</option>
+          <option value="sinbi">신비주택 (sinbi)</option>
         </select>
       </div>
       <div class="form-group">
-        <label>표준 기본 관리비 (호실 기본값)</label>
-        <input type="number" id="cfgMaintFee" value="50000">
+        <label>1층 공동현관 비밀번호</label>
+        <input type="text" id="cfgMainEntry" value="#1234*">
       </div>
       <div class="form-group">
-        <label>공용현관 마스터 비밀번호</label>
-        <input type="text" id="cfgMasterPin" value="1234*">
+        <label>공용 초고속 와이파이 SSID</label>
+        <input type="text" id="cfgWifiSsid" value="CHICVILL_5G">
       </div>
       <div class="form-group">
-        <label>관리사무소 대표 연락처</label>
-        <input type="tel" id="cfgManagerPhone" value="02-888-7777">
+        <label>공용 와이파이 비밀번호</label>
+        <input type="text" id="cfgWifiPw" value="chic2026pw">
       </div>
+
       <button class="btn btn-primary" style="width:100%; padding:11px;" onclick="saveBuildingConfig()">
-        기본 설정 저장하기
+        기본 출입 정보 저장
       </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 3] 건물별 앱 사용료 납부 통계 모달 ================= -->
+  <!-- ================= [작은 모달 5] 앱 사용료 통계 ================= -->
   <div class="modal-overlay" id="appFeeStatsModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title"><span>📊</span> <span>건물별 앱 사용료 납부 통계</span></div>
+        <div class="modal-title"><span>📊</span> <span>지점별 앱 사용료 수납 현황</span></div>
         <button class="close-btn" onclick="closeModal('appFeeStatsModal')">&times;</button>
       </div>
-      
-      <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); border-radius:12px; padding:12px; margin-bottom:12px;">
-        <div class="kv-row">
-          <span class="kv-label">2026년 10월 총 사용료</span>
-          <span class="kv-val" style="color:var(--primary);">30,000 원</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-label">완납률</span>
-          <span class="kv-val" style="color:var(--success);">100% (미납 0건)</span>
-        </div>
-        <div class="kv-row">
-          <span class="kv-label">연간 누적 납부액</span>
-          <span class="kv-val">360,000 원</span>
-        </div>
-      </div>
 
-      <div style="font-size:12px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">최근 납부 이력</div>
       <div style="font-size:12px;">
         <div class="kv-row">
-          <span>• 2026.10월분 (시크빌 본점)</span>
-          <span style="color:var(--success);">30,000원 완납 (10/25)</span>
+          <span>• 시크빌 본점 (29실)</span>
+          <span style="color:var(--success);">87,000원 완납</span>
         </div>
         <div class="kv-row">
-          <span>• 2026.09월분 (시크빌 본점)</span>
-          <span style="color:var(--success);">30,000원 완납 (09/25)</span>
+          <span>• 선호아트빌 (15실)</span>
+          <span style="color:var(--success);">45,000원 완납</span>
         </div>
         <div class="kv-row">
-          <span>• 2026.08월분 (시크빌 본점)</span>
-          <span style="color:var(--success);">30,000원 완납 (08/25)</span>
+          <span>• 신비주택 (20실)</span>
+          <span style="color:var(--success);">60,000원 완납</span>
+        </div>
+        <div class="kv-row" style="margin-top:6px; font-weight:800; border-top:1px solid var(--card-border); padding-top:8px;">
+          <span>전사 합계 (64실)</span>
+          <span style="color:var(--primary); font-size:14px;">192,000 원</span>
         </div>
       </div>
 
-      <button class="btn btn-secondary" style="width:100%; padding:10px; margin-top:14px;" onclick="closeModal('appFeeStatsModal')">닫기</button>
+      <button class="btn btn-secondary" style="width:100%; padding:10px; margin-top:14px;" onclick="closeModal('appFeeStatsModal')">
+        닫기
+      </button>
     </div>
   </div>
 
-  <!-- ================= [작은 모달 4] 임대인, 임차인과 채팅 (알림-버튼) 모달 ================= -->
+  <!-- ================= [작은 모달 6] 관리인 통합 채팅 ================= -->
   <div class="modal-overlay" id="adminChatModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">
-          <span>💬</span>
-          <span>임대인·임차인 채팅 (알림-버튼)</span>
-        </div>
+        <div class="modal-title"><span>💬</span> <span>임대인·임차인 통합 알림 채팅</span></div>
         <button class="close-btn" onclick="closeModal('adminChatModal')">&times;</button>
-      </div>
-
-      <div style="display:flex; justify-content:space-between; align-items:center; background:#1e293b; padding:8px 12px; border-radius:8px; margin-bottom:10px;">
-        <span style="font-size:12px; color:var(--text-muted);">대화 상대:</span>
-        <select id="chatPartner" style="background:#0f172a; color:#fff; border:1px solid var(--card-border); padding:4px 8px; border-radius:6px; font-size:12px;" onchange="changeChatPartner(this.value)">
-          <option value="lessor">🏢 임대인(김임대 소유주)</option>
-          <option value="tenant201">🔑 임차인(201호 홍길동)</option>
-          <option value="tenant301">🔑 임차인(301호 이영희)</option>
-        </select>
       </div>
 
       <div class="chat-box">
         <div class="chat-messages" id="adminChatMessages">
           <div class="chat-bubble bubble-other">
-            [임대인] 관리인님, 201호 수전 누수 수리 접수건 현장 확인 부탁드립니다!
+            [시크빌 김임대]: 302호 공실 매물 직거래 등록 완료했습니다.
           </div>
           <div class="chat-bubble bubble-admin">
-            네 김임대 사장님, 오늘 오후 2시 방문하여 신속 점검 진행하겠습니다.
-          </div>
-          <div class="chat-bubble bubble-other">
-            [201호 임차인] 관리사무소님, 승강기 정기 안전점검 시간 확인했습니다.
+            확인했습니다. 포털 메인 추천 매물 리스트에 실시간 노출 반영되었습니다!
           </div>
         </div>
         <div class="chat-input-area">
-          <input type="text" id="adminChatInput" class="chat-input" placeholder="메시지를 입력하세요 (Enter)" onkeydown="if(event.key==='Enter') sendAdminChat()">
+          <input type="text" id="adminChatInput" class="chat-input" placeholder="메시지 입력 (Enter)" onkeydown="if(event.key==='Enter') sendAdminChat()">
           <button class="btn btn-primary" onclick="sendAdminChat()">전송</button>
         </div>
       </div>
 
       <button class="btn btn-secondary" style="width:100%; padding:9px;" onclick="closeModal('adminChatModal')">대화창 닫기</button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 5] 앱 사용료 영수증 모달 ================= -->
-  <div class="modal-overlay" id="adminReceiptModal">
-    <div class="modal" style="background:#fff; color:#0f172a;">
-      <div class="modal-header" style="border-bottom:2px solid #0f172a; padding-bottom:8px;">
-        <div class="modal-title" style="color:#0f172a;"><span>🧾</span> <span>앱 사용료 납부 영수증</span></div>
-        <button class="close-btn" style="color:#64748b;" onclick="closeModal('adminReceiptModal')">&times;</button>
-      </div>
-      <div style="font-size:12.5px; line-height:1.7; padding-top:8px;">
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">영수증 번호</span>
-          <strong>FEE-202610-BLDG01</strong>
-        </div>
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">건물명</span>
-          <strong>시크빌 본점</strong>
-        </div>
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">적용 년월</span>
-          <strong>2026년 10월</strong>
-        </div>
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">납부 금액</span>
-          <strong style="color:#0284c7; font-size:15px;">30,000 원 (완납)</strong>
-        </div>
-        <div class="kv-row" style="color:#0f172a; border-color:#e2e8f0;">
-          <span style="color:#64748b;">결제 수단</span>
-          <span>법인카드 자동이체</span>
-        </div>
-        <div style="text-align:center; margin-top:14px; font-size:11px; color:#94a3b8;">
-          위 금액을 Smart Rent3 SaaS 플랫폼 사용료로 정히 영수함.<br>
-          <strong>2026.10.25 • BaseSaasApp 운영본부</strong>
-        </div>
-      </div>
-      <button class="btn btn-primary" style="width:100%; padding:10px; margin-top:12px; background:#0284c7; color:#fff;" onclick="window.print()">
-        🖨️ 영수증 인쇄
-      </button>
-    </div>
-  </div>
-
-  <!-- ================= [작은 모달 6] 모든 페이지 점프 모달 ================= -->
-  <div class="modal-overlay" id="jumpModal">
-    <div class="modal">
-      <div class="modal-header">
-        <div class="modal-title"><span>🚀</span> <span>모든 페이지 즉시 점프</span></div>
-        <button class="close-btn" onclick="closeModal('jumpModal')">&times;</button>
-      </div>
-      <div style="display:flex; flex-direction:column; gap:8px;">
-        <a href="home.html" class="btn btn-secondary" style="padding:12px; font-size:13px; justify-content:center;">🏠 홈페이지 (첫 만남·누구나)</a>
-        <a href="admin.html" class="btn btn-primary" style="padding:12px; font-size:13px; justify-content:center;">👑 admin 관리인 총괄 관제</a>
-        <a href="lessor.html" class="btn btn-secondary" style="padding:12px; font-size:13px; justify-content:center;">🏢 임대인(건물주) 전용 라운지</a>
-        <a href="tenant.html" class="btn btn-secondary" style="padding:12px; font-size:13px; justify-content:center;">🔑 임차인(세입자) 마이홈</a>
-        <a href="cosign.html" target="_blank" class="btn btn-secondary" style="padding:12px; font-size:13px; justify-content:center;">🤝 Co-Signing 비대면 계약실</a>
-      </div>
     </div>
   </div>
 
@@ -616,32 +671,86 @@
     function closeModal(id) { document.getElementById(id).style.display = "none"; }
 
     function openBuildingCreateModal() { openModal("buildingCreateModal"); }
-    function openBuildingConfigModal() { openModal("buildingConfigModal"); }
+    function openBuildingConfigModal(branch) {
+      if (branch) document.getElementById("cfgBranchSelect").value = branch;
+      openModal("buildingConfigModal");
+    }
     function openAppFeeStatsModal() { openModal("appFeeStatsModal"); }
-    function openAdminReceiptModal() { openModal("adminReceiptModal"); }
-    function openJumpModal() { openModal("jumpModal"); }
+    
+    function openTaxRoiModal() {
+      fetchTaxRoiData();
+      openModal("adminTaxRoiModal");
+    }
 
-    // [알림-버튼] 채팅 모달 열기 및 미확인 알림 소거
+    function openEntitiesModal() {
+      fetchEntitiesData();
+      openModal("adminEntitiesModal");
+    }
+
     function openAdminChatModal() {
       openModal("adminChatModal");
       const b1 = document.getElementById("adminHeaderAlarm");
-      const b2 = document.getElementById("adminTileAlarm");
       if (b1) b1.style.display = "none";
-      if (b2) b2.style.display = "none";
     }
 
-    async function createBuildingStep() {
-      const name = document.getElementById("newBldgName").value.trim();
-      const addr = document.getElementById("newBldgAddr").value.trim();
-      if (!name) { showAlert("건물명을 입력해주세요."); return; }
+    function goToPcMode() {
+      window.location.href = "index.html?role=admin";
+    }
 
-      showAlert("✅ 새 건물 생성 완료! 기본 설정 모달로 연결됩니다.");
+    // 1. 통합 세무·수익률 실데이터 연동 (API)
+    async function fetchTaxRoiData() {
+      const mode = document.getElementById("roiTaxMode").value;
+      try {
+        const res = await fetch(`/api/rent3/analytics/tax-roi?tax_mode=${mode}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data && data.data.aggregate) {
+            const agg = data.data.aggregate;
+            document.getElementById("roiTotalRooms").innerText = `${agg.total_rooms} 개실`;
+            document.getElementById("roiNoiAmount").innerText = `${agg.noi.toLocaleString()} 원`;
+            document.getElementById("roiCapRate").innerText = `${agg.roi.avg_cap_rate_pct} %`;
+            document.getElementById("roiNetRoi").innerText = `${agg.roi.avg_net_roi} %`;
+          }
+        }
+      } catch (e) {
+        console.warn("ROI 로딩 예외:", e);
+      }
+    }
+
+    // 2. 8대 표준 엔티티 카운트 연동 (API)
+    async function fetchEntitiesData() {
+      try {
+        const res = await fetch("/api/rent3/entities/summary/dashboard");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.counts) {
+            document.getElementById("cntAdmin").innerText = `${data.counts.admins} 명`;
+            document.getElementById("cntLessor").innerText = `${data.counts.lessors} 명`;
+            document.getElementById("cntTenant").innerText = `${data.counts.tenants} 명`;
+            document.getElementById("cntBuilding").innerText = `${data.counts.buildings} 동`;
+            document.getElementById("cntRoom").innerText = `${data.counts.rooms} 실`;
+            document.getElementById("cntContract").innerText = `${data.counts.contracts} 건`;
+            document.getElementById("cntPay").innerText = `${data.counts.pays} 건`;
+            document.getElementById("cntOutlay").innerText = `${data.counts.outlays} 건`;
+          }
+        }
+      } catch (e) {
+        console.warn("엔티티 카운트 로딩 예외:", e);
+      }
+    }
+
+    function saveNewBuilding() {
+      const name = document.getElementById("newBldgName").value.trim();
+      if (!name) {
+        alert("건물명을 입력해주세요.");
+        return;
+      }
+      showAlert(`🏢 [${name}] 지점이 전산 시스템에 성공적으로 개설되었습니다.`);
       closeModal("buildingCreateModal");
-      setTimeout(() => { openBuildingConfigModal(); }, 400);
     }
 
     function saveBuildingConfig() {
-      showAlert("💾 건물 기본 설정이 성공적으로 저장되었습니다.");
+      showAlert("⚙️ 지점 기본 출입 및 와이파이 설정이 저장되었습니다.");
       closeModal("buildingConfigModal");
     }
 
@@ -657,11 +766,7 @@
       container.appendChild(bubble);
       inp.value = "";
       container.scrollTop = container.scrollHeight;
-      showAlert("임대인/임차인에게 메시지가 전달되었습니다.");
-    }
-
-    function changeChatPartner(val) {
-      showAlert(`대화 상대가 변경되었습니다.`);
+      showAlert("공지 메시지가 전송되었습니다.");
     }
   </script>
 </body>
