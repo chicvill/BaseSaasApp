@@ -3,10 +3,12 @@ apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 """
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from apps._rent3_core import (
+    BrokerContractOnboarding,
+    BrokerContractTextParser,
     Building,
     CheckOutSettlement,
     CoSignSession,
@@ -367,4 +369,96 @@ def send_lessor_chat(req: ChatReplyReq):
         message=req.message.strip(),
     ).save(action="lessor_chat_sent", app_source=APP_SRC)
     return {"success": True, "message": "메시지가 전송되었습니다.", "chat": msg.model_dump()}
+
+
+class BrokerTextParseReq(BaseModel):
+    text: str
+
+
+class BrokerContractPhotoReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    photo_data_url: str
+    photo_filename: str = ""
+    tenant_name: str
+    tenant_phone: str
+    tenant_car_number: str = ""
+    lease_type: str = "월세"
+    pay_timing: str = "후불"
+    deposit: int = 5000000
+    monthly_rent: int = 500000
+    maintenance_fee: int = 50000
+    contract_deposit: int = 300000
+    deposit_received: bool = True
+    contract_date: Optional[str] = None
+    move_in_date: Optional[str] = None
+    lease_term_months: int = 12
+    special_terms: str = ""
+    broker_agency_name: str = ""
+    broker_agent_name: str = ""
+    broker_reg_no: str = ""
+    broker_phone: str = ""
+    rtms_filed_by_broker: bool = True
+    fixed_date_no: str = ""
+
+
+@router.post("/contracts/parse-broker-text")
+def parse_broker_contract_text(req: BrokerTextParseReq):
+    parsed = BrokerContractTextParser.parse(req.text)
+    return {
+        "success": True,
+        "message": "계약서 문구에서 주요 계약 조건을 자동 추출했습니다. 내용을 확인한 뒤 적용해 주세요.",
+        "parsed": parsed,
+    }
+
+
+@router.post("/contracts/broker-photo")
+def register_broker_contract_photo(req: BrokerContractPhotoReq):
+    ensure_pool_seeded()
+    res = BrokerContractOnboarding.register(
+        branch=req.branch,
+        room_no=req.room_no,
+        photo_data_url=req.photo_data_url,
+        photo_filename=req.photo_filename,
+        tenant_name=req.tenant_name,
+        tenant_phone=req.tenant_phone,
+        tenant_car_number=req.tenant_car_number,
+        lease_type=req.lease_type,
+        pay_timing=req.pay_timing,
+        deposit=req.deposit,
+        monthly_rent=req.monthly_rent,
+        maintenance_fee=req.maintenance_fee,
+        contract_deposit=req.contract_deposit,
+        deposit_received=req.deposit_received,
+        contract_date=req.contract_date,
+        move_in_date=req.move_in_date,
+        lease_term_months=req.lease_term_months,
+        special_terms=req.special_terms,
+        broker_agency_name=req.broker_agency_name,
+        broker_agent_name=req.broker_agent_name,
+        broker_reg_no=req.broker_reg_no,
+        broker_phone=req.broker_phone,
+        rtms_filed_by_broker=req.rtms_filed_by_broker,
+        fixed_date_no=req.fixed_date_no,
+        app_source=APP_SRC,
+    )
+    rtms_status = res["rtms"]["status"]
+    level = "warning" if rtms_status == "PENDING" else "success"
+    msg = (
+        f"📸 {req.room_no}호 공인중개사 계약서 사진 보관 및 계약 원장 적용 완료! "
+        f"(contracts.json · rooms.json · users.json 실시간 동기화)"
+    )
+    hint = (
+        "주의: 중개사 전월세 미신고 상태이므로 체결일로부터 30일 이내 RTMS 신고 마감을 확인해 주세요."
+        if rtms_status == "PENDING" else "임차인 앱 마이홈에서도 첨부된 계약서 사본과 납부 현황이 즉시 연동됩니다."
+    )
+    return {"success": True, "level": level, "message": msg, "hint": hint, **res}
+
+
+@router.get("/contracts/{contract_id}/photo")
+def get_contract_photo(contract_id: str):
+    ensure_pool_seeded()
+    abs_path, mime, filename = BrokerContractOnboarding.resolve_photo_file(contract_id)
+    return FileResponse(path=abs_path, media_type=mime, filename=filename)
+
 

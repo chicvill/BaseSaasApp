@@ -3,10 +3,12 @@ apps/rent3_tenant/api.py — 임차인 및 예비 세입자 전용 API 라우터
 """
 from typing import Optional
 from fastapi import APIRouter
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.errors import DomainError, NotFound
 from apps._rent3_core import (
+    BrokerContractOnboarding,
     Building,
     CheckOutSettlement,
     CoSignSession,
@@ -251,4 +253,12 @@ def agree_checkout(settlement_id: str, req: CheckoutAgreeReq):
         "message": "퇴실 정산 명세 동의 및 반환계좌 등록이 완료되었습니다 (임대인 앱 즉시 반영).",
         "settlement": s.model_dump(),
     }
+
+
+@router.get("/contracts/{contract_id}/photo")
+def get_tenant_contract_photo(contract_id: str):
+    ensure_pool_seeded()
+    abs_path, mime, filename = BrokerContractOnboarding.resolve_photo_file(contract_id)
+    return FileResponse(path=abs_path, media_type=mime, filename=filename)
+
 

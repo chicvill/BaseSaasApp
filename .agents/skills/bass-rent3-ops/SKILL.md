@@ -242,6 +242,16 @@ description: Operational business rules, domain invariants, and verification ins
       - 🔑 **`rent3_tenant` (임차인용 앱)**: 복비 0원 공실 매물 탐색 & 1:1 채팅/투어 신청, 공동 계약방 입장, 마이홈 청구/납부 내역 실시간 확인 & 온라인 납부, 도어락 비번 열람 & 차량 등록, A/S 사진 접수, 연말정산 17% 세액공제 납입증명서 A4 인쇄, 퇴실 정산 동의.
       - 🤝 **`rent3_contract` (공동 임대계약 전용 앱)**: 임대인과 임차인이 대면/비대면으로 같은 화면을 함께 보며 실시간으로 검증·작성·날인하는 독립 중립 전자계약 앱. 조건 1글자 수정 시 동의 자동 초기화(`Revision Lock`), 양측 자필 전자서명 및 SHA-256 해시 봉인, 체결 즉시 `contracts.json`·`rooms.json`·`users.json`·`payments.json`·`ops.json(RTMS)` 실시간 일괄 반영 및 표준 계약서 A4 인쇄 지원.
 
+19. **공인중개사 개입 외부 지면계약서 사진 첨부 및 Data Pool 원장 즉시 적용 (`BROKER_PAPER` Contract Onboarding)**:
+    - **현실 정합성 지원**: 당사자 직거래(`DIRECT`) 외에 외부 개업공인중개사 사무소를 통해 체결된 지면 계약(`BROKER_PAPER`)도 임대인 앱(`rent3_lessor`)에서 계약서 사진 첨부로 즉시 전산화하여 동일한 수납·세무·마이홈 생태계로 편입한다.
+    - **원본 계약서 사진 영속 보관 (`data/rent3_pool/uploads/contracts/`)**:
+      - 촬영·스캔한 계약서 이미지 파일을 공동 Data Pool 하위 `uploads/contracts/{contract_id}.{ext}`에 원자적으로 저장하고, `contracts.json`에는 경량 상대경로(`contract_photo_file`)와 중개사무소 메타정보(`broker_info`: 상호, 대표 공인중개사, 등록번호, 연락처)를 기록한다.
+      - 임대인(`rent3_lessor`)과 해당 호실 입주 임차인(`rent3_tenant` 마이홈) 모두 첨부된 원본 계약서 사본 이미지를 언제든 열람할 수 있다.
+    - **스마트폰 카메라 OCR(라이브 텍스트) 자동 추출 보조 (`BrokerContractTextParser`)**:
+      - 스마트폰 기본 카메라로 계약서 사진을 찍어 복사한 문구를 붙여넣으면 보증금·월세·관리비·임차인 연락처·입주일·중개사무소명을 자동 파싱해 입력 폼을 채워준다.
+    - **원클릭 Data Pool 5종 동기화 적용**:
+      - 등록 즉시 ① `users.json` 임차인 활성화, ② `contracts.json` 계약 생성(`rent2` 선불/후불·부가세·가짜체납 차단 규칙 동일 적용), ③ `rooms.json` 입주 배정(직거래 공실 광고 자동 마감), ④ 계약금 수령 시 `payments.json` 기록, ⑤ `ops.json` 국토부 RTMS 신고 상태 반영(중개사 거래신고 완료 시 `FILED`, 미신고 시 30일 마감 `PENDING` D-Day 추적)을 원자적으로 수행한다.
+
 ---
 
 ## 4. 🎨 Resilient UX 배너 표준

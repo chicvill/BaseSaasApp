@@ -105,6 +105,26 @@
         </div>
       ` : ""}
 
+      ${ct && ct.contract_photo_file ? `
+        <div class="bass-card no-print" style="margin-bottom:14px;">
+          <div class="bass-row" style="justify-content:space-between;">
+            <div>
+              <h3 style="margin:0;">📸 공인중개사 입회 지면계약서 원본 사본</h3>
+              <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">
+                중개업소: <strong>${Bass.escapeHtml((ct.broker_info && ct.broker_info.agency_name) || "공인중개사사무소")}</strong>
+                ${ct.broker_info && ct.broker_info.agent_name ? ` (대표 ${Bass.escapeHtml(ct.broker_info.agent_name)})` : ""}
+                · 특약: ${Bass.escapeHtml(ct.special_terms || "-")}
+              </div>
+            </div>
+            <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo" target="_blank" rel="noopener">🔍 계약서 원본 열기/다운로드</a>
+          </div>
+          ${String(ct.contract_photo_file).toLowerCase().endsWith(".pdf")
+            ? `<div class="bass-muted" style="margin-top:8px;font-size:13px;">PDF 스캔본 계약서가 보관되어 있습니다. 우측 상단 버튼으로 확인하세요.</div>`
+            : `<img src="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:block;">`
+          }
+        </div>
+      ` : ""}
+
       <div class="bass-card no-print" style="margin-bottom:14px;">
         <h3>💳 월별 납부 현황 & 온라인 간편 납부 (임대인 FIFO 장부 실시간 동기화)</h3>
         <div style="margin:10px 0;">

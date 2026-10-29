@@ -19,6 +19,7 @@
     .month-PAID { color: var(--ok); border-color: hsl(152 65% 50% / .4); }
     .month-UNPAID, .month-PARTIAL { color: var(--err); border-color: hsl(356 85% 62% / .5); font-weight: 700; }
     .month-EXEMPT_POSTPAID { color: var(--primary-2); border-color: hsl(196 95% 58% / .4); }
+    .contract-photo-preview { max-width: 100%; max-height: 360px; border-radius: 12px; border: 1px solid var(--border); margin-top: 8px; display: block; background: #fff; }
   </style>
 </head>
 <body>
@@ -50,6 +51,7 @@
 
     <nav class="tabs" id="tabBar">
       <button class="bass-btn tab-btn is-active" data-tab="ledger" type="button">💰 호실장부 & 문자 FIFO 수납</button>
+      <button class="bass-btn tab-btn" data-tab="broker" type="button">📸 중개 계약서 사진 등록</button>
       <button class="bass-btn tab-btn" data-tab="tax" type="button">📊 공용운영비 · NOI · 종소세</button>
       <button class="bass-btn tab-btn" data-tab="ops" type="button">🔧 A/S · 1:1채팅 · 퇴실정산</button>
       <button class="bass-btn tab-btn" data-tab="rooms" type="button">🚪 신규호실 등록 · 도어락/주차</button>

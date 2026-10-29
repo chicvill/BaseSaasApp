@@ -30,12 +30,20 @@
         <tr><th>메뉴</th><th>주요 기능</th><th>업데이트되는 공동 JSON 파일</th></tr>
       </thead>
       <tbody>
-        <tr><td>호실장부 & 문자 수납</td><td>은행 입금문자 붙여넣기 자동 파싱, FIFO 순차 상계, 공실 공개 토글</td><td><code>payments.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>호실장부 & 문자 수납</td><td>은행 입금문자 붙여넣기 자동 파싱, FIFO 순차 상계, 공실 공개 토글, 첨부 계약서 사진 열람</td><td><code>payments.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>중개 계약서 사진 등록</td><td>공인중개사 개입 지면계약서 촬영본/PDF 첨부(<code>uploads/contracts/</code> 보관), 카메라 OCR 텍스트 자동 채우기, 호실·임차인·계약금·전월세신고(RTMS) 일괄 적용</td><td><code>contracts.json</code>, <code>rooms.json</code>, <code>users.json</code>, <code>payments.json</code>, <code>ops.json</code></td></tr>
         <tr><td>공용운영비 · 종소세</td><td>8대 표준 경비 등재, NOI 순수익 계산, 5월 종소세 UTF-8 BOM CSV 출력</td><td><code>outlays.json</code></td></tr>
         <tr><td>A/S · 채팅 · 퇴실정산</td><td>기사 배정(수리비 자동 경비화), 퇴실 공제 명세 산출 및 원클릭 공실 복귀</td><td><code>ops.json</code>, <code>contracts.json</code>, <code>rooms.json</code></td></tr>
         <tr><td>호실 등록 · 도어락</td><td>신규 호실 객체 생성, 도어락 비밀번호 원격 변경(입주자 자동 동기화)</td><td><code>rooms.json</code>, <code>users.json</code></td></tr>
       </tbody>
     </table>
+
+    <h2>2. 부동산중개사 개입 계약서 사진 등록 절차</h2>
+    <ol>
+      <li>상단 탭 <strong>[📸 중개 계약서 사진 등록]</strong>(또는 각 호실 카드의 <strong>[📸 중개계약 사진등록]</strong>)을 클릭합니다.</li>
+      <li>촬영한 종이 계약서 사진(JPG/PNG/WEBP) 또는 PDF 스캔본을 첨부합니다. 스마트폰 카메라에서 복사한 문구를 붙여넣고 <strong>[✨ 문구에서 계약조건 자동 채우기]</strong>를 누르면 보증금·월세·관리비·임차인·중개사무소명이 자동 입력됩니다.</li>
+      <li>중개사의 주택임대차(전월세) 신고 대행 여부를 체크하고 <strong>[📸 계약서 사진 보관 및 계약내용 즉시 적용]</strong>을 누르면, 이미지 원본은 <code>data/rent3_pool/uploads/contracts/</code>에 SHA-256 해시와 함께 보관되고 공실 마감·세입자 마이홈 개통·후불 입주월 비과세 원장이 즉시 적용됩니다.</li>
+    </ol>
   </main>
 </body>
 </html>

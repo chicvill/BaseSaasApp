@@ -349,11 +349,16 @@ class Contract(PoolObj):
     tenant_signature: str = ""
     integrity_hash: str = ""
     cosign_session_id: str = ""
+    contract_channel: str = "DIRECT"         # DIRECT (직거래 공동계약) / BROKER_PAPER (공인중개사 지면계약 사진등록)
+    contract_photo_file: str = ""            # data/rent3_pool/ 기준 상대 경로 (예: uploads/contracts/ct_xxx.jpg)
+    contract_photo_name: str = ""            # 원본 업로드 파일명
+    broker_info: Dict[str, Any] = Field(default_factory=dict)  # 중개사무소 상호, 공인중개사명, 등록번호, 연락처 등
     fixed_date_no: str = ""                  # 대법원 확정일자 번호 (FIX-YYYYMMDD-XXXXXX)
     status: str = "ACTIVE"                   # ACTIVE / TERMINATED / RENEWED
 
     def summary(self) -> str:
-        return f"계약 {self.room_no}호 {self.tenant_name} ({self.lease_type}/{self.pay_timing})"
+        ch = "중개계약" if self.contract_channel == "BROKER_PAPER" else "직거래"
+        return f"계약[{ch}] {self.room_no}호 {self.tenant_name} ({self.lease_type}/{self.pay_timing})"
 
     def compute_vat(self) -> int:
         if not self.vat_target or self.lease_type == "전세":

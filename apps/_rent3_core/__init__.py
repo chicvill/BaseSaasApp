@@ -5,6 +5,7 @@ apps/_rent3_core — Rent3 5대 분리 앱이 공동으로 사용하는 객체�
 불변의 BaseSaasApp 코어를 1줄도 수정하지 않고 모든 분리 앱이 동일한 JSON Data Pool을 공유한다.
 """
 from .billing import FifoPaymentEngine, SmsDepositParser, TaxAndCertificateService
+from .broker import BrokerContractOnboarding, BrokerContractTextParser
 from .cosign import CoSignSession
 from .models import (
     Admin,
@@ -47,6 +48,8 @@ __all__ = [
     "SmsDepositParser",
     "FifoPaymentEngine",
     "TaxAndCertificateService",
+    "BrokerContractOnboarding",
+    "BrokerContractTextParser",
     "CoSignSession",
     "DirectChat",
     "MaintenanceTicket",

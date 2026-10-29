@@ -269,6 +269,110 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         listings_relisted = self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]
         self.assertTrue(any(l["room_no"] == "202" for l in listings_relisted))
 
+    def test_05_broker_paper_contract_photo_onboarding(self):
+        """5. 부동산중개사 개입 지면계약서 사진 첨부, OCR 텍스트 추출, Data Pool 5종 동기화 및 사진 조회 검증."""
+        # [A] 스마트폰 OCR 문구 자동 파싱 검증
+        ocr_sample = (
+            "주택임대차표준계약서 선호타워 302호 보증금 1,000만원 계약금 50만원 월세 48만원 관리비 4만원 후불 "
+            "입주일 2026-10-20 임차인 강중개 010-3232-4545 행복공인중개사사무소 대표 이공인 02-333-4444"
+        )
+        r_parse = self.client.post("/api/rent3_lessor/contracts/parse-broker-text", json={"text": ocr_sample})
+        self.assertEqual(r_parse.status_code, 200)
+        parsed = r_parse.json()["parsed"]
+        self.assertEqual(parsed["room_no"], "302")
+        self.assertEqual(parsed["deposit"], 10_000_000)
+        self.assertEqual(parsed["monthly_rent"], 480_000)
+        self.assertEqual(parsed["maintenance_fee"], 40_000)
+        self.assertEqual(parsed["contract_deposit"], 500_000)
+        self.assertEqual(parsed["pay_timing"], "후불")
+        self.assertEqual(parsed["move_in_date"], "2026-10-20")
+        self.assertEqual(parsed["tenant_name"], "강중개")
+        self.assertEqual(parsed["tenant_phone"], "010-3232-4545")
+        self.assertEqual(parsed["broker_agency_name"], "행복공인중개사사무소")
+        self.assertEqual(parsed["broker_agent_name"], "이공인")
+
+        # [B] 사진 미첨부 시 DomainError(400) 차단 검증
+        r_no_photo = self.client.post("/api/rent3_lessor/contracts/broker-photo", json={
+            "branch": "sunho",
+            "room_no": "302",
+            "photo_data_url": "",
+            "tenant_name": "강중개",
+            "tenant_phone": "010-3232-4545",
+        })
+        self.assertEqual(r_no_photo.status_code, 400)
+
+        # [C] 유효 1x1 PNG Data URL 첨부 + 중개사 전월세 미신고(rtms_filed_by_broker=False)로 원장 일괄 적용
+        sample_png_b64 = (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+        )
+        r_reg = self.client.post("/api/rent3_lessor/contracts/broker-photo", json={
+            "branch": "sunho",
+            "room_no": "302",
+            "photo_data_url": sample_png_b64,
+            "photo_filename": "sunho_302_broker_contract.png",
+            "tenant_name": parsed["tenant_name"],
+            "tenant_phone": parsed["tenant_phone"],
+            "tenant_car_number": "77가 8899",
+            "lease_type": "월세",
+            "pay_timing": "후불",
+            "deposit": parsed["deposit"],
+            "monthly_rent": parsed["monthly_rent"],
+            "maintenance_fee": parsed["maintenance_fee"],
+            "contract_deposit": parsed["contract_deposit"],
+            "deposit_received": True,
+            "contract_date": "2026-10-18",
+            "move_in_date": parsed["move_in_date"],
+            "lease_term_months": 12,
+            "special_terms": "반려동물 금지, 퇴실 청소비 7만원",
+            "broker_agency_name": parsed["broker_agency_name"],
+            "broker_agent_name": parsed["broker_agent_name"],
+            "broker_phone": "02-333-4444",
+            "rtms_filed_by_broker": False,
+        })
+        self.assertEqual(r_reg.status_code, 200)
+        reg_body = r_reg.json()
+        self.assertEqual(reg_body["level"], "warning")  # RTMS 미신고 주의 안내 배너
+        ct = reg_body["contract"]
+        ct_id = ct["id"]
+        self.assertEqual(ct["contract_channel"], "BROKER_PAPER")
+        self.assertTrue(ct["contract_photo_file"].startswith("uploads/contracts/"))
+        self.assertEqual(ct["broker_info"]["agency_name"], "행복공인중개사사무소")
+
+        # [D] 디스크 물리 이미지 파일 존재 & 임대인/임차인 양쪽 앱에서 계약서 원본 이미지 서빙 검증
+        abs_img = os.path.join(self.temp_pool, ct["contract_photo_file"])
+        self.assertTrue(os.path.isfile(abs_img), "계약서 사진 파일이 디스크 uploads/contracts/에 저장되지 않았습니다.")
+
+        r_img_lessor = self.client.get(f"/api/rent3_lessor/contracts/{ct_id}/photo")
+        self.assertEqual(r_img_lessor.status_code, 200)
+        self.assertEqual(r_img_lessor.headers["content-type"], "image/png")
+        self.assertGreater(len(r_img_lessor.content), 20)
+
+        r_img_tenant = self.client.get(f"/api/rent3_tenant/contracts/{ct_id}/photo")
+        self.assertEqual(r_img_tenant.status_code, 200)
+        self.assertEqual(r_img_tenant.content, r_img_lessor.content)
+
+        # [E] 공동 JSON Data Pool 5종 실시간 동기화 및 후불 입주월 가짜 체납 0원 검증
+        listings_sunho = self.client.get("/api/rent3_tenant/listings?branch=sunho").json()["listings"]
+        self.assertFalse(any(l["room_no"] == "302" for l in listings_sunho), "중개 계약 체결 호실이 공실 목록에서 닫히지 않았습니다.")
+
+        dash_sunho = self.client.get("/api/rent3_lessor/dashboard?branch=sunho&up_to_ym=2026-10").json()
+        room302 = next(r for r in dash_sunho["rooms"] if r["room_no"] == "302")
+        self.assertTrue(room302["is_occupied"])
+        self.assertEqual(room302["ledger"]["total_unpaid"], 0)
+        self.assertEqual(room302["ledger"]["months"][0]["status"], "EXEMPT_POSTPAID")
+
+        # 임차인 마이홈에서 첨부 계약서 경로 및 차량 등록 동기화 확인
+        tenant_id = reg_body["tenant"]["id"]
+        myhome_302 = self.client.get(f"/api/rent3_tenant/myhome/{tenant_id}").json()
+        self.assertEqual(myhome_302["contract"]["contract_photo_file"], ct["contract_photo_file"])
+        self.assertEqual(myhome_302["tenant"]["car_number"], "77가 8899")
+
+        # 관리인 앱 RTMS 신고 관제에 PENDING 상태로 노출되는지 검증
+        admin_ov = self.client.get("/api/rent3_admin/overview").json()
+        rtms_302 = next(x for x in admin_ov["rtms_reports"] if x["id_contract"] == ct_id)
+        self.assertEqual(rtms_302["status"], "PENDING")
+
 
 if __name__ == "__main__":
     unittest.main()
