@@ -90,7 +90,9 @@ foreach ($appName in $rent3Apps) {
 # ── (D) 실시간 공동 JSON Data Pool 연결 ──
 Ensure-Junction (Join-Path $TargetRoot "data\rent3_pool") (Join-Path $SourceRoot "data\rent3_pool")
 
-# ── (E) rent3 전용 테스트 및 유틸 스크립트 연결 ──
+# ── (E) rent3 전용 테스트 및 실행 배치/스크립트 연결 ──
+Ensure-HardLink (Join-Path $TargetRoot "run_r3.bat")                       (Join-Path $SourceRoot "run_r3.bat")
+Ensure-HardLink (Join-Path $TargetRoot "test_r3.bat")                      (Join-Path $SourceRoot "test_r3.bat")
 Ensure-HardLink (Join-Path $TargetRoot "tests\test_rent3_pool_suite.py")   (Join-Path $SourceRoot "tests\test_rent3_pool_suite.py")
 Ensure-HardLink (Join-Path $TargetRoot "scripts\generate_rent3_qa_pdf.py") (Join-Path $SourceRoot "scripts\generate_rent3_qa_pdf.py")
 
