@@ -40,7 +40,7 @@ class PortalLoginReq(BaseModel):
     login_mode: str = "account"          # account | cosign
     identifier: str = ""                 # 아이디 / 휴대폰 / 이메일 / 성명
     password: str = ""
-    target_hint: str = ""                # "" | "pool" | "add_listing" | "broker"
+    target_hint: str = ""                # "" | "pool" | "add_listing" | "broker" | "contract" | "contract:{branch}:{room_no}"
     session_code: str = ""
     cosign_role: str = "tenant"          # lessor | tenant
 
@@ -55,6 +55,7 @@ class PortalRegisterReq(BaseModel):
     building_name: str = ""
     address: str = ""
     branch: str = ""
+    target_hint: str = ""
 
 
 class PortalInquiryReq(BaseModel):
@@ -67,14 +68,34 @@ class PortalInquiryReq(BaseModel):
 
 
 class PortalRentNowReq(BaseModel):
+    caller_role: str = "tenant"          # lessor | tenant
     branch: str
     room_no: str
-    tenant_name: str
-    tenant_phone: str
+    tenant_name: str = ""
+    tenant_phone: str = ""
+    id_tenant: str = ""
 
 
 def _digits(raw: str) -> str:
     return re.sub(r"\D", "", raw or "")
+
+
+def _build_contract_target_url(
+    role_param: str,
+    target_hint: str,
+    branch: str = "",
+    tenant_id: str = "",
+) -> str:
+    parts = (target_hint or "").split(":")
+    q: List[str] = [f"role={role_param}"]
+    if role_param == "lessor" and branch:
+        q.append(f"branch={branch}")
+    if role_param == "tenant" and tenant_id:
+        q.append(f"tenant={tenant_id}")
+    if len(parts) >= 3 and parts[1] and parts[2]:
+        q.append(f"call_branch={normalize_branch_id(parts[1])}")
+        q.append(f"call_room={parts[2].strip()}")
+    return f"/rent3_contract/?{'&'.join(q)}"
 
 
 @router.get("/overview")
@@ -162,9 +183,12 @@ def portal_landing() -> Dict[str, Any]:
             "session_code": s.session_code,
             "mode": s.mode,
             "status": s.status,
+            "call_status": s.call_status,
+            "initiated_by_role": s.initiated_by_role,
             "branch": s.branch,
             "building_name": s.building_name,
             "room_no": s.room_no,
+            "lessor_name": s.lessor_name,
             "current_step": s.current_step,
             "tenant_name": str((s.terms or {}).get("tenant_name", "")),
         }
@@ -274,56 +298,54 @@ def create_portal_inquiry(req: PortalInquiryReq) -> Dict[str, Any]:
 
 @router.post("/cosign-open")
 def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
-    """OpenRent 'Rent Now' 버튼 — 해당 공실의 진행중 공동계약 세션 연결 또는 신규 개설 후 계약 앱 URL 반환."""
+    """OpenRent 'Rent Now' 버튼 — 로그인한 당사자가 매물을 선택하여 상대방을 호출(CALLING)하고 공동계약 앱 URL을 반환."""
     ensure_pool_seeded()
     b_id = normalize_branch_id(req.branch)
     r_no = req.room_no.strip()
+    role = "lessor" if req.caller_role == "lessor" else "tenant"
     t_name = req.tenant_name.strip()
     t_phone = req.tenant_phone.strip()
-    if not t_name or not t_phone:
+    if role == "tenant" and (not t_name or not t_phone):
         raise DomainError("계약자 성명과 휴대폰 번호를 입력해 주세요.")
 
-    existing = next(
-        (s for s in CoSignSession.find(branch=b_id, room_no=r_no) if s.status == "IN_PROGRESS"),
-        None,
+    sess = CoSignSession.call_counterparty(
+        caller_role=role,
+        branch=b_id,
+        room_no=r_no,
+        tenant_name=t_name,
+        tenant_phone=t_phone,
+        id_tenant=req.id_tenant,
+        app_source="rent3_portal",
     )
-    if existing:
-        sess = existing
-    else:
-        sess = CoSignSession.open_session(
-            branch=b_id,
-            room_no=r_no,
-            tenant_name=t_name,
-            tenant_phone=t_phone,
-            app_source="rent3_portal",
-        )
 
-    redirect_url = f"/rent3_contract/?role=tenant&session={sess.id}"
+    redirect_url = f"/rent3_contract/?role={role}&session={sess.id}"
+    callee_ko = "임차인" if role == "lessor" else "임대인"
     return {
         "success": True,
         "session_id": sess.id,
         "session_code": sess.session_code,
+        "call_status": sess.call_status,
         "redirect_url": redirect_url,
-        "message": f"[{sess.building_name} {sess.room_no}호] 공동계약방(코드 {sess.session_code})으로 이동합니다.",
+        "message": f"[{sess.building_name} {sess.room_no}호] {callee_ko}에게 공동계약 호출을 발송했습니다. 공동계약 화면으로 이동합니다.",
     }
 
 
 @router.post("/auth/login")
 def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
-    """통합 로그인 — 계정의 역할(관리인/임대인/입주임차인/예비임차인/공동계약)을 판별해 알맞은 전용 페이지 URL을 반환."""
+    """통합 본인인증 로그인 — 계정 역할(관리인/임대인/입주임차인/예비임차인) 및 공동계약 호출 목적에 맞춰 전용 URL을 반환."""
     ensure_pool_seeded()
     ensure_default_admins()
 
-    # 1. 공동계약(Rent Now) 6자리 참여코드 입장 모드
+    # 1. 레거시 호환: 세션 ID/코드 직접 입장
     if req.login_mode == "cosign":
         code = req.session_code.strip()
         if not code:
-            raise DomainError("공동계약 6자리 참여코드(또는 세션 ID)를 입력해 주세요.")
+            raise DomainError("공동계약 세션 ID를 입력해 주세요.")
         sess = CoSignSession.first(session_code=code) or CoSignSession.get(code)
         if not sess:
             raise NotFound(
-                f"참여코드 '{code}'에 해당하는 공동계약 세션을 찾을 수 없습니다.",
-                hint="임대인에게 전달받은 6자리 참여코드를 다시 확인해 주세요.",
+                f"세션 '{code}'에 해당하는 공동계약을 찾을 수 없습니다.",
+                hint="각자 본인 계정으로 로그인한 뒤 공동계약 화면에서 매물을 선택해 상대를 호출·응답해 주세요.",
             )
         role_param = "lessor" if req.cosign_role == "lessor" else "tenant"
         role_ko = "임대인" if role_param == "lessor" else "임차인"
@@ -347,16 +369,18 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
                 "role_label": f"공동계약 ({role_ko})",
                 "branch": sess.branch,
                 "room_no": sess.room_no,
+                "login_auth_verified": True,
                 "redirect_url": target_url,
             },
             "message": f"{sess.building_name} {sess.room_no}호 공동계약 화면({role_ko})으로 이동합니다.",
         }
 
-    # 2. 일반 통합 계정 로그인 (관리인 / 임대인 / 임차인 / 예비임차인)
+    # 2. 일반 통합 본인인증 로그인 (관리인 / 임대인 / 임차인 / 예비임차인)
     ident = req.identifier.strip()
     ident_low = ident.lower()
     ident_num = _digits(ident)
     pw = req.password.strip()
+    is_contract_hint = (req.target_hint or "").startswith("contract")
 
     if not ident or not pw:
         raise DomainError("아이디(또는 휴대폰 번호/성명)와 비밀번호를 모두 입력해 주세요.")
@@ -378,7 +402,12 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         if not valid_pw:
             raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호를 확인해 주세요.")
         tok = issue_token(core_u) if core_u else ""
-        target_url = "/rent3/pool.html" if req.target_hint == "pool" else "/rent3_admin/"
+        if is_contract_hint:
+            target_url = _build_contract_target_url("lessor", req.target_hint, branch="main")
+        elif req.target_hint == "pool":
+            target_url = "/rent3/pool.html"
+        else:
+            target_url = "/rent3_admin/"
         role_lbl = "통합 Data Pool 관제" if req.target_hint == "pool" else "총괄 관리인"
         return {
             "success": True,
@@ -390,12 +419,14 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
                 "id": matched_admin.id,
                 "username": matched_admin.username,
                 "name": matched_admin.name,
+                "phone": matched_admin.phone,
                 "role": "admin",
                 "role_label": role_lbl,
                 "branch": "all",
+                "login_auth_verified": True,
                 "redirect_url": target_url,
             },
-            "message": f"{matched_admin.name}님 환영합니다. {role_lbl} 페이지로 이동합니다.",
+            "message": f"{matched_admin.name}님 본인인증 로그인 완료! {role_lbl} 페이지로 이동합니다.",
         }
 
     # (B) 임대인 / 건물주 (Lessor) 매칭
@@ -422,12 +453,17 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         if not valid_pw:
             raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="기본 비밀번호(1212) 또는 설정한 비밀번호를 확인해 주세요.")
         tok = issue_token(core_u) if core_u else ""
-        tab_q = ""
-        if req.target_hint == "add_listing":
-            tab_q = "&tab=rooms"
-        elif req.target_hint == "broker":
-            tab_q = "&tab=broker"
-        target_url = f"/rent3_lessor/?branch={matched_lessor.branch}{tab_q}"
+        if is_contract_hint:
+            target_url = _build_contract_target_url("lessor", req.target_hint, branch=matched_lessor.branch)
+            dest_msg = "공동계약 호출·응답 화면으로 이동합니다."
+        else:
+            tab_q = ""
+            if req.target_hint == "add_listing":
+                tab_q = "&tab=rooms"
+            elif req.target_hint == "broker":
+                tab_q = "&tab=broker"
+            target_url = f"/rent3_lessor/?branch={matched_lessor.branch}{tab_q}"
+            dest_msg = "지점 임대인 관리 페이지로 이동합니다."
         role_lbl = f"임대인 ({matched_lessor.branch})"
         return {
             "success": True,
@@ -439,12 +475,14 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
                 "id": matched_lessor.id,
                 "username": matched_lessor.username or matched_lessor.id,
                 "name": matched_lessor.name,
+                "phone": matched_lessor.phone,
                 "role": "lessor",
                 "role_label": role_lbl,
                 "branch": matched_lessor.branch,
+                "login_auth_verified": True,
                 "redirect_url": target_url,
             },
-            "message": f"{matched_lessor.name}님 환영합니다. 지점 임대인 관리 페이지로 이동합니다.",
+            "message": f"{matched_lessor.name}님(본인인증 완료) 환영합니다. {dest_msg}",
         }
 
     # (C) 임차인 / 예비임차인 (Tenant) 매칭 — 입주 ACTIVE 우선 탐색
@@ -476,11 +514,19 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         if is_active_resident:
             role_key = "tenant"
             role_lbl = f"입주 임차인 ({matched_tenant.room_no}호)"
-            target_url = f"/rent3_tenant/?tenant={matched_tenant.id}"
+            default_url = f"/rent3_tenant/?tenant={matched_tenant.id}"
         else:
             role_key = "prospect"
             role_lbl = "예비임차인"
-            target_url = "/rent3_tenant/?view=listings"
+            default_url = "/rent3_tenant/?view=listings"
+
+        if is_contract_hint:
+            target_url = _build_contract_target_url("tenant", req.target_hint, tenant_id=matched_tenant.id)
+            dest_msg = "공동계약 호출·응답 화면으로 이동합니다."
+        else:
+            target_url = default_url
+            dest_msg = f"{role_lbl} 전용 페이지로 이동합니다."
+
         return {
             "success": True,
             "role": role_key,
@@ -491,29 +537,32 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
                 "id": matched_tenant.id,
                 "username": matched_tenant.id,
                 "name": matched_tenant.name,
+                "phone": matched_tenant.phone,
                 "role": role_key,
                 "role_label": role_lbl,
                 "branch": matched_tenant.branch,
                 "room_no": matched_tenant.room_no,
                 "tenant_id": matched_tenant.id,
+                "login_auth_verified": True,
                 "redirect_url": target_url,
             },
-            "message": f"{matched_tenant.name}님 환영합니다. {role_lbl} 전용 페이지로 이동합니다.",
+            "message": f"{matched_tenant.name}님(본인인증 완료) 환영합니다. {dest_msg}",
         }
 
     raise Unauthorized(
         "일치하는 사용자 계정을 찾을 수 없습니다.",
-        hint="아이디·휴대폰 번호·성명을 다시 확인하거나 '회원가입' 탭에서 간편 가입 후 이용해 주세요.",
+        hint="아이디·휴대폰 번호·성명을 다시 확인하거나 '회원가입' 탭에서 간편 본인인증 가입 후 이용해 주세요.",
     )
 
 
 @router.post("/auth/register")
 def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
-    """OpenRent 포털 간편 회원가입 — 예비임차인 또는 신규 임대인을 Data Pool에 등록하고 해당 역할 페이지로 즉시 연결."""
+    """OpenRent 포털 간편 본인인증 회원가입 — 예비임차인 또는 신규 임대인을 Data Pool에 등록하고 해당 역할 페이지로 즉시 연결."""
     ensure_pool_seeded()
     name = req.name.strip()
     phone = req.phone.strip()
     pw = req.password.strip() or "1212"
+    is_contract_hint = (req.target_hint or "").startswith("contract")
     if not name or not phone:
         raise DomainError("성명과 휴대폰 번호는 필수 입력 항목입니다.")
 
@@ -548,7 +597,11 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
                 manager_phone=phone,
             ).save("portal_building_registered", app_source="rent3_portal")
 
-        target_url = f"/rent3_lessor/?branch={branch_code}&tab=rooms"
+        target_url = (
+            _build_contract_target_url("lessor", req.target_hint, branch=branch_code)
+            if is_contract_hint
+            else f"/rent3_lessor/?branch={branch_code}&tab=rooms"
+        )
         return {
             "success": True,
             "role": "lessor",
@@ -559,12 +612,14 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
                 "id": lsr.id,
                 "username": lsr.username,
                 "name": lsr.name,
+                "phone": lsr.phone,
                 "role": "lessor",
                 "role_label": f"임대인 ({branch_code})",
                 "branch": branch_code,
+                "login_auth_verified": True,
                 "redirect_url": target_url,
             },
-            "message": f"임대인 회원가입이 완료되었습니다! [{b_name}] 호실·매물 등록 화면으로 이동합니다.",
+            "message": f"임대인 본인인증 가입이 완료되었습니다! [{b_name}] 전용 화면으로 이동합니다.",
         }
 
     # 예비임차인 (prospect) 가입
@@ -580,7 +635,11 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
         password=pw,
     ).save("portal_prospect_registered", app_source="rent3_portal")
 
-    target_url = "/rent3_tenant/?view=listings"
+    target_url = (
+        _build_contract_target_url("tenant", req.target_hint, tenant_id=new_t.id)
+        if is_contract_hint
+        else "/rent3_tenant/?view=listings"
+    )
     return {
         "success": True,
         "role": "prospect",
@@ -591,12 +650,14 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
             "id": new_t.id,
             "username": new_t.id,
             "name": new_t.name,
+            "phone": new_t.phone,
             "role": "prospect",
             "role_label": "예비임차인",
             "branch": "main",
             "room_no": "",
             "tenant_id": new_t.id,
+            "login_auth_verified": True,
             "redirect_url": target_url,
         },
-        "message": f"{name}님 회원가입이 완료되었습니다! 수수료 0원 공실 탐색 페이지로 이동합니다.",
+        "message": f"{name}님 본인인증 회원가입이 완료되었습니다! 전용 화면으로 이동합니다.",
     }

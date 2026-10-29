@@ -580,8 +580,9 @@ def ensure_pool_seeded(force: bool = False) -> None:
         message="안녕하세요! 시크빌 203호 공실 이번 주 토요일 오후 2시에 실물 투어 가능할까요?",
     ).save("seeded", app_source=src)
 
-    # 샘플 진행중 공동계약 세션 1건 (시크빌 203호)
-    CoSignSession.open_session(
+    # 샘플 공동계약 호출 대기 세션 1건 (예비임차인 김예비 -> 시크빌 203호 임대인 호출 중)
+    CoSignSession.call_counterparty(
+        caller_role="tenant",
         branch="main",
         room_no="203",
         tenant_name="김예비",

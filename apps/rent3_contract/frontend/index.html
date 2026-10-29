@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>🤝 스마트 공동 임대계약 — Rent3 Contract</title>
+  <title>🤝 스마트 공동 임대계약 (호출·응답 & 신분증·등기 확인) — Rent3 Contract</title>
   <link rel="stylesheet" href="/shared/ui/base.css">
   <style>
-    .app-shell { max-width: 720px; margin: 0 auto; padding: 16px 14px 64px; }
+    .app-shell { max-width: 780px; margin: 0 auto; padding: 16px 14px 64px; }
     .nav-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
     .role-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
     .role-btn.is-active { background: linear-gradient(120deg, var(--primary), var(--primary-2)); border-color: transparent; font-weight: 800; }
@@ -14,8 +14,15 @@
     .step-pill { text-align: center; padding: 9px 4px; border-radius: 12px; font-size: 12px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; }
     .step-pill.is-done { border-color: var(--ok); color: var(--ok); }
     .step-pill.is-now { background: hsl(258 90% 60% / .25); border-color: var(--primary); font-weight: 700; }
-    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
-    .check-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 12px; background: hsl(232 30% 12% / .65); border: 1px solid var(--border); margin-bottom: 8px; }
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); gap: 10px; }
+    .check-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 12px; background: hsl(232 30% 12% / .65); border: 1px solid var(--border); margin-bottom: 8px; }
+    .id-verify-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; margin: 12px 0; }
+    .id-card-box { padding: 14px; border-radius: 12px; background: hsl(232 30% 12% / .72); border: 1px solid var(--border); }
+    .id-card-box.is-verified { border-color: var(--ok); box-shadow: inset 0 0 0 1px hsl(150 75% 45% / .25); }
+    .call-banner { padding: 14px 16px; border-radius: 14px; border: 1px solid hsl(38 92% 55% / .55); background: hsl(38 90% 50% / .14); margin-bottom: 14px; }
+    .auth-bar { padding: 10px 13px; border-radius: 12px; background: hsl(215 50% 16% / .65); border: 1px solid var(--border); margin-top: 10px; font-size: 12.5px; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .gate-list { display: grid; gap: 6px; margin: 10px 0 14px; }
+    .gate-item { display: flex; justify-content: space-between; align-items: center; padding: 8px 11px; border-radius: 10px; font-size: 12.5px; background: hsl(232 30% 12% / .6); border: 1px solid var(--border); }
     .sig-pad { width: 100%; height: 110px; background: #fff; border-radius: 12px; border: 2px solid var(--border-strong); touch-action: none; cursor: crosshair; }
     .contract-paper { background: #fff; color: #111; padding: 26px; border-radius: 14px; line-height: 1.65; margin-top: 16px; }
     .contract-paper h2, .contract-paper h3 { color: #000; }
@@ -42,58 +49,74 @@
       <a class="bass-btn bass-btn--sm" href="manual.html">📘 매뉴얼</a>
     </div>
 
+    <!-- 나에게 도착한 공동계약 호출 수신 배너 -->
+    <section id="incomingCallBox" class="call-banner no-print" style="display:none;"></section>
+
     <header class="bass-card no-print" style="margin-bottom:14px;">
       <div class="bass-row" style="justify-content:space-between;">
         <div>
-          <h1 style="font-size:21px;margin-bottom:4px;">🤝 스마트 공동 임대계약 워크스페이스</h1>
-          <div class="bass-muted" style="font-size:13px;">임대인(갑)과 임차인(을)이 같은 계약 세션을 실시간으로 함께 보며 작성·날인합니다.</div>
+          <h1 style="font-size:21px;margin-bottom:4px;">🤝 본인인증 호출·응답 공동 임대계약 워크스페이스</h1>
+          <div class="bass-muted" style="font-size:13px;">임대인과 임차인이 각자 본인인증 로그인 후, 먼저 입장한 측이 매물을 선택해 상대를 호출·응답하여 계약을 시작합니다.</div>
         </div>
         <span id="poolBadge" class="bass-badge bass-badge--ok bass-badge--pulse">JSON Pool 동기화 대기</span>
       </div>
 
+      <!-- 로그인 본인인증 상태 바 -->
+      <div id="authIdentityBar" class="auth-bar"></div>
+
       <div class="role-switch">
-        <button id="btnRoleLessor" class="bass-btn role-btn is-active" type="button">🏢 임대인(갑) 시점 보기</button>
-        <button id="btnRoleTenant" class="bass-btn role-btn" type="button">🔑 임차인(을) 시점 보기</button>
+        <button id="btnRoleLessor" class="bass-btn role-btn is-active" type="button">🏢 임대인(갑) 로그인 화면</button>
+        <button id="btnRoleTenant" class="bass-btn role-btn" type="button">🔑 임차인(을) 로그인 화면</button>
       </div>
 
       <div class="field-grid" style="margin-top:10px;">
         <div>
-          <label class="bass-label">진행/완료 계약 세션 선택</label>
+          <label class="bass-label">호출 대기 / 진행 / 완료 공동계약 목록</label>
           <select id="sessionSelect" class="bass-select"></select>
-        </div>
-        <div>
-          <label class="bass-label">6자리 참여코드로 즉시 합류</label>
-          <div class="bass-row" style="flex-wrap:nowrap;">
-            <input id="joinCodeInput" class="bass-input" placeholder="예: 842910">
-            <button id="btnJoinCode" class="bass-btn bass-btn--primary" type="button">입장</button>
-          </div>
         </div>
       </div>
 
-      <details style="margin-top:12px;">
-        <summary style="cursor:pointer;font-size:13px;color:var(--primary-2);font-weight:700;">➕ 새 공동 임대계약 세션 개설 (신규 / 5% 상한 재계약)</summary>
-        <div class="field-grid" style="margin-top:10px;">
-          <div>
-            <label class="bass-label">대상 호실</label>
-            <select id="newRoomSelect" class="bass-select"></select>
+      <!-- 매물 선택 후 상대방 호출 패널 -->
+      <details id="callLaunchDetails" style="margin-top:12px;" open>
+        <summary style="cursor:pointer;font-size:13.5px;color:var(--primary-2);font-weight:800;">
+          📞 먼저 입장한 당사자가 매물 선택 후 상대방 호출하여 공동계약 시작하기
+        </summary>
+        <div style="margin-top:10px; padding:12px; border-radius:12px; background:hsl(232 30% 12% / .55); border:1px solid var(--border);">
+          <div class="field-grid">
+            <div>
+              <label class="bass-label">1. 계약 대상 매물(호실) 선택</label>
+              <select id="newRoomSelect" class="bass-select"></select>
+            </div>
+            <div>
+              <label class="bass-label">2. 계약 구분</label>
+              <select id="newModeSelect" class="bass-select">
+                <option value="NEW">신규 임대차 계약</option>
+                <option value="RENEWAL">조건변경 재계약 (법정 5% 상한 검증)</option>
+              </select>
+            </div>
           </div>
-          <div>
-            <label class="bass-label">계약 구분</label>
-            <select id="newModeSelect" class="bass-select">
-              <option value="NEW">신규 임대차 계약</option>
-              <option value="RENEWAL">조건변경 재계약 (법정 5% 상한 검증)</option>
-            </select>
+
+          <div id="selectedRoomOwnerInfo" class="bass-muted" style="font-size:12.5px; margin:8px 0; padding:8px 10px; border-radius:8px; background:hsl(220 35% 15% / .65);"></div>
+
+          <div class="field-grid" style="margin-top:8px;">
+            <div id="participantTenantWrap">
+              <label class="bass-label">본인인증 가입 임차인 빠른 선택 (선택)</label>
+              <select id="participantTenantSelect" class="bass-select"></select>
+            </div>
+            <div>
+              <label class="bass-label" id="lblCallTenantName">임차인 성명 (로그인 본인인증 성명)</label>
+              <input id="newTenantName" class="bass-input" placeholder="예: 김예비">
+            </div>
+            <div>
+              <label class="bass-label" id="lblCallTenantPhone">임차인 휴대폰 번호</label>
+              <input id="newTenantPhone" class="bass-input" placeholder="010-1234-5678">
+            </div>
           </div>
-          <div>
-            <label class="bass-label">예비 임차인 성명</label>
-            <input id="newTenantName" class="bass-input" placeholder="홍길동">
-          </div>
-          <div>
-            <label class="bass-label">예비 임차인 연락처</label>
-            <input id="newTenantPhone" class="bass-input" placeholder="010-1234-5678">
-          </div>
+
+          <button id="btnCallCounterparty" class="bass-btn bass-btn--primary" style="margin-top:10px;width:100%;" type="button">
+            📞 선택한 매물로 상대방 호출하여 공동계약 요청 발송
+          </button>
         </div>
-        <button id="btnOpenSession" class="bass-btn bass-btn--primary" style="margin-top:10px;width:100%;" type="button">🤝 새 공동 임대계약방 개설 (cosign_sessions.json 즉시 생성)</button>
       </details>
     </header>
 
@@ -105,13 +128,13 @@
             <div id="wsMeta" class="bass-muted" style="font-size:12.5px;"></div>
           </div>
           <div class="bass-row">
+            <span id="callStateBadge" class="bass-badge bass-badge--ok">연결됨</span>
             <span id="revBadge" class="bass-badge bass-badge--info">Revision v1</span>
-            <span id="codeBadge" class="bass-badge bass-badge--warn">참여코드 -</span>
           </div>
         </div>
 
         <div class="stepper" id="stepperBar">
-          <div class="step-pill" data-step="1">① 등기확인</div>
+          <div class="step-pill" data-step="1">① 신분증·등기</div>
           <div class="step-pill" data-step="2">② 옵션점검</div>
           <div class="step-pill" data-step="3">③ 조건작성</div>
           <div class="step-pill" data-step="4">④ 전자서명</div>
@@ -130,4 +153,3 @@
   <script src="app.js"></script>
 </body>
 </html>
-

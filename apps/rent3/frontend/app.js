@@ -1,4 +1,4 @@
-/* apps/rent3/frontend/app.js — OpenRent 벤치마킹 직거래 포털 & 역할 기반 자동 라우팅 클라이언트 */
+/* apps/rent3/frontend/app.js — OpenRent 벤치마킹 직거래 포털 & 본인인증 역할별 자동 라우팅 클라이언트 */
 (function () {
   "use strict";
 
@@ -57,26 +57,70 @@
     return "👤";
   }
 
+  function buildContractUrlFromSession(user, callBranch, callRoom) {
+    if (!user) return "/rent3_contract/";
+    const isLessor = user.role === "lessor" || user.role === "admin";
+    const params = new URLSearchParams();
+    params.set("role", isLessor ? "lessor" : "tenant");
+    if (isLessor && user.branch && user.branch !== "all") {
+      params.set("branch", user.branch);
+    }
+    if (!isLessor && (user.tenant_id || user.id)) {
+      params.set("tenant", user.tenant_id || user.id);
+    }
+    if (callBranch && callRoom) {
+      params.set("call_branch", callBranch);
+      params.set("call_room", callRoom);
+    }
+    return `/rent3_contract/?${params.toString()}`;
+  }
+
+  function navigateToCoSignOrLogin(callBranch, callRoom) {
+    const user = getSession();
+    if (user && user.name) {
+      window.location.href = buildContractUrlFromSession(user, callBranch, callRoom);
+      return;
+    }
+    const hint = callBranch && callRoom ? `contract:${callBranch}:${callRoom}` : "contract";
+    openAuthModal({ tab: "login", preset: "cosign", targetHint: hint });
+  }
+
   function renderSessionUI() {
     const user = getSession();
     const btnSignIn = $("btnNavSignIn");
     const loggedBox = $("navLoggedBox");
     const strip = $("activeSessionStrip");
+    const quickAuth = $("quickCosignAuthStatus");
 
     if (user && user.redirect_url) {
       btnSignIn.style.display = "none";
       loggedBox.style.display = "inline-flex";
-      $("navUserBadge").textContent = `${roleIcon(user.role)} ${user.name} · ${user.role_label || user.role}`;
+      $("navUserBadge").textContent = `${roleIcon(user.role)} ${user.name} · 본인인증됨`;
       $("navGoWorkspace").href = user.redirect_url;
 
       strip.style.display = "block";
       $("activeSessionText").innerHTML =
-        `현재 <strong>${esc(user.name)}</strong>님(<code>${esc(user.role_label || user.role)}</code>)으로 로그인되어 있습니다. 역할에 맞는 전용 워크스페이스로 바로 이동할 수 있습니다.`;
+        `🛡️ <strong>${esc(user.name)}</strong>님(<code>${esc(user.role_label || user.role)}</code> · 본인인증 완료)으로 로그인되어 있습니다. 역할 전용 워크스페이스 또는 공동계약 호출 화면으로 바로 이동할 수 있습니다.`;
       $("stripGoBtn").href = user.redirect_url;
+
+      if (quickAuth) {
+        quickAuth.style.background = "#f0fdf4";
+        quickAuth.style.borderColor = "#86efac";
+        quickAuth.style.color = "#166534";
+        quickAuth.innerHTML =
+          `✅ <strong>${esc(user.name)}</strong>님 (${esc(user.role_label || user.role)}) 본인인증 완료 — 아래 버튼으로 입장해 매물 선택 후 상대방을 호출하거나 도착한 호출에 응답하세요.`;
+      }
     } else {
       btnSignIn.style.display = "inline-flex";
       loggedBox.style.display = "none";
       strip.style.display = "none";
+      if (quickAuth) {
+        quickAuth.style.background = "#f8fafc";
+        quickAuth.style.borderColor = "var(--or-border)";
+        quickAuth.style.color = "var(--or-text)";
+        quickAuth.innerHTML =
+          `🔒 임대인 또는 임차인으로 <strong>본인인증 로그인</strong>하면 매물을 선택해 상대를 호출하거나 도착한 호출에 즉시 응답할 수 있습니다.`;
+      }
     }
   }
 
@@ -85,18 +129,19 @@
       btn.classList.toggle("is-active", btn.dataset.authTab === tabName);
     });
     $("formAccountLogin").style.display = tabName === "login" ? "block" : "none";
-    $("formCosignLogin").style.display = tabName === "cosign" ? "block" : "none";
     $("formRegister").style.display = tabName === "register" ? "block" : "none";
   }
 
   function openAuthModal({ tab = "login", preset = "", targetHint = "" } = {}) {
-    switchAuthTab(tab);
+    switchAuthTab(tab === "register" ? "register" : "login");
     $("loginTargetHint").value = targetHint || "";
     $("chkAdminPoolHub").checked = targetHint === "pool";
 
     const sub = $("authModalSub");
-    if (targetHint === "add_listing") {
-      sub.textContent = "임대인으로 로그인(또는 신규 가입)하면 보유 지점의 호실·매물 등록 탭으로 바로 이동합니다.";
+    if ((targetHint || "").startsWith("contract")) {
+      sub.textContent = "임대인 또는 임차인으로 본인인증 로그인(또는 회원가입)하면 즉시 공동계약 호출·응답 화면으로 이동합니다.";
+    } else if (targetHint === "add_listing") {
+      sub.textContent = "임대인으로 본인인증 로그인(또는 신규 가입)하면 보유 지점의 호실·매물 등록 탭으로 바로 이동합니다.";
     } else if (targetHint === "broker") {
       sub.textContent = "임대인으로 로그인하면 공인중개사 지면계약서 사진 등록 탭으로 바로 이동합니다.";
     } else if (preset === "tenant") {
@@ -111,11 +156,7 @@
       sub.textContent = "총괄 관리인(admin)으로 로그인하면 가맹·정산·전사 수익률 관제 페이지로 이동합니다.";
       $("loginIdentifier").value = "admin";
     } else {
-      sub.textContent = "로그인 즉시 계정의 역할에 맞는 전용 페이지로 자동 이동합니다.";
-    }
-
-    if (tab === "cosign" && state.openSessions.length && !$("modalSessionCode").value) {
-      $("modalSessionCode").value = state.openSessions[0].session_code;
+      sub.textContent = "본인인증 로그인 즉시 계정의 역할에 맞는 전용 페이지로 자동 이동합니다.";
     }
 
     $("authModal").classList.add("is-open");
@@ -238,7 +279,7 @@
             </button>
             <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
               data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
-              🤝 Rent Now 계약
+              📞 공동계약 호출
             </button>
           </div>
         </div>
@@ -252,17 +293,34 @@
         $("inqModalTitle").textContent = `💬 [${btn.dataset.bldg} ${btn.dataset.room}호] 집주인 1:1 방문문의`;
         const u = getSession();
         if (u && u.name) $("inqSenderName").value = u.name;
+        if (u && u.phone) $("inqSenderPhone").value = u.phone;
         $("inquiryModal").classList.add("is-open");
       });
     });
 
     grid.querySelectorAll(".js-open-rentnow").forEach((btn) => {
       btn.addEventListener("click", () => {
+        const u = getSession();
+        if (!u || !u.name) {
+          // 비로그인 시: 본인인증 로그인 후 해당 매물 호출 화면으로 즉시 이동!
+          openAuthModal({
+            tab: "login",
+            preset: "cosign",
+            targetHint: `contract:${btn.dataset.branch}:${btn.dataset.room}`,
+          });
+          return;
+        }
         $("rnBranch").value = btn.dataset.branch;
         $("rnRoomNo").value = btn.dataset.room;
-        $("rnModalTitle").textContent = `🤝 [${btn.dataset.bldg} ${btn.dataset.room}호] Rent Now 공동계약 시작`;
-        const u = getSession();
-        if (u && u.name) $("rnTenantName").value = u.name;
+        const isLessor = u.role === "lessor" || u.role === "admin";
+        $("rnCallerRole").value = isLessor ? "lessor" : "tenant";
+        $("rnModalTitle").textContent = `📞 [${btn.dataset.bldg} ${btn.dataset.room}호] 상대방 호출 및 공동계약 시작`;
+        $("rnVerifiedNotice").innerHTML =
+          `🛡️ <strong>${esc(u.name)}</strong>님(본인인증 완료) 계정으로 <strong>${isLessor ? "임차인" : "임대인"}</strong>을 호출합니다.`;
+        if (!isLessor) {
+          $("rnTenantName").value = u.name || "";
+          $("rnTenantPhone").value = u.phone || "";
+        }
         $("rentNowModal").classList.add("is-open");
       });
     });
@@ -283,19 +341,23 @@
         const acc = state.demoAccounts[Number(btn.dataset.demoIdx)];
         if (!acc) return;
         Bass.withLock(btn, async () => {
+          const currentHint = $("loginTargetHint").value || "";
+          const effectiveHint = currentHint.startsWith("contract")
+            ? currentHint
+            : (acc.target_hint || currentHint);
           const res = await Bass.api(APP_ID, "/pool/auth/login", {
             method: "POST",
             body: {
               login_mode: "account",
               identifier: acc.identifier,
               password: acc.password,
-              target_hint: acc.target_hint || $("loginTargetHint").value || "",
+              target_hint: effectiveHint,
             },
           });
           saveSession(res.user, res.token);
           Bass.updateAppAlert("success", res.message, `이동 경로: ${res.redirect_url}`);
           window.location.href = res.redirect_url;
-        }, "로그인 이동 중... ⏳");
+        }, "본인인증 확인 및 이동 중... ⏳");
       });
     });
   }
@@ -319,18 +381,23 @@
     ).join("");
     brSel.value = prevBr;
 
-    // 진행중 공동계약 세션 빠른 선택 바인딩
+    // 진행중 공동계약 호출/응답 현황 요약 바인딩
     const sessWrap = $("openSessionsWrap");
-    const sessPicker = $("openSessionPicker");
-    if (state.openSessions.length) {
+    const sessSummary = $("openSessionsSummary");
+    if (state.openSessions.length && sessWrap && sessSummary) {
       sessWrap.style.display = "block";
-      sessPicker.innerHTML = state.openSessions.map((s) =>
-        `<option value="${esc(s.session_code)}">[코드 ${esc(s.session_code)}] ${esc(s.building_name)} ${esc(s.room_no)}호 (Step ${s.current_step}/5)</option>`
-      ).join("");
-      if (!$("quickSessionCode").value) {
-        $("quickSessionCode").value = state.openSessions[0].session_code;
-      }
-    } else {
+      sessSummary.innerHTML = state.openSessions.slice(0, 3).map((s) => {
+        const isCalling = s.call_status === "CALLING";
+        const callerKo = s.initiated_by_role === "lessor" ? "임대인" : "임차인";
+        const calleeKo = s.initiated_by_role === "lessor" ? "임차인" : "임대인";
+        return `
+          <div style="padding:6px 9px; border-radius:6px; background:${isCalling ? "#fef3c7" : "#eef2ff"}; color:${isCalling ? "#92400e" : "#1e3a8a"}; font-weight:600;">
+            ${isCalling ? "🔔 호출 응답 대기" : "🤝 양측 연결됨"} · [${esc(s.building_name)} ${esc(s.room_no)}호]
+            ${isCalling ? `${callerKo} 호출 → ${calleeKo} 응답 대기` : `Step ${s.current_step}/5 진행 중`}
+          </div>
+        `;
+      }).join("");
+    } else if (sessWrap) {
       sessWrap.style.display = "none";
     }
 
@@ -372,11 +439,15 @@
     btn.addEventListener("click", () => {
       const preset = btn.dataset.rolePreset || "";
       if (preset === "cosign") {
-        openAuthModal({ tab: "cosign" });
+        navigateToCoSignOrLogin();
       } else {
         openAuthModal({ tab: "login", preset });
       }
     });
+  });
+
+  $("btnQuickCosignGo").addEventListener("click", () => {
+    navigateToCoSignOrLogin();
   });
 
   $("authModalTabs").addEventListener("click", (e) => {
@@ -389,7 +460,7 @@
     $("regLessorFields").style.display = $("regRole").value === "lessor" ? "block" : "none";
   });
 
-  // 통합 계정 로그인 제출 -> 역할 판별 후 자동 리다이렉트
+  // 통합 계정 본인인증 로그인 제출 -> 역할 판별 후 자동 리다이렉트
   $("formAccountLogin").addEventListener("submit", (e) => {
     e.preventDefault();
     const btn = $("btnSubmitLogin");
@@ -410,49 +481,10 @@
       closeAuthModal();
       Bass.updateAppAlert("success", res.message, `자동 이동: ${res.redirect_url}`);
       window.location.href = res.redirect_url;
-    }, "역할 확인 및 이동 중... ⏳");
+    }, "본인인증 확인 및 이동 중... ⏳");
   });
 
-  // 공동계약 6자리 참여코드 로그인 제출 -> rent3_contract 자동 이동
-  $("formCosignLogin").addEventListener("submit", (e) => {
-    e.preventDefault();
-    Bass.withLock($("btnSubmitCosign"), async () => {
-      const res = await Bass.api(APP_ID, "/pool/auth/login", {
-        method: "POST",
-        body: {
-          login_mode: "cosign",
-          session_code: $("modalSessionCode").value,
-          cosign_role: $("modalCosignRole").value,
-        },
-      });
-      saveSession(res.user, "");
-      closeAuthModal();
-      window.location.href = res.redirect_url;
-    }, "공동계약방 연결 중... ⏳");
-  });
-
-  // 메인 배너 공동계약 코드 즉시 입장
-  $("openSessionPicker").addEventListener("change", () => {
-    $("quickSessionCode").value = $("openSessionPicker").value;
-  });
-
-  $("quickCosignForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    Bass.withLock($("btnQuickCosignGo"), async () => {
-      const res = await Bass.api(APP_ID, "/pool/auth/login", {
-        method: "POST",
-        body: {
-          login_mode: "cosign",
-          session_code: $("quickSessionCode").value,
-          cosign_role: $("quickCosignRole").value,
-        },
-      });
-      saveSession(res.user, "");
-      window.location.href = res.redirect_url;
-    }, "공동계약방 연결 중... ⏳");
-  });
-
-  // 간편 회원가입 -> Data Pool 등록 후 역할 페이지로 자동 이동
+  // 간편 본인인증 회원가입 -> Data Pool 등록 후 역할/공동계약 페이지로 자동 이동
   $("formRegister").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnSubmitRegister"), async () => {
@@ -466,13 +498,14 @@
           building_name: $("regBuildingName").value,
           address: $("regAddress").value,
           password: $("regPassword").value,
+          target_hint: $("loginTargetHint").value || "",
         },
       });
       saveSession(res.user, res.token);
       closeAuthModal();
       Bass.updateAppAlert("success", res.message);
       window.location.href = res.redirect_url;
-    }, "가입 및 워크스페이스 생성 중... ⏳");
+    }, "본인인증 가입 및 이동 중... ⏳");
   });
 
   // 검색 & 필터 바인딩
@@ -545,24 +578,27 @@
     }, "전송 중... ⏳");
   });
 
-  // Rent Now 공동계약 시작 모달
+  // Rent Now 상대방 호출 모달
   $("btnCloseRentNowModal").addEventListener("click", () => $("rentNowModal").classList.remove("is-open"));
   $("formRentNow").addEventListener("submit", (e) => {
     e.preventDefault();
+    const u = getSession();
     Bass.withLock($("btnSubmitRentNow"), async () => {
       const res = await Bass.api(APP_ID, "/pool/cosign-open", {
         method: "POST",
         body: {
+          caller_role: $("rnCallerRole").value || "tenant",
           branch: $("rnBranch").value,
           room_no: $("rnRoomNo").value,
           tenant_name: $("rnTenantName").value,
           tenant_phone: $("rnTenantPhone").value,
+          id_tenant: u && (u.tenant_id || (u.role !== "lessor" ? u.id : "")) ? (u.tenant_id || u.id) : "",
         },
       });
       $("rentNowModal").classList.remove("is-open");
       Bass.updateAppAlert("success", res.message);
       window.location.href = res.redirect_url;
-    }, "공동계약 개설 중... ⏳");
+    }, "상대방 호출 발송 중... ⏳");
   });
 
   // 모달 바깥 배경 클릭 시 닫기
@@ -589,4 +625,3 @@
     })
     .catch(Bass.showError);
 })();
-

@@ -240,7 +240,7 @@ description: Operational business rules, domain invariants, and verification ins
       - 👑 **`rent3_admin` (관리인용 앱)**: 임대인 가맹 심사/승인, 월 SaaS 앱 사용료 과금/정산, 전사 건물·호실 포트폴리오 KPI, RTMS 30일 신고 마감 감시, 전체 객체 탐색기.
       - 🏢 **`rent3_lessor` (임대인용 앱)**: 건물·호실·옵션 관리, 공실 게시 토글, `rent2` 계승 은행문자 파싱 & FIFO 순차 상계 & 후불 가짜 체납 차단, 공동 계약방 원클릭 개설, 도어락/주차/A/S 배정, 퇴실 정산 및 공실 자동 복귀, 8대 공용경비·NOI·5월 종소세 CSV 출력.
       - 🔑 **`rent3_tenant` (임차인용 앱)**: 복비 0원 공실 매물 탐색 & 1:1 채팅/투어 신청, 공동 계약방 입장, 마이홈 청구/납부 내역 실시간 확인 & 온라인 납부, 도어락 비번 열람 & 차량 등록, A/S 사진 접수, 연말정산 17% 세액공제 납입증명서 A4 인쇄, 퇴실 정산 동의.
-      - 🤝 **`rent3_contract` (공동 임대계약 전용 앱)**: 임대인과 임차인이 대면/비대면으로 같은 화면을 함께 보며 실시간으로 검증·작성·날인하는 독립 중립 전자계약 앱. 조건 1글자 수정 시 동의 자동 초기화(`Revision Lock`), 양측 자필 전자서명 및 SHA-256 해시 봉인, 체결 즉시 `contracts.json`·`rooms.json`·`users.json`·`payments.json`·`ops.json(RTMS)` 실시간 일괄 반영 및 표준 계약서 A4 인쇄 지원.
+      - 🤝 **`rent3_contract` (공동 임대계약 전용 앱)**: 임대인과 임차인이 각각 본인인증 로그인을 거친 뒤, 둘 중 어느 한쪽이 먼저 공동계약 화면에서 매물(호실)을 선택해 상대방을 호출(`CALLING`)하고 상대방이 응답(`CONNECTED`)함으로써 계약이 개시되는 중립 전자계약 앱. ① 각자 로그인 본인인증 증표 연동, ② 서로 상대방 신분증을 대조하여 본인 확인이 되었음을 상호 체크(`lessor_checked_tenant_id`, `tenant_checked_lessor_id`), ③ 대법원 등기부등본 열람·확인 체크(`step1_lessor_confirmed`, `step1_tenant_locked`), ④ 시설 점검 및 조건 합의(`Revision Lock`)가 모두 완료된 뒤에만 자필 전자서명(`sign_step4`) 및 SHA-256 해시 봉인이 허용된다.
 
 19. **공인중개사 개입 외부 지면계약서 사진 첨부 및 Data Pool 원장 즉시 적용 (`BROKER_PAPER` Contract Onboarding)**:
     - **현실 정합성 지원**: 당사자 직거래(`DIRECT`) 외에 외부 개업공인중개사 사무소를 통해 체결된 지면 계약(`BROKER_PAPER`)도 임대인 앱(`rent3_lessor`)에서 계약서 사진 첨부로 즉시 전산화하여 동일한 수납·세무·마이홈 생태계로 편입한다.
@@ -281,7 +281,7 @@ description: Operational business rules, domain invariants, and verification ins
       - 🏢 **임대인 / 건물주 (`lessor` / `branch_admin`)**: `chic`(`main`), `sunho`(`sunho`), `sinbi`(`sinbi`) 및 `users.json` 등재 가맹 임대인 로그인 시 보유 지점에 맞춰 `/rent3_lessor/?branch={branch}`로 자동 이동한다 (`+ 매물 등록` 진입 시 `&tab=rooms`, `중개 계약서 등록` 진입 시 `&tab=broker`).
       - 🔑 **입주 임차인 (`tenant`)**: `users.json`의 입주 세입자(성명·연락처·이메일·ID) 로그인 시 본인 계약 호실 마이홈 `/rent3_tenant/?tenant={tenant_id}`로 자동 이동한다.
       - 📢 **예비임차인 (`prospect`)**: 미배정 예비임차인 또는 신규 간편가입자 로그인 시 `/rent3_tenant/?view=listings`(공실 탐색 화면)로 자동 이동한다.
-      - 🤝 **Rent Now 공동계약 참여자 (`cosign`)**: 6자리 참여코드와 역할(임대인/임차인)로 입장 시 `/rent3_contract/?role={lessor|tenant}&session={session_id}`로 즉시 이동한다.
+      - 🤝 **실시간 공동계약 (`rent3_contract` 호출·응답 개시 원칙)**: 비로그인 코드 입장 없이 임대인과 임차인이 각각 로그인(본인인증 완료) 후 `/rent3_contract/`로 진입하며, 둘 중 한쪽이 먼저 매물을 선택해 상대를 호출(`call_counterparty`)하고 상대가 응답(`respond_to_call`)하면 계약이 시작된다. 서명 전 반드시 **상호 신분증 확인 체크**와 **등기부등본 확인 체크**를 모두 완료해야 한다.
 
 ---
 

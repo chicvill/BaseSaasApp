@@ -148,8 +148,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_join.status_code, 200)
         self.assertEqual(r_join.json()["session"]["id"], sid)
 
-        # Step 1 & Step 2 상호 확인 잠금
-        self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant"})
+        # Step 1 상호 신분증 본인 확인 체크 & 등기부등본 확인 잠금 + Step 2 옵션 점검
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True})
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", json={"role": "tenant"})
 
         # Step 3: v1 양측 합의 완료 후, 임대인이 월세를 55만 -> 54만으로 수정하면 양측 합의가 자동 초기화되는지 검증!
@@ -664,9 +665,28 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_reg.json()["role"], "prospect")
         self.assertEqual(r_reg.json()["redirect_url"], "/rent3_tenant/?view=listings")
 
-        # [F] Rent Now 공동계약 개설 및 6자리 참여코드 로그인 -> /rent3_contract/ 자동 분기 검증
+        # [F] 본인인증 공동계약 진입(target_hint="contract") 및 Rent Now 매물 호출 분기 검증
+        r_lsr_contract = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "chic",
+            "password": "1212",
+            "target_hint": "contract",
+        })
+        self.assertEqual(r_lsr_contract.status_code, 200)
+        self.assertTrue(r_lsr_contract.json()["user"]["login_auth_verified"])
+        self.assertEqual(r_lsr_contract.json()["redirect_url"], "/rent3_contract/?role=lessor&branch=main")
+
+        r_tnt_contract = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "010-9191-8282",
+            "password": "8282",
+            "target_hint": "contract:sinbi:202",
+        })
+        self.assertEqual(r_tnt_contract.status_code, 200)
+        self.assertTrue(r_tnt_contract.json()["user"]["login_auth_verified"])
+        self.assertIn("call_branch=sinbi&call_room=202", r_tnt_contract.json()["redirect_url"])
+
         sample_listing = land["listings"][0]
         r_rn = self.client.post("/api/rent3/pool/cosign-open", json={
+            "caller_role": "tenant",
             "branch": sample_listing["branch"],
             "room_no": sample_listing["room_no"],
             "tenant_name": "오픈렌트예비",
@@ -674,18 +694,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         })
         self.assertEqual(r_rn.status_code, 200)
         rn_data = r_rn.json()
+        self.assertEqual(rn_data["call_status"], "CALLING")
         self.assertTrue(rn_data["redirect_url"].startswith("/rent3_contract/?role=tenant&session="))
-
-        r_code_login = self.client.post("/api/rent3/pool/auth/login", json={
-            "login_mode": "cosign",
-            "session_code": rn_data["session_code"],
-            "cosign_role": "lessor",
-        })
-        self.assertEqual(r_code_login.status_code, 200)
-        self.assertEqual(
-            r_code_login.json()["redirect_url"],
-            f"/rent3_contract/?role=lessor&session={rn_data['session_id']}",
-        )
 
         # [G] 포털 1:1 방문문의 -> ops.json 실시간 기록 확인
         r_inq = self.client.post("/api/rent3/pool/inquiries", json={
@@ -696,6 +706,132 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "message": "OpenRent 포털에서 실물 투어 신청합니다.",
         })
         self.assertEqual(r_inq.status_code, 200)
+
+    def test_09_cosign_call_respond_mutual_id_and_registry_before_sign(self):
+        """9. 양측 본인인증 로그인 -> 매물 선택 상대 호출·응답 연결 -> 상호 신분증 체크 & 등기부등본 확인 후 서명 검증."""
+        # [A] 임대인(sinbi) 및 신규 임차인 각각 본인인증 로그인/가입 확인
+        r_lessor_login = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "sinbi",
+            "password": "1212",
+            "target_hint": "contract",
+        })
+        self.assertEqual(r_lessor_login.status_code, 200)
+        self.assertTrue(r_lessor_login.json()["user"]["login_auth_verified"])
+
+        r_tenant_reg = self.client.post("/api/rent3/pool/auth/register", json={
+            "role": "prospect",
+            "name": "최호출",
+            "phone": "010-7788-6655",
+            "password": "6655",
+            "target_hint": "contract",
+        })
+        self.assertEqual(r_tenant_reg.status_code, 200)
+        self.assertTrue(r_tenant_reg.json()["user"]["login_auth_verified"])
+        tenant_id = r_tenant_reg.json()["user"]["tenant_id"]
+
+        # [B] 임차인이 먼저 공동계약 화면에서 신비주택(sinbi) 202호 선택 -> 임대인 호출(CALLING)
+        r_call = self.client.post("/api/rent3_contract/sessions/call", json={
+            "caller_role": "tenant",
+            "branch": "sinbi",
+            "room_no": "202",
+            "tenant_name": "최호출",
+            "tenant_phone": "010-7788-6655",
+            "id_tenant": tenant_id,
+            "mode": "NEW",
+        })
+        self.assertEqual(r_call.status_code, 200)
+        sess = r_call.json()["session"]
+        sid = sess["id"]
+        self.assertEqual(sess["call_status"], "CALLING")
+        self.assertEqual(sess["initiated_by_role"], "tenant")
+        self.assertTrue(sess["tenant_login_verified"])
+        self.assertFalse(sess["lessor_login_verified"])
+
+        # 임대인(sinbi)에게 도착한 호출 수신 목록에 노출되는지 검증
+        r_inc = self.client.get("/api/rent3_contract/incoming-calls?role=lessor&branch=sinbi")
+        self.assertEqual(r_inc.status_code, 200)
+        self.assertTrue(any(c["id"] == sid for c in r_inc.json()["calls"]))
+
+        # [C] 안전장치 1: 상대방 응답(CONNECTED) 전 단계 진행 시 400 차단 & 본인 자가응답 400 차단
+        r_premature = self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant"})
+        self.assertEqual(r_premature.status_code, 400)
+
+        r_self_resp = self.client.post(f"/api/rent3_contract/sessions/{sid}/respond", json={
+            "responder_role": "tenant",
+        })
+        self.assertEqual(r_self_resp.status_code, 400)
+
+        # [D] 임대인(sinbi)이 호출에 응답 -> CONNECTED 전환 및 양측 로그인 본인인증 확정
+        r_resp = self.client.post(f"/api/rent3_contract/sessions/{sid}/respond", json={
+            "responder_role": "lessor",
+        })
+        self.assertEqual(r_resp.status_code, 200)
+        conn = r_resp.json()["session"]
+        self.assertEqual(conn["call_status"], "CONNECTED")
+        self.assertTrue(conn["lessor_login_verified"])
+        self.assertTrue(conn["tenant_login_verified"])
+
+        # [E] 안전장치 2: 조건 합의(Step 3)를 먼저 마쳐도, 서로 신분증 확인 체크 또는 등기부 확인이 누락되면 서명 차단(400)!
+        cur_rev = conn["revision"]
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": cur_rev})
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "tenant", "expected_revision": cur_rev})
+
+        # 신분증 확인 전 서명 시도 -> 400 차단
+        r_no_id = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={
+            "role": "lessor",
+            "signature": "신비임대인(서명)",
+            "expected_revision": cur_rev,
+        })
+        self.assertEqual(r_no_id.status_code, 400)
+
+        # 임대인만 임차인 신분증 확인 체크하고 임차인은 아직 임대인 신분증을 체크하지 않은 경우 -> 여전히 400 차단!
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", json={"role": "lessor", "checked": True})
+        r_one_side_id = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={
+            "role": "lessor",
+            "signature": "신비임대인(서명)",
+            "expected_revision": cur_rev,
+        })
+        self.assertEqual(r_one_side_id.status_code, 400)
+
+        # 임차인도 임대인 신분증 확인 체크 완료, 하지만 아직 등기부등본(step1_tenant_locked) 미확인 상태 -> 여전히 400 차단!
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", json={"role": "tenant", "checked": True})
+        r_no_reg = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={
+            "role": "tenant",
+            "signature": "최호출(서명)",
+            "expected_revision": cur_rev,
+        })
+        self.assertEqual(r_no_reg.status_code, 400)
+
+        # [F] 등기부등본 확인 잠금 + 옵션 확인 완료 -> 이제 비로소 양측 서명 통과 및 SHA-256 무결성 해시 봉인 성공!
+        r_reg_ok = self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant"})
+        self.assertEqual(r_reg_ok.status_code, 200)
+        self.assertTrue(r_reg_ok.json()["session"]["step1_tenant_locked"])
+
+        self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", json={"role": "tenant"})
+
+        r_sig1 = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={
+            "role": "lessor",
+            "signature": "신비임대인(전자서명)",
+            "expected_revision": cur_rev,
+        })
+        self.assertEqual(r_sig1.status_code, 200)
+
+        r_sig2 = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={
+            "role": "tenant",
+            "signature": "최호출(전자서명)",
+            "expected_revision": cur_rev,
+        })
+        self.assertEqual(r_sig2.status_code, 200)
+        self.assertTrue(bool(r_sig2.json()["session"]["integrity_hash"]))
+
+        # [G] 최종 계약 체결 봉인 -> 생성된 계약서 스냅샷에 상호 신분증 확인 증적이 영구 박제되었는지 검증
+        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        self.assertEqual(r_seal.status_code, 200)
+        snap = r_seal.json()["contract"]["registry_snapshot"]
+        self.assertTrue(snap["lessor_login_verified"])
+        self.assertTrue(snap["tenant_login_verified"])
+        self.assertTrue(snap["lessor_checked_tenant_id"])
+        self.assertTrue(snap["tenant_checked_lessor_id"])
 
 
 if __name__ == "__main__":

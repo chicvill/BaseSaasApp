@@ -1,20 +1,23 @@
 """
-apps/_rent3_core/cosign.py — 임대인·임차인이 함께 보며 작성하는 공동 임대계약 객체 (`CoSignSession`).
+apps/_rent3_core/cosign.py — 임대인·임차인이 각각 로그인 후 매물 선택 호출·응답으로 시작하는 공동 임대계약 객체 (`CoSignSession`).
 
 저장 파일: `data/rent3_pool/cosign_sessions.json`
 핵심 불변식:
-  1. 중립 공동 작업 공간: 임대인(갑)과 임차인(을)이 6자리 참여코드/링크로 같은 세션을 실시간 미러링하며 함께 작성한다.
-  2. 5단계 상호 합의 잠금(Mutual Lock-Step):
-     - Step 1: 등기부등본 권리관계 공동 열람 및 임차인 확인 잠금
+  1. 각자 로그인 본인인증 & 호출·응답 개시(Call & Respond Handshake):
+     - 임대인(갑)과 임차인(을)은 각각 로그인 과정에서 본인인증을 거친 상태로 진입한다.
+     - 둘 중 어느 한쪽이 먼저 공동계약 화면에서 매물(호실)을 선택해 상대방을 호출(`CALLING`)하고, 상대방이 응답(`CONNECTED`)함으로써 공동계약이 시작된다.
+  2. 상호 신분증 대조 체크 & 등기부등본 확인 후 서명(Strict Pre-Sign Gate):
+     - Step 1: 양측 로그인 본인인증 확인 + 서로 상대방의 실물 신분증을 대조하여 본인 확인이 되었음을 상호 체크(`lessor_checked_tenant_id`, `tenant_checked_lessor_id`) + 대법원 등기부등본 권리관계 확인 체크(`step1_lessor_confirmed`, `step1_tenant_locked`)
      - Step 2: 호실 옵션/시설 상태 실물 공동 체크 및 상호 잠금
      - Step 3: 보증금/월세/관리비/선후불/특약 공동 작성 -> 단 1글자라도 수정 시 revision 증가 및 양측 동의 자동 초기화(Revision Lock)!
-     - Step 4: 양측 본인확인 및 모바일 자필 전자서명 날인 -> SHA-256 계약원본 무결성 해시 봉인
+     - Step 4: (호출응답 완료 + 양측 로그인 본인인증 + 상호 신분증 확인 체크 + 등기부등본 확인 체크 + 조건 합의가 모두 완료된 경우에만) 양측 모바일 자필 전자서명 날인 -> SHA-256 계약원본 무결성 해시 봉인
      - Step 5: 계약금 입금 확인 즉시 공동 Data Pool(`contracts.json`, `rooms.json`, `users.json`, `payments.json`, `ops.json`) 일괄 업데이트!
   3. 신규 계약(`NEW`) 및 5% 상한 검증이 내장된 만기 재계약(`RENEWAL`)을 모두 지원한다.
 """
 from __future__ import annotations
 
 import random
+import re
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import uuid4
 
@@ -37,7 +40,7 @@ from .pool import PoolObj, now_iso
 
 
 class CoSignSession(PoolObj):
-    """임대인·임차인 실시간 공동 임대계약 작성 세션 객체."""
+    """임대인·임차인 실시간 호출·응답 및 상호 신분·등기 확인 기반 공동 임대계약 세션 객체."""
     collection: ClassVar[str] = "cosign_sessions"
     label: ClassVar[str] = "공동 임대계약 세션"
 
@@ -57,14 +60,27 @@ class CoSignSession(PoolObj):
     lessor_account: str = ""
     id_tenant: str = ""
 
+    # 호출·응답 핸드셰이크 및 로그인 본인인증 상태
+    initiated_by_role: str = "lessor"        # lessor / tenant (먼저 매물을 선택해 호출한 주체)
+    call_status: str = "CONNECTED"           # CALLING (상대방 응답 대기) / CONNECTED (양측 응답·접속 완료)
+    called_at: str = Field(default_factory=now_iso)
+    responded_at: str = ""
+    lessor_login_verified: bool = True       # 임대인 로그인 본인인증 완료 여부
+    tenant_login_verified: bool = True       # 임차인 로그인 본인인증 완료 여부
+
     current_step: int = 1                    # 1..5
     status: str = "IN_PROGRESS"              # IN_PROGRESS / COMPLETED / CANCELLED
     revision: int = 1                        # 조건 변경 시마다 +1 증가 (위변조 원천 차단)
 
-    # Step 1: 등기부등본 권리 분석
+    # Step 1: 상호 신분증 확인 체크 & 대법원 등기부등본 권리 분석
+    lessor_checked_tenant_id: bool = False   # 임대인이 임차인 신분증을 대조·본인확인 체크했는지 여부
+    lessor_id_checked_at: str = ""
+    tenant_checked_lessor_id: bool = False   # 임차인이 임대인 신분증을 대조·본인확인 체크했는지 여부
+    tenant_id_checked_at: str = ""
+
     registry_data: Dict[str, Any] = Field(default_factory=dict)
-    step1_lessor_confirmed: bool = False
-    step1_tenant_locked: bool = False
+    step1_lessor_confirmed: bool = False     # 임대인 등기부등본 제시/확인
+    step1_tenant_locked: bool = False        # 임차인 등기부등본 열람/확인 잠금
 
     # Step 2: 호실 옵션 및 시설 공동 점검표
     option_checks: List[Dict[str, Any]] = Field(default_factory=list)
@@ -94,7 +110,16 @@ class CoSignSession(PoolObj):
     completed_at: str = ""
 
     def summary(self) -> str:
-        return f"공동계약 [{self.room_no}호 코드:{self.session_code}] Step {self.current_step}/5 ({self.status}, rev={self.revision})"
+        c_tag = "호출중" if self.call_status == "CALLING" else f"Step {self.current_step}/5"
+        return f"공동계약 [{self.room_no}호] {c_tag} ({self.status}, rev={self.revision})"
+
+    def is_step1_fully_verified(self) -> bool:
+        return (
+            self.lessor_checked_tenant_id
+            and self.tenant_checked_lessor_id
+            and self.step1_lessor_confirmed
+            and self.step1_tenant_locked
+        )
 
     @classmethod
     def open_session(
@@ -104,6 +129,11 @@ class CoSignSession(PoolObj):
         tenant_name: str = "",
         tenant_phone: str = "",
         mode: str = "NEW",
+        initiated_by_role: str = "lessor",
+        call_status: str = "CONNECTED",
+        lessor_login_verified: bool = True,
+        tenant_login_verified: bool = True,
+        id_tenant: str = "",
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
         b_id = normalize_branch_id(branch)
@@ -120,12 +150,19 @@ class CoSignSession(PoolObj):
             if not prev_ct:
                 raise DomainError(f"{room.room_no}호에 갱신할 기존 활성 계약이 없습니다.")
 
+        matched_t: Optional[Tenant] = Tenant.get(id_tenant) if id_tenant else None
+        if not matched_t and tenant_phone:
+            digits = re.sub(r"\D", "", tenant_phone)
+            if len(digits) >= 8:
+                matched_t = next((t for t in Tenant.all() if re.sub(r"\D", "", t.phone) == digits), None)
+
         move_in_default = (
             prev_ct.expiry_date if prev_ct and prev_ct.expiry_date
             else (room.available_from if re_is_date(room.available_from) else date_today().isoformat())
         )
-        t_name = tenant_name or (prev_ct.tenant_name if prev_ct else "")
-        t_phone = tenant_phone or (prev_ct.tenant_phone if prev_ct else "")
+        t_name = tenant_name or (matched_t.name if matched_t else (prev_ct.tenant_name if prev_ct else ""))
+        t_phone = tenant_phone or (matched_t.phone if matched_t else (prev_ct.tenant_phone if prev_ct else ""))
+        resolved_tid = matched_t.id if matched_t else (prev_ct.id_tenant if prev_ct else "")
 
         opts = [
             {
@@ -137,6 +174,7 @@ class CoSignSession(PoolObj):
             for o in (room.option_list or [])
         ]
 
+        now_str = now_iso()
         session = cls(
             mode=mode,
             prev_contract_id=prev_ct.id if prev_ct else "",
@@ -150,6 +188,13 @@ class CoSignSession(PoolObj):
             lessor_name=lessor.name if lessor else "김임대",
             lessor_phone=lessor.phone if lessor else "010-1212-3434",
             lessor_account=lessor.account_number if lessor else "국민 123-456-789012",
+            id_tenant=resolved_tid,
+            initiated_by_role=initiated_by_role,
+            call_status=call_status,
+            called_at=now_str,
+            responded_at=now_str if call_status == "CONNECTED" else "",
+            lessor_login_verified=lessor_login_verified,
+            tenant_login_verified=tenant_login_verified,
             current_step=1,
             status="IN_PROGRESS",
             revision=1,
@@ -160,13 +205,13 @@ class CoSignSession(PoolObj):
                 "clean_title": room.registry_info.get("clean_title", True),
                 "checked_date": date_today().isoformat(),
             },
-            step1_lessor_confirmed=True,
+            step1_lessor_confirmed=(initiated_by_role == "lessor" or call_status == "CONNECTED"),
             option_checks=opts,
             terms={
                 "tenant_name": t_name,
                 "tenant_phone": t_phone,
-                "tenant_email": "",
-                "tenant_car_number": "",
+                "tenant_email": matched_t.email if matched_t else "",
+                "tenant_car_number": matched_t.car_number if matched_t else "",
                 "lease_type": room.lease_type or "월세",
                 "pay_timing": room.pay_timing or "후불",
                 "vat_target": room.vat_applicable,
@@ -179,24 +224,118 @@ class CoSignSession(PoolObj):
                 "lease_term_months": 12,
                 "special_terms": (
                     "1. 본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.\n"
-                    "2. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n"
-                    "3. 월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함."
+                    "2. 임대인과 임차인은 각자 본인인증 로그인 후 서로의 실물 신분증과 등기부등본을 대조·확인하였음.\n"
+                    "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n"
+                    "4. 월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함."
                 ),
             },
         ).save(action="cosign_session_opened", app_source=app_source)
 
+        callee_role = "tenant" if initiated_by_role == "lessor" else "lessor"
+        caller_name = session.lessor_name if initiated_by_role == "lessor" else (t_name or "임차인")
+        msg_prefix = "[📞 실시간 공동계약 호출]" if call_status == "CALLING" else "[🤝 공동 임대계약방 개설]"
         DirectChat(
             branch=b_id,
             id_room=room.id,
             room_no=room.room_no,
-            sender_role="lessor",
-            sender_name=session.lessor_name,
-            message=f"[🤝 공동 임대계약방 개설] {room.room_no}호 실시간 공동 계약서가 준비되었습니다. 참여코드 [{session.session_code}]로 입장해 함께 확인·작성해 주세요.",
-            quick_action_label="공동 임대계약방 입장",
-            quick_action_url=f"/rent3_contract/?session={session.id}&role=tenant",
-        ).save(action="cosign_invite_sent", app_source=app_source)
+            sender_role=initiated_by_role,
+            sender_name=caller_name,
+            message=(
+                f"{msg_prefix} {session.building_name} {room.room_no}호 공동계약 요청이 도착했습니다. "
+                f"본인 로그인 후 공동계약 화면에서 호출에 응답하여 계약을 시작해 주세요."
+            ),
+            quick_action_label="호출 응답 및 공동계약 입장",
+            quick_action_url=f"/rent3_contract/?session={session.id}&role={callee_role}",
+        ).save(action="cosign_call_sent", app_source=app_source)
 
         return session
+
+    @classmethod
+    def call_counterparty(
+        cls,
+        caller_role: str,
+        branch: str,
+        room_no: str,
+        tenant_name: str = "",
+        tenant_phone: str = "",
+        id_tenant: str = "",
+        mode: str = "NEW",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임대인 또는 임차인 중 먼저 공동계약 화면에서 매물을 선택한 측이 상대를 호출(CALLING)하여 세션을 시작한다."""
+        role_norm = "tenant" if caller_role == "tenant" else "lessor"
+        if role_norm == "tenant" and (not tenant_name.strip() or not tenant_phone.strip()) and not id_tenant:
+            raise DomainError(
+                "임차인 로그인 본인인증 정보(성명·연락처)가 필요합니다.",
+                hint="먼저 임차인 계정으로 로그인한 뒤 매물을 선택해 임대인을 호출해 주세요.",
+            )
+        if role_norm == "lessor" and mode == "NEW" and not (tenant_name.strip() or tenant_phone.strip() or id_tenant):
+            raise DomainError(
+                "호출할 임차인(예비 세입자)을 선택하거나 성명·연락처를 입력해 주세요.",
+                hint="가입된 임차인 목록에서 선택하거나 연락처를 입력하면 해당 임차인에게 호출이 전송됩니다.",
+            )
+
+        return cls.open_session(
+            branch=branch,
+            room_no=room_no,
+            tenant_name=tenant_name.strip(),
+            tenant_phone=tenant_phone.strip(),
+            mode=mode,
+            initiated_by_role=role_norm,
+            call_status="CALLING",
+            lessor_login_verified=(role_norm == "lessor"),
+            tenant_login_verified=(role_norm == "tenant"),
+            id_tenant=id_tenant.strip(),
+            app_source=app_source,
+        )
+
+    def respond_to_call(
+        self,
+        responder_role: str,
+        responder_name: str = "",
+        responder_phone: str = "",
+        id_tenant: str = "",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """호출받은 상대방(임대인 또는 임차인)이 본인 로그인 상태에서 응답하여 공동계약을 정식 개시(CONNECTED)한다."""
+        self._ensure_in_progress()
+        role_norm = "tenant" if responder_role == "tenant" else "lessor"
+        if self.call_status == "CALLING" and role_norm == self.initiated_by_role:
+            other_ko = "임차인" if self.initiated_by_role == "lessor" else "임대인"
+            raise DomainError(
+                f"현재 {other_ko}의 호출 응답을 기다리는 중입니다.",
+                hint=f"{other_ko}이(가) 로그인 후 [호출 응답 및 계약 시작] 버튼을 눌러야 연결됩니다.",
+            )
+
+        if role_norm == "tenant":
+            self.tenant_login_verified = True
+            if id_tenant.strip():
+                self.id_tenant = id_tenant.strip()
+            merged_terms = {**self.terms}
+            if responder_name.strip():
+                merged_terms["tenant_name"] = responder_name.strip()
+            if responder_phone.strip():
+                merged_terms["tenant_phone"] = responder_phone.strip()
+            self.terms = merged_terms
+        else:
+            self.lessor_login_verified = True
+            self.step1_lessor_confirmed = True
+
+        self.call_status = "CONNECTED"
+        self.responded_at = now_iso()
+        self.save(action=f"call_responded_by_{role_norm}", app_source=app_source)
+
+        resp_label = self.lessor_name if role_norm == "lessor" else str(self.terms.get("tenant_name") or "임차인")
+        DirectChat(
+            branch=self.branch,
+            id_room=self.id_room,
+            room_no=self.room_no,
+            sender_role=role_norm,
+            sender_name=resp_label,
+            message=f"[✅ 공동계약 호출 응답 완료] {resp_label}님이 입장하여 양측 연결이 완료되었습니다. 신분증 상호 확인 및 등기부등본 확인을 진행해 주세요.",
+        ).save(action="cosign_call_connected", app_source=app_source)
+
+        return self
 
     @classmethod
     def by_code_or_id(cls, token: str) -> "CoSignSession":
@@ -205,17 +344,56 @@ class CoSignSession(PoolObj):
         if not found:
             raise NotFound(
                 f"공동 계약 세션('{key}')을 찾을 수 없습니다.",
-                hint="임대인에게 전달받은 6자리 참여코드 또는 세션 ID를 다시 확인해 주세요.",
+                hint="공동계약 호출 목록에서 세션을 선택해 주세요.",
             )
         return found
+
+    def verify_counterparty_id(
+        self,
+        role: str,
+        checked: bool = True,
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임대인과 임차인이 서로 상대방의 신분증을 확인하여 본인임을 체크한다."""
+        self._ensure_ready_for_steps()
+        if not (self.lessor_login_verified and self.tenant_login_verified):
+            raise DomainError("양측 모두 본인인증 로그인이 완료된 상태여야 신분증 대조 체크를 진행할 수 있습니다.")
+
+        if role == "lessor":
+            if not self.terms.get("tenant_name"):
+                raise DomainError("확인할 임차인 성명 정보가 아직 등록되지 않았습니다.")
+            self.lessor_checked_tenant_id = checked
+            self.lessor_id_checked_at = now_iso() if checked else ""
+        else:
+            self.tenant_checked_lessor_id = checked
+            self.tenant_id_checked_at = now_iso() if checked else ""
+
+        if not checked:
+            self.lessor_signature = ""
+            self.tenant_signature = ""
+            self.integrity_hash = ""
+
+        if self.is_step1_fully_verified() and self.current_step < 2:
+            self.current_step = 2
+
+        return self.save(action=f"id_card_checked_by_{role}_{checked}", app_source=app_source)
 
     def confirm_step1(
         self,
         role: str,
         registry_updates: Optional[Dict[str, Any]] = None,
+        checked_counterparty_id: Optional[bool] = None,
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
-        self._ensure_in_progress()
+        self._ensure_ready_for_steps()
+        if checked_counterparty_id is not None:
+            if role == "lessor":
+                self.lessor_checked_tenant_id = checked_counterparty_id
+                self.lessor_id_checked_at = now_iso() if checked_counterparty_id else ""
+            else:
+                self.tenant_checked_lessor_id = checked_counterparty_id
+                self.tenant_id_checked_at = now_iso() if checked_counterparty_id else ""
+
         if registry_updates and role == "lessor":
             self.registry_data = {**self.registry_data, **registry_updates}
             self.step1_tenant_locked = False
@@ -225,7 +403,8 @@ class CoSignSession(PoolObj):
             if not self.step1_lessor_confirmed:
                 raise DomainError("먼저 임대인의 등기부등본 정보 제시가 완료되어야 합니다.")
             self.step1_tenant_locked = True
-        if self.step1_lessor_confirmed and self.step1_tenant_locked and self.current_step < 2:
+
+        if self.is_step1_fully_verified() and self.current_step < 2:
             self.current_step = 2
         return self.save(action=f"step1_confirmed_by_{role}", app_source=app_source)
 
@@ -236,7 +415,7 @@ class CoSignSession(PoolObj):
         facility_notes: Optional[str] = None,
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
-        self._ensure_in_progress()
+        self._ensure_ready_for_steps()
         if option_checks is not None:
             self.option_checks = option_checks
             if role == "lessor":
@@ -259,7 +438,7 @@ class CoSignSession(PoolObj):
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
         """Step 3 계약 조건 수정 — 단 1개 필드라도 값이 달라지면 revision 증가 + 양측 동의 및 서명 즉시 초기화!"""
-        self._ensure_in_progress()
+        self._ensure_ready_for_steps()
         merged = {**self.terms}
         changed = False
         int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
@@ -302,7 +481,7 @@ class CoSignSession(PoolObj):
         return self
 
     def agree_step3(self, role: str, expected_revision: Optional[int] = None, app_source: str = "rent3_contract") -> "CoSignSession":
-        self._ensure_in_progress()
+        self._ensure_ready_for_steps()
         if expected_revision is not None and expected_revision != self.revision:
             raise Conflict(
                 f"계약 조건이 방금 수정되었습니다 (현재 리비전 v{self.revision}).",
@@ -327,7 +506,23 @@ class CoSignSession(PoolObj):
         expected_revision: Optional[int] = None,
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
-        self._ensure_in_progress()
+        """Step 4 자필 전자서명 — 본인인증·상호 신분증 확인·등기부등본 확인·계약조건 합의가 모두 완료된 뒤에만 허용!"""
+        self._ensure_ready_for_steps()
+        if not (self.lessor_login_verified and self.tenant_login_verified):
+            raise DomainError(
+                "임대인과 임차인 모두 로그인 본인인증이 완료되어야 전자서명할 수 있습니다.",
+                hint="양측 모두 로그인 및 호출 응답을 완료해 주세요.",
+            )
+        if not (self.lessor_checked_tenant_id and self.tenant_checked_lessor_id):
+            raise DomainError(
+                "서로 상대방의 신분증을 확인하여 본인 확인 체크를 완료해야 전자서명할 수 있습니다.",
+                hint="Step 1에서 임대인·임차인 모두 상대방 신분증 대조 확인에 체크해 주세요.",
+            )
+        if not (self.step1_lessor_confirmed and self.step1_tenant_locked):
+            raise DomainError(
+                "등기부등본을 확인한 뒤에만 전자서명할 수 있습니다.",
+                hint="Step 1에서 등기부등본 권리관계 제시 및 임차인 열람 확인을 완료해 주세요.",
+            )
         if not (self.step3_lessor_agreed and self.step3_tenant_agreed):
             raise DomainError("양측 모두 Step 3 계약 조건 합의 잠금을 완료해야 전자서명할 수 있습니다.")
         if expected_revision is not None and expected_revision != self.revision:
@@ -349,6 +544,12 @@ class CoSignSession(PoolObj):
             self.integrity_hash = Contract.compute_integrity_hash({
                 "session_id": self.id,
                 "revision": self.revision,
+                "identity_verification": {
+                    "lessor_login_verified": self.lessor_login_verified,
+                    "tenant_login_verified": self.tenant_login_verified,
+                    "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
+                    "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
+                },
                 "registry_data": self.registry_data,
                 "option_checks": self.option_checks,
                 "terms": self.terms,
@@ -370,7 +571,7 @@ class CoSignSession(PoolObj):
             ct = Contract.require(self.created_contract_id)
             return {"session": self.model_dump(), "contract": ct.model_dump(), "already_completed": True}
 
-        self._ensure_in_progress()
+        self._ensure_ready_for_steps()
         if not (self.lessor_signature and self.tenant_signature):
             raise DomainError("임대인과 임차인 양측 전자서명이 모두 완료되어야 최종 체결할 수 있습니다.")
 
@@ -378,7 +579,10 @@ class CoSignSession(PoolObj):
         t_info = self.terms
 
         # 1) 임차인 객체 생성 또는 갱신 -> users.json 즉시 업데이트
-        tenant = Tenant.first(phone=t_info["tenant_phone"]) if t_info.get("tenant_phone") else None
+        tenant = (
+            (Tenant.get(self.id_tenant) if self.id_tenant else None)
+            or (Tenant.first(phone=t_info["tenant_phone"]) if t_info.get("tenant_phone") else None)
+        )
         if not tenant:
             tenant = Tenant(
                 name=t_info["tenant_name"],
@@ -442,7 +646,15 @@ class CoSignSession(PoolObj):
             maintenance_fee=int(t_info.get("maintenance_fee", room.maintenance_fee)),
             special_terms=t_info.get("special_terms", ""),
             option_snapshot=self.option_checks,
-            registry_snapshot=self.registry_data,
+            registry_snapshot={
+                **self.registry_data,
+                "lessor_login_verified": self.lessor_login_verified,
+                "tenant_login_verified": self.tenant_login_verified,
+                "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
+                "lessor_id_checked_at": self.lessor_id_checked_at,
+                "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
+                "tenant_id_checked_at": self.tenant_id_checked_at,
+            },
             lessor_signature=self.lessor_signature,
             tenant_signature=self.tenant_signature,
             integrity_hash=self.integrity_hash,
@@ -523,11 +735,18 @@ class CoSignSession(PoolObj):
         if self.status != "IN_PROGRESS":
             raise Conflict(
                 f"이미 종료되었거나 체결 완료된 계약 세션입니다 (상태: {self.status}).",
-                hint="체결된 계약서를 인쇄하거나 새 세션을 개설해 주세요.",
+                hint="체결된 계약서를 인쇄하거나 새 매물을 선택해 상대를 호출해 주세요.",
+            )
+
+    def _ensure_ready_for_steps(self) -> None:
+        self._ensure_in_progress()
+        if self.call_status == "CALLING":
+            callee_ko = "임차인" if self.initiated_by_role == "lessor" else "임대인"
+            raise DomainError(
+                f"상대방({callee_ko})이 아직 공동계약 호출에 응답하지 않았습니다.",
+                hint=f"{callee_ko}이(가) 로그인 후 호출에 응답하면 계약 단계 진행이 시작됩니다.",
             )
 
 
 def re_is_date(v: str) -> bool:
-    import re
     return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", (v or "").strip()))
-
