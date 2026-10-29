@@ -95,7 +95,7 @@ class MaintenanceTicket(PoolObj):
         after_photo: str = "",
         app_source: str = "rent3_lessor",
     ) -> "MaintenanceTicket":
-        self.repair_cost = max(0, int(repair_cost))
+        self.repair_cost = max(0, repair_cost)
         self.cost_burden = cost_burden
         self.resolution_note = resolution_note.strip()
         if after_photo:
@@ -171,15 +171,15 @@ class CheckOutSettlement(PoolObj):
         app_source: str = "rent3_lessor",
     ) -> "CheckOutSettlement":
         b_id = normalize_branch_id(branch)
-        room = Room.first(branch=b_id, room_no=str(room_no))
+        room = Room.first(branch=b_id, room_no=room_no)
         if not room or not room.active_contract_id:
             raise DomainError(f"{room_no}호는 현재 퇴실 정산할 활성 계약이 없습니다.")
 
         ct = Contract.require(room.active_contract_id)
         ledger = ct.ledger()
         unpaid = int(ledger["total_unpaid"])
-        total_deduct = unpaid + int(utility_settlement) + int(cleaning_fee) + int(damage_restoration_fee)
-        refund = max(0, int(ct.deposit) - total_deduct)
+        total_deduct = unpaid + utility_settlement + cleaning_fee + damage_restoration_fee
+        refund = max(0, ct.deposit - total_deduct)
 
         settlement = cls(
             branch=b_id,
@@ -192,9 +192,9 @@ class CheckOutSettlement(PoolObj):
             status="CALCULATED",
             deposit_original=ct.deposit,
             unpaid_rent_deduction=unpaid,
-            utility_settlement=int(utility_settlement),
-            cleaning_fee=int(cleaning_fee),
-            damage_restoration_fee=int(damage_restoration_fee),
+            utility_settlement=utility_settlement,
+            cleaning_fee=cleaning_fee,
+            damage_restoration_fee=damage_restoration_fee,
             refund_amount=refund,
             inspection_notes=inspection_notes,
         ).save(action="checkout_calculated", app_source=app_source)
@@ -304,4 +304,343 @@ class RtmsReport(PoolObj):
         ct.fixed_date_no = fix_no
         ct.save(action="fixed_date_attached", app_source=app_source)
         return report
+
+
+class ExpiryRenewalCheck(PoolObj):
+    """만기 6~2개월 전 전출계획 확인 및 전출의사 없을 때 연장 재계약 예고 객체 (주택임대차보호법 제6조·제7조)."""
+    collection: ClassVar[str] = "ops"
+    label: ClassVar[str] = "만기 전출확인·재계약예고"
+
+    id: str = Field(default_factory=lambda: f"exp_{uuid4().hex[:8]}")
+    branch: str = "main"
+    id_building: str = ""
+    id_room: str = ""
+    room_no: str = ""
+    id_contract: str = ""
+    id_tenant: str = ""
+    tenant_name: str = ""
+    lessor_name: str = ""
+    expiry_date: str = ""
+    notice_deadline_date: str = ""
+
+    # AWAITING_TENANT -> MOVEOUT_PLANNED | STAY_CONFIRMED -> RENEWAL_PREVIEWED -> RENEWAL_ACKNOWLEDGED
+    status: str = "AWAITING_TENANT"
+    tenant_plan: str = "UNDECIDED"           # UNDECIDED / MOVE_OUT / STAY
+    planned_move_out_date: str = ""
+    tenant_memo: str = ""
+    check_requested_at: str = ""
+    tenant_responded_at: str = ""
+
+    renewal_type: str = ""                   # SAME_TERMS / ADJUSTED_WITHIN_5PCT
+    current_deposit: int = 0
+    current_monthly_rent: int = 0
+    current_maintenance_fee: int = 0
+    proposed_deposit: int = 0
+    proposed_monthly_rent: int = 0
+    proposed_maintenance_fee: int = 0
+    proposed_term_months: int = 12
+    deposit_increase_pct: float = 0.0
+    rent_increase_pct: float = 0.0
+    renewal_note: str = ""
+    cosign_session_id: str = ""
+    cosign_session_code: str = ""
+    renewal_preview_sent_at: str = ""
+    renewal_acknowledged_at: str = ""
+
+    def summary(self) -> str:
+        return f"만기확인 [{self.room_no}호 {self.tenant_name}] {self.status} (만기 {self.expiry_date})"
+
+    @classmethod
+    def for_contract(cls, contract_id: str) -> Optional["ExpiryRenewalCheck"]:
+        if not contract_id:
+            return None
+        matches = cls.find(id_contract=contract_id)
+        if not matches:
+            return None
+        return sorted(matches, key=lambda x: x.updated_at, reverse=True)[0]
+
+    @classmethod
+    def request_moveout_check(
+        cls,
+        branch: str,
+        room_no: str,
+        message_note: str = "",
+        app_source: str = "rent3_lessor",
+    ) -> "ExpiryRenewalCheck":
+        b_id = normalize_branch_id(branch)
+        room = Room.first(branch=b_id, room_no=room_no)
+        if not room or not room.active_contract_id:
+            raise DomainError(f"{room_no}호에는 현재 진행 중인 활성 임대차 계약이 없습니다.")
+
+        ct = Contract.require(room.active_contract_id)
+        win = ct.expiry_window_status()
+        existing = cls.for_contract(ct.id)
+
+        if existing:
+            chk = existing
+            chk.expiry_date = ct.expiry_date
+            chk.notice_deadline_date = win["notice_deadline_date"]
+            chk.status = "AWAITING_TENANT"
+            chk.tenant_plan = "UNDECIDED"
+            chk.check_requested_at = now_iso()
+        else:
+            chk = cls(
+                branch=b_id,
+                id_building=ct.id_building,
+                id_room=room.id,
+                room_no=room.room_no,
+                id_contract=ct.id,
+                id_tenant=ct.id_tenant,
+                tenant_name=ct.tenant_name,
+                lessor_name=ct.lessor_name,
+                expiry_date=ct.expiry_date,
+                notice_deadline_date=win["notice_deadline_date"],
+                status="AWAITING_TENANT",
+                tenant_plan="UNDECIDED",
+                check_requested_at=now_iso(),
+                current_deposit=ct.deposit,
+                current_monthly_rent=ct.monthly_rent,
+                current_maintenance_fee=ct.maintenance_fee,
+                proposed_deposit=ct.deposit,
+                proposed_monthly_rent=ct.monthly_rent,
+                proposed_maintenance_fee=ct.maintenance_fee,
+                proposed_term_months=ct.lease_term_months or 12,
+            )
+        chk.save(action="expiry_moveout_check_requested", app_source=app_source)
+
+        extra = f" ({message_note.strip()})" if message_note.strip() else ""
+        DirectChat(
+            branch=b_id,
+            id_room=room.id,
+            room_no=room.room_no,
+            sender_role="lessor",
+            sender_name=ct.lessor_name or "임대인",
+            message=(
+                f"[📅 만기 6~2개월 전 전출계획 확인 요청] {room.room_no}호 계약 만기일({ct.expiry_date}, "
+                f"법정 통지마감 {win['notice_deadline_date']})을 앞두고 퇴실(전출) 계획 여부를 확인 중입니다. "
+                f"임차인 마이홈에서 [전출 예정] 또는 [전출의사 없음(연장 희망)]을 회신해 주세요.{extra}"
+            ),
+            quick_action_label="마이홈 전출계획 회신",
+            quick_action_url=f"/rent3_tenant/?tenant={ct.id_tenant}",
+        ).save(action="chat_auto_sent", app_source=app_source)
+        return chk
+
+    @classmethod
+    def ensure_for_contract(cls, ct: Contract) -> "ExpiryRenewalCheck":
+        existing = cls.for_contract(ct.id)
+        if existing:
+            return existing
+        win = ct.expiry_window_status()
+        return cls(
+            branch=ct.branch,
+            id_building=ct.id_building,
+            id_room=ct.id_room,
+            room_no=ct.room_no,
+            id_contract=ct.id,
+            id_tenant=ct.id_tenant,
+            tenant_name=ct.tenant_name,
+            lessor_name=ct.lessor_name,
+            expiry_date=ct.expiry_date,
+            notice_deadline_date=win["notice_deadline_date"],
+            status="AWAITING_TENANT",
+            tenant_plan="UNDECIDED",
+            check_requested_at=now_iso(),
+            current_deposit=ct.deposit,
+            current_monthly_rent=ct.monthly_rent,
+            current_maintenance_fee=ct.maintenance_fee,
+            proposed_deposit=ct.deposit,
+            proposed_monthly_rent=ct.monthly_rent,
+            proposed_maintenance_fee=ct.maintenance_fee,
+            proposed_term_months=ct.lease_term_months or 12,
+        )
+
+    def respond_moveout_plan(
+        self,
+        tenant_plan: str,
+        planned_move_out_date: str = "",
+        tenant_memo: str = "",
+        prelist_vacancy: bool = True,
+        app_source: str = "rent3_tenant",
+    ) -> "ExpiryRenewalCheck":
+        plan = (tenant_plan or "").strip().upper()
+        if plan not in ("MOVE_OUT", "STAY"):
+            raise DomainError("전출계획 회신 값은 'MOVE_OUT'(전출 예정) 또는 'STAY'(전출의사 없음/연장 희망)여야 합니다.")
+
+        self.tenant_plan = plan
+        self.tenant_memo = (tenant_memo or "").strip()
+        self.tenant_responded_at = now_iso()
+
+        room = Room.get(self.id_room)
+
+        if plan == "MOVE_OUT":
+            self.status = "MOVEOUT_PLANNED"
+            self.planned_move_out_date = (planned_move_out_date or "").strip() or self.expiry_date
+            self.save(action="tenant_planned_moveout", app_source=app_source)
+
+            if room and prelist_vacancy:
+                room.pre_moveout_notice = True
+                room.is_published = True
+                room.available_from = f"{self.planned_move_out_date} 입주예정(만기퇴실)"
+                room.save(action="room_prelisted_from_moveout_plan", app_source=app_source)
+
+            DirectChat(
+                branch=self.branch,
+                id_room=self.id_room,
+                room_no=self.room_no,
+                sender_role="tenant",
+                sender_name=self.tenant_name,
+                message=(
+                    f"[📦 만기 전출(퇴실) 예정 회신] {self.room_no}호 {self.tenant_name} 세입자가 "
+                    f"{self.planned_move_out_date} 퇴실 예정을 회신했습니다."
+                    + (" (공실 쇼케이스에 사전예약 매물로 자동 등록됨)" if prelist_vacancy else "")
+                ),
+            ).save(action="chat_auto_sent", app_source=app_source)
+        else:
+            self.status = "STAY_CONFIRMED"
+            self.planned_move_out_date = ""
+            self.save(action="tenant_confirmed_no_moveout", app_source=app_source)
+
+            if room and room.pre_moveout_notice:
+                room.pre_moveout_notice = False
+                room.is_published = False
+                room.available_from = "즉시입주"
+                room.save(action="room_prelist_cancelled_for_stay", app_source=app_source)
+
+            DirectChat(
+                branch=self.branch,
+                id_room=self.id_room,
+                room_no=self.room_no,
+                sender_role="tenant",
+                sender_name=self.tenant_name,
+                message=(
+                    f"[🏠 전출의사 없음(거주 연장 희망) 회신] {self.room_no}호 {self.tenant_name} 세입자가 전출 계획이 없음을 "
+                    f"확인했습니다. 임대인 앱에서 연장 재계약 조건을 예고해 주세요."
+                ),
+            ).save(action="chat_auto_sent", app_source=app_source)
+
+        return self
+
+    def send_renewal_preview(
+        self,
+        proposed_deposit: Optional[int] = None,
+        proposed_monthly_rent: Optional[int] = None,
+        proposed_maintenance_fee: Optional[int] = None,
+        proposed_term_months: int = 12,
+        renewal_note: str = "",
+        open_cosign_session: bool = True,
+        app_source: str = "rent3_lessor",
+    ) -> "ExpiryRenewalCheck":
+        if self.tenant_plan == "MOVE_OUT":
+            raise DomainError(
+                "임차인이 '전출(퇴실) 예정'으로 회신한 상태입니다.",
+                hint="연장 재계약 예고를 발송하려면 먼저 전출의사 없음(연장 희망) 상태로 전환해 주세요.",
+            )
+
+        ct = Contract.require(self.id_contract)
+        dep = ct.deposit if proposed_deposit is None else proposed_deposit
+        rent = ct.monthly_rent if proposed_monthly_rent is None else proposed_monthly_rent
+        maint = ct.maintenance_fee if proposed_maintenance_fee is None else proposed_maintenance_fee
+        months = max(1, proposed_term_months or 12)
+
+        # 주택임대차보호법 제7조 법정 5% 상한 검증 (초과 시 Mismatch 422 발생)
+        ct.validate_renewal_cap(new_deposit=dep, new_rent=rent)
+
+        dep_inc = round(((dep - ct.deposit) / ct.deposit) * 100, 2) if ct.deposit > 0 else 0.0
+        rent_inc = round(((rent - ct.monthly_rent) / ct.monthly_rent) * 100, 2) if ct.monthly_rent > 0 else 0.0
+        is_same = (dep == ct.deposit and rent == ct.monthly_rent and maint == ct.maintenance_fee)
+
+        self.tenant_plan = "STAY"
+        self.current_deposit = ct.deposit
+        self.current_monthly_rent = ct.monthly_rent
+        self.current_maintenance_fee = ct.maintenance_fee
+        self.proposed_deposit = dep
+        self.proposed_monthly_rent = rent
+        self.proposed_maintenance_fee = maint
+        self.proposed_term_months = months
+        self.deposit_increase_pct = dep_inc
+        self.rent_increase_pct = rent_inc
+        self.renewal_type = "SAME_TERMS" if is_same else "ADJUSTED_WITHIN_5PCT"
+        self.renewal_note = (renewal_note or "").strip() or (
+            "종전과 동일한 임대 조건으로 연장 재계약을 예고합니다."
+            if is_same else f"주택임대차보호법 5% 상한 이내(월세 {rent_inc:+.2f}%)로 조정된 연장 재계약 조건을 예고합니다."
+        )
+
+        if open_cosign_session:
+            from .cosign import CoSignSession
+            sess = CoSignSession.get(self.cosign_session_id) if self.cosign_session_id else None
+            if not sess or sess.status != "IN_PROGRESS":
+                sess = CoSignSession.open_session(
+                    branch=self.branch,
+                    room_no=self.room_no,
+                    tenant_name=ct.tenant_name,
+                    tenant_phone=ct.tenant_phone,
+                    mode="RENEWAL",
+                    app_source=app_source,
+                )
+            sess.update_terms(
+                role="lessor",
+                updates={
+                    "deposit": dep,
+                    "monthly_rent": rent,
+                    "maintenance_fee": maint,
+                    "lease_term_months": months,
+                    "move_in_date": ct.expiry_date or date_today().isoformat(),
+                    "special_terms": (
+                        f"[만기 연장 재계약 예고 반영] {self.renewal_note}\n"
+                        "자연 마모 수선은 임대인 부담이며, 종전 입실 점검표를 승계함."
+                    ),
+                },
+                app_source=app_source,
+            )
+            self.cosign_session_id = sess.id
+            self.cosign_session_code = sess.session_code
+
+        self.status = "RENEWAL_PREVIEWED"
+        self.renewal_preview_sent_at = now_iso()
+        self.save(action="renewal_contract_preview_sent", app_source=app_source)
+
+        type_label = "동일조건 연장" if is_same else f"5% 이내 조정({rent_inc:+.1f}%)"
+        code_info = f" · 공동재계약 코드 [{self.cosign_session_code}]" if self.cosign_session_code else ""
+        DirectChat(
+            branch=self.branch,
+            id_room=self.id_room,
+            room_no=self.room_no,
+            sender_role="lessor",
+            sender_name=ct.lessor_name or "임대인",
+            message=(
+                f"[📝 연장 재계약 예고 도착 — {type_label}] 보증금 {dep:,}원 / 월세 {rent:,}원 / "
+                f"관리비 {maint:,}원 ({months}개월 연장){code_info}. 마이홈에서 예고 조건 확인 및 전자서명을 진행해 주세요."
+            ),
+            quick_action_label="공동 재계약방 열기" if self.cosign_session_id else "",
+            quick_action_url=f"/rent3_contract/?session={self.cosign_session_id}&role=tenant" if self.cosign_session_id else "",
+        ).save(action="chat_auto_sent", app_source=app_source)
+
+        return self
+
+    def acknowledge_renewal_preview(
+        self,
+        tenant_memo: str = "",
+        app_source: str = "rent3_tenant",
+    ) -> "ExpiryRenewalCheck":
+        if self.status not in ("RENEWAL_PREVIEWED", "RENEWAL_ACKNOWLEDGED"):
+            raise DomainError("아직 임대인의 연장 재계약 예고가 발송되지 않았습니다.")
+        if tenant_memo.strip():
+            self.tenant_memo = tenant_memo.strip()
+        self.status = "RENEWAL_ACKNOWLEDGED"
+        self.renewal_acknowledged_at = now_iso()
+        self.save(action="renewal_preview_acknowledged_by_tenant", app_source=app_source)
+
+        DirectChat(
+            branch=self.branch,
+            id_room=self.id_room,
+            room_no=self.room_no,
+            sender_role="tenant",
+            sender_name=self.tenant_name,
+            message=(
+                f"[✅ 연장 재계약 예고 동의 완료] {self.room_no}호 {self.tenant_name} 세입자가 예고된 연장 조건"
+                f"(보 {self.proposed_deposit:,}원 / 월 {self.proposed_monthly_rent:,}원)을 확인·동의했습니다."
+            ),
+        ).save(action="chat_auto_sent", app_source=app_source)
+        return self
+
 

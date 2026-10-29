@@ -97,7 +97,7 @@ class FifoPaymentEngine:
         if amount <= 0:
             raise DomainError("입금 금액은 0원보다 커야 합니다.", hint="정확한 수납 금액을 입력해 주세요.")
 
-        room = Room.first(branch=b_id, room_no=str(room_no))
+        room = Room.first(branch=b_id, room_no=room_no)
         if not room:
             raise NotFound(f"{b_id} 지점에서 '{room_no}호'를 찾을 수 없습니다.", hint="호실 번호를 다시 확인해 주세요.")
 
@@ -149,8 +149,8 @@ class FifoPaymentEngine:
         monthly_std = contract.monthly_rent + contract.maintenance_fee + contract.compute_vat()
         if monthly_std > 0:
             ratio = amount / monthly_std
-            rent_part = int(round(contract.monthly_rent * ratio))
-            vat_part = int(round(contract.compute_vat() * ratio))
+            rent_part = round(contract.monthly_rent * ratio)
+            vat_part = round(contract.compute_vat() * ratio)
             maint_part = max(0, amount - rent_part - vat_part)
         else:
             rent_part = amount
@@ -250,11 +250,11 @@ class TaxAndCertificateService:
         rooms = Room.find(branch=b_id)
         pays = [
             p for p in Pay.find(branch=b_id)
-            if p.payment_kind == "MONTHLY_RENT" and str(p.paid_date).startswith(yr_prefix)
+            if p.payment_kind == "MONTHLY_RENT" and p.paid_date.startswith(yr_prefix)
         ]
         outlays = [
             o for o in Outlay.find(branch=b_id)
-            if str(o.expense_date).startswith(yr_prefix)
+            if o.expense_date.startswith(yr_prefix)
         ]
 
         gross_revenue = sum(p.total_amount for p in pays)
@@ -268,7 +268,7 @@ class TaxAndCertificateService:
 
         # 분리과세(15.4%: 소득세 14% + 지방소득세 1.4%) 추정 세액
         taxable_income = max(0, noi)
-        estimated_separate_tax = int(round(taxable_income * 0.154))
+        estimated_separate_tax = round(taxable_income * 0.154)
         prop_val = bldg.property_value if bldg else 1000000000
         cap_rate = round((noi / prop_val) * 100, 2) if prop_val > 0 else 0.0
 
@@ -307,7 +307,7 @@ class TaxAndCertificateService:
         yr = summary["year"]
         outlays = [
             o for o in Outlay.find(branch=b_id)
-            if str(o.expense_date).startswith(f"{yr:04d}")
+            if o.expense_date.startswith(f"{yr:04d}")
         ]
 
         buf = io.StringIO()
@@ -344,11 +344,11 @@ class TaxAndCertificateService:
 
         pays = [
             p for p in Pay.find(id_contract=ct.id)
-            if p.payment_kind == "MONTHLY_RENT" and str(p.paid_date).startswith(f"{yr:04d}")
+            if p.payment_kind == "MONTHLY_RENT" and p.paid_date.startswith(f"{yr:04d}")
         ]
         total_paid = sum(p.total_amount for p in pays)
         deductible_base = min(total_paid, 10_000_000)  # 연 1,000만원 한도
-        estimated_refund_17pct = int(round(deductible_base * 0.17))
+        estimated_refund_17pct = round(deductible_base * 0.17)
 
         return {
             "certificate_no": f"CERT-{yr}-{ct.id[-6:].upper()}",

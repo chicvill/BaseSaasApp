@@ -12,13 +12,13 @@ import os
 import shutil
 from typing import Any, Dict, List
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
+from reportlab.lib import colors  # type: ignore[import-untyped]
+from reportlab.lib.pagesizes import A4  # type: ignore[import-untyped]
+from reportlab.lib.styles import ParagraphStyle  # type: ignore[import-untyped]
+from reportlab.lib.units import mm  # type: ignore[import-untyped]
+from reportlab.pdfbase import pdfmetrics  # type: ignore[import-untyped]
+from reportlab.pdfbase.ttfonts import TTFont  # type: ignore[import-untyped]
+from reportlab.platypus import (  # type: ignore[import-untyped]
     Flowable,
     KeepTogether,
     Paragraph,
@@ -46,7 +46,7 @@ def register_korean_fonts() -> tuple[str, str]:
 class InteractiveCheckBox(Flowable):
     """PDF 뷰어에서 직접 클릭하여 체크/해제할 수 있는 AcroForm 체크박스 Flowable."""
 
-    def __init__(self, field_name: str, tooltip: str = "", size: float = 13.0):
+    def __init__(self, field_name: str, tooltip: str = "", size: int = 13):
         super().__init__()
         self.field_name = field_name
         self.tooltip = tooltip
@@ -67,7 +67,7 @@ class InteractiveCheckBox(Flowable):
             fillColor=colors.white,
             borderColor=colors.HexColor("#2563EB"),
             textColor=colors.HexColor("#0F172A"),
-            borderWidth=1.2,
+            borderWidth=1,
             borderStyle="solid",
             fieldFlags="",
             forceBorder=True,
@@ -81,6 +81,8 @@ class InteractiveNoteField(Flowable):
     def __init__(self, field_name: str, width: float = 72.0, height: float = 16.0, tooltip: str = ""):
         super().__init__()
         self.field_name = field_name
+        self.box_width = round(width)
+        self.box_height = round(height)
         self.width = width
         self.height = height
         self.tooltip = tooltip
@@ -92,12 +94,12 @@ class InteractiveNoteField(Flowable):
             value="",
             x=0,
             y=0,
-            width=self.width,
-            height=self.height,
+            width=self.box_width,
+            height=self.box_height,
             fillColor=colors.HexColor("#F8FAFC"),
             borderColor=colors.HexColor("#CBD5E1"),
             textColor=colors.HexColor("#0F172A"),
-            borderWidth=0.7,
+            borderWidth=1,
             fontSize=8,
             fieldFlags="",
             forceBorder=True,
@@ -155,6 +157,7 @@ SECTIONS: List[Dict[str, Any]] = [
             ("LES-D05", "게시데이터", "공용운영비 · NOI · 종소세 탭", "미화(18만)·승강기(11만)·인터넷(16.5만) 경비 합계(45.5만) 차감 NOI 및 15.4% 분리과세 예상세액 표기 확인"),
             ("LES-D06", "게시데이터", "A/S · 채팅 · 퇴실정산 탭", "201호 세면대 배수 점검 요청(RECEIVED) 티켓 및 203호 김예비 방문투어 희망 채팅 기본 노출 확인"),
             ("LES-D07", "게시데이터", "신규호실 · 도어락/주차 관제 탭", "201~203호 현재 도어락 비밀번호(4860*, 7942*, 2030*) 및 등록 차량(201호 12가 3456) 표시 확인"),
+            ("LES-D08", "게시데이터", "만기 6~2개월 전 법정 통지구간 배너", "주택임대차보호법 제6조 통지구간(D-180~D-60) 도래 호실(시크빌 201호 등) 상단 경보 배너 및 통지마감일 표시 확인"),
             ("LES-F01", "실행기능", "지점 선택 드롭다운 전환", "상단 드롭다운에서 선호아트빌(sunho) · 신비주택(sinbi, 상가 VAT 포함) 전환 시 KPI와 호실 목록이 즉시 바뀌는지 확인"),
             ("LES-F02", "실행기능", "[문자 파싱 & 즉시 수납] + 중복차단", "은행 입금문자 파싱 시 가장 오래된 미납월부터 FIFO 순차 상계되며, 동일 문자 재클릭 시 409 중복입금 황색 배너로 차단되는지 확인"),
             ("LES-F03", "실행기능", "[직접 FIFO 수납] 버튼", "호실 카드에서 수납액 입력 후 클릭 시 payments.json 반영 및 미납액/월별 상태 칩이 즉시 갱신되는지 확인"),
@@ -169,6 +172,8 @@ SECTIONS: List[Dict[str, Any]] = [
             ("LES-F12", "실행기능", "A/S [기사 배정] & [수리 완료]", "기사 배정 시 안내 채팅이 자동 발송되고, 수리 완료 시 임대인 부담 수리비가 outlays.json 필요경비에 자동 등재되는지 확인"),
             ("LES-F13", "실행기능", "[퇴실 정산서 발행] & [반환 완료]", "미납월세·공과금·청소비 자동 공제 정산서 발행 후, 반환 완료 클릭 시 호실이 즉시 '공실 매물 공개'로 자동 복귀되는지 확인"),
             ("LES-F14", "실행기능", "[호실 저장] · [비번 변경] · [채팅 전송]", "신규 호실 추가, 도어락 비밀번호 변경(입주자 마이홈 즉시 반영), 1:1 메신저 답변 전송이 각각 정상 작동하는지 확인"),
+            ("LES-F15", "실행기능", "[전출계획 확인 요청] & [전출/연장 기록]", "만기 6~2개월 전 확인 요청 발송 및 유선 확인 기록 시 ops.json 반영, 만기전출 시 사전공실 노출 동작 확인"),
+            ("LES-F16", "실행기능", "[연장 재계약 예고 발송] (5% 상한 검증)", "전출의사 없을 때 연장 조건 예고 시 5% 초과 인상은 422 차단되고 적법 조건은 마이홈 예고장 및 공동 재계약방에 전달되는지 확인"),
         ],
     },
     {
@@ -184,6 +189,7 @@ SECTIONS: List[Dict[str, Any]] = [
             ("TEN-D04", "게시데이터", "월별 FIFO 납부 현황 & A/S 목록", "후불 입주월 비과세(EXEMPT_POSTPAID) 내역, 월별 청구/납부 내역 및 접수된 A/S 진행 상태 표시 확인"),
             ("TEN-D05", "게시데이터", "17% 월세 세액공제 공식 증명서", "연간 총 납입액(1,650,000원), 17% 예상 세액공제(280,500원), 확정일자 및 현금영수증 승인번호가 찍힌 영수필 직인 양식 확인"),
             ("TEN-D06", "게시데이터", "복비 0원 공실 탐색 쇼케이스", "[복비 0원 즉시입주 공실 탐색] 전환 시 공개 공실 3실(시크빌 203·선호 302·신비 202) 및 등기 클린 배지 노출 확인"),
+            ("TEN-D07", "게시데이터", "만기 6~2개월 전 전출확인·연장예고 카드", "법정 통지구간 세입자(201호 이민수 등) 마이홈 진입 시 만기일·통지마감일 및 연장 재계약 예고장 카드 표시 확인"),
             ("TEN-F01", "실행기능", "[마이홈] ↔ [공실 탐색] 모드 스위치", "상단 2개 모드 버튼 클릭 시 세입자 마이홈 라운지와 예비 임차인 공실 탐색 화면이 즉시 전환되는지 확인"),
             ("TEN-F02", "실행기능", "입주 세입자 선택 드롭다운", "202호 정서연(미납 보유), 301호 한지훈, 101호 디자인스튜디오 봄 등으로 전환 시 각 세대 원장과 증명서가 갱신되는지 확인"),
             ("TEN-F03", "실행기능", "세대 도어락 [보기 / 숨기기]", "버튼 클릭 시 마스킹(••••*)이 실제 도어락 비밀번호(4860* 등)로 토글되고 임대인 변경분과 일치하는지 확인"),
@@ -193,6 +199,8 @@ SECTIONS: List[Dict[str, Any]] = [
             ("TEN-F07", "실행기능", "[월세 즉시 납부] 온라인 결제", "카카오페이/카드/계좌이체 선택 후 납부 클릭 시 payments.json 반영, 미납액 차감 및 세액공제 증명서 금액이 즉시 합산되는지 확인"),
             ("TEN-F08", "실행기능", "[임대인에게 수리 요청 보내기]", "수리 분류·제목 입력 후 클릭 시 ops.json에 티켓이 생성되고 임대인 A/S 대장에 실시간 노출되는지 확인"),
             ("TEN-F09", "실행기능", "[납입증명서 인쇄] & 공실 [방문문의/계약방]", "증명서 인쇄 시 불필요한 버튼이 숨겨져 A4 출력되며, 공실 탭에서 [1:1 방문문의] 전송 및 [열린 계약방 입장] 이동 확인"),
+            ("TEN-F10", "실행기능", "[전출의사 없음] / [만기 전출 예정 회신]", "마이홈에서 회신 시 임대인 화면에 즉시 동기화되며, 만기 전출 시 공실 쇼케이스에 사전공개 배지로 노출되는지 확인"),
+            ("TEN-F11", "실행기능", "[연장 재계약 예고 조건 확인·동의]", "임대인 연장 재계약 예고장에서 조건 확인·동의 클릭 시 상태가 동의 완료로 변경되고 공동 재계약방 원클릭 입장이 되는지 확인"),
         ],
     },
     {
@@ -495,7 +503,7 @@ def build_pdf(output_path: str) -> int:
             chk = InteractiveCheckBox(
                 field_name=f"chk_{item_id}",
                 tooltip=f"[{item_id}] {name} 테스트 완료 체크",
-                size=12.5,
+                size=13,
             )
             note = InteractiveNoteField(
                 field_name=f"note_{item_id}",

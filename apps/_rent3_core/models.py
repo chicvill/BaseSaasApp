@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, ClassVar, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -54,7 +54,7 @@ def normalize_branch_id(raw: Optional[str]) -> str:
     """단일 진입점 지점 ID 정규화 (Single Source of Truth)."""
     if not raw:
         return "main"
-    key = str(raw).strip().lower()
+    key = raw.strip().lower()
     return BRANCH_ALIASES.get(key, key)
 
 
@@ -75,7 +75,7 @@ def date_today() -> date:
 
 
 def parse_ym(value: str) -> Optional[Tuple[int, int]]:
-    s = str(value or "").strip()
+    s = (value or "").strip()
     m = re.search(r"(\d{4})\s*[-./]\s*(\d{1,2})", s)
     if not m:
         return None
@@ -224,7 +224,7 @@ class Building(PoolObj):
         return f"건물 {self.building_name} ({self.branch})"
 
     def rooms(self) -> List["Room"]:
-        return sorted(Room.find(id_building=self.id), key=lambda r: str(r.room_no))
+        return sorted(Room.find(id_building=self.id), key=lambda r: r.room_no)
 
     def occupancy_stats(self) -> Dict[str, Any]:
         rms = self.rooms()
@@ -279,6 +279,7 @@ class Room(PoolObj):
     monthly_rent: int = 500000
     maintenance_fee: int = 50000
     available_from: str = "즉시입주"
+    pre_moveout_notice: bool = False         # 만기 전출예정 회신 시 사전 공실 매물 예고 플래그
     is_published: bool = True
     images: List[str] = Field(default_factory=list)
 
@@ -305,6 +306,7 @@ class Room(PoolObj):
         """퇴실 정산 완료 시 공실 전환 및 직거래 매물 자동 재노출."""
         self.id_tenant = ""
         self.active_contract_id = ""
+        self.pre_moveout_notice = False
         self.is_published = True
         self.available_from = "즉시입주"
         return self.save(action="room_vacated_and_relisted", app_source=app_source)
@@ -365,8 +367,8 @@ class Contract(PoolObj):
             return 0
         base = self.monthly_rent + self.maintenance_fee
         if self.vat_separate:
-            return int(round(base * 0.1))
-        return int(round(base - (base / 1.1)))
+            return round(base * 0.1)
+        return round(base - (base / 1.1))
 
     def days_to_expiry(self) -> Optional[int]:
         if not self.expiry_date:
@@ -376,6 +378,54 @@ class Contract(PoolObj):
             return (exp - date_today()).days
         except ValueError:
             return None
+
+    def expiry_window_status(self) -> Dict[str, Any]:
+        """주택임대차보호법 제6조 만기 6개월(180일)~2개월(60일) 전 전출확인·재계약예고 구간 판별."""
+        days = self.days_to_expiry()
+        if days is None or not self.expiry_date:
+            return {
+                "days_to_expiry": None,
+                "months_to_expiry": None,
+                "window_state": "UNKNOWN",
+                "in_6_to_2_months_window": False,
+                "notice_open_date": "",
+                "notice_deadline_date": "",
+                "days_to_notice_deadline": None,
+            }
+        try:
+            exp = date.fromisoformat(self.expiry_date[:10])
+        except ValueError:
+            return {
+                "days_to_expiry": days,
+                "months_to_expiry": None,
+                "window_state": "UNKNOWN",
+                "in_6_to_2_months_window": False,
+                "notice_open_date": "",
+                "notice_deadline_date": "",
+                "days_to_notice_deadline": None,
+            }
+
+        open_dt = exp - timedelta(days=180)
+        deadline_dt = exp - timedelta(days=60)
+        days_to_deadline = (deadline_dt - date_today()).days
+        if days < 0:
+            w_state = "EXPIRED"
+        elif days < 60:
+            w_state = "TACIT_LOCKED"
+        elif days <= 180:
+            w_state = "NOTICE_WINDOW"
+        else:
+            w_state = "EARLY"
+
+        return {
+            "days_to_expiry": days,
+            "months_to_expiry": round(days / 30.0, 1),
+            "window_state": w_state,
+            "in_6_to_2_months_window": (60 <= days <= 180),
+            "notice_open_date": open_dt.isoformat(),
+            "notice_deadline_date": deadline_dt.isoformat(),
+            "days_to_notice_deadline": days_to_deadline,
+        }
 
     def due_for_month(self, ym: str) -> Dict[str, Any]:
         """rent2 핵심 불변식 계승:
@@ -409,8 +459,8 @@ class Contract(PoolObj):
                 "rule_state": "POSTPAID_MOVE_IN_EXEMPT",
             }
 
-        rent_amt = 0 if self.lease_type == "전세" else int(self.monthly_rent)
-        maint_amt = int(self.maintenance_fee)
+        rent_amt = 0 if self.lease_type == "전세" else self.monthly_rent
+        maint_amt = self.maintenance_fee
         vat_amt = self.compute_vat() if (self.vat_target and self.vat_separate) else 0
         total_due = rent_amt + maint_amt + vat_amt
         return {
@@ -437,7 +487,7 @@ class Contract(PoolObj):
             p for p in Pay.find(id_contract=self.id)
             if p.payment_kind == "MONTHLY_RENT"
         ]
-        total_pool_paid = sum(int(p.total_amount) for p in pays)
+        total_pool_paid = sum(p.total_amount for p in pays)
         remaining_credit = total_pool_paid
 
         rows: List[Dict[str, Any]] = []
@@ -508,7 +558,7 @@ class Contract(PoolObj):
     def validate_renewal_cap(self, new_deposit: int, new_rent: int) -> Dict[str, Any]:
         """주택임대차보호법 제7조 5% 임대료 증액 상한선 검증."""
         old_equiv = self.monthly_rent
-        max_rent = int(round(old_equiv * 1.05))
+        max_rent = round(old_equiv * 1.05)
         if old_equiv > 0 and new_rent > max_rent:
             inc_pct = round(((new_rent - old_equiv) / old_equiv) * 100, 2)
             raise Mismatch(
@@ -517,7 +567,7 @@ class Contract(PoolObj):
                 expected=max_rent,
                 actual=new_rent,
             )
-        max_dep = int(round(self.deposit * 1.05))
+        max_dep = round(self.deposit * 1.05)
         if self.deposit > 0 and new_deposit > max_dep:
             inc_pct = round(((new_deposit - self.deposit) / self.deposit) * 100, 2)
             raise Mismatch(

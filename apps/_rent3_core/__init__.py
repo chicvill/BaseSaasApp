@@ -21,7 +21,7 @@ from .models import (
     date_today,
     normalize_branch_id,
 )
-from .ops import CheckOutSettlement, DirectChat, MaintenanceTicket, RtmsReport
+from .ops import CheckOutSettlement, DirectChat, ExpiryRenewalCheck, MaintenanceTicket, RtmsReport
 from .pool import JsonDataPool, POOL_COLLECTIONS, POOL_REGISTRY, PoolObj, pool, use_pool_dir
 from .seed import ensure_pool_seeded
 
@@ -55,5 +55,6 @@ __all__ = [
     "MaintenanceTicket",
     "CheckOutSettlement",
     "RtmsReport",
+    "ExpiryRenewalCheck",
 ]
 

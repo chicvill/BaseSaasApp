@@ -35,3 +35,4 @@
 {"at": "2026-10-29T19:17:02", "actor": "system", "app_source": "seed_bootstrap", "collection": "ops", "kind": "directchat", "id": "chat_0c1a5195", "action": "seeded", "summary": "채팅 [203호] 김예비(방문희망): 안녕하세요! 시크빌 203호 공실 이번 주 "}
 {"at": "2026-10-29T19:17:02", "actor": "system", "app_source": "seed_bootstrap", "collection": "cosign_sessions", "kind": "cosignsession", "id": "cs_2e289e9e", "action": "cosign_session_opened", "summary": "공동계약 [203호 코드:408188] Step 1/5 (IN_PROGRESS, rev=1)"}
 {"at": "2026-10-29T19:17:02", "actor": "system", "app_source": "seed_bootstrap", "collection": "ops", "kind": "directchat", "id": "chat_a72a6a4b", "action": "cosign_invite_sent", "summary": "채팅 [203호] 김임대 (시크빌 대표): [🤝 공동 임대계약방 개설] 203호 실시간"}
+{"at": "2026-10-29T20:40:58", "actor": "system", "app_source": "seed", "collection": "contracts", "kind": "contract", "id": "ct_main_201", "action": "sync_expiry_window_demo", "summary": "계약[직거래] 201호 이민수 (월세/후불)"}

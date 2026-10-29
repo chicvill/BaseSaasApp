@@ -336,7 +336,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
     ).save("seeded", app_source=src)
 
     # 5. Contracts (contracts.json)
-    # 201호: 2026-07 입주(후불 -> 7월 비과세, 8·9·10월 완납 상태)
+    # 201호: 2026-07 입주, 만기 2027-03-01(8개월 약정 -> 만기 6~2개월 전 전출확인 구간 D-123일 자동 감지 시연!)
     ct201 = Contract(
         id="ct_main_201",
         branch="main",
@@ -350,8 +350,8 @@ def ensure_pool_seeded(force: bool = False) -> None:
         tenant_phone="010-8888-2010",
         contract_date="2026-06-25",
         move_in_date="2026-07-01",
-        expiry_date="2027-07-01",
-        lease_term_months=12,
+        expiry_date="2027-03-01",
+        lease_term_months=8,
         lease_type="월세",
         pay_timing="후불",
         vat_target=False,

@@ -107,7 +107,7 @@ class CoSignSession(PoolObj):
         app_source: str = "rent3_contract",
     ) -> "CoSignSession":
         b_id = normalize_branch_id(branch)
-        room = Room.first(branch=b_id, room_no=str(room_no))
+        room = Room.first(branch=b_id, room_no=room_no)
         if not room:
             raise NotFound(f"{b_id} 지점에서 '{room_no}호'를 찾을 수 없습니다.")
 
@@ -169,7 +169,7 @@ class CoSignSession(PoolObj):
                 "tenant_car_number": "",
                 "lease_type": room.lease_type or "월세",
                 "pay_timing": room.pay_timing or "후불",
-                "vat_target": bool(room.vat_applicable),
+                "vat_target": room.vat_applicable,
                 "vat_separate": True,
                 "contract_deposit": 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
@@ -460,11 +460,13 @@ class CoSignSession(PoolObj):
         room.maintenance_fee = ct.maintenance_fee
         room.lease_type = ct.lease_type
         room.pay_timing = ct.pay_timing
+        room.pre_moveout_notice = False
+        room.available_from = "즉시입주"
         room.is_published = False
         room.save(action="room_assigned_by_cosign", app_source=app_source)
 
         # 4) 계약금 수납 기록 생성 -> payments.json 즉시 업데이트
-        c_dep = int(ct.contract_deposit)
+        c_dep = ct.contract_deposit
         if c_dep > 0:
             Pay(
                 branch=self.branch,
@@ -527,5 +529,5 @@ class CoSignSession(PoolObj):
 
 def re_is_date(v: str) -> bool:
     import re
-    return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", str(v or "").strip()))
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", (v or "").strip()))
 

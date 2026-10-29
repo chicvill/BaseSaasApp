@@ -56,6 +56,9 @@
     const lg = data.ledger || { months: [], total_unpaid: 0 };
     const cert = data.certificate;
     const co = data.pending_checkout;
+    const ew = data.expiry_window;
+    const ec = data.expiry_check;
+    const showExpiryCard = Boolean((ew && ew.in_6_to_2_months_window) || ec);
 
     elMyhome.innerHTML = `
       <div class="bass-card no-print" style="margin-bottom:14px;">
@@ -68,7 +71,7 @@
           </div>
           <div class="bass-row">
             <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
-            <span class="bass-badge bass-badge--info">만기 D-${lg.days_to_expiry ?? "-"}</span>
+            <span class="bass-badge ${ew && ew.in_6_to_2_months_window ? "bass-badge--warn" : "bass-badge--info"}">만기 D-${lg.days_to_expiry ?? "-"}${ew && ew.in_6_to_2_months_window ? " (6~2개월 통지구간)" : ""}</span>
           </div>
         </div>
 
@@ -90,6 +93,67 @@
           </div>
         </div>
       </div>
+
+      ${showExpiryCard ? `
+        <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid var(--warn);">
+          <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <div>
+              <h3 style="margin:0;">📅 만기 6~2개월 전 전출계획 확인 & 연장 재계약 예고</h3>
+              <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">
+                계약 만기일: <strong>${Bass.escapeHtml(ct.expiry_date || "-")}</strong> (D-${ew ? ew.days_to_expiry : "-"})
+                ${ew ? ` · 법정 통지마감(만기 2개월 전): <strong>${Bass.escapeHtml(ew.notice_deadline_date)}</strong>` : ""}
+              </div>
+            </div>
+            <span class="bass-badge ${ec && (ec.status === "RENEWAL_ACKNOWLEDGED" || ec.status === "STAY_CONFIRMED") ? "bass-badge--ok" : "bass-badge--warn"}">
+              ${ec ? (
+                ec.status === "AWAITING_TENANT" ? "📨 임대인 전출계획 확인 요청 도착" :
+                ec.status === "MOVEOUT_PLANNED" ? `📦 만기전출 예정 회신됨 (${Bass.escapeHtml(ec.planned_move_out_date)})` :
+                ec.status === "STAY_CONFIRMED" ? "🏠 전출의사 없음 회신 완료" :
+                ec.status === "RENEWAL_PREVIEWED" ? "📝 임대인 연장 재계약 예고 도착" :
+                ec.status === "RENEWAL_ACKNOWLEDGED" ? "✅ 연장 재계약 예고 조건 동의 완료" : Bass.escapeHtml(ec.status)
+              ) : "⚖️ 만기 6~2개월 전 사전확인 구간"}
+            </span>
+          </div>
+
+          <div class="field-grid" style="margin-top:10px;">
+            <div>
+              <label class="bass-label">전출(퇴실) 희망 시 예정일 (거주 연장 시 자동 무시)</label>
+              <input id="expMoveOutDate" type="date" class="bass-input" value="${Bass.escapeHtml((ec && ec.planned_move_out_date) || ct.expiry_date || "")}">
+            </div>
+            <div>
+              <label class="bass-label">임대인 전달 메모 (선택)</label>
+              <input id="expTenantMemo" class="bass-input" value="${Bass.escapeHtml((ec && ec.tenant_memo) || "")}" placeholder="예: 전출 의사 없으며 동일 조건으로 1년 더 거주 희망합니다.">
+            </div>
+          </div>
+          <div class="bass-row" style="margin-top:8px;flex-wrap:wrap;gap:8px;">
+            <button id="btnPlanStay" class="bass-btn bass-btn--primary" type="button">🏠 전출의사 없음 (거주 연장 희망 회신)</button>
+            <button id="btnPlanMoveOut" class="bass-btn" type="button">📦 만기 전출(퇴실) 예정 회신</button>
+          </div>
+
+          ${ec && (ec.status === "RENEWAL_PREVIEWED" || ec.status === "RENEWAL_ACKNOWLEDGED") ? `
+            <div class="listing-card" style="margin:12px 0 0;border-color:var(--primary-2);">
+              <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
+                <strong style="font-size:15px;">📝 임대인 연장 재계약 예고장 (${ec.renewal_type === "SAME_TERMS" ? "종전 동일조건 연장" : "법정 5% 상한 이내 조정"})</strong>
+                <span class="bass-badge ${ec.status === "RENEWAL_ACKNOWLEDGED" ? "bass-badge--ok" : "bass-badge--info"}">${ec.status === "RENEWAL_ACKNOWLEDGED" ? "확인·동의 완료" : "임차인 확인 대기"}</span>
+              </div>
+              <div style="font-size:13.5px;margin-top:8px;line-height:1.6;">
+                • 보증금: ${fmtWon(ec.current_deposit)} ➔ <strong>${fmtWon(ec.proposed_deposit)}</strong> (${ec.deposit_increase_pct >= 0 ? "+" : ""}${ec.deposit_increase_pct}%)<br>
+                • 월세 / 관리비: ${fmtWon(ec.current_monthly_rent)} ➔ <strong>${fmtWon(ec.proposed_monthly_rent)}</strong> (${ec.rent_increase_pct >= 0 ? "+" : ""}${ec.rent_increase_pct}%) / 관리비 <strong>${fmtWon(ec.proposed_maintenance_fee)}</strong><br>
+                • 예정 연장기간: <strong>${ec.proposed_term_months}개월</strong>
+                ${ec.renewal_note ? `<br>• 임대인 안내: <span class="bass-muted">${Bass.escapeHtml(ec.renewal_note)}</span>` : ""}
+              </div>
+              <div class="bass-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
+                ${ec.status !== "RENEWAL_ACKNOWLEDGED" ? `
+                  <button id="btnAckRenewal" class="bass-btn bass-btn--primary" type="button">✅ 연장 재계약 예고 조건 확인·동의</button>
+                ` : ""}
+                ${ec.cosign_session_id ? `
+                  <a class="bass-btn bass-btn--sm ${ec.status === "RENEWAL_ACKNOWLEDGED" ? "bass-btn--primary" : ""}" href="/rent3_contract/?session=${encodeURIComponent(ec.cosign_session_id)}&role=tenant">🤝 공동 재계약방 즉시 입장 (참여코드 ${Bass.escapeHtml(ec.cosign_session_code)})</a>
+                ` : ""}
+              </div>
+            </div>
+          ` : ""}
+        </div>
+      ` : ""}
 
       ${co ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-color:var(--warn);">
@@ -264,6 +328,61 @@
         });
       });
     }
+
+    const btnPlanStay = document.getElementById("btnPlanStay");
+    if (btnPlanStay) {
+      btnPlanStay.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const memo = (document.getElementById("expTenantMemo") && document.getElementById("expTenantMemo").value) || "";
+          const res = await Bass.api(APP_ID, `/myhome/${t.id}/expiry-plan`, {
+            method: "POST",
+            body: {
+              tenant_plan: "STAY",
+              tenant_memo: memo || "전출의사 없음 — 계속 거주 및 연장 희망",
+              prelist_vacancy: false,
+            },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          await loadMyhome();
+        });
+      });
+    }
+
+    const btnPlanMoveOut = document.getElementById("btnPlanMoveOut");
+    if (btnPlanMoveOut) {
+      btnPlanMoveOut.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const moveDate = (document.getElementById("expMoveOutDate") && document.getElementById("expMoveOutDate").value) || ct.expiry_date || "";
+          const memo = (document.getElementById("expTenantMemo") && document.getElementById("expTenantMemo").value) || "";
+          const res = await Bass.api(APP_ID, `/myhome/${t.id}/expiry-plan`, {
+            method: "POST",
+            body: {
+              tenant_plan: "MOVE_OUT",
+              planned_move_out_date: moveDate,
+              tenant_memo: memo || `만기일(${moveDate}) 퇴실 예정`,
+              prelist_vacancy: true,
+            },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          await loadMyhome();
+        });
+      });
+    }
+
+    const btnAckRenewal = document.getElementById("btnAckRenewal");
+    if (btnAckRenewal) {
+      btnAckRenewal.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const memo = (document.getElementById("expTenantMemo") && document.getElementById("expTenantMemo").value) || "";
+          const res = await Bass.api(APP_ID, `/myhome/${t.id}/acknowledge-renewal`, {
+            method: "POST",
+            body: { tenant_memo: memo },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          await loadMyhome();
+        });
+      });
+    }
   }
 
   async function loadListings() {
@@ -273,8 +392,8 @@
 
     elListings.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <h3>📢 중개수수료(복비) 0원 즉시입주 직거래 공실 쇼케이스 (${list.length}실)</h3>
-        <p class="bass-muted" style="font-size:13px;">임대인 앱에서 공실 공개한 호실(<code>rooms.json</code>)이 실시간으로 표시되며, 공동 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
+        <h3>📢 중개수수료(복비) 0원 즉시입주·만기예정 직거래 공실 쇼케이스 (${list.length}실)</h3>
+        <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실(<code>rooms.json</code>)이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
       </div>
       ${list.map((r) => `
         <div class="listing-card">
@@ -283,7 +402,10 @@
               <strong style="font-size:17px;">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.name || `${r.room_no}호`)}</strong>
               <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.address)} · ${r.area_sqm}㎡ · ${Bass.escapeHtml(r.available_from)}</div>
             </div>
-            <span class="bass-badge bass-badge--ok">등기부 근저당 0원 클린</span>
+            <div class="bass-row" style="gap:6px;">
+              ${r.is_pre_moveout_listing ? `<span class="bass-badge bass-badge--warn">📅 만기퇴실 예정 사전공개</span>` : ""}
+              <span class="bass-badge bass-badge--ok">등기부 근저당 0원 클린</span>
+            </div>
           </div>
           <div style="font-size:16px;font-weight:800;margin:8px 0;color:var(--primary-2);">
             보증금 ${fmtWon(r.deposit)} / 월세 ${fmtWon(r.monthly_rent)} (관리비 ${fmtWon(r.maintenance_fee)}, ${Bass.escapeHtml(r.pay_timing)})

@@ -61,16 +61,16 @@ def _parse_korean_money(fragment: str) -> Optional[int]:
     matched = False
     m_eok = re.search(r"(\d+(?:\.\d+)?)\s*억", s)
     if m_eok:
-        total += int(round(float(m_eok.group(1)) * 100_000_000))
+        total += round(float(m_eok.group(1)) * 100_000_000)
         matched = True
     m_cheon = re.search(r"(\d+(?:\.\d+)?)\s*천만", s)
     if m_cheon:
-        total += int(round(float(m_cheon.group(1)) * 10_000_000))
+        total += round(float(m_cheon.group(1)) * 10_000_000)
         matched = True
     else:
         m_man = re.search(r"(\d+(?:\.\d+)?)\s*만", s)
         if m_man:
-            total += int(round(float(m_man.group(1)) * 10_000))
+            total += round(float(m_man.group(1)) * 10_000)
             matched = True
     if matched:
         return total
@@ -271,7 +271,7 @@ class BrokerContractOnboarding:
         if not (tenant_name or "").strip() or not (tenant_phone or "").strip():
             raise DomainError("임차인 성명과 연락처는 필수 입력 항목입니다.")
 
-        room = Room.first(branch=b_id, room_no=str(room_no))
+        room = Room.first(branch=b_id, room_no=room_no)
         if not room:
             raise NotFound(f"{b_id} 지점에서 '{room_no}호'를 찾을 수 없습니다.")
 
@@ -318,7 +318,7 @@ class BrokerContractOnboarding:
         # 2) Contract 원장 생성 -> contracts.json 즉시 업데이트
         c_date = (contract_date or "").strip() or date_today().isoformat()
         m_in = (move_in_date or "").strip() or c_date
-        months = max(1, int(lease_term_months or 12))
+        months = max(1, lease_term_months or 12)
         expiry = add_months_str(m_in, months)
 
         broker_meta = {
@@ -326,7 +326,7 @@ class BrokerContractOnboarding:
             "agent_name": broker_agent_name.strip(),
             "reg_no": broker_reg_no.strip(),
             "phone": broker_phone.strip(),
-            "rtms_filed_by_broker": bool(rtms_filed_by_broker),
+            "rtms_filed_by_broker": rtms_filed_by_broker,
             "photo_sha256": photo_hash,
         }
 
@@ -356,12 +356,12 @@ class BrokerContractOnboarding:
             lease_term_months=months,
             lease_type=lease_type,
             pay_timing=pay_timing,
-            vat_target=bool(room.vat_applicable),
+            vat_target=room.vat_applicable,
             vat_separate=True,
-            contract_deposit=int(contract_deposit or 0),
-            deposit=int(deposit or 0),
-            monthly_rent=0 if lease_type == "전세" else int(monthly_rent or 0),
-            maintenance_fee=int(maintenance_fee or 0),
+            contract_deposit=contract_deposit or 0,
+            deposit=deposit or 0,
+            monthly_rent=0 if lease_type == "전세" else (monthly_rent or 0),
+            maintenance_fee=maintenance_fee or 0,
             special_terms=special_terms.strip() or f"[공인중개사 중개 계약] {broker_meta['agency_name']} 입회 하 지면 체결 원본 첨부",
             option_snapshot=room.option_list,
             registry_snapshot=room.registry_info,
@@ -386,6 +386,8 @@ class BrokerContractOnboarding:
         room.maintenance_fee = ct.maintenance_fee
         room.lease_type = ct.lease_type
         room.pay_timing = ct.pay_timing
+        room.pre_moveout_notice = False
+        room.available_from = "즉시입주"
         room.is_published = False
         room.save(action="room_assigned_by_broker_contract", app_source=app_source)
 

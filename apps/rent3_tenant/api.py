@@ -14,6 +14,7 @@ from apps._rent3_core import (
     CoSignSession,
     Contract,
     DirectChat,
+    ExpiryRenewalCheck,
     FifoPaymentEngine,
     Lessor,
     MaintenanceTicket,
@@ -65,7 +66,7 @@ class CheckoutAgreeReq(BaseModel):
 @router.get("/status")
 def get_status():
     ensure_pool_seeded()
-    listings = [r for r in Room.find(is_published=True) if not r.is_occupied]
+    listings = [r for r in Room.find(is_published=True) if (not r.is_occupied) or r.pre_moveout_notice]
     return {
         "success": True,
         "app_id": "rent3_tenant",
@@ -88,13 +89,14 @@ def list_open_listings(branch: Optional[str] = None):
 
     cards = []
     for r in sorted(rooms, key=lambda x: (x.branch, x.room_no)):
-        if r.is_occupied or not r.is_published:
+        if (r.is_occupied and not r.pre_moveout_notice) or not r.is_published:
             continue
         b = bldgs.get(r.id_building)
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)
         cards.append({
             **r.model_dump(),
+            "is_pre_moveout_listing": r.is_occupied and r.pre_moveout_notice,
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lessor.name if lessor else "임대인",
@@ -113,11 +115,11 @@ def list_open_listings(branch: Optional[str] = None):
 def submit_inquiry(req: InquiryReq):
     ensure_pool_seeded()
     b_id = normalize_branch_id(req.branch)
-    room = Room.first(branch=b_id, room_no=str(req.room_no))
+    room = Room.first(branch=b_id, room_no=req.room_no)
     chat = DirectChat(
         branch=b_id,
         id_room=room.id if room else "",
-        room_no=str(req.room_no),
+        room_no=req.room_no,
         sender_role="tenant",
         sender_name=req.sender_name.strip() or "예비임차인",
         message=req.message.strip(),
@@ -158,6 +160,8 @@ def get_myhome(tenant_id: str):
     ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else Contract.first(id_tenant=t.id, status="ACTIVE")
     ledger = ct.ledger() if ct else None
     cert = TaxAndCertificateService.build_tenant_tax_certificate(ct.id) if ct else None
+    exp_win = ct.expiry_window_status() if ct else None
+    exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
 
     tickets = sorted(MaintenanceTicket.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
     checkouts = [c for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED"]
@@ -175,6 +179,8 @@ def get_myhome(tenant_id: str):
         "building": bldg.model_dump() if bldg else None,
         "room": room.model_dump() if room else None,
         "contract": ct.model_dump() if ct else None,
+        "expiry_window": exp_win,
+        "expiry_check": exp_chk.model_dump() if exp_chk else None,
         "ledger": ledger,
         "certificate": cert,
         "payments": [p.model_dump() for p in payments],
@@ -260,5 +266,61 @@ def get_tenant_contract_photo(contract_id: str):
     ensure_pool_seeded()
     abs_path, mime, filename = BrokerContractOnboarding.resolve_photo_file(contract_id)
     return FileResponse(path=abs_path, media_type=mime, filename=filename)
+
+
+class TenantMoveoutPlanReq(BaseModel):
+    tenant_plan: str                         # MOVE_OUT / STAY
+    planned_move_out_date: str = ""
+    tenant_memo: str = ""
+    prelist_vacancy: bool = True
+
+
+class TenantAckRenewalReq(BaseModel):
+    tenant_memo: str = ""
+
+
+@router.post("/myhome/{tenant_id}/expiry-plan")
+def submit_tenant_expiry_plan(tenant_id: str, req: TenantMoveoutPlanReq):
+    ensure_pool_seeded()
+    t = Tenant.require(tenant_id)
+    room = Room.get(t.current_room_id) if t.current_room_id else None
+    ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else Contract.first(id_tenant=t.id, status="ACTIVE")
+    if not ct:
+        raise DomainError("현재 진행 중인 임대차 계약을 찾을 수 없습니다.")
+
+    chk = ExpiryRenewalCheck.ensure_for_contract(ct).respond_moveout_plan(
+        tenant_plan=req.tenant_plan,
+        planned_move_out_date=req.planned_move_out_date,
+        tenant_memo=req.tenant_memo,
+        prelist_vacancy=req.prelist_vacancy,
+        app_source=APP_SRC,
+    )
+    msg = (
+        f"📦 만기 전출(퇴실) 예정일({chk.planned_move_out_date})이 임대인에게 전달되었습니다."
+        if chk.tenant_plan == "MOVE_OUT"
+        else "🏠 '전출의사 없음(거주 연장 희망)'이 임대인에게 전달되었습니다. 곧 임대인의 연장 재계약 조건 예고가 도착합니다."
+    )
+    return {"success": True, "level": "success", "message": msg, "check": chk.model_dump()}
+
+
+@router.post("/myhome/{tenant_id}/acknowledge-renewal")
+def acknowledge_tenant_renewal_preview(tenant_id: str, req: TenantAckRenewalReq):
+    ensure_pool_seeded()
+    t = Tenant.require(tenant_id)
+    room = Room.get(t.current_room_id) if t.current_room_id else None
+    ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else Contract.first(id_tenant=t.id, status="ACTIVE")
+    if not ct:
+        raise DomainError("현재 진행 중인 임대차 계약을 찾을 수 없습니다.")
+    chk = ExpiryRenewalCheck.for_contract(ct.id)
+    if not chk:
+        raise NotFound("발송된 연장 재계약 예고 내역이 없습니다.")
+    chk.acknowledge_renewal_preview(tenant_memo=req.tenant_memo, app_source=APP_SRC)
+    return {
+        "success": True,
+        "level": "success",
+        "message": "✅ 연장 재계약 예고 조건 확인 및 동의가 임대인에게 전달되었습니다!",
+        "check": chk.model_dump(),
+    }
+
 
 

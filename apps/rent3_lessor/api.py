@@ -15,6 +15,7 @@ from apps._rent3_core import (
     Contract,
     DirectChat,
     EXPENSE_CATEGORIES,
+    ExpiryRenewalCheck,
     FifoPaymentEngine,
     Lessor,
     MaintenanceTicket,
@@ -132,10 +133,11 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
     bldg = Building.first(branch=b_id) or (buildings[0] if buildings else None)
     lessor = Lessor.get(bldg.id_lessor) if (bldg and bldg.id_lessor) else Lessor.first(branch=b_id)
 
-    rooms = sorted(Room.find(branch=b_id), key=lambda r: str(r.room_no))
+    rooms = sorted(Room.find(branch=b_id), key=lambda r: r.room_no)
     tenants_by_id = {t.id: t for t in Tenant.find(branch=b_id)}
 
     room_cards: List[Dict[str, Any]] = []
+    expiry_notice_rooms: List[Dict[str, Any]] = []
     total_unpaid_branch = 0
     for r in rooms:
         ct = Contract.get(r.active_contract_id) if r.active_contract_id else None
@@ -143,13 +145,20 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
         if ledger:
             total_unpaid_branch += int(ledger["total_unpaid"])
         tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
-        room_cards.append({
+        exp_win = ct.expiry_window_status() if ct else None
+        exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
+        card = {
             **r.model_dump(),
             "is_occupied": r.is_occupied,
             "tenant": tenant.model_dump() if tenant else None,
             "contract": ct.model_dump() if ct else None,
             "ledger": ledger,
-        })
+            "expiry_window": exp_win,
+            "expiry_check": exp_chk.model_dump() if exp_chk else None,
+        }
+        room_cards.append(card)
+        if ct and ((exp_win and exp_win["in_6_to_2_months_window"]) or exp_chk is not None):
+            expiry_notice_rooms.append(card)
 
     payments = sorted(Pay.find(branch=b_id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
     outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
@@ -168,6 +177,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
         "lessor": lessor.model_dump() if lessor else None,
         "total_unpaid_branch": total_unpaid_branch,
         "rooms": room_cards,
+        "expiry_notice_rooms": expiry_notice_rooms,
         "payments": [p.model_dump() for p in payments[:30]],
         "outlays": [{**o.model_dump(), "category_label": o.category_label} for o in outlays],
         "expense_categories": EXPENSE_CATEGORIES,
@@ -184,7 +194,7 @@ def create_or_update_room(req: RoomCreateReq):
     ensure_pool_seeded()
     b_id = normalize_branch_id(req.branch)
     bldg = Building.first(branch=b_id)
-    existing = Room.first(branch=b_id, room_no=str(req.room_no))
+    existing = Room.first(branch=b_id, room_no=req.room_no)
     if existing:
         existing.name = req.name or existing.name
         existing.floor = req.floor
@@ -204,7 +214,7 @@ def create_or_update_room(req: RoomCreateReq):
         id=f"room_{b_id}_{req.room_no}",
         branch=b_id,
         id_building=bldg.id if bldg else "",
-        room_no=str(req.room_no),
+        room_no=req.room_no,
         name=req.name or f"{req.room_no}호 ({req.room_category})",
         floor=req.floor,
         area_sqm=req.area_sqm,
@@ -358,12 +368,12 @@ def complete_checkout(settlement_id: str):
 @router.post("/chats")
 def send_lessor_chat(req: ChatReplyReq):
     b_id = normalize_branch_id(req.branch)
-    room = Room.first(branch=b_id, room_no=str(req.room_no))
+    room = Room.first(branch=b_id, room_no=req.room_no)
     lessor = Lessor.first(branch=b_id)
     msg = DirectChat(
         branch=b_id,
         id_room=room.id if room else "",
-        room_no=str(req.room_no),
+        room_no=req.room_no,
         sender_role="lessor",
         sender_name=lessor.name if lessor else "임대인",
         message=req.message.strip(),
@@ -460,5 +470,111 @@ def get_contract_photo(contract_id: str):
     ensure_pool_seeded()
     abs_path, mime, filename = BrokerContractOnboarding.resolve_photo_file(contract_id)
     return FileResponse(path=abs_path, media_type=mime, filename=filename)
+
+
+class RequestMoveoutCheckReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    message_note: str = ""
+
+
+class RecordMoveoutPlanReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    tenant_plan: str                         # MOVE_OUT / STAY
+    planned_move_out_date: str = ""
+    tenant_memo: str = ""
+    prelist_vacancy: bool = True
+
+
+class RenewalPreviewReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    proposed_deposit: Optional[int] = None
+    proposed_monthly_rent: Optional[int] = None
+    proposed_maintenance_fee: Optional[int] = None
+    proposed_term_months: int = 12
+    renewal_note: str = ""
+    open_cosign_session: bool = True
+
+
+@router.post("/expiry/request-check")
+def request_expiry_moveout_check(req: RequestMoveoutCheckReq):
+    ensure_pool_seeded()
+    chk = ExpiryRenewalCheck.request_moveout_check(
+        branch=req.branch,
+        room_no=req.room_no,
+        message_note=req.message_note,
+        app_source=APP_SRC,
+    )
+    return {
+        "success": True,
+        "level": "success",
+        "message": (
+            f"📅 {chk.room_no}호({chk.tenant_name}) 만기 전출계획 확인 요청이 발송되었습니다 "
+            f"(법정 통지마감: {chk.notice_deadline_date})."
+        ),
+        "hint": "세입자가 마이홈에서 [전출 예정] 또는 [전출의사 없음]을 회신하면 즉시 동기화됩니다.",
+        "check": chk.model_dump(),
+    }
+
+
+@router.post("/expiry/record-plan")
+def record_expiry_moveout_plan(req: RecordMoveoutPlanReq):
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    room = Room.first(branch=b_id, room_no=req.room_no)
+    if not room or not room.active_contract_id:
+        from core.errors import DomainError
+        raise DomainError(f"{req.room_no}호에 활성 계약이 없습니다.")
+    ct = Contract.require(room.active_contract_id)
+    chk = ExpiryRenewalCheck.ensure_for_contract(ct).respond_moveout_plan(
+        tenant_plan=req.tenant_plan,
+        planned_move_out_date=req.planned_move_out_date,
+        tenant_memo=req.tenant_memo,
+        prelist_vacancy=req.prelist_vacancy,
+        app_source=APP_SRC,
+    )
+    msg = (
+        f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 공실 쇼케이스에 사전예약 매물로 게시되었습니다."
+        if chk.tenant_plan == "MOVE_OUT"
+        else f"🏠 {chk.room_no}호 전출의사 없음(거주 연장 희망) 확인 완료 — 이제 연장 재계약 조건을 예고하실 수 있습니다."
+    )
+    return {"success": True, "level": "success", "message": msg, "check": chk.model_dump()}
+
+
+@router.post("/expiry/preview-renewal")
+def send_expiry_renewal_preview(req: RenewalPreviewReq):
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    room = Room.first(branch=b_id, room_no=req.room_no)
+    if not room or not room.active_contract_id:
+        from core.errors import DomainError
+        raise DomainError(f"{req.room_no}호에 활성 계약이 없습니다.")
+    ct = Contract.require(room.active_contract_id)
+    chk = ExpiryRenewalCheck.ensure_for_contract(ct).send_renewal_preview(
+        proposed_deposit=req.proposed_deposit,
+        proposed_monthly_rent=req.proposed_monthly_rent,
+        proposed_maintenance_fee=req.proposed_maintenance_fee,
+        proposed_term_months=req.proposed_term_months,
+        renewal_note=req.renewal_note,
+        open_cosign_session=req.open_cosign_session,
+        app_source=APP_SRC,
+    )
+    code_hint = (
+        f"공동 재계약방(참여코드 {chk.cosign_session_code})이 함께 개설되어 임차인 마이홈에 전달되었습니다."
+        if chk.cosign_session_code else "임차인 마이홈에 연장 재계약 예고장이 전달되었습니다."
+    )
+    return {
+        "success": True,
+        "level": "success",
+        "message": (
+            f"📝 {chk.room_no}호({chk.tenant_name}) 연장 재계약 예고 발송 완료! "
+            f"(보 {chk.proposed_deposit:,}원 / 월 {chk.proposed_monthly_rent:,}원, {chk.proposed_term_months}개월)"
+        ),
+        "hint": code_hint,
+        "check": chk.model_dump(),
+    }
+
 
 

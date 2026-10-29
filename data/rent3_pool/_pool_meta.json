@@ -1,10 +1,10 @@
 {
   "pool_name": "rent3_pool",
   "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
-  "total_revision": 46,
+  "total_revision": 47,
   "total_objects": 37,
-  "last_updated_collection": "",
-  "updated_at": "2026-10-29T19:17:02",
+  "last_updated_collection": "contracts",
+  "updated_at": "2026-10-29T20:40:58",
   "collections": {
     "users": {
       "file": "users.json",
@@ -42,9 +42,9 @@
       "file": "contracts.json",
       "exists": true,
       "count": 4,
-      "revision": 5,
-      "size_bytes": 5124,
-      "updated_at": "2026-10-29T19:17:01"
+      "revision": 6,
+      "size_bytes": 5254,
+      "updated_at": "2026-10-29T20:40:58"
     },
     "payments": {
       "file": "payments.json",

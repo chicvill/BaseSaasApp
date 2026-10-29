@@ -252,6 +252,15 @@ description: Operational business rules, domain invariants, and verification ins
     - **원클릭 Data Pool 5종 동기화 적용**:
       - 등록 즉시 ① `users.json` 임차인 활성화, ② `contracts.json` 계약 생성(`rent2` 선불/후불·부가세·가짜체납 차단 규칙 동일 적용), ③ `rooms.json` 입주 배정(직거래 공실 광고 자동 마감), ④ 계약금 수령 시 `payments.json` 기록, ⑤ `ops.json` 국토부 RTMS 신고 상태 반영(중개사 거래신고 완료 시 `FILED`, 미신고 시 30일 마감 `PENDING` D-Day 추적)을 원자적으로 수행한다.
 
+20. **만기 6~2개월 전 전출계획 확인 및 연장 재계약 예고 거버넌스 (`ExpiryRenewalCheck` — 주택임대차보호법 제6조·제7조 준수)**:
+    - **법정 통지 구간 자동 판별 (`Contract.expiry_window_status`)**:
+      - 만기일 기준 `60 <= 남은일수 <= 180`(만기 6개월 전 ~ 2개월 전) 계약을 **`NOTICE_WINDOW`(법정 전출확인·갱신예고 구간)**로 자동 감지하여 임대인 대시보드와 임차인 마이홈 최상단에 통지 마감일(`만기일 - 60일`)과 함께 강조 표시한다 (`< 60일` 진입 시 `TACIT_LOCKED` 묵시적 갱신 구간 안내).
+    - **전출계획 확인 및 분기 처리 (`ops.json` 내 `ExpiryRenewalCheck` 객체)**:
+      1. **확인 요청 (`AWAITING_TENANT`)**: 임대인이 전출계획 확인을 요청하면 `ops.json`에 상태가 기록되고 세입자에게 인앱 안내 채팅이 자동 발송된다.
+      2. **전출 예정 회신 (`MOVEOUT_PLANNED`)**: 임차인이 퇴실(전출) 의사와 퇴실 희망일을 회신하면, 호실 객체(`Room`)를 **퇴실예정 사전공개 매물(`pre_moveout_notice=True`, `is_published=True`, `available_from="{퇴실예정일} 입주예정"`)**로 연동해 공실 기간을 최소화한다.
+      3. **전출의사 없음 회신 (`STAY_CONFIRMED`)**: 임차인이 전출 의사가 없음(계속 거주 희망)을 회신하면 임대인에게 **연장 재계약 예고** 패널이 활성화된다.
+      4. **연장 재계약 예고 및 동의 (`RENEWAL_PREVIEWED` ➔ `RENEWAL_ACKNOWLEDGED`)**: 전출의사가 없는 세입자에게 임대인이 **동일조건 연장(`SAME_TERMS`)** 또는 **법정 5% 상한(`Contract.validate_renewal_cap`) 이내 조정 조건(`ADJUSTED_WITHIN_5PCT`)**으로 연장 재계약 예고장을 발송하며, 옵션에 따라 실시간 공동 재계약방(`CoSignSession(mode="RENEWAL")`)을 즉시 함께 개설해 원스톱 전자서명으로 연결한다.
+
 ---
 
 ## 4. 🎨 Resilient UX 배너 표준

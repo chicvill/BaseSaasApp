@@ -373,6 +373,105 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         rtms_302 = next(x for x in admin_ov["rtms_reports"] if x["id_contract"] == ct_id)
         self.assertEqual(rtms_302["status"], "PENDING")
 
+    def test_06_expiry_6_to_2_months_moveout_check_and_renewal_preview(self):
+        """6. 만기 6~2개월 전 전출계획 확인, 사전공실 연동 및 전출의사 없을 때 연장 재계약 예고(5% 상한·공동계약방) 검증."""
+        # [A] 기준일(2026-10-29) 대비 만기일(2027-03-01, D-123)인 201호가 6~2개월 통지구간(NOTICE_WINDOW)으로 자동 탐지되는지 검증
+        dash = self.client.get("/api/rent3_lessor/dashboard?branch=main").json()
+        notice_rooms = dash["expiry_notice_rooms"]
+        self.assertTrue(any(r["room_no"] == "201" for r in notice_rooms))
+        r201 = next(r for r in dash["rooms"] if r["room_no"] == "201")
+        self.assertTrue(r201["expiry_window"]["in_6_to_2_months_window"])
+        self.assertEqual(r201["expiry_window"]["window_state"], "NOTICE_WINDOW")
+
+        # [B] 임대인이 201호에 전출계획 확인 요청 발송 -> AWAITING_TENANT 및 채팅 발송 확인
+        r_req = self.client.post("/api/rent3_lessor/expiry/request-check", json={
+            "branch": "main",
+            "room_no": "201",
+        })
+        self.assertEqual(r_req.status_code, 200)
+        self.assertEqual(r_req.json()["check"]["status"], "AWAITING_TENANT")
+
+        # [C] 임차인(tenant_201)이 우선 '만기 전출(MOVE_OUT)'로 회신 시 -> 공실 쇼케이스에 사전공개 매물로 자동 노출되는지 확인
+        r_move = self.client.post("/api/rent3_tenant/myhome/tenant_201/expiry-plan", json={
+            "tenant_plan": "MOVE_OUT",
+            "planned_move_out_date": "2027-03-01",
+            "tenant_memo": "타 지역 발령 가능성 검토 중",
+            "prelist_vacancy": True,
+        })
+        self.assertEqual(r_move.status_code, 200)
+        self.assertEqual(r_move.json()["check"]["status"], "MOVEOUT_PLANNED")
+
+        listings_after_move = self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]
+        pre_item = next((l for l in listings_after_move if l["room_no"] == "201"), None)
+        self.assertIsNotNone(pre_item, "만기 전출 예정 호실이 사전공개 매물로 노출되지 않았습니다.")
+        self.assertTrue(pre_item["is_pre_moveout_listing"])
+
+        # 전출 예정 상태에서 연장 재계약 예고 발송 시 DomainError(400) 차단 검증
+        r_blocked_move = self.client.post("/api/rent3_lessor/expiry/preview-renewal", json={
+            "branch": "main",
+            "room_no": "201",
+            "proposed_deposit": 5_000_000,
+            "proposed_monthly_rent": 500_000,
+        })
+        self.assertEqual(r_blocked_move.status_code, 400)
+
+        # [D] 임차인이 '전출의사 없음(STAY)'으로 회신 변경 -> STAY_CONFIRMED 및 사전공실 노출 즉시 해제 검증
+        r_stay = self.client.post("/api/rent3_tenant/myhome/tenant_201/expiry-plan", json={
+            "tenant_plan": "STAY",
+            "tenant_memo": "발령 취소되어 전출의사 없으며 1년 연장 희망합니다.",
+            "prelist_vacancy": False,
+        })
+        self.assertEqual(r_stay.status_code, 200)
+        self.assertEqual(r_stay.json()["check"]["status"], "STAY_CONFIRMED")
+        listings_after_stay = self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]
+        self.assertFalse(any(l["room_no"] == "201" for l in listings_after_stay), "전출의사 없음 전환 후에도 사전공실이 남아 있습니다.")
+
+        # [E] 전출의사 없을 때 임대인이 법정 5% 상한 초과(월세 50만 -> 55만, +10%) 연장 예고 시 422(Mismatch) 차단 검증
+        r_over_5pct = self.client.post("/api/rent3_lessor/expiry/preview-renewal", json={
+            "branch": "main",
+            "room_no": "201",
+            "proposed_deposit": 5_000_000,
+            "proposed_monthly_rent": 550_000,
+            "proposed_maintenance_fee": 50_000,
+            "proposed_term_months": 12,
+        })
+        self.assertEqual(r_over_5pct.status_code, 422)
+        self.assertEqual(r_over_5pct.json()["level"], "diff")
+
+        # [F] 적법한 5% 이내(+4.0%, 월세 50만 -> 52만) 연장 재계약 예고 발송 + 공동 재계약방 동시 개설 검증
+        r_preview = self.client.post("/api/rent3_lessor/expiry/preview-renewal", json={
+            "branch": "main",
+            "room_no": "201",
+            "proposed_deposit": 5_000_000,
+            "proposed_monthly_rent": 520_000,
+            "proposed_maintenance_fee": 50_000,
+            "proposed_term_months": 12,
+            "renewal_note": "전출의사가 없으셔서 법정 5% 이내(+4%)로 1년 연장 재계약을 예고드립니다.",
+            "open_cosign_session": True,
+        })
+        self.assertEqual(r_preview.status_code, 200)
+        chk_prev = r_preview.json()["check"]
+        self.assertEqual(chk_prev["status"], "RENEWAL_PREVIEWED")
+        self.assertEqual(chk_prev["renewal_type"], "ADJUSTED_WITHIN_5PCT")
+        self.assertEqual(chk_prev["rent_increase_pct"], 4.0)
+        self.assertTrue(chk_prev["cosign_session_id"])
+        self.assertEqual(len(chk_prev["cosign_session_code"]), 6)
+
+        # 공동 재계약방(cosign_sessions.json)에 예고 조건(월세 52만, RENEWAL 모드)이 세팅되었는지 확인
+        sess_res = self.client.get(f"/api/rent3_contract/sessions/{chk_prev['cosign_session_id']}").json()["session"]
+        self.assertEqual(sess_res["mode"], "RENEWAL")
+        self.assertEqual(sess_res["terms"]["monthly_rent"], 520_000)
+
+        # [G] 임차인 마이홈에서 연장 재계약 예고장 확인·동의 -> RENEWAL_ACKNOWLEDGED 동기화 검증
+        myhome_201 = self.client.get("/api/rent3_tenant/myhome/tenant_201").json()
+        self.assertEqual(myhome_201["expiry_check"]["status"], "RENEWAL_PREVIEWED")
+
+        r_ack = self.client.post("/api/rent3_tenant/myhome/tenant_201/acknowledge-renewal", json={
+            "tenant_memo": "예고해주신 52만원 연장 조건 확인 및 동의합니다.",
+        })
+        self.assertEqual(r_ack.status_code, 200)
+        self.assertEqual(r_ack.json()["check"]["status"], "RENEWAL_ACKNOWLEDGED")
+
 
 if __name__ == "__main__":
     unittest.main()
