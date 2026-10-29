@@ -27,7 +27,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         cls.temp_pool = tempfile.mkdtemp(prefix="rent3_pool_test_")
         use_pool_dir(cls.temp_pool)
         ensure_pool_seeded(force=True)
-        cls.app = create_gateway(db_path=":memory:")
+        cls.app = create_gateway(apps_root=os.path.join(ROOT, "apps"), db_path=":memory:")
         cls.client = TestClient(cls.app)
 
     @classmethod
@@ -45,12 +45,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
     def test_01_immutable_core_zero_changes(self):
         """1. 불변의 BaseSaasApp 코어(core/, run.py)가 단 1줄도 수정되지 않았음을 검증."""
+        git_root = os.path.abspath(os.path.join(os.path.realpath(os.path.join(ROOT, "core")), ".."))
         res = subprocess.run(
             ["git", "diff", "--name-only", "core", "run.py"],
-            cwd=ROOT,
+            cwd=git_root,
             capture_output=True,
             text=True,
         )
+        self.assertEqual(res.returncode, 0, f"git diff 실행 실패: {res.stderr}")
         self.assertEqual(res.stdout.strip(), "", f"불변 코어가 수정되었습니다: {res.stdout}")
 
     def test_02_zero_touch_mounting_and_manuals(self):
