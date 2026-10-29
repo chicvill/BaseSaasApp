@@ -605,10 +605,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertGreaterEqual(land["stats"]["total_buildings"], 3)
         self.assertGreater(len(land["listings"]), 0)
 
-        # [B] 총괄 관리인(admin) 로그인 -> /rent3_admin/ 및 Data Pool 허브 분기 검증
+        # [B] 총괄 관리인(admin / 0202) 로그인 -> 관리인 전용 앱(/rent3_admin/) 및 Data Pool 허브 분기 검증
         r_adm = self.client.post("/api/rent3/pool/auth/login", json={
             "identifier": "admin",
-            "password": "1212",
+            "password": "0202",
         })
         self.assertEqual(r_adm.status_code, 200)
         self.assertEqual(r_adm.json()["role"], "admin")

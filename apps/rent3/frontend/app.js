@@ -153,8 +153,9 @@
       const ex = state.demoAccounts.find((d) => d.group === "임대인");
       if (ex) $("loginIdentifier").value = ex.identifier;
     } else if (preset === "admin") {
-      sub.textContent = "총괄 관리인(admin)으로 로그인하면 가맹·정산·전사 수익률 관제 페이지로 이동합니다.";
+      sub.textContent = "총괄 관리인(admin / 0202)으로 로그인하면 관리인 전용 앱(/rent3_admin/)으로 즉시 이동합니다.";
       $("loginIdentifier").value = "admin";
+      $("loginPassword").value = "0202";
     } else {
       sub.textContent = "본인인증 로그인 즉시 계정의 역할에 맞는 전용 페이지로 자동 이동합니다.";
     }

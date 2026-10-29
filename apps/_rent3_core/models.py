@@ -126,7 +126,7 @@ class Admin(PoolObj):
     business_number: str = "101-86-12345"
     email: str = "admin@rent3.saas.kr"
     role: str = "superadmin"
-    password: str = "1212"
+    password: str = "0202"
 
     def summary(self) -> str:
         return f"관리인 {self.name} ({self.username})"

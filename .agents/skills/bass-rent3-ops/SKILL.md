@@ -277,7 +277,7 @@ description: Operational business rules, domain invariants, and verification ins
       - **히어로 검색 & 특화 도구**: 키워드·지점·매물유형 통합 검색바, 즉시입주·만기전출 사전공개·등기클린 퀵 필터, OpenRent 시그니처 **월세 적정 예산 계산기(Affordability Calculator)** 내장.
       - **`No Dead Listings` 실시간 공실 연동**: 공동 Data Pool(`rooms.json`)의 공개 공실 및 만기전출 예정 사전공개 매물을 실시간 표출하고, `ops.json`(`DirectChat`) 기반 1:1 방문투어 예약 및 *Rent Now* 5단계 공동계약 입장을 지원한다.
     - **통합 인증(`POST /api/rent3/pool/auth/login`) 및 역할별 자동 라우팅 규칙**:
-      - 👑 **총괄 관리인 (`superadmin` / `admin`)**: `admin` 로그인 시 `/rent3_admin/`(관리인 전용 콘솔)로 자동 이동하며, 옵션 선택 시 `/rent3/pool.html`(통합 Data Pool 관제 허브)로 이동한다.
+      - 👑 **총괄 관리인 (`superadmin` / `admin`)**: `admin` / `0202`(및 플랫폼 기본 `1212` 호환) 로그인 시 관리인 전용 앱인 **`/rent3_admin/`**(`apps/rent3_admin`, 플랫폼 총괄 관리인 거버넌스 센터)로 즉시 이동한다 (옵션 선택 시 `/rent3/pool.html` 이동).
       - 🏢 **임대인 / 건물주 (`lessor` / `branch_admin`)**: `chic`(`main`), `sunho`(`sunho`), `sinbi`(`sinbi`) 및 `users.json` 등재 가맹 임대인 로그인 시 보유 지점에 맞춰 `/rent3_lessor/?branch={branch}`로 자동 이동한다 (`+ 매물 등록` 진입 시 `&tab=rooms`, `중개 계약서 등록` 진입 시 `&tab=broker`).
       - 🔑 **입주 임차인 (`tenant`)**: `users.json`의 입주 세입자(성명·연락처·이메일·ID) 로그인 시 본인 계약 호실 마이홈 `/rent3_tenant/?tenant={tenant_id}`로 자동 이동한다.
       - 📢 **예비임차인 (`prospect`)**: 미배정 예비임차인 또는 신규 간편가입자 로그인 시 `/rent3_tenant/?view=listings`(공실 탐색 화면)로 자동 이동한다.

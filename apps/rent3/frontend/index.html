@@ -194,11 +194,11 @@
 
         <article class="or-role-card">
           <div>
-            <span class="or-brand__tag" style="background:#e0f2fe;color:#075985;border-color:#bae6fd;">👑 총괄 관리인 · 허브</span>
-            <h3>플랫폼 관제 & Data Pool</h3>
-            <p>가맹 임대인 승인, 월 SaaS 이용료 정산, 전 지점 통합 수익률(NOI), RTMS 신고 마감 및 실시간 JSON Data Pool을 관제합니다.</p>
+            <span class="or-brand__tag" style="background:#e0f2fe;color:#075985;border-color:#bae6fd;">👑 총괄 관리인 전용 앱</span>
+            <h3>플랫폼 관제 (rent3_admin)</h3>
+            <p><code>admin / 0202</code> 로그인 시 총괄 관리인 전용 앱(<code>/rent3_admin/</code>)으로 이동해 임대인 가맹 승인, 월 SaaS 이용료 정산, 전 지점 NOI·RTMS를 관제합니다.</p>
           </div>
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="admin">관리인으로 로그인 →</button>
+          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="admin">관리인 전용 앱 로그인 →</button>
         </article>
       </div>
     </section>
@@ -334,8 +334,8 @@
           <input id="loginIdentifier" class="or-input" placeholder="예: chic, admin, 010-8888-2010, 이민수" required>
         </div>
         <div class="or-field">
-          <label for="loginPassword">비밀번호 (임차인은 휴대폰 뒷 4자리도 가능)</label>
-          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호 입력 (데모 기본: 1212)" value="1212" required>
+          <label for="loginPassword">비밀번호 (관리인: 0202 · 임차인: 휴대폰 뒷 4자리 가능)</label>
+          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호 입력 (관리인: 0202 / 기본: 1212)" value="1212" required>
         </div>
         <div class="or-field" style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--or-muted);">
           <input id="chkAdminPoolHub" type="checkbox">

@@ -199,18 +199,18 @@ def portal_landing() -> Dict[str, Any]:
     demo_accounts: List[Dict[str, Any]] = [
         {
             "group": "관리인",
-            "badge": "👑 총괄 관리인",
-            "label": "본사 총괄 관리인 (admin)",
+            "badge": "👑 총괄 관리인 전용 앱",
+            "label": "본사 총괄 관리인 (admin / 0202)",
             "identifier": "admin",
-            "password": "1212",
+            "password": "0202",
             "target_desc": "/rent3_admin/",
         },
         {
             "group": "통합허브",
             "badge": "🌐 Data Pool",
-            "label": "통합 Data Pool 관제 (admin)",
+            "label": "통합 Data Pool 관제 (admin / 0202)",
             "identifier": "admin",
-            "password": "1212",
+            "password": "0202",
             "target_hint": "pool",
             "target_desc": "/rent3/pool.html",
         },
@@ -398,9 +398,14 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
     )
     if matched_admin:
         core_u = CoreUser.by_username(matched_admin.username)
-        valid_pw = core_u.check_password(pw) if core_u else (pw == "1212")
+        admin_pw = matched_admin.password or "0202"
+        valid_pw = (
+            pw == "0202"
+            or pw == admin_pw
+            or (core_u.check_password(pw) if core_u else (pw == "1212"))
+        )
         if not valid_pw:
-            raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호를 확인해 주세요.")
+            raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호(0202)를 확인해 주세요.")
         tok = issue_token(core_u) if core_u else ""
         if is_contract_hint:
             target_url = _build_contract_target_url("lessor", req.target_hint, branch="main")
@@ -408,7 +413,7 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
             target_url = "/rent3/pool.html"
         else:
             target_url = "/rent3_admin/"
-        role_lbl = "통합 Data Pool 관제" if req.target_hint == "pool" else "총괄 관리인"
+        role_lbl = "통합 Data Pool 관제" if req.target_hint == "pool" else "플랫폼 총괄 관리인 (rent3_admin)"
         return {
             "success": True,
             "role": "admin",
