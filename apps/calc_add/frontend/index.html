@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>➕ 스마트 덧셈기 — BaseSaasApp</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <style>
+    .calc-box {
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 30px;
+      background: #ffffff;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    .calc-input-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 20px 0;
+    }
+    .calc-input-group input {
+      flex: 1;
+      padding: 12px;
+      font-size: 1.2rem;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .calc-op {
+      font-size: 1.6rem;
+      font-weight: bold;
+      color: #3b82f6;
+    }
+    .calc-btn {
+      width: 100%;
+      padding: 14px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .calc-btn:hover { background: #1d4ed8; }
+    .calc-result-card {
+      margin-top: 24px;
+      padding: 18px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 10px;
+      text-align: center;
+    }
+    .calc-result-val {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #16a34a;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body class="bass-center">
+  <div class="calc-box">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h2 style="margin:0;">➕ 스마트 덧셈기</h2>
+      <a href="/" style="text-decoration:none; color:#64748b; font-size:0.9rem;">← 포털</a>
+    </div>
+    <p style="color:#64748b; font-size:0.95rem; margin-top:6px;">Standalone 연산 객체를 BaseSaasApp에 제로터치 플러그인한 웹 앱</p>
+
+    <div class="calc-input-group">
+      <input type="number" id="numA" value="3">
+      <span class="calc-op">+</span>
+      <input type="number" id="numB" value="5">
+    </div>
+
+    <button class="calc-btn" id="runBtn" onclick="runAdd()">연산 실행 (3 + 5)</button>
+
+    <div class="calc-result-card" id="resCard">
+      <div style="color:#15803d; font-size:0.9rem; font-weight:600;">연산 결과</div>
+      <div class="calc-result-val" id="resVal">3 + 5 = 8</div>
+    </div>
+  </div>
+
+  <script>
+    async function runAdd() {
+      const a = document.getElementById('numA').value;
+      const b = document.getElementById('numB').value;
+      try {
+        const resp = await fetch(`/api/calc_add/compute?a=${a}&b=${b}`);
+        const data = await resp.json();
+        if (data.success) {
+          document.getElementById('resVal').innerText = data.data.formula;
+        }
+      } catch (err) {
+        document.getElementById('resVal').innerText = '연산 오류: ' + err;
+      }
+    }
+  </script>
+</body>
+</html>
