@@ -1,0 +1,436 @@
+{
+  "pool": "rent3_pool",
+  "collection": "rooms",
+  "revision": 8,
+  "updated_at": "2026-10-29T19:17:01",
+  "count": 7,
+  "items": [
+    {
+      "id": "room_main_201",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "room_no": "201",
+      "name": "201호 (남향 풀옵션)",
+      "floor": 2,
+      "area_sqm": 24.2,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "tenant_201",
+      "active_contract_id": "ct_main_201",
+      "doorlock_pwd": "4860*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 10000000,
+      "monthly_rent": 500000,
+      "maintenance_fee": 50000,
+      "available_from": "즉시입주",
+      "is_published": false,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_202",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "room_no": "202",
+      "name": "202호 (분리형 원룸)",
+      "floor": 2,
+      "area_sqm": 25.0,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "tenant_202",
+      "active_contract_id": "ct_main_202",
+      "doorlock_pwd": "7942*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 5000000,
+      "monthly_rent": 520000,
+      "maintenance_fee": 50000,
+      "available_from": "즉시입주",
+      "is_published": false,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_203",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "room_no": "203",
+      "name": "203호 (채광 최상 남향 즉시입주)",
+      "floor": 2,
+      "area_sqm": 23.8,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "2030*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "신규 천장형 에어컨·빌트인 냉장고 완비, 복비 0원 직거래 즉시입주",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 5000000,
+      "monthly_rent": 500000,
+      "maintenance_fee": 50000,
+      "available_from": "즉시입주",
+      "is_published": true,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_sunho_301",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sunho",
+      "id_building": "bldg_sunho",
+      "room_no": "301",
+      "name": "301호 (역세권 정남향)",
+      "floor": 3,
+      "area_sqm": 21.5,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "tenant_sunho_301",
+      "active_contract_id": "ct_sunho_301",
+      "doorlock_pwd": "3690*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 5000000,
+      "monthly_rent": 460000,
+      "maintenance_fee": 40000,
+      "available_from": "즉시입주",
+      "is_published": false,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_sunho_302",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sunho",
+      "id_building": "bldg_sunho",
+      "room_no": "302",
+      "name": "302호 (조용한 주택가 풀옵션 공실)",
+      "floor": 3,
+      "area_sqm": 20.4,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "3020*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "도배·장판 신규 시공 완료, 지하철 도보 4분",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 3000000,
+      "monthly_rent": 450000,
+      "maintenance_fee": 40000,
+      "available_from": "즉시입주",
+      "is_published": true,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_sinbi_101",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sinbi",
+      "id_building": "bldg_sinbi",
+      "room_no": "101",
+      "name": "101호 (1층 로드형 상가/사무실)",
+      "floor": 1,
+      "area_sqm": 39.6,
+      "room_category": "상가/사무실",
+      "vat_applicable": true,
+      "id_tenant": "tenant_sinbi_101",
+      "active_contract_id": "ct_sinbi_101",
+      "doorlock_pwd": "1122*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "선불",
+      "deposit": 20000000,
+      "monthly_rent": 900000,
+      "maintenance_fee": 100000,
+      "available_from": "즉시입주",
+      "is_published": false,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_sinbi_202",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sinbi",
+      "id_building": "bldg_sinbi",
+      "room_no": "202",
+      "name": "202호 (복층형 오피스텔 즉시입주)",
+      "floor": 2,
+      "area_sqm": 29.0,
+      "room_category": "오피스텔",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "2029*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "홍대입구 인접 층고 높은 복층 구조, 채광 우수",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 10000000,
+      "monthly_rent": 620000,
+      "maintenance_fee": 60000,
+      "available_from": "즉시입주",
+      "is_published": true,
+      "images": [],
+      "_kind": "room"
+    }
+  ]
+}

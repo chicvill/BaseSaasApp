@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>📘 공식 운영 매뉴얼 — 플랫폼 총괄 관리인 (Rent3 Admin)</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/manual.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="manual-header">
+      <div>
+        <span class="bass-badge bass-badge--info">Rent3 Admin v3.1</span>
+        <h1 class="bass-gradient-text" style="margin-top:6px;">👑 플랫폼 총괄 관리인 공식 운영 매뉴얼</h1>
+      </div>
+      <div class="bass-row no-print">
+        <a class="bass-btn" href="./">← 관리인 앱으로 돌아가기</a>
+        <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </header>
+
+    <div class="callout">
+      <strong>법적 안전 불변식:</strong> 공인중개사법 준수를 위해 거래 건당 중개수수료(복비)를 일절 수취하지 않으며, 가맹 건물주 대상 <strong>월 정액 SaaS 솔루션 이용료</strong>만 정산·관리합니다.
+    </div>
+
+    <h2>1. 총괄 관리인 주요 기능</h2>
+    <table>
+      <thead>
+        <tr><th>탭</th><th>주요 업무</th><th>참조/갱신 JSON 파일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>임대인 가맹 · 사용료</td><td>신규 건물주 및 건물 온보딩, 월 SaaS 이용료 완납 정산</td><td><code>users.json</code>, <code>buildings.json</code></td></tr>
+        <tr><td>전 지점 포트폴리오 & RTMS</td><td>전 건물 가동률·총수입·NOI 비교, 30일 전월세 신고제 확정일자 감사</td><td><code>rooms.json</code>, <code>payments.json</code>, <code>outlays.json</code>, <code>ops.json</code></td></tr>
+        <tr><td>실시간 JSON Data Pool 탐색기</td><td>8개 JSON 컬렉션 원문 실시간 열람 및 <code>_events.jsonl</code> 감사</td><td><code>data/rent3_pool/*.json</code> 전체</td></tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+

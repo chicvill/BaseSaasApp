@@ -1,0 +1,54 @@
+{
+  "pool": "rent3_pool",
+  "collection": "buildings",
+  "revision": 4,
+  "updated_at": "2026-10-29T19:17:01",
+  "count": 3,
+  "items": [
+    {
+      "id": "bldg_main",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "main",
+      "building_name": "시크빌 본점",
+      "address": "서울특별시 관악구 남부순환로 1820-12",
+      "id_lessor": "lessor_chic",
+      "default_maintenance_fee": 50000,
+      "common_entrance_pwd": "#2580*",
+      "wifi_info": "ChicVill_5G / chic2026!",
+      "property_value": 1850000000,
+      "manager_phone": "010-2222-1111",
+      "_kind": "building"
+    },
+    {
+      "id": "bldg_sunho",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sunho",
+      "building_name": "선호아트빌",
+      "address": "서울특별시 동작구 상도로 245-8",
+      "id_lessor": "lessor_sunho",
+      "default_maintenance_fee": 40000,
+      "common_entrance_pwd": "#1357*",
+      "wifi_info": "Sunho_Giga / sunho1004",
+      "property_value": 1150000000,
+      "manager_phone": "010-3333-2222",
+      "_kind": "building"
+    },
+    {
+      "id": "bldg_sinbi",
+      "created_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-10-29T19:17:01",
+      "branch": "sinbi",
+      "building_name": "신비주택 & 상가",
+      "address": "서울특별시 마포구 월드컵북로 64-5",
+      "id_lessor": "lessor_sinbi",
+      "default_maintenance_fee": 60000,
+      "common_entrance_pwd": "#9900*",
+      "wifi_info": "Sinbi_Fiber / sinbi7788",
+      "property_value": 1450000000,
+      "manager_phone": "010-4444-3333",
+      "_kind": "building"
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "pool": "rent3_pool",
+  "collection": "outlays",
+  "revision": 4,
+  "updated_at": "2026-10-29T19:17:02",
+  "count": 3,
+  "items": [
+    {
+      "id": "out_511acd34",
+      "created_at": "2026-10-29T19:17:02",
+      "updated_at": "2026-10-29T19:17:02",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "id_room": "",
+      "category": "cleaning",
+      "title": "10월 계단·복도 정기 미화 대행",
+      "expense_date": "2026-10-10",
+      "amount": 180000,
+      "vendor": "클린케어환경",
+      "memo": "",
+      "_kind": "outlay"
+    },
+    {
+      "id": "out_342fddce",
+      "created_at": "2026-10-29T19:17:02",
+      "updated_at": "2026-10-29T19:17:02",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "id_room": "",
+      "category": "elevator",
+      "title": "10월 승강기 법정 정기점검 수수료",
+      "expense_date": "2026-10-15",
+      "amount": 110000,
+      "vendor": "현대엘리베이터서비스",
+      "memo": "",
+      "_kind": "outlay"
+    },
+    {
+      "id": "out_9a8cced3",
+      "created_at": "2026-10-29T19:17:02",
+      "updated_at": "2026-10-29T19:17:02",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "id_room": "",
+      "category": "internet_tv",
+      "title": "전 세대 기가인터넷 단체회선료",
+      "expense_date": "2026-10-20",
+      "amount": 165000,
+      "vendor": "KT기업통신",
+      "memo": "",
+      "_kind": "outlay"
+    }
+  ]
+}

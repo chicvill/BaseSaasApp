@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>📘 공식 운영 매뉴얼 — 임대인 관제 (Rent3 Lessor)</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/manual.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="manual-header">
+      <div>
+        <span class="bass-badge bass-badge--info">Rent3 Lessor v3.1</span>
+        <h1 class="bass-gradient-text" style="margin-top:6px;">🏢 임대인 자산·수납 관제 공식 운영 매뉴얼</h1>
+      </div>
+      <div class="bass-row no-print">
+        <a class="bass-btn" href="./">← 임대인 앱으로 돌아가기</a>
+        <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </header>
+
+    <div class="callout">
+      <strong>핵심 불변식:</strong> 객체지향 <code>rent2</code> 수납 엔진을 100% 계승하여 <strong>후불 입주월 비과세(가짜 체납 원천 차단)</strong>와 <strong>가장 오래된 미납월부터의 FIFO 순차 상계</strong>를 보장하며, 모든 변경은 즉시 <code>data/rent3_pool/*.json</code>에 반영됩니다.
+    </div>
+
+    <h2>1. 핵심 업무 가이드</h2>
+    <table>
+      <thead>
+        <tr><th>메뉴</th><th>주요 기능</th><th>업데이트되는 공동 JSON 파일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>호실장부 & 문자 수납</td><td>은행 입금문자 붙여넣기 자동 파싱, FIFO 순차 상계, 공실 공개 토글</td><td><code>payments.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>공용운영비 · 종소세</td><td>8대 표준 경비 등재, NOI 순수익 계산, 5월 종소세 UTF-8 BOM CSV 출력</td><td><code>outlays.json</code></td></tr>
+        <tr><td>A/S · 채팅 · 퇴실정산</td><td>기사 배정(수리비 자동 경비화), 퇴실 공제 명세 산출 및 원클릭 공실 복귀</td><td><code>ops.json</code>, <code>contracts.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>호실 등록 · 도어락</td><td>신규 호실 객체 생성, 도어락 비밀번호 원격 변경(입주자 자동 동기화)</td><td><code>rooms.json</code>, <code>users.json</code></td></tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+

@@ -230,6 +230,20 @@ description: Operational business rules, domain invariants, and verification ins
 
 ---
 
+18. **공동 실시간 JSON Data Pool (`data/rent3_pool/*.json`) & 5대 목적별 앱 객체 분리 거버넌스 (`AGENT.md` 헌법 구현)**:
+    - **불변의 BaseSaasApp 코어 원칙**: `core/` 및 `run.py` 코드는 단 1줄도 수정하지 않으며, `apps/_rent3_core/`(언더스코어 접두사로 로더 스킵)에 공유 OOP 도메인 엔진과 `JsonDataPool`을 둔다.
+    - **전 구성 요소 객체화 & 실시간 원자적 JSON 갱신 (`PoolObj`)**:
+      - `Admin`, `Lessor`, `Tenant`(`users.json`), `Building`(`buildings.json`), `Room`(`rooms.json`), `CoSignSession`(`cosign_sessions.json`), `Contract`(`contracts.json`), `Pay`(`payments.json`), `Outlay`(`outlays.json`), `DirectChat`/`MaintenanceTicket`/`CheckOutSettlement`/`RtmsReport`(`ops.json`) 등 모든 비즈니스 구성 요소가 독립 객체로 동작한다.
+      - 객체의 `.save()` / `.delete()` 호출 즉시 임시 파일 작성 후 `os.replace()` 원자적 교체로 해당 JSON 파일과 `_pool_meta.json`, `_events.jsonl`이 실시간 업데이트되며, `mtime` 감지를 통해 모든 분리 앱과 멀티 프로세스가 최신 상태를 즉시 공유한다.
+    - **기능·용도별 분리된 5대 독립 앱 객체 (`BaseSaaSApp`)**:
+      - 🌐 **`rent3` (통합관리용 허브 앱)**: 공동 JSON Data Pool 실시간 원문/상태 관제(`pool.html`, `/api/rent3/pool/*`) 및 전체 앱 전환 허브.
+      - 👑 **`rent3_admin` (관리인용 앱)**: 임대인 가맹 심사/승인, 월 SaaS 앱 사용료 과금/정산, 전사 건물·호실 포트폴리오 KPI, RTMS 30일 신고 마감 감시, 전체 객체 탐색기.
+      - 🏢 **`rent3_lessor` (임대인용 앱)**: 건물·호실·옵션 관리, 공실 게시 토글, `rent2` 계승 은행문자 파싱 & FIFO 순차 상계 & 후불 가짜 체납 차단, 공동 계약방 원클릭 개설, 도어락/주차/A/S 배정, 퇴실 정산 및 공실 자동 복귀, 8대 공용경비·NOI·5월 종소세 CSV 출력.
+      - 🔑 **`rent3_tenant` (임차인용 앱)**: 복비 0원 공실 매물 탐색 & 1:1 채팅/투어 신청, 공동 계약방 입장, 마이홈 청구/납부 내역 실시간 확인 & 온라인 납부, 도어락 비번 열람 & 차량 등록, A/S 사진 접수, 연말정산 17% 세액공제 납입증명서 A4 인쇄, 퇴실 정산 동의.
+      - 🤝 **`rent3_contract` (공동 임대계약 전용 앱)**: 임대인과 임차인이 대면/비대면으로 같은 화면을 함께 보며 실시간으로 검증·작성·날인하는 독립 중립 전자계약 앱. 조건 1글자 수정 시 동의 자동 초기화(`Revision Lock`), 양측 자필 전자서명 및 SHA-256 해시 봉인, 체결 즉시 `contracts.json`·`rooms.json`·`users.json`·`payments.json`·`ops.json(RTMS)` 실시간 일괄 반영 및 표준 계약서 A4 인쇄 지원.
+
+---
+
 ## 4. 🎨 Resilient UX 배너 표준
 
 - ⚠️ **황색 (`warning`)**: 이미 처리된 신청/중복 입금/미비 서류 안내.

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>📘 공식 운영 매뉴얼 — 임차인 매물·마이홈 (Rent3 Tenant)</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/manual.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="manual-header">
+      <div>
+        <span class="bass-badge bass-badge--info">Rent3 Tenant v3.1</span>
+        <h1 class="bass-gradient-text" style="margin-top:6px;">🔑 임차인 매물·마이홈 공식 이용 매뉴얼</h1>
+      </div>
+      <div class="bass-row no-print">
+        <a class="bass-btn" href="./">← 임차인 앱으로 돌아가기</a>
+        <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </header>
+
+    <div class="callout">
+      <strong>핵심 기능:</strong> 예비 세입자는 복비 0원 직거래 매물을 검색·투어 신청하고 공동 임대계약방으로 합류하며, 입주 후에는 마이홈에서 실시간 납부 현황 조회·결제, 도어락·주차 등록, A/S 접수, 연말정산 17% 세액공제 증명서 인쇄를 원스톱으로 이용합니다.
+    </div>
+
+    <h2>1. 주요 화면 및 Data Pool 연동</h2>
+    <table>
+      <thead>
+        <tr><th>구분</th><th>이용 기능</th><th>연동 JSON 파일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>공실 쇼케이스</td><td>실시간 공개 공실 조회, 1:1 방문투어 문의, 공동 계약방 입장</td><td><code>rooms.json</code>, <code>ops.json</code>, <code>cosign_sessions.json</code></td></tr>
+        <tr><td>출입 · 주차</td><td>계약 체결자 전용 세대 도어락 비번 열람, 내 차량 주차 등록</td><td><code>users.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>월세 납부 · 세액공제</td><td>월별 FIFO 원장 확인, 온라인 납부, 17% 세액공제 공식 증명서 A4 인쇄</td><td><code>payments.json</code>, <code>contracts.json</code></td></tr>
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
+

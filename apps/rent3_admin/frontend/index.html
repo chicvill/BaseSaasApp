@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>👑 플랫폼 총괄 관리인 — Rent3 Admin</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <style>
+    .app-shell { max-width: 1020px; margin: 0 auto; padding: 16px 14px 70px; }
+    .nav-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
+    .kpi-box { padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
+    .kpi-val { font-size: 20px; font-weight: 800; margin-top: 4px; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0; }
+    .tab-btn.is-active { background: linear-gradient(120deg, var(--primary), var(--primary-2)); border-color: transparent; font-weight: 800; }
+    .item-card { padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 10px; }
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    pre.json-view { background: hsl(232 42% 6%); border: 1px solid var(--border-strong); border-radius: 12px; padding: 14px; font-size: 12px; max-height: 440px; overflow: auto; color: #cbd5e1; }
+  </style>
+</head>
+<body>
+  <main class="app-shell">
+    <div id="app-alert"></div>
+
+    <div class="nav-pills">
+      <a class="bass-btn bass-btn--sm" href="/rent3/pool.html">🌐 통합 Data Pool 허브</a>
+      <a class="bass-btn bass-btn--sm" href="/rent3_lessor/">🏢 임대인 앱</a>
+      <a class="bass-btn bass-btn--sm" href="/rent3_tenant/">🔑 임차인 앱</a>
+      <a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/">🤝 공동 임대계약 앱</a>
+      <a class="bass-btn bass-btn--sm" href="manual.html">📘 매뉴얼</a>
+    </div>
+
+    <header class="bass-card">
+      <div class="bass-row" style="justify-content:space-between;">
+        <div>
+          <h1 style="font-size:21px;margin-bottom:4px;">👑 플랫폼 총괄 관리인 거버넌스 센터</h1>
+          <div class="bass-muted" style="font-size:13px;">중개수수료 0원 합법 SaaS 과금 · 전 지점 포트폴리오 NOI · RTMS 감시 · 공동 JSON Data Pool 감사</div>
+        </div>
+        <span id="poolBadge" class="bass-badge bass-badge--ok bass-badge--pulse">JSON Pool v-</span>
+      </div>
+      <div id="kpiGrid" class="kpi-grid"></div>
+    </header>
+
+    <nav class="tabs" id="tabBar">
+      <button class="bass-btn tab-btn is-active" data-tab="lessors" type="button">🏢 임대인 가맹 · 월 SaaS 사용료</button>
+      <button class="bass-btn tab-btn" data-tab="portfolio" type="button">📊 전 지점 건물 포트폴리오 & RTMS</button>
+      <button class="bass-btn tab-btn" data-tab="pool" type="button">📂 실시간 JSON Data Pool 탐색기</button>
+    </nav>
+
+    <section id="tabContent"></section>
+  </main>
+
+  <script src="/shared/ui/bass.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
+

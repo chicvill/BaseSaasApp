@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>🌐 Rent3 통합관리 & 실시간 JSON Data Pool 허브</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <style>
+    .hub-shell { max-width: 1080px; margin: 0 auto; padding: 18px 14px 70px; }
+    .app-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin: 14px 0; }
+    .file-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 12px 0; }
+    .file-card { padding: 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; }
+    .file-card.is-active { border-color: var(--primary); box-shadow: var(--glow); }
+    pre.json-box { background: hsl(232 42% 6%); border: 1px solid var(--border-strong); border-radius: 12px; padding: 14px; font-size: 12px; max-height: 420px; overflow: auto; color: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <main class="hub-shell">
+    <div id="app-alert"></div>
+
+    <header class="bass-card">
+      <div class="bass-row" style="justify-content:space-between;">
+        <div>
+          <span class="bass-badge bass-badge--info">AGENT.md 아키텍처 헌법 구현체</span>
+          <h1 class="bass-gradient-text" style="font-size:24px;margin-top:6px;">🌐 Rent3 통합관리 · 실시간 공동 JSON Data Pool 허브</h1>
+          <div class="bass-muted" style="font-size:13.5px;">불변의 BaseSaasApp 위에서 분리된 4개 역할/기능 앱이 하나의 <code>data/rent3_pool/*.json</code>을 실시간 공유합니다.</div>
+        </div>
+        <span id="hubRevBadge" class="bass-badge bass-badge--ok bass-badge--pulse">동기화 중...</span>
+      </div>
+
+      <div class="app-grid">
+        <a class="bass-card is-interactive" href="/rent3_admin/" style="padding:16px;">
+          <div style="font-size:24px;">👑</div>
+          <h3 style="margin-top:6px;font-size:16px;">관리인용 앱 (rent3_admin)</h3>
+          <div class="bass-muted" style="font-size:12.5px;">임대인 가맹 심사 · 월 SaaS 사용료 정산 · 전 지점 NOI · RTMS 감시</div>
+        </a>
+        <a class="bass-card is-interactive" href="/rent3_lessor/" style="padding:16px;">
+          <div style="font-size:24px;">🏢</div>
+          <h3 style="margin-top:6px;font-size:16px;">임대인용 앱 (rent3_lessor)</h3>
+          <div class="bass-muted" style="font-size:12.5px;">호실/공실 관리 · 은행문자 파싱 & FIFO 수납 · 공용경비·종소세</div>
+        </a>
+        <a class="bass-card is-interactive" href="/rent3_tenant/" style="padding:16px;">
+          <div style="font-size:24px;">🔑</div>
+          <h3 style="margin-top:6px;font-size:16px;">임차인용 앱 (rent3_tenant)</h3>
+          <div class="bass-muted" style="font-size:12.5px;">복비 0원 공실 탐색 · 마이홈 납부/도어락/주차 · 17% 세액공제 증명서</div>
+        </a>
+        <a class="bass-card is-interactive" href="/rent3_contract/" style="padding:16px;border-color:var(--primary);">
+          <div style="font-size:24px;">🤝</div>
+          <h3 style="margin-top:6px;font-size:16px;">공동 임대계약 앱 (rent3_contract)</h3>
+          <div class="bass-muted" style="font-size:12.5px;">임대인·임차인 동시 열람 · Revision Lock · 자필서명 · 확정일자 봉인</div>
+        </a>
+      </div>
+    </header>
+
+    <section class="bass-card" style="margin-top:14px;">
+      <h3>📂 공동 JSON Data Pool 파일별 실시간 상태 (클릭 시 원문 즉시 확인)</h3>
+      <div id="fileGrid" class="file-grid"></div>
+      <pre id="rawJsonBox" class="json-box">로딩 중...</pre>
+    </section>
+
+    <section class="bass-card" style="margin-top:14px;">
+      <h3>⚡ 앱 간 실시간 객체 업데이트 이벤트 로그 (<code>_events.jsonl</code>)</h3>
+      <div id="eventList"></div>
+    </section>
+  </main>
+
+  <script src="/shared/ui/bass.js"></script>
+  <script>
+    (function () {
+      "use strict";
+      let currentCol = "rooms";
+
+      async function loadHub() {
+        const res = await Bass.api("rent3", "/pool/overview");
+        const meta = res.meta || {};
+        document.getElementById("hubRevBadge").textContent = `Pool v${meta.total_revision} · 총 ${meta.total_objects}개 객체`;
+
+        const cols = meta.collections || {};
+        document.getElementById("fileGrid").innerHTML = Object.entries(cols).map(([name, info]) => `
+          <div class="file-card ${name === currentCol ? "is-active" : ""}" data-col="${name}">
+            <div style="font-weight:800;font-size:13.5px;">📄 ${Bass.escapeHtml(info.file)}</div>
+            <div style="font-size:18px;font-weight:800;color:var(--primary-2);margin:4px 0;">${info.count} 객체</div>
+            <div class="bass-muted" style="font-size:11px;">v${info.revision} · ${(info.size_bytes || 0).toLocaleString()} B</div>
+          </div>
+        `).join("");
+
+        document.querySelectorAll(".file-card").forEach((el) => {
+          el.addEventListener("click", () => {
+            currentCol = el.dataset.col;
+            loadHub().catch(Bass.showError);
+          });
+        });
+
+        const rawRes = await Bass.api("rent3", `/pool/files/${encodeURIComponent(currentCol)}`);
+        document.getElementById("rawJsonBox").textContent = JSON.stringify(rawRes, null, 2);
+
+        document.getElementById("eventList").innerHTML = (res.recent_events || []).slice(0, 15).map((e) => `
+          <div style="padding:7px 8px;border-bottom:1px solid var(--border);font-size:12.5px;">
+            <code>${Bass.escapeHtml(e.at)}</code> · <span class="bass-badge">${Bass.escapeHtml(e.app_source)}</span>
+            <strong>${Bass.escapeHtml(e.collection)}.json</strong> [${Bass.escapeHtml(e.action)}] — ${Bass.escapeHtml(e.summary)}
+          </div>
+        `).join("");
+      }
+
+      loadHub().catch(Bass.showError);
+      setInterval(() => { if (!document.hidden) loadHub().catch(() => {}); }, 3000);
+    })();
+  </script>
+</body>
+</html>
+
