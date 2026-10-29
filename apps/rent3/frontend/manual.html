@@ -3,36 +3,36 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rent3 공식 운영 매뉴얼 (Direct Rent Standard)</title>
+  <title>OpenRent · Rent3 공식 운영 매뉴얼 (Direct Rent & Role Routing)</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
     body { background: #f8fafc; color: #1e293b; line-height: 1.6; padding: 32px 20px; }
     .paper {
-      max-width: 860px; margin: 0 auto; background: #fff; padding: 48px; border-radius: 12px;
+      max-width: 880px; margin: 0 auto; background: #fff; padding: 48px; border-radius: 12px;
       box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
     }
-    .header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; border-bottom: 2px solid #0f172a; padding-bottom: 16px; }
-    .title { font-size: 26px; font-weight: 800; color: #0f172a; }
+    .header-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; border-bottom: 2px solid #0f172a; padding-bottom: 16px; }
+    .title { font-size: 25px; font-weight: 800; color: #0f172a; }
     .print-btn {
       background: #0f172a; color: #fff; border: none; padding: 10px 18px; border-radius: 8px;
-      font-size: 14px; font-weight: 700; cursor: pointer; transition: background 0.2s;
+      font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none;
     }
-    .print-btn:hover { background: #334155; }
-    h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 28px 0 12px; border-left: 4px solid #38bdf8; padding-left: 10px; }
+    h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 28px 0 12px; border-left: 4px solid #3276b1; padding-left: 10px; }
     p, li { font-size: 14.5px; color: #334155; margin-bottom: 8px; }
     ul, ol { padding-left: 20px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13.5px; }
+    th, td { border: 1px solid #cbd5e1; padding: 9px 10px; text-align: left; }
+    th { background: #f1f5f9; font-weight: 700; }
     .box { background: #f1f5f9; padding: 16px; border-radius: 8px; margin: 14px 0; border: 1px solid #e2e8f0; font-size: 14px; }
-    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; }
-    .badge-law { background: #fee2e2; color: #991b1b; }
-    .badge-safe { background: #dcfce7; color: #166534; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; background: #dcfce7; color: #166534; }
 
     @media print {
       body { background: #fff; padding: 0; }
       .paper { box-shadow: none; border: none; padding: 0; max-width: 100%; }
-      .print-btn { display: none; }
+      .no-print { display: none !important; }
       h2 { border-left-color: #000; }
-      .box { border-color: #000; background: #fafafa; }
+      th, td, .box { border-color: #000; }
     }
   </style>
 </head>
@@ -40,48 +40,74 @@
   <div class="paper">
     <div class="header-actions">
       <div>
-        <div class="title">🏡 Rent3 비대면 임대차 표준 운영 매뉴얼</div>
-        <div style="font-size:13px; color:#64748b; margin-top:4px;">버전 3.0.0 | BaseSaasApp 공통 거버넌스 준수 문서</div>
+        <div class="title">🏡 OpenRent · Rent3 직거래 포털 & 역할별 라우팅 매뉴얼</div>
+        <div style="font-size:13px; color:#64748b; margin-top:4px;">버전 3.1.0 | OpenRent 벤치마킹 포털 · 공동 JSON Data Pool 거버넌스</div>
       </div>
-      <button class="print-btn" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      <div class="no-print" style="display:flex; gap:8px;">
+        <a href="/rent3/" class="print-btn" style="background:#3276b1;">🏡 포털 홈으로</a>
+        <button class="print-btn" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
     </div>
 
-    <h2>1. 🛡️ 공인중개사법 안전 운영 준수 가이드</h2>
+    <h2>1. 🏡 OpenRent 벤치마킹 직거래 포털 개요 (<code>/rent3/index.html</code>)</h2>
     <div class="box">
-      <span class="badge badge-law">핵심 법률 불변식</span> <strong>무등록 중개행위 차단</strong><br>
-      본 플랫폼은 임대인과 임차인의 <strong>당사자 간 직접 전자계약(직거래)</strong> 및 사후 관리를 위한 IT 소프트웨어(SaaS)입니다.
-      <ul>
-        <li><strong>복비(중개수수료) 0원 원칙</strong>: 플랫폼 운영자 및 가맹점은 계약 체결에 따른 '알선 수수료'를 수취할 수 없으며, 월 솔루션비 및 PG 결제 수수료만 부과합니다.</li>
-        <li><strong>가격 알선 개입 금지</strong>: 시스템은 호실 정가(보증금/월세)대로 신청을 접수하며 임의의 가격 절충/협상에 개입하지 않습니다.</li>
-        <li><strong>주택임대차 신고(전월세 신고제)</strong>: 보증금 6천만원 초과 또는 월세 30만원 초과 계약은 체결일로부터 30일 이내에 임차인/임대인이 지자체에 계약 내용을 신고해야 합니다.</li>
+      <span class="badge">핵심 구조</span> 영국 직거래 표준 플랫폼 <strong>OpenRent(openrent.co.uk)</strong>의 사용자 경험을 한국 임대차 및 공동 실시간 Data Pool(<code>data/rent3_pool/*.json</code>)에 최적화하여 구성했습니다.
+      <ul style="margin-top:8px; margin-bottom:0;">
+        <li><strong>통합 매물 검색 & 퀵 필터</strong>: 지역·건물명·옵션 검색, 즉시입주, 만기전출 예정 사전공개, 등기 근저당 0원 클린 필터 제공.</li>
+        <li><strong>월세 부담능력 계산기 (Affordability Calculator)</strong>: 월 세후 소득 30% 기준 권장 주거비 및 보유 보증금 이내 매물 자동 필터링.</li>
+        <li><strong>No Dead Listings 실시간 연동</strong>: <code>rooms.json</code>과 직결되어 계약 체결 즉시 매물이 마감되고, 퇴실·만기전출 시 자동 게시됩니다.</li>
       </ul>
     </div>
 
-    <h2>2. 🔄 3단계 비대면 계약 파이프라인 운영 절차</h2>
-    <ol>
-      <li><strong>[1단계] 입주 신청서 접수</strong>: 임차인이 공개 웹페이지에서 공실을 탐색하고 희망일과 인적사항을 입력하여 접수합니다. (상태: <code>PENDING_REVIEW</code>)</li>
-      <li><strong>[2단계] 임대인 검토 및 승인</strong>: 관리자 화면에서 신청자의 입주 일정과 보증금 조건을 확인하고 <code>[승인/계약발송]</code>을 클릭합니다. (상태: <code>APPROVED</code>)</li>
-      <li><strong>[3단계] 결제 및 전자서명 체결</strong>: 임차인에게 안내 링크가 전달되며, 모바일에서 본인 서명 날인 및 첫 결제(계약금/첫달분)를 완료하면 계약이 최종 체결됩니다. (상태: <code>PAID_CONFIRMED</code>)</li>
-    </ol>
+    <h2>2. 🔐 로그인 후 역할별 자동 페이지 분기 규칙</h2>
+    <p>상단 <strong>[🔐 로그인 / 회원가입 (Sign In)]</strong> 모달에서 로그인하면 서버(<code>POST /api/rent3/pool/auth/login</code>)가 계정 역할을 판별해 알맞은 전용 워크스페이스로 즉시 이동시킵니다.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>사용자 역할</th>
+          <th>로그인 식별자 예시</th>
+          <th>자동 이동 페이지 (Redirect URL)</th>
+          <th>주요 수행 기능</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>👑 총괄 관리인</strong></td>
+          <td><code>admin</code> (PW: <code>1212</code>)</td>
+          <td><code>/rent3_admin/</code><br><small>(옵션 선택 시 <code>/rent3/pool.html</code>)</small></td>
+          <td>임대인 가맹 승인, 월 SaaS 이용료 정산, 전 지점 NOI 수익률, RTMS 감시</td>
+        </tr>
+        <tr>
+          <td><strong>🏢 임대인 (건물주)</strong></td>
+          <td><code>chic</code>, <code>sunho</code>, <code>sinbi</code> 또는 연락처</td>
+          <td><code>/rent3_lessor/?branch={지점코드}</code><br><small>(매물등록 클릭 시 <code>&amp;tab=rooms</code>)</small></td>
+          <td>은행문자 FIFO 수납, 납입일 D-3/D+1 통보, 중개 계약서 사진 등록, 세무결산</td>
+        </tr>
+        <tr>
+          <td><strong>🔑 입주 임차인</strong></td>
+          <td><code>010-8888-2010</code> 또는 <code>이민수</code></td>
+          <td><code>/rent3_tenant/?tenant={임차인ID}</code></td>
+          <td>내 호실 납부원장, D-3/D+1 통보 확인, 도어락·주차, 17% 세액공제 증명서</td>
+        </tr>
+        <tr>
+          <td><strong>📢 예비임차인</strong></td>
+          <td>신규 가입 또는 미배정 계정</td>
+          <td><code>/rent3_tenant/?view=listings</code></td>
+          <td>중개수수료 0원 즉시입주 공실 탐색, 1:1 방문투어 문의</td>
+        </tr>
+        <tr>
+          <td><strong>🤝 공동계약 당사자</strong></td>
+          <td>6자리 참여코드 + 임대인/임차인 선택</td>
+          <td><code>/rent3_contract/?role={역할}&amp;session={ID}</code></td>
+          <td>5단계 동시 열람, Revision Lock 조건 합의, 자필서명 및 확정일자 봉인</td>
+        </tr>
+      </tbody>
+    </table>
 
-    <h2>3. 🚪 입실(Check-In) 및 시설 점검표 관리</h2>
-    <p>입주 당일 분쟁을 사전에 예방하기 위해 다음 절차를 진행합니다:</p>
+    <h2>3. 🔄 실시간 공동 JSON Data Pool 무결성 원칙</h2>
     <ul>
-      <li>입실 당일 오전 10시 임시 도어락 비밀번호 및 와이파이 정보가 세입자 라운지에 자동/수동 안내됩니다.</li>
-      <li>세입자는 입실 직후 벽지, 바닥, 에어컨, 세탁기 등 옵션의 사진을 촬영하여 시설 점검표에 등록합니다. 등록된 사진은 퇴실 시 원상복구 감가상각의 기준이 됩니다.</li>
-    </ul>
-
-    <h2>4. 🛠️ 거주 중 세입자 라운지 소통 (민원/수리)</h2>
-    <ul>
-      <li>세입자는 언제든 모바일 세입자 라운지에서 1:1 수리/민원 요청(사진 첨부 가능)을 등록할 수 있습니다.</li>
-      <li>관리자는 관제 대시보드 <strong>[세입자 라운지 민원/수리]</strong> 탭에서 실시간으로 확인 후 일정 안내 및 조치 답변을 등록합니다.</li>
-    </ul>
-
-    <h2>5. 💰 rent2 수납 엔진 계승 및 주의사항</h2>
-    <p>본 앱은 rent2의 수납 코어를 100% 공유합니다:</p>
-    <ul>
-      <li><strong>FIFO 순차 상계</strong>: 입금된 월세는 가장 오래된 미납월부터 순서대로 상계됩니다.</li>
-      <li><strong>후불 입주월 비과세</strong>: 입주월 당월에는 후불 청구가 발생하지 않으며 다음 달부터 청구됩니다 (가짜 체납 방지).</li>
+      <li><strong>원자적 동기화</strong>: 5개 분리 앱(<code>rent3</code>, <code>rent3_admin</code>, <code>rent3_lessor</code>, <code>rent3_tenant</code>, <code>rent3_contract</code>)이 하나의 <code>data/rent3_pool/*.json</code>을 실시간으로 공유합니다.</li>
+      <li><strong>법적 안전 불변식</strong>: 거래 건당 중개수수료(복비) 0원 원칙, 주택임대차보호법 제6·7조(만기 6~2개월 전출확인 및 5% 증액 상한), 후불 입주월 가짜체납 방지 원칙을 준수합니다.</li>
     </ul>
   </div>
 </body>

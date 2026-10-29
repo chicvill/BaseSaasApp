@@ -4,9 +4,17 @@
 
   const APP_ID = "rent3_tenant";
   const params = new URLSearchParams(window.location.search);
+  let savedSession = null;
+  try {
+    savedSession = JSON.parse(window.localStorage.getItem("rent3_session") || "null");
+  } catch (_) {
+    savedSession = null;
+  }
 
-  let mode = params.get("view") === "listings" ? "listings" : "myhome";
-  let selectedTenantId = params.get("tenant") || "";
+  let mode = params.get("view") === "listings" || (!params.get("view") && savedSession && savedSession.role === "prospect")
+    ? "listings"
+    : "myhome";
+  let selectedTenantId = params.get("tenant") || (savedSession && savedSession.tenant_id ? savedSession.tenant_id : "");
   let tenantList = [];
   let showDoorlock = false;
 
@@ -58,19 +66,23 @@
     const co = data.pending_checkout;
     const ew = data.expiry_window;
     const ec = data.expiry_check;
+    const bs = data.billing_schedule;
+    const bns = data.billing_notices || [];
+    const activeBns = bns.filter((x) => x.status !== "RESOLVED_PAID");
     const showExpiryCard = Boolean((ew && ew.in_6_to_2_months_window) || ec);
 
     elMyhome.innerHTML = `
       <div class="bass-card no-print" style="margin-bottom:14px;">
-        <div class="bass-row" style="justify-content:space-between;">
+        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
           <div>
             <label class="bass-label">현재 조회 중인 입주 세입자 선택</label>
             <select id="tenantSel" class="bass-select">
               ${tenantList.map((item) => `<option value="${item.id}" ${item.id === t.id ? "selected" : ""}>[${Bass.escapeHtml(item.building_name)} ${Bass.escapeHtml(item.room_no)}호] ${Bass.escapeHtml(item.name)} (${Bass.escapeHtml(item.phone)})</option>`).join("")}
             </select>
           </div>
-          <div class="bass-row">
+          <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
             <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
+            ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
             <span class="bass-badge ${ew && ew.in_6_to_2_months_window ? "bass-badge--warn" : "bass-badge--info"}">만기 D-${lg.days_to_expiry ?? "-"}${ew && ew.in_6_to_2_months_window ? " (6~2개월 통지구간)" : ""}</span>
           </div>
         </div>
@@ -93,6 +105,28 @@
           </div>
         </div>
       </div>
+
+      ${activeBns.map((bn) => `
+        <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid ${bn.notice_type === "OVERDUE_1D" ? "var(--err)" : "var(--primary-2)"};">
+          <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
+            <div>
+              <h3 style="margin:0;">${bn.notice_type === "OVERDUE_1D" ? "🚨 임대료 미납 통보 도착 (납입기한 경과)" : "🔔 임대료 납입일 사전 안내 (납입일 도래)"}</h3>
+              <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">
+                약정 납입일: <strong>매월 ${bn.payment_day}일</strong>(=입주일) · 대상 귀속월: <strong>${Bass.escapeHtml(bn.billing_ym)}</strong> (기한 ${Bass.escapeHtml(bn.due_date)})
+                · 입금계좌: <code>${Bass.escapeHtml(bn.lessor_account)}</code>
+              </div>
+            </div>
+            <span class="bass-badge ${bn.status === "ACKNOWLEDGED" ? "bass-badge--ok" : (bn.notice_type === "OVERDUE_1D" ? "bass-badge--err" : "bass-badge--info")}">
+              ${bn.status === "ACKNOWLEDGED" ? "확인 완료" : (bn.notice_type === "OVERDUE_1D" ? `미납 ${fmtWon(bn.amount_due)}` : `예정액 ${fmtWon(bn.amount_due)}`)}
+            </span>
+          </div>
+          <div style="font-size:13px;margin-top:8px;line-height:1.5;">${Bass.escapeHtml(bn.message)}</div>
+          <div class="bass-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
+            <button class="bass-btn bass-btn--sm bass-btn--primary btn-jump-pay" data-amt="${bn.amount_due}" type="button">💳 ${fmtWon(bn.amount_due)} 즉시 납부하기</button>
+            ${bn.status !== "ACKNOWLEDGED" ? `<button class="bass-btn bass-btn--sm btn-ack-bn" data-id="${bn.id}" type="button">✅ 통보 내용 확인 완료</button>` : ""}
+          </div>
+        </div>
+      `).join("")}
 
       ${showExpiryCard ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid var(--warn);">
@@ -383,6 +417,29 @@
         });
       });
     }
+
+    elMyhome.querySelectorAll(".btn-ack-bn").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/myhome/${t.id}/billing-notices/${btn.dataset.id}/acknowledge`, {
+            method: "POST",
+          });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          await loadMyhome();
+        });
+      });
+    });
+
+    elMyhome.querySelectorAll(".btn-jump-pay").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const payInp = document.getElementById("payAmtInput");
+        if (payInp) {
+          payInp.value = btn.dataset.amt || payInp.value;
+          payInp.scrollIntoView({ behavior: "smooth", block: "center" });
+          payInp.focus();
+        }
+      });
+    });
   }
 
   async function loadListings() {

@@ -31,6 +31,7 @@
       </thead>
       <tbody>
         <tr><td>호실장부 & 문자 수납</td><td>은행 입금문자 붙여넣기 자동 파싱, FIFO 순차 상계, 공실 공개 토글, 첨부 계약서 사진 열람</td><td><code>payments.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>납입일 D-3 사전통보 · D+1 미납통보</td><td>입주일 기준 매월 납입일 3일 전 사전 안내 발송, 납입일 1일 후 실제 미납 호실에만 미납 통보 발송(완납 오발송 차단 · 수납 시 자동 해소)</td><td><code>ops.json</code>, <code>payments.json</code></td></tr>
         <tr><td>만기 6~2개월 전 전출확인 · 연장예고</td><td>법정 통지구간(D-180~D-60) 자동 감지, 임차인 전출계획 확인 요청, 만기전출 시 사전공실 노출, 전출의사 없을 때 5% 상한 검증 연장 재계약 예고 및 공동 재계약방 개설</td><td><code>ops.json</code>, <code>rooms.json</code>, <code>cosign_sessions.json</code></td></tr>
         <tr><td>중개 계약서 사진 등록</td><td>공인중개사 개입 지면계약서 촬영본/PDF 첨부(<code>uploads/contracts/</code> 보관), 카메라 OCR 텍스트 자동 채우기, 호실·임차인·계약금·전월세신고(RTMS) 일괄 적용</td><td><code>contracts.json</code>, <code>rooms.json</code>, <code>users.json</code>, <code>payments.json</code>, <code>ops.json</code></td></tr>
         <tr><td>공용운영비 · 종소세</td><td>8대 표준 경비 등재, NOI 순수익 계산, 5월 종소세 UTF-8 BOM CSV 출력</td><td><code>outlays.json</code></td></tr>
@@ -51,6 +52,13 @@
       <li>주택임대차보호법 제6조에 따라 만기 <strong>6개월 ~ 2개월 전(D-180 ~ D-60)</strong> 구간에 진입한 호실은 상단 요약 배너와 호실 카드에 <strong>⚖️ 법정 통지구간</strong> 경보로 자동 표시됩니다.</li>
       <li><strong>STEP 1 (전출계획 확인):</strong> <strong>[📩 임차인에게 전출계획 확인 요청]</strong>을 보내거나 유선 확인 후 <strong>[🏠 전출의사 없음 기록]</strong> / <strong>[📦 만기전출(사전공실) 기록]</strong>을 선택합니다. 만기전출 확정 시 퇴실 전이라도 임차인 공실 쇼케이스에 <code>만기퇴실 예정 사전공개</code> 매물로 선제 노출되어 공실 기간을 0일로 줄입니다.</li>
       <li><strong>STEP 2 (연장 재계약 예고):</strong> 임차인이 <strong>전출의사 없음(거주 연장 희망)</strong>인 경우, 종전 동일조건 또는 <strong>법정 5% 상한 이내</strong>로 조정한 보증금·월세·연장개월을 입력해 <strong>[📝 연장 재계약 예고 발송]</strong>을 클릭하면, 5% 초과 시 즉시 차단(422)되며 적법한 조건은 임차인 마이홈 예고장 및 실시간 공동 재계약방(<code>RENEWAL</code>)으로 동시에 전달됩니다.</li>
+    </ol>
+
+    <h2>4. 매월 임대료 납입일(=입주일) 3일 전 통보 및 납입일 1일 후 미납 통보</h2>
+    <ol>
+      <li>각 호실의 계약 입주일(<code>move_in_date</code>) 일자(1~31일, 단월 말일 자동 보정)가 매월 약정 납입일로 자동 산정됩니다.</li>
+      <li>상단 <strong>[⚡ D-3 납입통보 · D+1 미납통보 일괄 실행]</strong> 클릭 시(또는 호실별 <strong>[🔔 납입일 사전통보]</strong> / <strong>[🚨 납입+1일 미납통보]</strong> 버튼 클릭 시), 차기 납입일 <strong>3일 전(D-3)</strong> 호실에는 납입 예정 안내가, 납입일 <strong>1일 후(D+1)</strong>가 지났음에도 FIFO 원장상 미납액이 남아 있는 호실에는 미납 독촉 통보가 <code>ops.json</code> 및 1:1 인앱 메시지로 발송됩니다.</li>
+      <li>납입일 당일 또는 통보 전 입금이 완료된 완납 호실에는 미납 통보 발송이 원천 차단(400)되며, 미납 통보 발송 후 세입자가 월세를 납부하면 통보 상태가 즉시 <code>RESOLVED_PAID(완납해소)</code>로 자동 전환됩니다.</li>
     </ol>
   </main>
 </body>

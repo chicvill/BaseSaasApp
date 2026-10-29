@@ -4,7 +4,13 @@
 
   const APP_ID = "rent3_lessor";
   const params = new URLSearchParams(window.location.search);
-  let currentBranch = params.get("branch") || "main";
+  let savedSession = null;
+  try {
+    savedSession = JSON.parse(window.localStorage.getItem("rent3_session") || "null");
+  } catch (_) {
+    savedSession = null;
+  }
+  let currentBranch = params.get("branch") || (savedSession && savedSession.role === "lessor" && savedSession.branch ? savedSession.branch : "main");
   let currentTab = params.get("tab") || "ledger";
   let dash = null;
   let brokerTargetRoomNo = "";
@@ -13,6 +19,7 @@
   const openPhotoRooms = new Set();
   const openExpiryRooms = new Set();
   const closedExpiryRooms = new Set();
+  let selectedAsOfDate = "";
 
   function expiryStatusLabel(ec) {
     if (!ec) return "";
@@ -34,7 +41,8 @@
   }
 
   async function refresh() {
-    dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}`);
+    const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
+    dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
     document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
 
     elBranch.innerHTML = (dash.branches || []).map((b) =>
@@ -109,6 +117,36 @@
       ` : ""}
 
       <div class="bass-card" style="margin-bottom:14px;">
+        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h3 style="margin:0;">🔔 매월 임대료 납입일(=입주일) 3일 전 통보 · 납입일 1일 후 미납 통보</h3>
+            <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
+              입주일 일자를 매월 납입일로 자동 산정하여 <strong>납입일 3일 전(D-3)</strong> 사전 안내 및 <strong>납입일 1일 후(D+1)</strong> 미납 호실 독촉 통보를 발송합니다 (완납 호실 오발송 원천 차단).
+            </p>
+          </div>
+          <div class="bass-row" style="flex-wrap:wrap;gap:8px;">
+            <label style="font-size:12px;">기준일
+              <input id="billingRefDate" type="date" class="bass-input" style="width:145px;" value="${Bass.escapeHtml(dash.as_of_date || dash.today || "")}">
+            </label>
+            <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input id="chkCatchupOverdue" type="checkbox" checked>
+              납입일+1일 이후 미통보 미납 포함
+            </label>
+            <button id="btnAutoDispatchBilling" class="bass-btn bass-btn--primary" type="button">⚡ D-3 납입통보 · D+1 미납통보 일괄 실행</button>
+          </div>
+        </div>
+        ${(dash.recent_billing_notices || []).length > 0 ? `
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);display:flex;flex-wrap:wrap;gap:6px;">
+            ${(dash.recent_billing_notices || []).slice(0, 6).map((bn) => `
+              <span class="bass-badge ${bn.status === "RESOLVED_PAID" ? "bass-badge--ok" : (bn.notice_type === "OVERDUE_1D" ? "bass-badge--err" : "bass-badge--info")}">
+                ${bn.notice_type === "OVERDUE_1D" ? "🚨 미납통보" : "🔔 3일전통보"} · ${Bass.escapeHtml(bn.room_no)}호 ${Bass.escapeHtml(bn.tenant_name)} (${Bass.escapeHtml(bn.billing_ym)} · ${fmtWon(bn.amount_due)} · ${bn.status === "RESOLVED_PAID" ? "완납해소" : (bn.status === "ACKNOWLEDGED" ? "세입자확인" : "발송됨")})
+              </span>
+            `).join("")}
+          </div>
+        ` : ""}
+      </div>
+
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>📩 은행 입금 알림문자 붙여넣기 (자동 파싱 & FIFO 순차 상계)</h3>
         <p class="bass-muted" style="font-size:13px;">가장 오래된 미납월부터 순차 상계하며, 동일 입금 재등록은 자동 차단(황색 배너)됩니다.</p>
         <div class="bass-row" style="margin-top:8px;">
@@ -122,6 +160,9 @@
         const ct = r.contract;
         const ew = r.expiry_window;
         const ec = r.expiry_check;
+        const bs = r.billing_schedule;
+        const bns = r.billing_notices || [];
+        const latestBn = bns.length > 0 ? bns[0] : null;
         const inWindow = Boolean(ew && ew.in_6_to_2_months_window);
         const defaultExpOpen = inWindow || Boolean(ec);
         const isExpiryOpen = openExpiryRooms.has(r.room_no) || (defaultExpOpen && !closedExpiryRooms.has(r.room_no));
@@ -162,10 +203,15 @@
               </div>
             </div>
             ${r.is_occupied && lg ? `
-              <div style="font-size:13px;margin-bottom:8px;">
+              <div style="font-size:13px;margin-bottom:8px;line-height:1.6;">
                 👤 입주자: <strong>${Bass.escapeHtml(lg.tenant_name)}</strong> (${Bass.escapeHtml((ct && ct.move_in_date) || "")} ~ ${Bass.escapeHtml((ct && ct.expiry_date) || "")} · 만기 D-${lg.days_to_expiry ?? "-"})
                 ${ct && ct.fixed_date_no ? ` · 확정일자 <code>${Bass.escapeHtml(ct.fixed_date_no)}</code>` : ` · <span style="color:var(--warn);">전월세신고 확인필요</span>`}
                 ${r.pre_moveout_notice ? ` · <span class="bass-badge bass-badge--warn">📢 만기퇴실 사전공실 노출중</span>` : ""}
+                ${bs ? `<br>💳 약정 납입일: <strong>매월 ${bs.payment_day}일</strong>(=입주일) · 차기 납입일 <code>${Bass.escapeHtml(bs.upcoming_due_date)}</code> (D-${bs.days_until_due})
+                  ${bs.is_pre_due_3d ? ` <span class="bass-badge bass-badge--info">🔔 납입 3일전 통보 대상</span>` : ""}
+                  ${bs.is_overdue_eligible ? ` <span class="bass-badge bass-badge--err">🚨 납입일(${Bass.escapeHtml(bs.past_due_date)}) +${bs.days_past_due}일 미납</span>` : ""}
+                  ${latestBn ? ` · <span class="bass-muted">최근통보: ${latestBn.notice_type === "OVERDUE_1D" ? "미납통보" : "사전통보"}(${Bass.escapeHtml(latestBn.billing_ym)}, ${latestBn.status === "RESOLVED_PAID" ? "완납해소" : (latestBn.status === "ACKNOWLEDGED" ? "확인됨" : "발송됨")})</span>` : ""}
+                ` : ""}
               </div>
               ${isExpiryOpen ? `
                 <div class="bass-card" style="margin:8px 0 10px;padding:12px;border:1px solid ${inWindow ? "var(--warn)" : "var(--border)"};">
@@ -244,9 +290,15 @@
               <div style="margin-bottom:8px;">
                 ${(lg.months || []).map((m) => `<span class="month-chip month-${m.status}">${m.ym}: ${Bass.escapeHtml(m.note)}</span>`).join("")}
               </div>
-              <div class="bass-row">
-                <input class="bass-input manual-amt" data-room="${r.room_no}" type="number" style="width:160px;" value="${r.monthly_rent + r.maintenance_fee}" placeholder="수납액(원)">
-                <button class="bass-btn bass-btn--sm btn-manual-pay" data-room="${r.room_no}" type="button">💰 직접 FIFO 수납</button>
+              <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                <div class="bass-row">
+                  <input class="bass-input manual-amt" data-room="${r.room_no}" type="number" style="width:160px;" value="${r.monthly_rent + r.maintenance_fee}" placeholder="수납액(원)">
+                  <button class="bass-btn bass-btn--sm btn-manual-pay" data-room="${r.room_no}" type="button">💰 직접 FIFO 수납</button>
+                </div>
+                <div class="bass-row" style="gap:6px;">
+                  <button class="bass-btn bass-btn--sm btn-send-billing-notice" data-room="${r.room_no}" data-type="PRE_DUE_3D" type="button">🔔 납입일 사전통보</button>
+                  <button class="bass-btn bass-btn--sm btn-send-billing-notice" data-room="${r.room_no}" data-type="OVERDUE_1D" type="button">🚨 납입+1일 미납통보</button>
+                </div>
               </div>
             ` : `<div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.status_description)}</div>`}
           </div>
@@ -381,6 +433,55 @@
               proposed_term_months: term,
               renewal_note: note,
               open_cosign_session: openCosign,
+            },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
+          await refresh();
+        });
+      });
+    });
+
+    const elRefDate = document.getElementById("billingRefDate");
+    if (elRefDate) {
+      elRefDate.addEventListener("change", () => {
+        selectedAsOfDate = elRefDate.value || "";
+        refresh().catch(Bass.showError);
+      });
+    }
+
+    const btnAutoDispatch = document.getElementById("btnAutoDispatchBilling");
+    if (btnAutoDispatch) {
+      btnAutoDispatch.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const refDate = document.getElementById("billingRefDate").value;
+          selectedAsOfDate = refDate || "";
+          const catchup = document.getElementById("chkCatchupOverdue").checked;
+          const res = await Bass.api(APP_ID, "/billing-notices/auto-dispatch", {
+            method: "POST",
+            body: {
+              branch: currentBranch,
+              as_of_date: refDate || null,
+              include_catchup_overdue: catchup,
+            },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          await refresh();
+        });
+      });
+    }
+
+    elTabContent.querySelectorAll(".btn-send-billing-notice").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const refDate = (document.getElementById("billingRefDate") && document.getElementById("billingRefDate").value) || null;
+          const res = await Bass.api(APP_ID, "/billing-notices/send", {
+            method: "POST",
+            body: {
+              branch: currentBranch,
+              room_no: btn.dataset.room,
+              notice_type: btn.dataset.type,
+              as_of_date: refDate,
+              force_pre_due: true,
             },
           });
           Bass.updateAppAlert(res.level || "success", res.message, res.hint);

@@ -19,6 +19,7 @@ from apps._rent3_core import (
     Lessor,
     MaintenanceTicket,
     Pay,
+    RentBillingNotice,
     Room,
     TaxAndCertificateService,
     Tenant,
@@ -162,6 +163,8 @@ def get_myhome(tenant_id: str):
     cert = TaxAndCertificateService.build_tenant_tax_certificate(ct.id) if ct else None
     exp_win = ct.expiry_window_status() if ct else None
     exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
+    bill_sched = ct.billing_notice_schedule() if ct else None
+    bill_notices = [bn.model_dump() for bn in RentBillingNotice.for_contract(ct.id, limit=10)] if ct else []
 
     tickets = sorted(MaintenanceTicket.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
     checkouts = [c for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED"]
@@ -181,6 +184,8 @@ def get_myhome(tenant_id: str):
         "contract": ct.model_dump() if ct else None,
         "expiry_window": exp_win,
         "expiry_check": exp_chk.model_dump() if exp_chk else None,
+        "billing_schedule": bill_sched,
+        "billing_notices": bill_notices,
         "ledger": ledger,
         "certificate": cert,
         "payments": [p.model_dump() for p in payments],
@@ -320,6 +325,22 @@ def acknowledge_tenant_renewal_preview(tenant_id: str, req: TenantAckRenewalReq)
         "level": "success",
         "message": "✅ 연장 재계약 예고 조건 확인 및 동의가 임대인에게 전달되었습니다!",
         "check": chk.model_dump(),
+    }
+
+
+@router.post("/myhome/{tenant_id}/billing-notices/{notice_id}/acknowledge")
+def acknowledge_tenant_billing_notice(tenant_id: str, notice_id: str):
+    ensure_pool_seeded()
+    t = Tenant.require(tenant_id)
+    bn = RentBillingNotice.require(notice_id)
+    if bn.id_tenant != t.id:
+        raise DomainError("본인에게 발송된 통보 내역만 확인 처리할 수 있습니다.")
+    bn.acknowledge(app_source=APP_SRC)
+    return {
+        "success": True,
+        "level": "success",
+        "message": "✅ 임대료 안내 통보 확인 처리가 완료되었습니다 (임대인 앱 실시간 동기화).",
+        "notice": bn.model_dump(),
     }
 
 

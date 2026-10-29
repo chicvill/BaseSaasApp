@@ -12,6 +12,7 @@ apps/_rent3_core/models.py — Rent3 전 구성 요소 도메인 객체 정의 (
 """
 from __future__ import annotations
 
+import calendar
 import hashlib
 import json
 import re
@@ -125,6 +126,7 @@ class Admin(PoolObj):
     business_number: str = "101-86-12345"
     email: str = "admin@rent3.saas.kr"
     role: str = "superadmin"
+    password: str = "1212"
 
     def summary(self) -> str:
         return f"관리인 {self.name} ({self.username})"
@@ -148,6 +150,7 @@ class Lessor(PoolObj):
     last_fee_paid_at: str = ""
     joined_at: str = Field(default_factory=lambda: date_today().isoformat())
     status: str = "ACTIVE"                   # PENDING_APPROVAL / ACTIVE / SUSPENDED
+    password: str = "1212"
 
     def summary(self) -> str:
         return f"임대인 {self.name} ({self.branch}, 상태={self.status})"
@@ -184,6 +187,7 @@ class Tenant(PoolObj):
     checked_in_at: str = ""
     checkin_memo: str = ""
     status: str = "ACTIVE"                   # PROSPECT / ACTIVE / MOVED_OUT
+    password: str = "1212"
 
     def summary(self) -> str:
         return f"임차인 {self.name} ({self.room_no or '미배정'}호)"
@@ -425,6 +429,101 @@ class Contract(PoolObj):
             "notice_open_date": open_dt.isoformat(),
             "notice_deadline_date": deadline_dt.isoformat(),
             "days_to_notice_deadline": days_to_deadline,
+        }
+
+    def payment_day(self) -> int:
+        """매월 약정 임대료 납입일(= 입주일 move_in_date의 일자, 1~31)."""
+        m = re.search(r"\d{4}\s*[-./]\s*\d{1,2}\s*[-./]\s*(\d{1,2})", self.move_in_date or "")
+        if m:
+            d = int(m.group(1))
+            if 1 <= d <= 31:
+                return d
+        return 1
+
+    def due_date_for_ym(self, ym: str) -> Optional[date]:
+        """특정 귀속년월(YYYY-MM)의 실제 납입기한일 산출 (단월 말일 자동 클램핑)."""
+        parsed = parse_ym(ym)
+        if not parsed:
+            return None
+        y, mo = parsed
+        last_day = calendar.monthrange(y, mo)[1]
+        return date(y, mo, min(self.payment_day(), last_day))
+
+    def billing_notice_schedule(self, as_of: Optional[date] = None) -> Dict[str, Any]:
+        """기준일(as_of) 대비 ① 납입일 3일 전 사전통보(PRE_DUE_3D) 및 ② 납입일 1일 후 미납통보(OVERDUE_1D) 판정."""
+        ref = as_of or date_today()
+        pay_day = self.payment_day()
+        this_ym = f"{ref.year:04d}-{ref.month:02d}"
+        this_due = self.due_date_for_ym(this_ym) or date(ref.year, ref.month, 1)
+
+        # 1) 차기(또는 당월 미도래) 납입기한 산출
+        if this_due >= ref:
+            upcoming_ym = this_ym
+            upcoming_due = this_due
+        else:
+            next_idx = ym_index(ref.year, ref.month) + 1
+            upcoming_ym = index_to_ym(next_idx)
+            upcoming_due = self.due_date_for_ym(upcoming_ym) or ref
+
+        up_spec = self.due_for_month(upcoming_ym)
+        if up_spec["rule_state"] == "POSTPAID_MOVE_IN_EXEMPT":
+            up_parsed = parse_ym(upcoming_ym)
+            if up_parsed:
+                upcoming_ym = index_to_ym(ym_index(*up_parsed) + 1)
+                upcoming_due = self.due_date_for_ym(upcoming_ym) or upcoming_due
+                up_spec = self.due_for_month(upcoming_ym)
+
+        lg_up = self.ledger(up_to_ym=upcoming_ym)
+        row_up = next((m for m in lg_up["months"] if m["ym"] == upcoming_ym), None)
+        upcoming_unpaid = int(row_up["unpaid"]) if row_up else 0
+        days_until_due = (upcoming_due - ref).days
+        is_pre_due_3d = (
+            self.status == "ACTIVE"
+            and days_until_due == 3
+            and up_spec["due"] > 0
+            and upcoming_unpaid > 0
+        )
+
+        # 2) 이미 납입일이 최소 1일 이상 경과한 최근 귀속월의 미납 여부 산출 (납입일 당일은 미납 아님)
+        if this_due < ref:
+            past_ym = this_ym
+            past_due = this_due
+        else:
+            prev_idx = ym_index(ref.year, ref.month) - 1
+            past_ym = index_to_ym(prev_idx)
+            past_due = self.due_date_for_ym(past_ym) or (ref - timedelta(days=1))
+
+        lg_past = self.ledger(up_to_ym=past_ym)
+        past_total_unpaid = int(lg_past["total_unpaid"])
+        unpaid_months = [str(m["ym"]) for m in lg_past["months"] if m["unpaid"] > 0]
+        days_past_due = (ref - past_due).days
+        is_overdue_1d_exact = (
+            self.status == "ACTIVE"
+            and days_past_due == 1
+            and past_total_unpaid > 0
+        )
+        is_overdue_eligible = (
+            self.status == "ACTIVE"
+            and days_past_due >= 1
+            and past_total_unpaid > 0
+        )
+
+        return {
+            "as_of_date": ref.isoformat(),
+            "payment_day": pay_day,
+            "upcoming_billing_ym": upcoming_ym,
+            "upcoming_due_date": upcoming_due.isoformat(),
+            "days_until_due": days_until_due,
+            "upcoming_due_amount": int(up_spec["due"]),
+            "upcoming_unpaid_amount": upcoming_unpaid,
+            "is_pre_due_3d": is_pre_due_3d,
+            "past_billing_ym": past_ym,
+            "past_due_date": past_due.isoformat(),
+            "days_past_due": days_past_due,
+            "past_unpaid_amount": past_total_unpaid,
+            "unpaid_months": unpaid_months,
+            "is_overdue_1d_exact": is_overdue_1d_exact,
+            "is_overdue_eligible": is_overdue_eligible,
         }
 
     def due_for_month(self, ym: str) -> Dict[str, Any]:

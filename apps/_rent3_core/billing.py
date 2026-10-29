@@ -178,6 +178,8 @@ class FifoPaymentEngine:
         ).save(action="fifo_payment_collected", app_source=app_source)
 
         after_ledger = contract.ledger(up_to_ym=target_ym)
+        from .ops import RentBillingNotice
+        RentBillingNotice.resolve_paid_for_contract(contract.id, after_ledger, app_source=app_source)
         diff = before_ledger["total_unpaid"] - amount
         if after_ledger["total_unpaid"] > 0:
             banner_level = "diff"

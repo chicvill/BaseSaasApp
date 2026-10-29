@@ -261,6 +261,28 @@ description: Operational business rules, domain invariants, and verification ins
       3. **전출의사 없음 회신 (`STAY_CONFIRMED`)**: 임차인이 전출 의사가 없음(계속 거주 희망)을 회신하면 임대인에게 **연장 재계약 예고** 패널이 활성화된다.
       4. **연장 재계약 예고 및 동의 (`RENEWAL_PREVIEWED` ➔ `RENEWAL_ACKNOWLEDGED`)**: 전출의사가 없는 세입자에게 임대인이 **동일조건 연장(`SAME_TERMS`)** 또는 **법정 5% 상한(`Contract.validate_renewal_cap`) 이내 조정 조건(`ADJUSTED_WITHIN_5PCT`)**으로 연장 재계약 예고장을 발송하며, 옵션에 따라 실시간 공동 재계약방(`CoSignSession(mode="RENEWAL")`)을 즉시 함께 개설해 원스톱 전자서명으로 연결한다.
 
+21. **매월 임대료 납입일(=입주일) 3일 전 사전 통보 및 납입일 1일 후 미납 통보 거버넌스 (`RentBillingNotice`)**:
+    - **약정 납입일(`Contract.payment_day`) 단일 기준**: 별도 약정이 없는 한 계약의 `move_in_date`(입주일) 일자(`1~31일`)를 매월 임대료 납입일로 삼으며, 단월(28·29·30일 월)에는 `calendar.monthrange`를 통해 해당 월 말일로 자동 클램핑한다.
+    - **납입일 3일 전 사전 안내 (`PRE_DUE_3D`, `납입일 - 3일`)**:
+      - 차기 납입 예정일 `due_date`로부터 정확히 3일 전(`(due_date - as_of).days == 3`)에 해당 귀속년월(`YYYY-MM`)의 실청구 예정액이 `0원`보다 크고 선수금으로 이미 완납되지 않은 경우, 납입기한·청구액·입금계좌를 담은 사전 안내(`RentBillingNotice`, `ops.json`) 및 1:1 인앱 메시지(`DirectChat`)를 발송한다.
+      - 후불 입주 당월 비과세(`POSTPAID_MOVE_IN_EXEMPT`) 및 전세(`due == 0`)는 원천 제외한다.
+    - **납입일 1일 후 미납 통보 (`OVERDUE_1D`, `납입일 + 1일` 이후 미납 시)**:
+      - 납입기한일 다음날(`as_of == due_date + 1일`, 또는 미통보 경과분 포함 시 `as_of >= due_date + 1일`) 도래 시점에 해당 납입기한 귀속년월까지의 실시간 FIFO 원장(`Contract.ledger(up_to_ym=past_ym)`)을 검증하여 **실제 미납액(`total_unpaid > 0`)이 존재할 때만** 미납 통보를 발송한다.
+      - **완납자 오발송 차단 및 자동 해소**: 납입일 당일 또는 통보 전 수납이 완료되어 `total_unpaid == 0`인 호실은 자동/수동 미납 통보가 원천 차단(`DomainError` 400)되며, 미납 통보 발송 후 입금(`FifoPaymentEngine.collect`)이 이루어지면 해당 통보 객체 상태가 즉시 `RESOLVED_PAID`로 자동 전환된다.
+      - **중복 발송 차단 (Idempotency)**: 동일 `(id_contract, billing_ym, notice_type)` 키로 이미 발송된 통보는 중복 발송되지 않는다(`Conflict` 409).
+
+22. **OpenRent(`openrent.co.uk`) 벤치마킹 직거래 포털(`apps/rent3/frontend/index.html`) 및 로그인 후 역할별 자동 페이지 이동 거버넌스**:
+    - **OpenRent 스타일 직거래 포털 구성 (`/rent3/index.html`)**:
+      - **상단 Dual-Audience 네비게이션**: 임차인 메뉴(For Tenants), 임대인 메뉴(For Landlords), 실시간 Data Pool 허브 링크, 그린 CTA `[+ 매물 등록 (Add Listing)]`, `[로그인 / 회원가입 (Sign In)]` 및 로그인 상태 배지·로그아웃 제공.
+      - **히어로 검색 & 특화 도구**: 키워드·지점·매물유형 통합 검색바, 즉시입주·만기전출 사전공개·등기클린 퀵 필터, OpenRent 시그니처 **월세 적정 예산 계산기(Affordability Calculator)** 내장.
+      - **`No Dead Listings` 실시간 공실 연동**: 공동 Data Pool(`rooms.json`)의 공개 공실 및 만기전출 예정 사전공개 매물을 실시간 표출하고, `ops.json`(`DirectChat`) 기반 1:1 방문투어 예약 및 *Rent Now* 5단계 공동계약 입장을 지원한다.
+    - **통합 인증(`POST /api/rent3/pool/auth/login`) 및 역할별 자동 라우팅 규칙**:
+      - 👑 **총괄 관리인 (`superadmin` / `admin`)**: `admin` 로그인 시 `/rent3_admin/`(관리인 전용 콘솔)로 자동 이동하며, 옵션 선택 시 `/rent3/pool.html`(통합 Data Pool 관제 허브)로 이동한다.
+      - 🏢 **임대인 / 건물주 (`lessor` / `branch_admin`)**: `chic`(`main`), `sunho`(`sunho`), `sinbi`(`sinbi`) 및 `users.json` 등재 가맹 임대인 로그인 시 보유 지점에 맞춰 `/rent3_lessor/?branch={branch}`로 자동 이동한다 (`+ 매물 등록` 진입 시 `&tab=rooms`, `중개 계약서 등록` 진입 시 `&tab=broker`).
+      - 🔑 **입주 임차인 (`tenant`)**: `users.json`의 입주 세입자(성명·연락처·이메일·ID) 로그인 시 본인 계약 호실 마이홈 `/rent3_tenant/?tenant={tenant_id}`로 자동 이동한다.
+      - 📢 **예비임차인 (`prospect`)**: 미배정 예비임차인 또는 신규 간편가입자 로그인 시 `/rent3_tenant/?view=listings`(공실 탐색 화면)로 자동 이동한다.
+      - 🤝 **Rent Now 공동계약 참여자 (`cosign`)**: 6자리 참여코드와 역할(임대인/임차인)로 입장 시 `/rent3_contract/?role={lessor|tenant}&session={session_id}`로 즉시 이동한다.
+
 ---
 
 ## 4. 🎨 Resilient UX 배너 표준

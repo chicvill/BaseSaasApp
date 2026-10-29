@@ -21,9 +21,11 @@ from apps._rent3_core import (
     MaintenanceTicket,
     Outlay,
     Pay,
+    RentBillingNotice,
     Room,
     TaxAndCertificateService,
     Tenant,
+    date_today,
     ensure_pool_seeded,
     normalize_branch_id,
     pool,
@@ -126,9 +128,10 @@ def get_status(branch: str = "main"):
 
 
 @router.get("/dashboard")
-def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
+def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
     ensure_pool_seeded()
     b_id = normalize_branch_id(branch)
+    ref_dt = RentBillingNotice._parse_ref_date(as_of_date)
     buildings = Building.all()
     bldg = Building.first(branch=b_id) or (buildings[0] if buildings else None)
     lessor = Lessor.get(bldg.id_lessor) if (bldg and bldg.id_lessor) else Lessor.first(branch=b_id)
@@ -147,6 +150,8 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
         tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
         exp_win = ct.expiry_window_status() if ct else None
         exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
+        bill_sched = ct.billing_notice_schedule(as_of=ref_dt) if ct else None
+        bill_notices = [bn.model_dump() for bn in RentBillingNotice.for_contract(ct.id, limit=5)] if ct else []
         card = {
             **r.model_dump(),
             "is_occupied": r.is_occupied,
@@ -155,10 +160,19 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
             "ledger": ledger,
             "expiry_window": exp_win,
             "expiry_check": exp_chk.model_dump() if exp_chk else None,
+            "billing_schedule": bill_sched,
+            "billing_notices": bill_notices,
         }
         room_cards.append(card)
         if ct and ((exp_win and exp_win["in_6_to_2_months_window"]) or exp_chk is not None):
-            expiry_notice_rooms.append(card)
+            expiry_notice_rooms.append({
+                "room_no": r.room_no,
+                "tenant_name": ct.tenant_name,
+                "expiry_date": ct.expiry_date,
+                "days_to_expiry": exp_win["days_to_expiry"] if exp_win else None,
+                "notice_deadline_date": exp_win["notice_deadline_date"] if exp_win else "",
+                "check_status": exp_chk.status if exp_chk else "UNREQUESTED",
+            })
 
     payments = sorted(Pay.find(branch=b_id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
     outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
@@ -166,10 +180,15 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
     checkouts = sorted(CheckOutSettlement.find(branch=b_id), key=lambda c: c.updated_at, reverse=True)
     chats = sorted(DirectChat.find(branch=b_id), key=lambda c: c.created_at, reverse=True)[:30]
     cosign_sessions = sorted(CoSignSession.find(branch=b_id), key=lambda s: s.updated_at, reverse=True)
+    recent_billing_notices = sorted(
+        RentBillingNotice.find(branch=b_id), key=lambda x: x.created_at, reverse=True
+    )[:15]
     fin = TaxAndCertificateService.branch_financial_summary(b_id)
 
     return {
         "success": True,
+        "today": date_today().isoformat(),
+        "as_of_date": ref_dt.isoformat(),
         "pool_revision": pool().overview()["total_revision"],
         "branch": b_id,
         "branches": [{"branch": b.branch, "building_name": b.building_name} for b in buildings],
@@ -178,6 +197,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None):
         "total_unpaid_branch": total_unpaid_branch,
         "rooms": room_cards,
         "expiry_notice_rooms": expiry_notice_rooms,
+        "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],
         "payments": [p.model_dump() for p in payments[:30]],
         "outlays": [{**o.model_dump(), "category_label": o.category_label} for o in outlays],
         "expense_categories": EXPENSE_CATEGORIES,
@@ -575,6 +595,72 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
         "hint": code_hint,
         "check": chk.model_dump(),
     }
+
+
+class SendBillingNoticeReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    notice_type: str                         # PRE_DUE_3D / OVERDUE_1D
+    as_of_date: Optional[str] = None
+    force_pre_due: bool = True
+
+
+class AutoDispatchBillingReq(BaseModel):
+    branch: str = "main"
+    as_of_date: Optional[str] = None
+    include_catchup_overdue: bool = False
+
+
+@router.post("/billing-notices/send")
+def send_room_billing_notice(req: SendBillingNoticeReq):
+    ensure_pool_seeded()
+    bn = RentBillingNotice.send_for_room(
+        branch=req.branch,
+        room_no=req.room_no,
+        notice_type=req.notice_type,
+        as_of_date=req.as_of_date,
+        force_pre_due=req.force_pre_due,
+        app_source=APP_SRC,
+    )
+    is_overdue = bn.notice_type == "OVERDUE_1D"
+    return {
+        "success": True,
+        "level": "warning" if is_overdue else "success",
+        "message": (
+            f"🚨 {bn.room_no}호({bn.tenant_name}) 미납 통보 발송 완료 — 납입일({bn.due_date}) 경과 미납액 {bn.amount_due:,}원"
+            if is_overdue
+            else f"🔔 {bn.room_no}호({bn.tenant_name}) 납입일({bn.due_date}) 사전 안내 발송 완료 — 예정액 {bn.amount_due:,}원"
+        ),
+        "hint": "임차인 마이홈 상단 알림 배너 및 1:1 인앱 메시지(ops.json)에 실시간 전달되었습니다.",
+        "notice": bn.model_dump(),
+    }
+
+
+@router.post("/billing-notices/auto-dispatch")
+def auto_dispatch_billing_notices(req: AutoDispatchBillingReq):
+    ensure_pool_seeded()
+    res = RentBillingNotice.run_daily_auto_dispatch(
+        branch=req.branch,
+        as_of_date=req.as_of_date,
+        include_catchup_overdue=req.include_catchup_overdue,
+        app_source=APP_SRC,
+    )
+    pre_cnt = len(res["sent_pre_due"])
+    ov_cnt = len(res["sent_overdue"])
+    skip_cnt = int(res["skipped_duplicates"])
+    if pre_cnt == 0 and ov_cnt == 0:
+        msg = (
+            f"ℹ️ 기준일({res['as_of_date']}) 현재 신규 발송할 통보 대상이 없습니다 "
+            f"(납입 3일전 0건 · 납입+1일 미납 0건, 기발송 중복 스킵 {skip_cnt}건)."
+        )
+        lvl = "warning"
+    else:
+        msg = (
+            f"⚡ 정기 자동통보 실행 완료 ({res['as_of_date']} 기준) — "
+            f"납입일 3일전 사전통보 {pre_cnt}건 · 납입일+1일 미납통보 {ov_cnt}건 발송!"
+        )
+        lvl = "success"
+    return {"success": True, "level": lvl, "message": msg, **res}
 
 
 

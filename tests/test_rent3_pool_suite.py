@@ -68,6 +68,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(data["collection"], col)
 
         for path in [
+            "/rent3/",
+            "/rent3/index.html",
+            "/rent3/openrent.css",
+            "/rent3/app.js",
+            "/rent3/session-bar.js",
+            "/rent3/manual.html",
             "/rent3/pool.html",
             "/rent3_admin/",
             "/rent3_admin/manual.html",
@@ -471,6 +477,225 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         })
         self.assertEqual(r_ack.status_code, 200)
         self.assertEqual(r_ack.json()["check"]["status"], "RENEWAL_ACKNOWLEDGED")
+
+    def test_07_monthly_rent_due_3d_before_and_overdue_1d_after_notices(self):
+        """7. 매월 납입일(=입주일) 3일 전 사전 통보, 납입일 1일 후 미납 통보, 완납 오발송 차단 및 수납 시 자동 해소 검증."""
+        # [A] 2026-10-29 기준: 입주일 1일인 201호(main)의 차기 납입일(2026-11-01)이 정확히 D-3(3일 전)인지 검증
+        dash = self.client.get("/api/rent3_lessor/dashboard?branch=main&as_of_date=2026-10-29").json()
+        r201 = next(r for r in dash["rooms"] if r["room_no"] == "201")
+        self.assertEqual(r201["billing_schedule"]["payment_day"], 1)
+        self.assertEqual(r201["billing_schedule"]["upcoming_due_date"], "2026-11-01")
+        self.assertEqual(r201["billing_schedule"]["days_until_due"], 3)
+        self.assertTrue(r201["billing_schedule"]["is_pre_due_3d"])
+        self.assertFalse(r201["billing_schedule"]["is_overdue_eligible"])  # 10월분까지 완납 상태
+
+        # 완납 상태인 201호에 미납 통보 발송 시도 -> DomainError(400) 원천 차단 검증
+        r_false_ov = self.client.post("/api/rent3_lessor/billing-notices/send", json={
+            "branch": "main",
+            "room_no": "201",
+            "notice_type": "OVERDUE_1D",
+            "as_of_date": "2026-10-29",
+        })
+        self.assertEqual(r_false_ov.status_code, 400)
+
+        # [B] 2026-10-29 정기 자동통보 실행 -> main(201호) 및 sunho(301호)에 D-3 PRE_DUE_3D 발송 검증
+        r_batch_d3 = self.client.post("/api/rent3_lessor/billing-notices/auto-dispatch", json={
+            "branch": "main",
+            "as_of_date": "2026-10-29",
+            "include_catchup_overdue": False,
+        })
+        self.assertEqual(r_batch_d3.status_code, 200)
+        b_d3 = r_batch_d3.json()
+        self.assertEqual(len(b_d3["sent_pre_due"]), 1)
+        self.assertEqual(b_d3["sent_pre_due"][0]["room_no"], "201")
+        self.assertEqual(len(b_d3["sent_overdue"]), 0)
+
+        r_batch_sunho_d3 = self.client.post("/api/rent3_lessor/billing-notices/auto-dispatch", json={
+            "branch": "sunho",
+            "as_of_date": "2026-10-29",
+            "include_catchup_overdue": False,
+        }).json()
+        self.assertEqual(len(r_batch_sunho_d3["sent_pre_due"]), 1)
+        self.assertEqual(r_batch_sunho_d3["sent_pre_due"][0]["room_no"], "301")
+
+        # 동일 기준일 재실행 시 중복 스킵 & 단건 중복 발송 시 409 Conflict 차단 검증
+        r_batch_dup = self.client.post("/api/rent3_lessor/billing-notices/auto-dispatch", json={
+            "branch": "main",
+            "as_of_date": "2026-10-29",
+            "include_catchup_overdue": False,
+        }).json()
+        self.assertEqual(r_batch_dup["total_sent"], 0)
+        self.assertEqual(r_batch_dup["skipped_duplicates"], 1)
+
+        r_dup_single = self.client.post("/api/rent3_lessor/billing-notices/send", json={
+            "branch": "main",
+            "room_no": "201",
+            "notice_type": "PRE_DUE_3D",
+            "as_of_date": "2026-10-29",
+        })
+        self.assertEqual(r_dup_single.status_code, 409)
+
+        # [C] 임차인(tenant_201) 마이홈에서 도착한 D-3 사전 통보 확인 -> 11/01 정상 납부 완료
+        bn_201_id = b_d3["sent_pre_due"][0]["id"]
+        r_ack_bn = self.client.post(f"/api/rent3_tenant/myhome/tenant_201/billing-notices/{bn_201_id}/acknowledge")
+        self.assertEqual(r_ack_bn.status_code, 200)
+        self.assertEqual(r_ack_bn.json()["notice"]["status"], "ACKNOWLEDGED")
+
+        r_pay_201 = self.client.post("/api/rent3_lessor/payments/collect", json={
+            "branch": "main",
+            "room_no": "201",
+            "amount": 550_000,
+            "paid_date": "2026-11-01",
+            "up_to_ym": "2026-11",
+        })
+        self.assertEqual(r_pay_201.status_code, 200)
+
+        # 납부 즉시 201호의 11월분 사전통보가 RESOLVED_PAID로 자동 해소되었는지 검증
+        mh_201_after = self.client.get("/api/rent3_tenant/myhome/tenant_201").json()
+        bn_201_after = next(x for x in mh_201_after["billing_notices"] if x["id"] == bn_201_id)
+        self.assertEqual(bn_201_after["status"], "RESOLVED_PAID")
+
+        # [D] 납입일 1일 후(2026-11-02, D+1) 정기 자동통보 실행:
+        #   - 완납한 main(201호)에는 미납통보 0건 스킵
+        #   - 미납 상태인 sunho(301호, 입주일 2026-09-01 -> 매월 1일 납입)에는 OVERDUE_1D 발송!
+        r_main_d1 = self.client.post("/api/rent3_lessor/billing-notices/auto-dispatch", json={
+            "branch": "main",
+            "as_of_date": "2026-11-02",
+            "include_catchup_overdue": False,
+        }).json()
+        self.assertEqual(len(r_main_d1["sent_overdue"]), 0)
+
+        r_sunho_d1 = self.client.post("/api/rent3_lessor/billing-notices/auto-dispatch", json={
+            "branch": "sunho",
+            "as_of_date": "2026-11-02",
+            "include_catchup_overdue": False,
+        })
+        self.assertEqual(r_sunho_d1.status_code, 200)
+        b_d1 = r_sunho_d1.json()
+        self.assertEqual(len(b_d1["sent_overdue"]), 1)
+        ov_301 = b_d1["sent_overdue"][0]
+        self.assertEqual(ov_301["room_no"], "301")
+        self.assertEqual(ov_301["notice_type"], "OVERDUE_1D")
+        self.assertEqual(ov_301["due_date"], "2026-11-01")
+        self.assertEqual(ov_301["days_offset"], 1)
+        self.assertEqual(ov_301["amount_due"], 500_000)  # 11월분 미납 500,000원
+
+        # [E] 301호가 미납액(500,000원) 납부 시 미납 통보가 즉시 RESOLVED_PAID로 자동 해소되는지 검증
+        r_pay_301 = self.client.post("/api/rent3_lessor/payments/collect", json={
+            "branch": "sunho",
+            "room_no": "301",
+            "amount": 500_000,
+            "paid_date": "2026-11-03",
+            "up_to_ym": "2026-11",
+        })
+        self.assertEqual(r_pay_301.status_code, 200)
+
+        mh_301_after = self.client.get("/api/rent3_tenant/myhome/tenant_sunho_301").json()
+        ov_301_after = next(x for x in mh_301_after["billing_notices"] if x["id"] == ov_301["id"])
+        self.assertEqual(ov_301_after["status"], "RESOLVED_PAID")
+
+    def test_08_openrent_portal_landing_and_role_based_login_routing(self):
+        """8. OpenRent 직거래 포털(index.html) 실시간 매물 연동 및 로그인 후 역할별 전용 페이지 자동 분기 검증."""
+        # [A] 포털 랜딩 API 조회 (공실 매물·통계·데모계정 반환 검증)
+        r_land = self.client.get("/api/rent3/pool/landing")
+        self.assertEqual(r_land.status_code, 200)
+        land = r_land.json()
+        self.assertTrue(land["success"])
+        self.assertGreaterEqual(land["stats"]["total_buildings"], 3)
+        self.assertGreater(len(land["listings"]), 0)
+
+        # [B] 총괄 관리인(admin) 로그인 -> /rent3_admin/ 및 Data Pool 허브 분기 검증
+        r_adm = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "admin",
+            "password": "1212",
+        })
+        self.assertEqual(r_adm.status_code, 200)
+        self.assertEqual(r_adm.json()["role"], "admin")
+        self.assertEqual(r_adm.json()["redirect_url"], "/rent3_admin/")
+        self.assertTrue(bool(r_adm.json()["token"]))
+
+        r_adm_pool = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "admin",
+            "password": "1212",
+            "target_hint": "pool",
+        })
+        self.assertEqual(r_adm_pool.json()["redirect_url"], "/rent3/pool.html")
+
+        # [C] 지점별 임대인 로그인 -> 본인 건물 지점 콘솔 및 매물등록 탭 분기 검증
+        r_lsr_sunho = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "sunho",
+            "password": "1212",
+        })
+        self.assertEqual(r_lsr_sunho.status_code, 200)
+        self.assertEqual(r_lsr_sunho.json()["role"], "lessor")
+        self.assertEqual(r_lsr_sunho.json()["redirect_url"], "/rent3_lessor/?branch=sunho")
+
+        r_lsr_add = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "chic",
+            "password": "1212",
+            "target_hint": "add_listing",
+        })
+        self.assertEqual(r_lsr_add.json()["redirect_url"], "/rent3_lessor/?branch=main&tab=rooms")
+
+        # [D] 입주 임차인(휴대폰 번호 + 뒷 4자리 비밀번호) 로그인 -> 내 호실 마이홈 자동 분기 검증
+        r_tnt = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "010-8888-2010",
+            "password": "2010",
+        })
+        self.assertEqual(r_tnt.status_code, 200)
+        self.assertEqual(r_tnt.json()["role"], "tenant")
+        self.assertEqual(r_tnt.json()["redirect_url"], "/rent3_tenant/?tenant=tenant_201")
+
+        # 오입력 비밀번호 401 차단 검증
+        r_bad = self.client.post("/api/rent3/pool/auth/login", json={
+            "identifier": "admin",
+            "password": "wrong_password",
+        })
+        self.assertEqual(r_bad.status_code, 401)
+
+        # [E] 예비임차인 간편 가입 -> 공실 탐색 페이지(/rent3_tenant/?view=listings) 자동 분기 검증
+        r_reg = self.client.post("/api/rent3/pool/auth/register", json={
+            "role": "prospect",
+            "name": "오픈렌트예비",
+            "phone": "010-9191-8282",
+            "password": "8282",
+        })
+        self.assertEqual(r_reg.status_code, 200)
+        self.assertEqual(r_reg.json()["role"], "prospect")
+        self.assertEqual(r_reg.json()["redirect_url"], "/rent3_tenant/?view=listings")
+
+        # [F] Rent Now 공동계약 개설 및 6자리 참여코드 로그인 -> /rent3_contract/ 자동 분기 검증
+        sample_listing = land["listings"][0]
+        r_rn = self.client.post("/api/rent3/pool/cosign-open", json={
+            "branch": sample_listing["branch"],
+            "room_no": sample_listing["room_no"],
+            "tenant_name": "오픈렌트예비",
+            "tenant_phone": "010-9191-8282",
+        })
+        self.assertEqual(r_rn.status_code, 200)
+        rn_data = r_rn.json()
+        self.assertTrue(rn_data["redirect_url"].startswith("/rent3_contract/?role=tenant&session="))
+
+        r_code_login = self.client.post("/api/rent3/pool/auth/login", json={
+            "login_mode": "cosign",
+            "session_code": rn_data["session_code"],
+            "cosign_role": "lessor",
+        })
+        self.assertEqual(r_code_login.status_code, 200)
+        self.assertEqual(
+            r_code_login.json()["redirect_url"],
+            f"/rent3_contract/?role=lessor&session={rn_data['session_id']}",
+        )
+
+        # [G] 포털 1:1 방문문의 -> ops.json 실시간 기록 확인
+        r_inq = self.client.post("/api/rent3/pool/inquiries", json={
+            "branch": sample_listing["branch"],
+            "room_no": sample_listing["room_no"],
+            "sender_name": "오픈렌트예비",
+            "visit_date": "토요일 15:00",
+            "message": "OpenRent 포털에서 실물 투어 신청합니다.",
+        })
+        self.assertEqual(r_inq.status_code, 200)
 
 
 if __name__ == "__main__":
