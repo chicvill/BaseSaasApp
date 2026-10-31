@@ -547,7 +547,7 @@ class TestTelegram(ApiCase):
     def setUp(self):
         super().setUp()                                   # 시크빌 임대인 준비는 개발 모드로
         from unittest import mock
-        env = mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "123:test"})
+        env = mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "123456:ABCdefGHIjklMNOpqrSTUvwx"})
         env.start()
         self.addCleanup(env.stop)
         self.updates, self.sent = [], []

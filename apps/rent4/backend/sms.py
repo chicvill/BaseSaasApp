@@ -63,6 +63,15 @@ def local_phone(phone: str) -> str:
     return "0" + d[2:] if d.startswith("82") else d
 
 
+TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
+
+
+def telegram_token() -> str:
+    """형식이 맞는 봇 토큰만 쓴다 (예: 123456789:AAH...). 자리표시자 '토큰' 같은 값은 없는 것으로 본다."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    return token if TOKEN_RE.match(token) else ""
+
+
 def public_url() -> str:
     return os.getenv("RENT4_PUBLIC_URL", "http://localhost:9070/")
 
@@ -70,7 +79,7 @@ def public_url() -> str:
 # ── 방식 선택 ──
 def available() -> List[Dict[str, str]]:
     out = [{"id": "dev", "label": PROVIDER_LABELS["dev"]}]
-    if os.getenv("TELEGRAM_BOT_TOKEN"):
+    if telegram_token():
         out.append({"id": "telegram", "label": PROVIDER_LABELS["telegram"]})
     if all(os.getenv(k) for k in ("SOLAPI_API_KEY", "SOLAPI_API_SECRET", "SMS_SENDER")):
         out.append({"id": "solapi", "label": PROVIDER_LABELS["solapi"]})
@@ -142,7 +151,7 @@ _lock = threading.Lock()
 
 
 def _telegram(method: str, params: Optional[Dict] = None, timeout: int = 10) -> Dict:
-    url = TELEGRAM_API.format(token=os.environ["TELEGRAM_BOT_TOKEN"], method=method)
+    url = TELEGRAM_API.format(token=telegram_token(), method=method)
     body = json.dumps(params or {}).encode()
     req = urllib.request.Request(url, data=body, method="POST", headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as res:
@@ -214,7 +223,11 @@ def _send_telegram(to: str, text: str) -> Dict[str, str]:
 
 def start_polling() -> None:
     """텔레그램을 쓸 수 있으면 봇 메시지를 계속 받는다 (데몬 스레드, 공개 주소 불필요)."""
-    if not os.getenv("TELEGRAM_BOT_TOKEN") or os.getenv("RENT4_TELEGRAM_POLLING") == "0":
+    if os.getenv("RENT4_TELEGRAM_POLLING") == "0":
+        return
+    if not telegram_token():
+        if os.getenv("TELEGRAM_BOT_TOKEN"):
+            logger.error("TELEGRAM_BOT_TOKEN 형식이 올바르지 않습니다 (예: 123456789:AAH...). @BotFather 가 준 토큰 전체를 넣으세요. 텔레그램은 꺼 둡니다.")
         return
 
     def loop():
