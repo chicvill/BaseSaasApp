@@ -60,6 +60,20 @@ dialog.detail { max-width: min(420px, 92vw); border: 1px solid var(--border-stro
 dialog.detail::backdrop { background: hsl(232 40% 4% / .7); }
 .hide { display: none !important; }
 
+/* 채팅창 (rent4.js startChat) */
+.chat-fab { position: fixed; right: 16px; bottom: 16px; z-index: 50; min-width: 52px; height: 52px; padding: 0 14px;
+  border-radius: 26px; border: 1px solid var(--border-strong); background: var(--bg-2); color: var(--text);
+  font: 700 16px var(--font); cursor: pointer; box-shadow: var(--shadow); }
+.chat-fab.has-new { background: linear-gradient(120deg, var(--primary), var(--primary-2)); border-color: transparent; }
+.chat-panel { position: fixed; right: 16px; bottom: 80px; z-index: 50; width: min(360px, calc(100vw - 32px)); max-height: 60vh;
+  display: flex; flex-direction: column; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-2);
+  box-shadow: var(--shadow); }
+.chat-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.chat-list { overflow-y: auto; padding: 10px 12px; display: grid; gap: 10px; }
+.chat-msg { padding: 10px 12px; border-radius: 12px; background: var(--surface); font-size: 13.5px; border: 1px solid var(--border); }
+.chat-msg.is-new { border-color: var(--primary); }
+.chat-meta { color: var(--muted); font-size: 11.5px; margin-bottom: 4px; }
+
 /* 비밀번호 보기/숨기기 (rent4.js addRevealToggle) */
 .pw-wrap { position: relative; display: block; }
 .pw-wrap .bass-input { padding-right: 76px; }

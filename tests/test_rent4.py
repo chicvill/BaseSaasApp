@@ -654,6 +654,35 @@ class TestResetLink(ApiCase):
         self.client.post("/api/rent4/lessor/import/commit", json={"text": changed}, headers=self.chic)
         self.assertEqual(self.client.get(f"/api/rent4/reset/view?t={token}").status_code, 404)
 
+    def test_online_tenant_gets_link_in_chat(self):
+        from apps.rent4.backend import chat
+        chat._last_seen.clear()
+        self.import_sheet()
+        tenant = self.tenant_login("101")
+        self.assertEqual(self.client.get("/api/rent4/chat/inbox", headers=tenant).json()["messages"], [])   # 접속 중 표시
+        r = self.reset("101")
+        self.assertEqual(r["delivered"], "chat")
+        msgs = self.client.get("/api/rent4/chat/inbox", headers=tenant).json()["messages"]
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["link"], f"reset.html?t={r['token']}")
+        self.assertIsNone(msgs[0]["read_at"])
+        self.client.post(f"/api/rent4/chat/read/{msgs[0]['id']}", headers=tenant)
+        self.assertTrue(self.client.get("/api/rent4/chat/inbox", headers=tenant).json()["messages"][0]["read_at"])
+        token = msgs[0]["link"].split("t=", 1)[1]
+        done = self.client.post("/api/rent4/reset/set", json={"t": token, "new": "chat-link-101"}).json()
+        self.assertEqual(done["home"], "임차인.html")
+        self.login("chic101", "chat-link-101")
+        # 다른 사람에게는 보이지 않는다
+        other = self.tenant_login("102")
+        self.assertEqual(self.client.get("/api/rent4/chat/inbox", headers=other).json()["messages"], [])
+
+    def test_offline_tenant_falls_back_to_share(self):
+        from apps.rent4.backend import chat
+        chat._last_seen.clear()
+        self.import_sheet()
+        self.assertEqual(self.reset("103")["delivered"], "share")
+        self.assertEqual(self.client.get("/api/rent4/chat/inbox").status_code, 401)
+
     def test_reset_page_served(self):
         self.assertEqual(self.client.get("/rent4/reset.html").status_code, 200)
 

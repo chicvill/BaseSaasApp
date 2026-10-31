@@ -29,6 +29,7 @@
     }
     if (!kinds.includes(info.kind)) { go(info.home); return new Promise(() => {}); }
     renderWho(info);
+    startChat();
     return info;
   }
 
@@ -291,5 +292,60 @@
     if (!dlg.open) dlg.showModal();
   }
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink };
+  /** 채팅창: 로그인한 화면 오른쪽 아래. 몇 초마다 받은 메시지를 확인한다 (= 서버에 '접속 중' 표시). */
+  function startChat() {
+    if (document.getElementById("chatFab")) return;
+    const esc = Bass.escapeHtml;
+    const fab = document.createElement("button");
+    fab.id = "chatFab";
+    fab.className = "chat-fab";
+    fab.type = "button";
+    fab.setAttribute("aria-label", "채팅");
+    fab.textContent = "💬";
+    const panel = document.createElement("div");
+    panel.id = "chatPanel";
+    panel.className = "chat-panel hide";
+    panel.innerHTML = `<div class="chat-head"><b>💬 채팅</b><button type="button" class="bass-btn bass-btn--sm bass-btn--ghost" data-chat="close">닫기</button></div>
+      <div class="chat-list" id="chatList"><div class="bass-muted" style="font-size:13px">받은 메시지가 없습니다.</div></div>`;
+    document.body.append(fab, panel);
+    let seen = new Set();
+    let first = true;
+
+    function render(messages) {
+      const list = document.getElementById("chatList");
+      if (!messages.length) return;
+      list.innerHTML = messages.map((m) => `
+        <div class="chat-msg ${m.read_at ? "" : "is-new"}">
+          <div class="chat-meta">${esc(m.sender_label || m.sender)} · ${esc(m.created_at.slice(5, 16).replace("T", " "))}</div>
+          <div>${esc(m.text)}</div>
+          ${m.link ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="${esc(m.link)}" data-read="${esc(m.id)}" style="margin-top:6px">${esc(m.link_label || "열기")}</a>` : ""}
+        </div>`).join("");
+      list.scrollTop = list.scrollHeight;
+    }
+
+    async function poll() {
+      try {
+        const { messages } = await Bass.api("rent4", "/chat/inbox");
+        const unread = messages.filter((m) => !m.read_at);
+        fab.textContent = unread.length ? `💬 ${unread.length}` : "💬";
+        fab.classList.toggle("has-new", unread.length > 0);
+        const fresh = messages.filter((m) => !seen.has(m.id));
+        messages.forEach((m) => seen.add(m.id));
+        render(messages);
+        if (!first && fresh.some((m) => !m.read_at)) panel.classList.remove("hide");   // 새 메시지가 오면 바로 연다
+        first = false;
+      } catch (_) { /* 로그아웃 등 — 조용히 다음 차례 */ }
+    }
+
+    fab.addEventListener("click", () => panel.classList.toggle("hide"));
+    panel.addEventListener("click", (e) => {
+      if (e.target.closest("[data-chat=close]")) panel.classList.add("hide");
+      const a = e.target.closest("[data-read]");
+      if (a) Bass.api("rent4", `/chat/read/${a.dataset.read}`, { method: "POST" }).catch(() => {});
+    });
+    poll();
+    setInterval(poll, 5000);
+  }
+
+  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat };
 })(window);

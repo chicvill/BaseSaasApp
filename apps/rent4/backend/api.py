@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, contracts, excel_import, ledger, oauth, sms
+from . import accounts, bank_parser, chat, contracts, excel_import, ledger, oauth, sms
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -295,8 +295,27 @@ def admin_sms(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_on
 def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
     """임차인 비밀번호 초기화 → 한 번만 쓰는 재설정 링크 (임대인이 채팅으로 전달)."""
     acc, room, token = accounts.issue_reset_link(_scope(user, branch).branch, room_no)
-    return {"success": True, "token": token, "username": acc.username, "room": acc.room,
+    delivered = "share"
+    if chat.online(acc.username):        # 임차인이 지금 접속 중이면 채팅창으로 바로 전달
+        chat.post(acc.username, user.username, f"임대인 {user.name or user.username}",
+                  f"{room.tenant_name}님, 비밀번호가 초기화되었습니다. 아래 버튼을 눌러 새 비밀번호를 정해 주세요. "
+                  f"({accounts.RESET_LINK_TTL // 3600}시간 안에, 한 번만 사용)",
+                  link=f"reset.html?t={token}", link_label="🔑 새 비밀번호 정하기")
+        delivered = "chat"
+    return {"success": True, "token": token, "username": acc.username, "room": acc.room, "delivered": delivered,
             "tenant_name": room.tenant_name, "phone": room.phone, "expires_hours": accounts.RESET_LINK_TTL // 3600}
+
+
+# ── 채팅창 (로그인한 사용자) ──
+@router.get("/chat/inbox")
+def chat_inbox(user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, "messages": chat.inbox(user.username)}
+
+
+@router.post("/chat/read/{message_id}")
+def chat_read(message_id: str, user: User = Depends(require_user)) -> Dict[str, Any]:
+    chat.mark_read(user.username, message_id)
+    return {"success": True}
 
 
 # ── 비밀번호 재설정 링크 (로그인 전) ──

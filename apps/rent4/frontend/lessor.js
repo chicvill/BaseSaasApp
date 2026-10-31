@@ -97,11 +97,17 @@
     if (btn.dataset.act === "reset") {
       Bass.withLock(btn, async () => {
         const r = await api(`/lessor/accounts/${room}/reset`, { method: "POST" });
+        if (r.delivered === "chat") {
+          Bass.updateAppAlert("success", `${r.room}호 ${r.tenant_name}님 화면의 채팅창으로 링크를 보냈습니다.`,
+            "임차인이 채팅창의 '새 비밀번호 정하기'를 누르면 바로 설정하고 로그인합니다. 이전 비밀번호는 이미 막혔습니다.");
+          await loadAccounts();
+          return;
+        }
         Rent4.shareLink({
           title: `${r.room}호 비밀번호를 초기화했습니다`, name: r.tenant_name, phone: r.phone,
           link: new URL(`reset.html?t=${encodeURIComponent(r.token)}`, location.href).href,
           message: `[Rent4] ${r.tenant_name}님, 아래 링크를 열어 새 비밀번호를 정해 주세요. 정하면 바로 로그인되고, 다음부터는 아이디 ${r.username} 또는 휴대폰 번호와 새 비밀번호로 로그인합니다. (${r.expires_hours}시간 안에, 한 번만 사용)`,
-          note: "이전 비밀번호는 이미 막혔습니다. 임차인이 새 비밀번호를 정하면 이 링크도 바로 만료됩니다.",
+          note: "임차인이 지금 접속해 있지 않아 채팅창으로 보내지 못했습니다. 이전 비밀번호는 이미 막혔고, 새 비밀번호를 정하면 이 링크도 바로 만료됩니다.",
         });
         await loadAccounts();
       }, "초기화 중...");
