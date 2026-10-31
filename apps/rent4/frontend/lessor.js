@@ -66,7 +66,7 @@
         lease_type: $("lType").value, pay_timing: $("lTiming").value,
         deposit: num("lDeposit"), rent: num("lRent"), mgmt: num("lMgmt"),
         start: $("lStart").value || null, end: $("lEnd").value || null } });
-      await Rent4.announceLink(res.token, `${res.contract.room}호 임대차 계약을 발행했습니다.`);
+      Rent4.sendContract(res.contract, res.token);
       $("leaseForm").reset();
       await loadLeases();
     }, "발행 중...");
@@ -75,23 +75,34 @@
   // ── 임차인 계정 ──
   async function loadAccounts() {
     const { accounts } = await api("/lessor/accounts");
-    $("accounts").innerHTML = `<thead><tr><th>호실</th><th>임차인</th><th>아이디</th><th>첫 비밀번호 코드</th><th>상태</th><th></th></tr></thead>
+    $("accounts").innerHTML = `<thead><tr><th>호실</th><th>임차인</th><th>아이디</th><th>상태</th><th></th></tr></thead>
       <tbody>${accounts.map((a) => `<tr>
-        <td><b>${esc(a.room)}</b></td><td>${esc(a.tenant_name)}</td>
+        <td><b>${esc(a.room)}</b></td><td>${esc(a.tenant_name)}<br><small class="bass-muted">${esc(a.phone)}</small></td>
         <td><code>${esc(a.username)}</code></td>
-        <td>${a.initial_code ? `<code style="font-size:14px">${esc(a.initial_code)}</code>` : "—"}</td>
-        <td>${a.activated ? `<span class="bass-badge bass-badge--ok">사용 중</span>` : `<span class="bass-badge bass-badge--warn">첫 로그인 전</span>`}</td>
-        <td><button class="bass-btn bass-btn--sm" data-reset="${esc(a.room)}">코드 재발급</button></td>
+        <td>${a.activated ? `<span class="bass-badge bass-badge--ok">사용 중</span>`
+              : a.link_sent ? `<span class="bass-badge bass-badge--info">링크 보냄</span>`
+              : `<span class="bass-badge bass-badge--warn">안내 전</span>`}</td>
+        <td style="text-align:right">
+          ${a.activated ? "" : `<button class="bass-btn bass-btn--sm bass-btn--primary" data-link="invite" data-room="${esc(a.room)}">📨 안내 링크</button>`}
+          <button class="bass-btn bass-btn--sm" data-link="reset" data-room="${esc(a.room)}" title="비밀번호를 잊었을 때: 새 코드 + 새 링크">코드 재발급</button>
+        </td>
       </tr>`).join("")}</tbody>`;
   }
 
   $("accounts").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-reset]");
+    const btn = e.target.closest("[data-link]");
     if (!btn) return;
+    const reset = btn.dataset.link === "reset";
     Bass.withLock(btn, async () => {
-      const r = await api(`/lessor/accounts/${encodeURIComponent(btn.dataset.reset)}/reset`, { method: "POST" });
-      Bass.updateAppAlert("success", `${btn.dataset.reset}호 새 코드: ${r.initial_code}`,
-        `아이디 ${r.username} 와 이 코드를 임차인에게 전달하세요. 이전 비밀번호로는 더 이상 로그인할 수 없습니다.`);
+      const r = await api(`/lessor/accounts/${encodeURIComponent(btn.dataset.room)}/${btn.dataset.link}`, { method: "POST" });
+      Rent4.sendLink({
+        title: reset ? `${r.room}호 코드를 재발급했습니다` : `${r.room}호 안내 링크를 만들었습니다`,
+        name: r.tenant_name, phone: r.phone, link: Rent4.inviteLink(r.token),
+        message: reset
+          ? `[Rent4] ${r.tenant_name}님, ${r.room}호 비밀번호가 초기화되었습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 새 첫 비밀번호를 받아 로그인해 주세요.`
+          : `[Rent4] ${r.tenant_name}님, ${r.room}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 아이디와 첫 비밀번호를 받아 주세요.`,
+        note: reset ? "이전 비밀번호와 이전 안내 링크는 이미 막혔습니다." : "",
+      });
       await loadAccounts();
     });
   });

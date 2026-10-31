@@ -11,6 +11,7 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     POST   /admin/contracts/{id}/relink|paid|cancel|reset   (reset = 비밀번호 분실: 새 임시 비밀번호 + 새 링크)
 계약 상대방 (로그인 전, 계약 링크의 토큰 t)
     GET    /contract/view?t=               계약 내용 · 상태 · (체결 후) 아이디와 임시 비밀번호
+    GET    /invite/view?t=  POST /invite/open   임차인 안내 링크: 휴대폰 뒤 4자리 확인 → 아이디·첫 코드
     POST   /contract/sign                  휴대폰 뒤 4자리 본인 확인 + 동의
 임대인 (branch_admin = 자기 건물 / 관리인은 ?branch= 로 건물 지정)
     GET    /lessor/board?year=2026         호실 × 12개월 수납 현황
@@ -19,7 +20,8 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     DELETE /lessor/payments/{id}           잘못 반영한 은행/수동 기록 취소
     POST   /lessor/import/preview|commit   연간 수납 Excel 표 붙여넣기 → 분석 / 반영
     GET    /lessor/accounts                임차인 계정 (아이디 · 첫 비밀번호 코드 · 사용 여부)
-    POST   /lessor/accounts/{room}/reset   임차인 계정 첫 비밀번호 재발급
+    POST   /lessor/accounts/{room}/invite  임차인 안내 링크 (아이디·첫 코드는 링크에서 본인 확인 후)
+    POST   /lessor/accounts/{room}/reset   코드 재발급 + 새 안내 링크
     GET|POST /lessor/contracts             임대차 계약 목록 / 발행
     POST   /lessor/contracts/{id}/relink|paid|cancel|reset
 임차인 (로그인)
@@ -221,10 +223,26 @@ def lessor_accounts(branch: str = "", user: User = Depends(staff)) -> Dict[str, 
     return {"success": True, "building": b.name, "accounts": accounts.list_accounts(b.branch)}
 
 
-@router.post("/lessor/accounts/{room_no}/reset")
-def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
-    acc = accounts.reset_account(_scope(user, branch).branch, room_no)
-    return {"success": True, "username": acc.username, "initial_code": acc.initial_code}
+@router.post("/lessor/accounts/{room_no}/{action}")
+def lessor_account_link(room_no: str, action: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    """invite = 안내 링크 보내기 (코드 그대로) · reset = 코드 재발급 + 새 안내 링크."""
+    if action not in ("invite", "reset"):
+        raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
+    acc, token = accounts.issue_invite(_scope(user, branch).branch, room_no, reissue=action == "reset")
+    room = Room.first(branch=acc.branch, room=acc.room)
+    return {"success": True, "token": token, "username": acc.username, "room": acc.room,
+            "tenant_name": room.tenant_name, "phone": room.phone}
+
+
+# ── 임차인 안내 링크 (로그인 전) ──
+@router.get("/invite/view")
+def invite_view(t: str = "") -> Dict[str, Any]:
+    return {"success": True, **accounts.invite_view(t)}
+
+
+@router.post("/invite/open")
+def invite_open(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.invite_open(str(payload.get("t", "")), str(payload.get("phone4", "")))}
 
 
 # ── 임차인 ──

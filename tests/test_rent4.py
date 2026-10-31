@@ -279,15 +279,49 @@ class TestApi(ApiCase):
         self.assertEqual(self.client.delete(f"/api/rent4/lessor/payments/{pid}", headers=self.chic).status_code, 200)
         self.assertEqual(len(Payment.find(room="101", source="bank")), 0)
 
-    def test_accounts_list_and_reset(self):
+    def open_invite(self, token, phone4):
+        res = self.client.post("/api/rent4/invite/open", json={"t": token, "phone4": phone4})
+        return res.status_code, res.json()
+
+    def test_accounts_list_hides_codes(self):
         self.import_sheet()
         rows = self.client.get("/api/rent4/lessor/accounts", headers=self.chic).json()["accounts"]
         self.assertEqual([r["username"] for r in rows], ["chic101", "chic102", "chic103"])
-        old = rows[0]["initial_code"]
-        new = self.client.post("/api/rent4/lessor/accounts/101/reset", headers=self.chic).json()["initial_code"]
-        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": new}).status_code, 200)
-        if new != old:
-            self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": old}).status_code, 401)
+        self.assertNotIn("initial_code", rows[0])
+        self.assertEqual((rows[0]["phone"], rows[0]["link_sent"]), ("010-1111-2222", False))
+
+    def test_invite_link_needs_phone_then_shows_code(self):
+        self.import_sheet()
+        r = self.client.post("/api/rent4/lessor/accounts/101/invite", headers=self.chic).json()
+        self.assertEqual((r["username"], r["tenant_name"], r["phone"]), ("chic101", "홍길동", "010-1111-2222"))
+        view = self.client.get(f"/api/rent4/invite/view?t={r['token']}").json()
+        self.assertEqual((view["room"], view["phone_masked"], view["activated"]), ("101", "***-****-2222", False))
+        self.assertNotIn("temp_password", view)
+        self.assertEqual(self.open_invite(r["token"], "0000")[0], 422)
+        status, body = self.open_invite(r["token"], "2222")
+        self.assertEqual(status, 200)
+        auth = self.login("chic101", body["temp_password"])
+        self.change_pw(auth, body["temp_password"], "invited-101")
+        self.assertEqual(self.open_invite(r["token"], "2222")[1]["temp_password"], "")
+        self.assertEqual(self.client.post("/api/rent4/lessor/accounts/101/invite", headers=self.chic).status_code, 409)
+
+    def test_reset_issues_new_code_and_kills_old_link(self):
+        self.import_sheet()
+        first = self.client.post("/api/rent4/lessor/accounts/101/invite", headers=self.chic).json()["token"]
+        old_code = self.open_invite(first, "2222")[1]["temp_password"]
+        second = self.client.post("/api/rent4/lessor/accounts/101/reset", headers=self.chic).json()["token"]
+        self.assertEqual(self.client.get(f"/api/rent4/invite/view?t={first}").status_code, 404)
+        new_code = self.open_invite(second, "2222")[1]["temp_password"]
+        self.login("chic101", new_code)
+        if new_code != old_code:
+            self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": old_code}).status_code, 401)
+
+    def test_new_tenant_invalidates_old_invite(self):
+        self.import_sheet()
+        token = self.client.post("/api/rent4/lessor/accounts/101/invite", headers=self.chic).json()["token"]
+        changed = SHEET.replace("홍길동", "고길동").replace("010-1111-2222", "010-9999-8888")
+        self.client.post("/api/rent4/lessor/import/commit", json={"text": changed}, headers=self.chic)
+        self.assertEqual(self.client.get(f"/api/rent4/invite/view?t={token}").status_code, 404)
 
 
 class TestContracts(ApiCase):

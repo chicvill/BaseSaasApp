@@ -67,7 +67,7 @@
         building_name: $("mBuilding").value.trim(), building_code: $("mCode").value.trim(),
         party_name: $("mName").value.trim(), party_phone: $("mPhone").value.trim(),
         fee: Number($("mFee").value || 0), start: $("mStart").value || null, end: $("mEnd").value || null } });
-      await Rent4.announceLink(res.token, `${res.contract.building_name} 가맹 계약을 발행했습니다.`);
+      Rent4.sendContract(res.contract, res.token);
       $("memberForm").reset();
       await loadContracts();
     }, "발행 중...");

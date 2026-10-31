@@ -165,30 +165,93 @@
           <td style="text-align:right">${acts}</td></tr>`;
       }).join("") : `<tr><td colspan="5" class="bass-muted">아직 발행한 계약이 없습니다.</td></tr>`}</tbody>`;
 
+    table._items = Object.fromEntries(items.map((c) => [c.id, c]));
     if (table.dataset.bound) return;
     table.dataset.bound = "1";
     table.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-act]");
       if (!btn) return;
+      const c = table._items[btn.dataset.id];
       Bass.withLock(btn, async () => {
         const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
-        if (btn.dataset.act === "relink") await announceLink(res.token, "링크를 새로 만들었습니다. 이전 링크는 더 이상 열리지 않습니다.");
-        if (btn.dataset.act === "paid") Bass.updateAppAlert("success", "납부를 확인해 계약이 체결되었습니다.",
-          `상대방이 계약 링크를 다시 열면 아이디(${res.contract.username})와 임시 비밀번호가 보입니다.`);
+        if (btn.dataset.act === "relink") sendContract(c, res.token, "새 링크를 만들었습니다 (이전 링크는 막힘)");
+        if (btn.dataset.act === "paid") sendLink({
+          title: "계약이 체결되었습니다", name: c.party_name, phone: c.party_phone,
+          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 받으신 계약 링크를 다시 열면 아이디와 임시 비밀번호가 보입니다.`,
+        });
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
-        if (btn.dataset.act === "reset") await announceLink(res.token,
-          `${res.contract.username} 비밀번호를 초기화했습니다. 이전 비밀번호와 이전 링크는 막혔습니다 — 새 링크를 보내 주세요.`);
+        if (btn.dataset.act === "reset") sendLink({
+          title: `${res.contract.username} 비밀번호를 초기화했습니다`, name: c.party_name, phone: c.party_phone,
+          link: contractLink(res.token),
+          message: `[Rent4] ${c.party_name}님, 비밀번호가 초기화되었습니다. 아래 링크에서 새 임시 비밀번호를 확인하고 로그인한 뒤 바로 바꿔 주세요.`,
+          note: "이전 비밀번호와 이전 링크는 이미 막혔습니다.",
+        });
         await reload();
       });
     });
   }
 
-  async function announceLink(token, lead) {
-    const link = contractLink(token);
-    const copied = await copy(link);
-    Bass.updateAppAlert("success", lead || "계약 링크를 만들었습니다.",
-      `${copied ? "링크를 복사했습니다. " : ""}문자·카카오톡 등으로 상대방에게 보내세요: ${link}`, { timeout: 0 });
+  function contractTitle(c) {
+    return c.kind === "membership" ? `${c.building_name} 가맹 계약` : `${c.building_name} ${c.room}호 임대차 계약`;
   }
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractLink, copy, contractTable, announceLink };
+  /** 계약 발행 · 링크 재발급 뒤 상대방에게 계약 링크 보내기. */
+  function sendContract(c, token, title) {
+    sendLink({
+      title: title || `${contractTitle(c)}을 발행했습니다`, name: c.party_name, phone: c.party_phone,
+      link: contractLink(token),
+      message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}서입니다. 아래 링크에서 계약 내용을 확인하고, 휴대폰 뒤 4자리로 본인 확인 후 동의해 주세요.`,
+    });
+  }
+
+  /** 임차인 안내 링크 (Excel 로 등록된 기존 임차인). */
+  function inviteLink(token) {
+    return new URL(`invite.html?t=${encodeURIComponent(token)}`, global.location.href).href;
+  }
+
+  /**
+   * 링크 보내기 창: 안내 문구 + [📤 카카오톡 등으로 공유] [💬 문자 보내기] [📋 복사].
+   * 휴대폰에서는 공유 버튼이 카카오톡·메시지 앱 선택 창을 연다. 문구는 열자마자 클립보드에도 복사한다.
+   */
+  async function sendLink({ title, name, phone, link, message, note }) {
+    const esc = Bass.escapeHtml;
+    const text = link ? `${message}\n${link}` : message;
+    const copied = await copy(text);
+    let dlg = document.getElementById("sendDialog");
+    if (!dlg) {
+      dlg = document.createElement("dialog");
+      dlg.id = "sendDialog";
+      dlg.className = "detail";
+      document.body.append(dlg);
+      dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    }
+    const digits = String(phone || "").replace(/\D/g, "");
+    const canShare = typeof global.navigator.share === "function";
+    dlg.innerHTML = `
+      <div class="stack">
+        <h2 style="margin:0;font-size:18px">📨 ${esc(title)}</h2>
+        <div class="bass-muted" style="font-size:13px">${esc(name)}님${digits ? ` (${esc(phone)})` : ""}에게 아래 내용을 보내 주세요.${copied ? " 이미 복사해 두었습니다." : ""}</div>
+        <textarea class="bass-input" readonly style="min-height:120px;font-size:13px">${esc(text)}</textarea>
+        ${note ? `<div style="font-size:12.5px;color:var(--warn)">${esc(note)}</div>` : ""}
+        <div class="bass-row">
+          ${canShare ? `<button class="bass-btn bass-btn--primary" data-send="share">📤 카카오톡 등으로 공유</button>` : ""}
+          ${digits ? `<a class="bass-btn ${canShare ? "" : "bass-btn--primary"}" href="sms:${digits}?&body=${encodeURIComponent(text)}">💬 문자 보내기</a>` : ""}
+          <button class="bass-btn" data-send="copy">📋 복사</button>
+          <button class="bass-btn bass-btn--ghost" data-send="close">닫기</button>
+        </div>
+        ${canShare ? "" : `<div class="bass-muted" style="font-size:12px">PC 에서는 복사한 내용을 카카오톡 PC·문자 앱에 붙여 넣으세요. 휴대폰에서 열면 카카오톡 공유 버튼이 나타납니다.</div>`}
+      </div>`;
+    dlg.onclick = async (e) => {
+      const act = e.target.closest("[data-send]")?.dataset.send;
+      if (act === "close") dlg.close();
+      if (act === "copy") Bass.updateAppAlert("success", (await copy(text)) ? "복사했습니다." : "복사하지 못했습니다.",
+        "카카오톡이나 문자 앱에 붙여 넣으세요.");
+      if (act === "share") {
+        try { await global.navigator.share({ title: "Rent4", text }); dlg.close(); } catch (_) { /* 사용자가 취소 */ }
+      }
+    };
+    if (!dlg.open) dlg.showModal();
+  }
+
+  global.Rent4 = { me, guard, logout, go, passwordGate, contractLink, inviteLink, copy, contractTable, sendContract, sendLink };
 })(window);
