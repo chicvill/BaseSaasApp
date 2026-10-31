@@ -32,3 +32,6 @@ Thumbs.db
 tests/scratch_apps/
 
 
+
+# Rent4 Knowledge Pool (임차인 이름·전화번호 포함 — 저장소에 올리지 않음)
+data/rent4_pool/

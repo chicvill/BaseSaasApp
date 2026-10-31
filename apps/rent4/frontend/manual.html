@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 사용 설명서</title>
+  <meta name="description" content="Rent4 입금 문자 수납부 운영 매뉴얼 (임대인 · 임차인).">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+  <style>
+    article { line-height: 1.75; max-width: 820px; }
+    article h2 { margin: 28px 0 8px; font-size: 20px; }
+    article li { margin: 4px 0; }
+    table.t { border-collapse: collapse; width: 100%; font-size: 14px; }
+    table.t th, table.t td { border: 1px solid var(--border-strong); padding: 6px 8px; text-align: left; }
+    pre { background: var(--bg-2); padding: 12px; border-radius: 10px; overflow-x: auto; font-size: 13px; }
+    @media print {
+      body { background: #fff !important; color: #000 !important; }
+      .no-print { display: none !important; }
+      article, article * { color: #000 !important; background: transparent !important; }
+      table.t th, table.t td { border-color: #000; }
+      @page { size: A4; margin: 16mm; }
+    }
+  </style>
+</head>
+<body>
+<main class="bass-container">
+  <header class="top no-print">
+    <h1><a href="./">📘 Rent4 사용 설명서</a></h1>
+    <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+  </header>
+  <article>
+    <h2>1. Rent4 는 무엇인가요</h2>
+    <p>임대인이 매달 은행 입금 알림 문자를 붙여 넣으면, 문자에서 <b>입금일·금액·입금자</b>를 읽어 <b>호실과 귀속월</b>을 찾아 수납 기록(Knowledge Pool)에 쌓습니다. 임차인은 호실 번호와 휴대폰 뒤 4자리로 자기 입금이 반영됐는지 확인합니다.</p>
+
+    <h2>2. 임대인 — 입금 문자 반영</h2>
+    <ol>
+      <li>임대인 화면에서 지점 관리자 계정으로 로그인합니다.</li>
+      <li><b>💬 입금 문자 반영</b> 탭에 은행 문자를 그대로 붙여 넣습니다. 여러 건은 빈 줄로 구분합니다.</li>
+      <li><b>🔍 분석하기</b>를 누르면 문자마다 결과가 나옵니다. 이 단계에서는 저장되지 않습니다.</li>
+      <li>결과를 확인하고 <b>✅ 체크한 입금 반영</b>을 누르면 수납 기록에 쌓입니다.</li>
+    </ol>
+    <table class="t">
+      <tr><th>결과</th><th>뜻</th><th>할 일</th></tr>
+      <tr><td>반영 준비</td><td>호실을 찾았고 금액이 월 청구액(임차료+관리비)의 정확한 배수</td><td>그대로 반영</td></tr>
+      <tr><td>금액 확인</td><td>금액이 월 청구액과 다름</td><td>귀속월·금액을 확인 후 체크해서 반영</td></tr>
+      <tr><td>호실 확인</td><td>입금자명이 세입자와 일치하지 않음 (가족 명의 등)</td><td>호실을 직접 골라 체크 후 반영</td></tr>
+      <tr><td>이미 반영됨</td><td>같은 날짜·시각·금액·입금자의 문자가 이미 반영됨</td><td>없음 (중복 방지)</td></tr>
+    </table>
+    <p><b>귀속월 배정 규칙 (FIFO)</b>: 가장 오래된 미납월부터 채웁니다. 미납이 없으면 이번 달, 그다음 달 순입니다. 2개월분을 한 번에 내면 두 달에 나눠 기록합니다.</p>
+    <p>입금자명에 호실 번호(예: <code>303호</code>, <code>김진수303</code>)가 있으면 이름보다 우선해 호실을 찾습니다. 세입자에게 "입금자명에 호실 번호를 넣어 달라"고 안내하면 매칭이 정확해집니다.</p>
+    <p>규칙으로 금액이나 입금자를 찾지 못한 문자는, 서버에 Gemini AI 키가 설정돼 있으면 AI 가 한 번 더 읽어 보완합니다 (결과에 'AI' 표시).</p>
+    <pre>[Web발신]
+신한 10/25 14:32
+110-***-123456
+입금 440,000
+잔액 3,456,789
+김수현</pre>
+
+    <h2>3. 임대인 — 수납 현황</h2>
+    <p>호실 × 12개월 표입니다. 칸의 숫자는 입금액(만원)과 입금일입니다. 칸을 누르면 상세 내역이 나오고, 입금 문자로 반영한 기록은 <b>반영 취소</b>할 수 있습니다.</p>
+    <ul>
+      <li>초록: 입금 · 테두리 있는 초록: 입금 문자로 반영 · 빨강: 미납 · 노랑: 이번 달 대기</li>
+      <li>흐린 칸: 현 임차인 입주 전 기록 (이전 임차인) — 임차인 화면에는 보이지 않습니다.</li>
+      <li><b>!</b> 표시: 수납부 입금일이 이상하거나 금액이 청구액과 다른 기록</li>
+    </ul>
+
+    <h2>4. 임대인 — Excel 수납부 가져오기</h2>
+    <p>연간 수납부 Excel 에서 제목 행("2026년도")부터 합계 행까지 복사해 붙여 넣습니다. 분석 결과에서 <b>월 합계 대조</b>(시트 하단 합계와 분석 합계 비교)와 <b>확인 필요</b> 항목을 보고 반영합니다.</p>
+    <ul>
+      <li>주민번호 칸은 읽지 않으며 어디에도 저장하지 않습니다.</li>
+      <li>"2. 3", "3-26", "3:16", "1015"(10/15) 같은 입금일 표기를 알아서 읽습니다. "공실·미납·전입·전출" 표기도 보존합니다.</li>
+      <li>같은 연도를 다시 가져오면 Excel 출처 기록만 교체되고, 입금 문자로 반영한 기록은 그대로 남습니다.</li>
+    </ul>
+
+    <h2>5. 임차인 — 입금 확인</h2>
+    <p>호실 번호와 계약 때 등록한 휴대폰 번호 뒤 4자리를 입력합니다. 입주한 달부터 이번 달까지 월별로 입금 확인 / 미납 / 이번 달 대기가 표시됩니다. 확인 실패가 10분 안에 5번 반복되면 잠시 조회가 막힙니다.</p>
+
+    <h2>6. 데이터 위치</h2>
+    <p>모든 기록은 서버의 <code>data/rent4_pool/</code> 폴더에 사람이 읽을 수 있는 JSON 으로 저장됩니다 (rooms · payments · marks · bank_messages). 이 폴더는 임차인 개인정보가 있어 git 저장소에 올리지 않습니다.</p>
+  </article>
+</main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 입금 수납부</title>
+  <meta name="description" content="임대인은 은행 입금 문자를 붙여 넣어 수납을 기록하고, 임차인은 반영된 입금 결과를 확인합니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container">
+  <header class="top">
+    <div>
+      <h1>🏠 <span class="bass-gradient-text">Rent4</span> 입금 수납부</h1>
+      <p class="sub bass-muted">은행 입금 문자 한 번 붙여 넣기로 쌓이는 월세 수납 기록</p>
+    </div>
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 사용 설명서</a>
+  </header>
+
+  <div class="bass-grid" style="margin-top:18px">
+    <a class="bass-card is-interactive" href="lessor.html" style="text-decoration:none;color:inherit">
+      <h2 style="margin:0 0 6px">🏢 임대인</h2>
+      <p class="bass-muted" style="margin:0 0 14px">은행 입금 문자를 붙여 넣으면 호실과 귀속월을 찾아 수납 기록에 쌓습니다. 호실별 12개월 현황판과 Excel 수납부 가져오기.</p>
+      <span class="bass-btn bass-btn--primary">임대인 로그인 →</span>
+    </a>
+    <a class="bass-card is-interactive" href="tenant.html" style="text-decoration:none;color:inherit">
+      <h2 style="margin:0 0 6px">🔑 임차인</h2>
+      <p class="bass-muted" style="margin:0 0 14px">호실 번호와 휴대폰 뒤 4자리로 내 월세·관리비 입금이 반영됐는지 확인합니다.</p>
+      <span class="bass-btn bass-btn--primary">입금 확인 →</span>
+    </a>
+  </div>
+  <p class="bass-muted" id="poolInfo" style="font-size:12.5px;margin-top:18px"></p>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script>
+  Bass.api("rent4", "/summary").then((s) => {
+    document.getElementById("poolInfo").textContent =
+      `Knowledge Pool: ${s.buildings.join(", ") || "건물 없음"} · 호실 ${s.rooms} · 수납 기록 ${s.payments}건 · 반영한 입금 문자 ${s.bank_messages}건`;
+  }).catch(Bass.showError);
+</script>
+</body>
+</html>

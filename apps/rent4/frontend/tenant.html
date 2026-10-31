@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 입금 확인</title>
+  <meta name="description" content="호실 번호와 휴대폰 뒤 4자리로 월세·관리비 입금 반영 결과를 확인합니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container" style="max-width:640px">
+  <header class="top">
+    <div>
+      <h1><a href="./">🔑 내 입금 확인</a></h1>
+      <p class="sub bass-muted">임대인이 반영한 월세·관리비 입금 내역</p>
+    </div>
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+  </header>
+  <div id="app-alert"></div>
+
+  <form id="lookupForm" class="bass-card stack">
+    <div class="bass-row" style="align-items:flex-end">
+      <div style="flex:1 1 120px"><label class="bass-label" for="room">호실</label>
+        <input class="bass-input" id="room" inputmode="numeric" placeholder="예: 303" required></div>
+      <div style="flex:1 1 140px"><label class="bass-label" for="phone4">휴대폰 뒤 4자리</label>
+        <input class="bass-input" id="phone4" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="0000" required></div>
+      <button class="bass-btn bass-btn--primary" id="btnLookup" type="submit" style="flex:1 1 100px">조회</button>
+    </div>
+  </form>
+
+  <section id="result" class="stack hide" style="margin-top:14px">
+    <div class="bass-card stack" id="roomCard"></div>
+    <div class="stats" id="sumCards"></div>
+    <div class="months-list" id="months"></div>
+    <p class="bass-muted" style="font-size:12.5px">입금 후 임대인이 은행 문자를 반영하면 이곳에 표시됩니다. 반영이 늦거나 다르면 임대인에게 문의해 주세요.</p>
+  </section>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = Bass.escapeHtml;
+  const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+  const LABEL = { paid: ["ok", "입금 확인"], unpaid: ["err", "미납"], due: ["warn", "이번 달 납부 대기"],
+    move_in: ["info", "입주월"], move_out: ["info", "전출"], vacant: ["info", "공실"] };
+
+  $("lookupForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnLookup"), async () => {
+      const v = await Bass.api("rent4", "/tenant/lookup", { method: "POST",
+        body: { room: $("room").value.trim(), phone4: $("phone4").value.trim() } });
+      render(v);
+    }, "조회 중...");
+  });
+
+  function render(v) {
+    const r = v.room, s = v.summary;
+    $("result").classList.remove("hide");
+    $("roomCard").innerHTML = `
+      <div class="bass-row" style="justify-content:space-between">
+        <strong style="font-size:18px">${esc(r.building)} ${esc(r.room)}호 · ${esc(r.tenant_name)}님</strong>
+        <span class="bass-badge bass-badge--info">${esc(r.lease_type)} · ${esc(r.pay_timing)}</span>
+      </div>
+      <div class="bass-muted" style="font-size:13.5px">월 ${won(r.monthly_due)} (임차료 ${won(r.rent)} + 관리비 ${won(r.mgmt)}) · 보증금 ${won(r.deposit)}
+        ${r.move_in ? ` · 입주 ${esc(r.move_in)}` : ""}</div>`;
+    $("sumCards").innerHTML = [
+      ["입금 확인", `${s.paid_months}개월`], ["미납", `${s.unpaid_months}개월`],
+      ["미납 금액", won(s.unpaid_amount)], ["최근 입금", s.last_paid || "-"],
+    ].map(([k, val]) => `<div class="bass-card stat"><b>${esc(val)}</b><span>${esc(k)}</span></div>`).join("");
+    $("months").innerHTML = v.months.map((m) => {
+      const [tone, label] = LABEL[m.status] || ["info", m.status];
+      const detail = m.status === "paid"
+        ? `${m.payments.map((p) => esc(p.paid_date || "입금일 미상")).join(", ")} 입금`
+        : (m.mark ? esc(m.mark) : "");
+      return `<div class="mrow">
+        <b>${esc(m.ym.replace("-", "."))}</b>
+        <div>${m.amount ? `<b>${won(m.amount)}</b>` : ""}<small>${detail}</small></div>
+        <span class="bass-badge bass-badge--${tone}">${label}</span>
+      </div>`;
+    }).join("");
+  }
+})();
+</script>
+</body>
+</html>
