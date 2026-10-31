@@ -36,6 +36,9 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - lease(임대인→임차인): 잔금 확인 시 Room 입주 처리(이름·전화·입주일·금액) → 임차인 계정 동기화(새 임차인이면 새 코드).
 - 링크 토큰은 sha256 해시만 저장. 재발급하면 이전 링크 무효. 서명 실패 10분 5회면 잠금.
 - 납부 확인은 signed 상태에서만. active 는 취소 불가.
+- 비밀번호 분실(reset, active 계약만): 새 임시 비밀번호 + 새 링크(이전 링크 무효), must_change=True. lease 는 계약 임차인이 아직 그 호실에 살 때만.
+- 비밀번호 변경: `/account/password` 는 언제든 (관리인 8자, 임대인·임차인 6자 이상). 관리인 분실은 `scripts/set_password.py`.
+- 로그인 토큰(12시간)은 core 가 상태 없이 서명하므로 초기화해도 이미 발급된 토큰은 만료 때까지 유효하다.
 - core 기본 계정(admin/chic/sunho/sinbi)의 고정 비밀번호 1212 는 폐기 — BASS_SEED_PASSWORD 또는 무작위(로그 1회). 남아 있으면 시드 때 교체.
 - core 의 branch_admin 이라도 LessorAccount(가맹 체결) 없으면 rent4 임대인 아님.
 

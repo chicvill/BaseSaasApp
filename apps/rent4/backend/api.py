@@ -8,7 +8,7 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
 관리인 (superadmin)
     GET    /admin/buildings                건물 목록과 이번 달 요약
     GET|POST /admin/contracts              가맹 계약 목록 / 발행 (계약 링크 토큰 반환)
-    POST   /admin/contracts/{id}/relink|paid|cancel
+    POST   /admin/contracts/{id}/relink|paid|cancel|reset   (reset = 비밀번호 분실: 새 임시 비밀번호 + 새 링크)
 계약 상대방 (로그인 전, 계약 링크의 토큰 t)
     GET    /contract/view?t=               계약 내용 · 상태 · (체결 후) 아이디와 임시 비밀번호
     POST   /contract/sign                  휴대폰 뒤 4자리 본인 확인 + 동의
@@ -21,10 +21,10 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     GET    /lessor/accounts                임차인 계정 (아이디 · 첫 비밀번호 코드 · 사용 여부)
     POST   /lessor/accounts/{room}/reset   임차인 계정 첫 비밀번호 재발급
     GET|POST /lessor/contracts             임대차 계약 목록 / 발행
-    POST   /lessor/contracts/{id}/relink|paid|cancel
+    POST   /lessor/contracts/{id}/relink|paid|cancel|reset
 임차인 (로그인)
     GET    /tenant/me                      내 호실의 입금 반영 결과
-    POST   /account/password               비밀번호 변경 (임대인·임차인 첫 로그인 때 필수)
+    POST   /account/password               비밀번호 변경 (관리인·임대인·임차인, 언제든. 첫 로그인 때는 필수)
 """
 from __future__ import annotations
 
@@ -101,6 +101,8 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
         return {"success": True, "contract": contracts.public(contracts.confirm_paid(c))}
     if action == "cancel":
         return {"success": True, "contract": contracts.public(contracts.cancel(c))}
+    if action == "reset":
+        return {"success": True, "token": contracts.reset_password(c), "contract": contracts.public(c)}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
 
 

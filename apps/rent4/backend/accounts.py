@@ -24,7 +24,7 @@ from core.auth import User
 from core.errors import DomainError, Forbidden, Mismatch, NotFound
 
 from .models import Building, LessorAccount, Room, TenantAccount
-from .pool import PoolObj, now_iso
+from .pool import now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
     ("chic", "시크빌", "main"),
@@ -137,17 +137,24 @@ def lessor_account(user: User) -> LessorAccount:
     return acc
 
 
-def change_password(user: User, current: str, new: str) -> PoolObj:
-    acc = lessor_account(user) if user.role in LESSOR_ROLES else tenant_account(user)
+def change_password(user: User, current: str, new: str) -> None:
+    """첫 로그인(임시 비밀번호)이든 평소든 같은 규칙으로 바꾼다. 관리인은 계정 기록 없이 core 비밀번호만 바꾼다."""
+    if user.role in ADMIN_ROLES:
+        acc, min_len = None, 8
+    else:
+        acc = lessor_account(user) if user.role in LESSOR_ROLES else tenant_account(user)
+        min_len = 6
     if not user.check_password(current):
         raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="처음이라면 계약 링크에서 받은 임시 비밀번호를 입력하세요.")
-    if len(new) < 6 or new.isdigit() and len(set(new)) == 1:
-        raise Mismatch("새 비밀번호는 6자 이상, 같은 숫자 반복이 아니어야 합니다.")
+    if len(new) < min_len or new.isdigit() and len(set(new)) == 1:
+        raise Mismatch(f"새 비밀번호는 {min_len}자 이상, 같은 숫자 반복이 아니어야 합니다.")
     if new == current:
         raise Mismatch("새 비밀번호가 지금 비밀번호와 같습니다.")
     user.set_password(new).save("rent4_password_changed")
-    acc.initial_code, acc.must_change, acc.activated_at = "", False, now_iso()
-    return acc.save()
+    if acc is not None:
+        acc.initial_code, acc.must_change = "", False
+        acc.activated_at = acc.activated_at or now_iso()
+        acc.save()
 
 
 def whoami(user: User) -> Dict:

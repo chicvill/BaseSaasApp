@@ -98,6 +98,7 @@ class Contract(PoolObj):
     paid_at: Optional[str] = None
     activated_at: Optional[str] = None
     username: str = ""             # 활성화 때 발급된 아이디
+    reset_at: Optional[str] = None # 비밀번호 분실로 링크·임시 비밀번호를 다시 발급한 시각
 
 
 class Room(PoolObj):

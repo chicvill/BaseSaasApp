@@ -345,6 +345,52 @@ class TestContracts(ApiCase):
         sunho = self.make_lessor("sunho", "선호아트빌", "박임대", "010-2222-3333")
         self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=sunho).status_code, 404)
 
+class TestPasswords(ApiCase):
+    def membership(self, code):
+        rows = self.client.get("/api/rent4/admin/contracts", headers=self.admin).json()["contracts"]
+        return next(c for c in rows if c["building_code"] == code)
+
+    def test_change_anytime_after_first_login(self):
+        self.import_sheet()
+        auth = self.tenant_login("103")
+        self.change_pw(auth, "secret-103", "second-103")
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic103", "password": "secret-103"}).status_code, 401)
+        self.login("chic103", "second-103")
+        self.change_pw(self.chic, "pw-chic-owner", "pw-chic-second")
+        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=self.chic).status_code, 200)
+
+    def test_admin_changes_own_password_min_8(self):
+        short = self.client.post("/api/rent4/account/password", headers=self.admin, json={"current": SEED_PW, "new": "short1"})
+        self.assertEqual(short.status_code, 422)
+        self.change_pw(self.admin, SEED_PW, "admin-new-password")
+        self.login("admin", "admin-new-password")
+
+    def test_lessor_lost_password_reset_by_new_link(self):
+        c = self.membership("chic")
+        res = self.client.post(f"/api/rent4/admin/contracts/{c['id']}/reset", headers=self.admin).json()
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic", "password": "pw-chic-owner"}).status_code, 401)
+        view = self.client.get(f"/api/rent4/contract/view?t={res['token']}").json()["contract"]
+        self.assertTrue(view["reset_at"])
+        temp = view["login"]["temp_password"]
+        auth = self.login("chic", temp)
+        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 403)
+        self.change_pw(auth, temp, "pw-chic-after-reset")
+        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 200)
+
+    def test_tenant_reset_only_while_still_resident(self):
+        self.import_sheet()
+        res = self.client.post("/api/rent4/lessor/contracts", headers=self.chic, json={
+            "room": "101", "party_name": "신입주", "party_phone": "010-7777-4321", "rent": 300000, "mgmt": 100000,
+            "start": "2026-03-15"}).json()
+        cid, token = res["contract"]["id"], res["token"]
+        self.client.post("/api/rent4/contract/sign", json={"t": token, "phone4": "4321", "agree": True})
+        self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=self.chic)
+        new = self.client.post(f"/api/rent4/lessor/contracts/{cid}/reset", headers=self.chic).json()["token"]
+        self.assertEqual(self.client.get(f"/api/rent4/contract/view?t={token}").status_code, 404)
+        self.assertTrue(self.client.get(f"/api/rent4/contract/view?t={new}").json()["contract"]["login"]["temp_password"])
+        self.import_sheet()                                     # 수납부상 101호 임차인이 다시 홍길동으로 바뀜
+        self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/reset", headers=self.chic).status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

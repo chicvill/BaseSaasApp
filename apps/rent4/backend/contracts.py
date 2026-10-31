@@ -195,6 +195,34 @@ def _activate_membership(c: Contract) -> None:
     c.username = acc.username
 
 
+def reset_password(c: Contract) -> str:
+    """비밀번호 분실: 체결된 계약의 계정에 새 임시 비밀번호를 걸고, 계약 링크를 새로 만든다.
+
+    상대방은 새 링크를 열어 임시 비밀번호를 확인하고, 로그인 즉시 다시 바꿔야 한다. 이전 링크와 비밀번호는 바로 막힌다.
+    """
+    if c.status != "active":
+        raise Conflict("체결된 계약에서만 비밀번호를 초기화할 수 있습니다.")
+    if c.kind == "membership":
+        acc = LessorAccount.first(username=c.username)
+        user = User.by_username(c.username)
+        if not acc or not user or acc.contract_id != c.id:
+            raise Conflict("이 가맹 계약의 임대인 계정을 찾을 수 없습니다.")
+        temp = temp_password()
+        user.set_password(temp).save("rent4_lessor_password_reset")
+        acc.initial_code, acc.must_change = temp, True
+        acc.save()
+    else:
+        acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
+        room = Room.first(branch=c.branch, room=c.room)
+        if not acc or acc.username != c.username or not room or room.tenant_name != c.party_name:
+            raise Conflict("이 계약의 임차인이 더 이상 이 호실에 거주하지 않습니다.")
+        accounts.reset_account(c.branch, c.room)
+    c.reset_at = now_iso()
+    token = _new_token(c)
+    c.save()
+    return token
+
+
 def _activate_lease(c: Contract) -> None:
     room = Room.first(branch=c.branch, room=c.room)
     if not room:
@@ -215,7 +243,8 @@ def public(c: Contract, for_party: bool = False) -> Dict:
             "building_code": c.building_code, "room": c.room, "party_name": c.party_name,
             "deposit": c.deposit, "rent": c.rent, "mgmt": c.mgmt, "fee": c.fee, "start": c.start, "end": c.end,
             "lease_type": c.lease_type, "pay_timing": c.pay_timing, "created_at": c.created_at,
-            "signed_at": c.signed_at, "paid_at": c.paid_at, "activated_at": c.activated_at, "username": c.username}
+            "signed_at": c.signed_at, "paid_at": c.paid_at, "activated_at": c.activated_at, "username": c.username,
+            "reset_at": c.reset_at}
     if not for_party:
         data["party_phone"] = c.party_phone
     else:
