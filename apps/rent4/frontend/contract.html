@@ -109,10 +109,15 @@
     }, "확인 중...");
   });
 
+  function failed() {
+    $("kind").textContent = "계약을 열 수 없습니다";
+  }
+
   if (!token) {
+    failed();
     Bass.updateAppAlert("error", "계약 링크가 올바르지 않습니다.", "받은 링크 전체를 그대로 열어 주세요.");
   } else {
-    load().catch(Bass.showError);
+    load().catch((err) => { failed(); Bass.showError(err); });
   }
 })();
 </script>
