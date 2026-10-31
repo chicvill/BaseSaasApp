@@ -41,6 +41,7 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 로그인 토큰(12시간)은 core 가 상태 없이 서명하므로 초기화해도 이미 발급된 토큰은 만료 때까지 유효하다.
 - core 기본 계정(admin/chic/sunho/sinbi)의 고정 비밀번호 1212 는 폐기 — BASS_SEED_PASSWORD 또는 무작위(로그 1회). 남아 있으면 시드 때 교체.
 - core 의 branch_admin 이라도 LessorAccount(가맹 체결) 없으면 rent4 임대인 아님.
+- 관리인: 서버 콘솔 `scripts/admin_link.py` → 설정 링크(setup.html, 토큰 해시 저장) + 임시 비밀번호 10자 → 첫 로그인 변경(8자 이상) 전에는 관리 API 403. 다시 발급하면 이전 링크·비밀번호 무효. AdminAccount 기록이 없는 관리인(BASS_SEED_PASSWORD 시드)은 변경 강제 없음.
 
 ## 로그인 · 권한
 - 로그인은 core `/auth/login` 하나. 로그인 뒤 `GET /me` 가 역할과 첫 페이지를 정한다.

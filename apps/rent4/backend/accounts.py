@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 from core.auth import User
 from core.errors import Conflict, DomainError, Forbidden, Mismatch, NotFound
 
-from .models import Building, LessorAccount, Room, TenantAccount
+from .models import AdminAccount, Building, LessorAccount, Room, TenantAccount
 from .pool import now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
@@ -36,6 +36,40 @@ BUILDINGS = (            # code, name, core.auth branch
 ADMIN_ROLES = ("superadmin", "admin")
 LESSOR_ROLES = ("branch_admin",)
 TENANT_ROLE = "user"
+TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"   # 헷갈리는 0/O, 1/l/I 제외
+
+
+def temp_password(length: int = 8) -> str:
+    return "".join(secrets.choice(TEMP_ALPHABET) for _ in range(length))
+
+
+# ── 관리인 설정 링크 (서버 콘솔에서 발급) ──
+def issue_admin_link(username: str = "admin") -> Tuple[AdminAccount, str]:
+    """관리인 계정에 임시 비밀번호를 걸고 설정 링크를 만든다. 이전 링크와 비밀번호는 즉시 막힌다."""
+    user = User.by_username(username)
+    if not user or user.role not in ADMIN_ROLES:
+        raise NotFound(f"관리인 계정 '{username}' 이 없습니다.", hint="서버를 한 번 실행하면 기본 관리인 계정이 만들어집니다.")
+    temp = temp_password(10)
+    user.set_password(temp).save("rent4_admin_setup_link")
+    token = secrets.token_urlsafe(24)
+    acc = AdminAccount.first(username=username) or AdminAccount(username=username)
+    acc.initial_code, acc.must_change, acc.link_hash, acc.activated_at = temp, True, _hash(token), None
+    return acc.save(), token
+
+
+def admin_link_view(token: str) -> Dict:
+    acc = AdminAccount.first(link_hash=_hash(token or "")) if token else None
+    if not acc:
+        raise NotFound("설정 링크가 올바르지 않거나 만료되었습니다.", hint="서버 관리자에게 링크를 다시 만들어 달라고 요청하세요.")
+    return {"username": acc.username, "temp_password": acc.initial_code if acc.must_change else "",
+            "activated": not acc.must_change}
+
+
+def require_ready(user: User) -> None:
+    """임시 비밀번호로 들어온 관리인은 비밀번호를 바꾸기 전까지 관리 기능을 쓸 수 없다."""
+    acc = AdminAccount.first(username=user.username) if user.role in ADMIN_ROLES else None
+    if acc and acc.must_change:
+        raise Forbidden("처음 로그인하셨습니다. 비밀번호를 먼저 바꿔 주세요.")
 
 
 def ensure_buildings() -> None:
@@ -196,7 +230,7 @@ def lessor_account(user: User) -> LessorAccount:
 def change_password(user: User, current: str, new: str) -> None:
     """첫 로그인(임시 비밀번호)이든 평소든 같은 규칙으로 바꾼다. 관리인은 계정 기록 없이 core 비밀번호만 바꾼다."""
     if user.role in ADMIN_ROLES:
-        acc, min_len = None, 8
+        acc, min_len = AdminAccount.first(username=user.username), 8
     else:
         acc = lessor_account(user) if user.role in LESSOR_ROLES else tenant_account(user)
         min_len = 6
@@ -217,7 +251,9 @@ def whoami(user: User) -> Dict:
     """로그인한 사용자의 역할과 이동할 페이지."""
     base = {"username": user.username, "name": user.name}
     if user.role in ADMIN_ROLES:
-        return {**base, "kind": "admin", "label": "관리인", "home": "admin.html"}
+        acc = AdminAccount.first(username=user.username)
+        return {**base, "kind": "admin", "label": "관리인", "home": "admin.html",
+                "must_change_password": bool(acc and acc.must_change)}
     if user.role in LESSOR_ROLES:
         acc = lessor_account(user)
         b = building_of(acc.branch)

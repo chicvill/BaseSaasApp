@@ -5,6 +5,7 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
 
 공통
     GET    /me                             역할(admin|lessor|tenant), 소속 건물·호실, 이동할 페이지
+    GET    /setup/view?t=                  관리인 설정 링크: 아이디와 임시 비밀번호 (첫 로그인 전까지)
 관리인 (superadmin)
     GET    /admin/buildings                건물 목록과 이번 달 요약
     GET|POST /admin/contracts              가맹 계약 목록 / 발행 (계약 링크 토큰 반환)
@@ -43,14 +44,21 @@ from . import accounts, bank_parser, contracts, excel_import, ledger
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
-admin_only = require_role(*accounts.ADMIN_ROLES)
 staff = require_role(*accounts.ADMIN_ROLES, *accounts.LESSOR_ROLES)
+
+
+def admin_only(user: User = Depends(require_role(*accounts.ADMIN_ROLES))) -> User:
+    accounts.require_ready(user)
+    return user
+
+
 tenant_only = require_role(accounts.TENANT_ROLE)
 
 
 def _scope(user: User, branch: str = "") -> Building:
     """임대인은 자기 건물, 관리인은 ?branch= 로 고른 건물."""
     if user.role in accounts.ADMIN_ROLES:
+        accounts.require_ready(user)
         if not branch:
             raise DomainError("건물을 선택해 주세요.", hint="관리인 화면에서 건물을 고른 뒤 들어오세요.")
         return accounts.building_of(branch)
@@ -106,6 +114,12 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
     if action == "reset":
         return {"success": True, "token": contracts.reset_password(c), "contract": contracts.public(c)}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
+
+
+# ── 관리인 설정 링크 (로그인 전, 서버 콘솔 scripts/admin_link.py 가 발급) ──
+@router.get("/setup/view")
+def setup_view(t: str = "") -> Dict[str, Any]:
+    return {"success": True, **accounts.admin_link_view(t)}
 
 
 # ── 계약 상대방 (링크 토큰, 로그인 전) ──

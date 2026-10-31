@@ -426,5 +426,31 @@ class TestPasswords(ApiCase):
         self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/reset", headers=self.chic).status_code, 409)
 
 
+
+class TestAdminSetupLink(ApiCase):
+    def test_admin_link_temp_password_then_forced_change(self):
+        _, token = accounts.issue_admin_link("admin")
+        self.assertEqual(self.client.post("/auth/login", json={"username": "admin", "password": SEED_PW}).status_code, 401)
+        view = self.client.get(f"/api/rent4/setup/view?t={token}").json()
+        self.assertEqual((view["username"], len(view["temp_password"]), view["activated"]), ("admin", 10, False))
+        auth = self.login("admin", view["temp_password"])
+        me = self.client.get("/api/rent4/me", headers=auth).json()
+        self.assertEqual((me["kind"], me["must_change_password"]), ("admin", True))
+        self.assertEqual(self.client.get("/api/rent4/admin/buildings", headers=auth).status_code, 403)
+        self.assertEqual(self.client.get("/api/rent4/lessor/board?branch=main", headers=auth).status_code, 403)
+        self.change_pw(auth, view["temp_password"], "admin-chosen-pw")
+        self.assertEqual(self.client.get("/api/rent4/admin/buildings", headers=auth).status_code, 200)
+        after = self.client.get(f"/api/rent4/setup/view?t={token}").json()
+        self.assertEqual((after["temp_password"], after["activated"]), ("", True))
+
+    def test_new_link_blocks_previous_link_and_password(self):
+        _, first = accounts.issue_admin_link("admin")
+        temp1 = self.client.get(f"/api/rent4/setup/view?t={first}").json()["temp_password"]
+        _, second = accounts.issue_admin_link("admin")
+        self.assertEqual(self.client.get(f"/api/rent4/setup/view?t={first}").status_code, 404)
+        self.assertEqual(self.client.post("/auth/login", json={"username": "admin", "password": temp1}).status_code, 401)
+        temp2 = self.client.get(f"/api/rent4/setup/view?t={second}").json()["temp_password"]
+        self.login("admin", temp2)
+
 if __name__ == "__main__":
     unittest.main()

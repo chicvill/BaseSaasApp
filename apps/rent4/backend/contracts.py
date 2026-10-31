@@ -32,13 +32,6 @@ MAX_SIGN_FAILURES, WINDOW_SECONDS = 5, 600
 _sign_failures: Dict[str, List[float]] = defaultdict(list)
 
 
-TEMP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789"   # 헷갈리는 0/O, 1/l/I 제외
-
-
-def temp_password(length: int = 8) -> str:
-    return "".join(secrets.choice(TEMP_ALPHABET) for _ in range(length))
-
-
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -185,7 +178,7 @@ def confirm_paid(c: Contract) -> Contract:
 def _activate_membership(c: Contract) -> None:
     if not Building.first(code=c.building_code):
         Building(code=c.building_code, name=c.building_name, branch=c.branch).save()
-    temp = temp_password()
+    temp = accounts.temp_password()
     user = User.by_username(c.building_code) or User(username=c.building_code, role="branch_admin", branch=c.branch)
     user.name, user.role, user.branch = c.party_name, "branch_admin", c.branch
     user.set_password(temp).save("rent4_membership_activated")
@@ -207,7 +200,7 @@ def reset_password(c: Contract) -> str:
         user = User.by_username(c.username)
         if not acc or not user or acc.contract_id != c.id:
             raise Conflict("이 가맹 계약의 임대인 계정을 찾을 수 없습니다.")
-        temp = temp_password()
+        temp = accounts.temp_password()
         user.set_password(temp).save("rent4_lessor_password_reset")
         acc.initial_code, acc.must_change = temp, True
         acc.save()

@@ -22,6 +22,8 @@
     </div>
   </header>
   <div id="app-alert"></div>
+  <div id="pwBox" class="hide"></div>
+  <section id="adminBody" class="hide">
   <h2 style="margin:10px 0 12px;font-size:17px">건물 선택</h2>
   <div class="bass-grid" id="buildings"></div>
 
@@ -40,6 +42,7 @@
     <button class="bass-btn bass-btn--primary" id="btnMember" type="submit" style="justify-self:start">계약 발행하고 링크 만들기</button>
   </form>
   <div class="board-wrap" style="margin-top:12px"><table class="board" id="memberships" style="min-width:640px"></table></div>
+  </section>
 </main>
 <script src="/shared/ui/bass.js"></script>
 <script src="rent4.js"></script>
@@ -74,7 +77,9 @@
   });
 
   try {
-    await Rent4.guard(["admin"]);
+    const me = await Rent4.guard(["admin"]);
+    await Rent4.passwordGate(me, $("pwBox"));
+    $("adminBody").classList.remove("hide");
     await reloadAll();
   } catch (err) {
     Bass.showError(err);

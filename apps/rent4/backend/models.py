@@ -54,6 +54,20 @@ class TenantAccount(PoolObj):
     invite_hash: str = ""          # 안내 링크 토큰 해시 (임차인이 바뀌면 비운다)
 
 
+class AdminAccount(PoolObj):
+    """관리인 계정의 첫 로그인 상태. 비밀번호는 core.auth User 에 해시로 저장된다.
+
+    서버 콘솔(scripts/admin_link.py)이 설정 링크와 임시 비밀번호를 만들고, 관리인은 첫 로그인 때 바꾼다.
+    """
+    collection: ClassVar[str] = "admin_accounts"
+
+    username: str
+    initial_code: str = ""
+    must_change: bool = True
+    link_hash: str = ""
+    activated_at: Optional[str] = None
+
+
 class LessorAccount(PoolObj):
     """가맹 계약으로 만들어진 임대인 계정. 비밀번호는 core.auth User 에 해시로 저장된다."""
     collection: ClassVar[str] = "lessor_accounts"

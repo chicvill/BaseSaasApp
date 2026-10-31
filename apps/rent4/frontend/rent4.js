@@ -96,8 +96,9 @@
       card.style.maxWidth = "460px";
       card.append(passwordForm({
         title: "처음 오셨네요 — 비밀번호를 바꿔 주세요",
-        intro: `계약 링크에서 받은 임시 비밀번호는 첫 로그인에만 쓸 수 있습니다. 앞으로 쓸 비밀번호를 정하면 ${info.label} 화면을 쓸 수 있습니다.`,
-        currentLabel: "임시 비밀번호 (현재 비밀번호)", submitLabel: "비밀번호 바꾸고 계속", minLen: 6,
+        intro: `${info.kind === "admin" ? "설정 링크" : "계약 링크"}에서 받은 임시 비밀번호는 첫 로그인에만 쓸 수 있습니다. 앞으로 쓸 비밀번호를 정하면 ${info.label} 화면을 쓸 수 있습니다.`,
+        currentLabel: "임시 비밀번호 (현재 비밀번호)", submitLabel: "비밀번호 바꾸고 계속",
+        minLen: info.kind === "admin" ? 8 : 6,
       }, () => {
         mount.replaceChildren();
         mount.classList.add("hide");
