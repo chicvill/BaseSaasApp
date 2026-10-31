@@ -254,5 +254,45 @@
     if (!dlg.open) dlg.showModal();
   }
 
+  /** 비밀번호 칸마다 [보기/숨기기] 버튼을 붙인다. 나중에 생기는 칸(비밀번호 변경 창 등)도 자동으로. */
+  function addRevealToggle(input) {
+    if (input.dataset.reveal) return;
+    input.dataset.reveal = "1";
+    const wrap = document.createElement("span");
+    wrap.className = "pw-wrap";
+    input.replaceWith(wrap);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pw-toggle";
+    btn.textContent = "보기";
+    btn.setAttribute("aria-label", "비밀번호 보기");
+    btn.setAttribute("aria-pressed", "false");
+    btn.addEventListener("click", () => {
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.textContent = show ? "숨기기" : "보기";
+      btn.setAttribute("aria-label", show ? "비밀번호 숨기기" : "비밀번호 보기");
+      btn.setAttribute("aria-pressed", String(show));
+      input.focus();
+    });
+    wrap.append(input, btn);
+  }
+
+  function enhancePasswords(root) {
+    root.querySelectorAll?.('input[type="password"]').forEach(addRevealToggle);
+  }
+
+  function watchPasswords() {
+    enhancePasswords(document);
+    new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => {
+      if (n.nodeType !== 1) return;
+      if (n.matches('input[type="password"]')) addRevealToggle(n);
+      else enhancePasswords(n);
+    }))).observe(document.body, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchPasswords);
+  else watchPasswords();
+
   global.Rent4 = { me, guard, logout, go, passwordGate, contractLink, inviteLink, copy, contractTable, sendContract, sendLink };
 })(window);
