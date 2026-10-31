@@ -7,6 +7,11 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     GET    /me                             역할(admin|lessor|tenant), 소속 건물·호실, 이동할 페이지
 관리인 (superadmin)
     GET    /admin/buildings                건물 목록과 이번 달 요약
+    GET|POST /admin/contracts              가맹 계약 목록 / 발행 (계약 링크 토큰 반환)
+    POST   /admin/contracts/{id}/relink|paid|cancel
+계약 상대방 (로그인 전, 계약 링크의 토큰 t)
+    GET    /contract/view?t=               계약 내용 · 상태 · (체결 후) 아이디와 임시 비밀번호
+    POST   /contract/sign                  휴대폰 뒤 4자리 본인 확인 + 동의
 임대인 (branch_admin = 자기 건물 / 관리인은 ?branch= 로 건물 지정)
     GET    /lessor/board?year=2026         호실 × 12개월 수납 현황
     POST   /lessor/bank/preview            입금 문자 붙여넣기 → 분석·매칭 제안 (저장 안 함)
@@ -15,9 +20,11 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     POST   /lessor/import/preview|commit   연간 수납 Excel 표 붙여넣기 → 분석 / 반영
     GET    /lessor/accounts                임차인 계정 (아이디 · 첫 비밀번호 코드 · 사용 여부)
     POST   /lessor/accounts/{room}/reset   임차인 계정 첫 비밀번호 재발급
+    GET|POST /lessor/contracts             임대차 계약 목록 / 발행
+    POST   /lessor/contracts/{id}/relink|paid|cancel
 임차인 (로그인)
     GET    /tenant/me                      내 호실의 입금 반영 결과
-    POST   /account/password               비밀번호 변경 (첫 로그인 때 필수)
+    POST   /account/password               비밀번호 변경 (임대인·임차인 첫 로그인 때 필수)
 """
 from __future__ import annotations
 
@@ -30,7 +37,7 @@ from fastapi import APIRouter, Body, Depends
 from core.auth import User, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, excel_import, ledger
+from . import accounts, bank_parser, contracts, excel_import, ledger
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -45,9 +52,12 @@ def _scope(user: User, branch: str = "") -> Building:
         if not branch:
             raise DomainError("건물을 선택해 주세요.", hint="관리인 화면에서 건물을 고른 뒤 들어오세요.")
         return accounts.building_of(branch)
-    if branch and branch != user.branch:
+    acc = accounts.lessor_account(user)
+    if acc.must_change:
+        raise Forbidden("처음 로그인하셨습니다. 비밀번호를 먼저 바꿔 주세요.")
+    if branch and branch != acc.branch:
         raise Forbidden("다른 건물의 정보는 볼 수 없습니다.")
-    return accounts.building_of(user.branch)
+    return accounts.building_of(acc.branch)
 
 
 @router.get("/summary")
@@ -66,6 +76,63 @@ def admin_buildings(user: User = Depends(admin_only)) -> Dict[str, Any]:
     items = [{"code": b.code, "name": b.name, "branch": b.branch, **ledger.building_stats(b.branch)}
              for b in Building.all()]
     return {"success": True, "buildings": items}
+
+
+@router.get("/admin/contracts")
+def admin_contracts(user: User = Depends(admin_only)) -> Dict[str, Any]:
+    return {"success": True, "contracts": contracts.listing("membership")}
+
+
+@router.post("/admin/contracts")
+def admin_contract_create(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
+    c, token = contracts.create_membership(user, payload)
+    return {"success": True, "contract": contracts.public(c), "token": token}
+
+
+@router.post("/admin/contracts/{contract_id}/{action}")
+def admin_contract_action(contract_id: str, action: str, user: User = Depends(admin_only)) -> Dict[str, Any]:
+    return _contract_action(contracts.require(contract_id, "membership"), action)
+
+
+def _contract_action(c, action: str) -> Dict[str, Any]:
+    if action == "relink":
+        return {"success": True, "token": contracts.relink(c), "contract": contracts.public(c)}
+    if action == "paid":
+        return {"success": True, "contract": contracts.public(contracts.confirm_paid(c))}
+    if action == "cancel":
+        return {"success": True, "contract": contracts.public(contracts.cancel(c))}
+    raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
+
+
+# ── 계약 상대방 (링크 토큰, 로그인 전) ──
+@router.get("/contract/view")
+def contract_view(t: str = "") -> Dict[str, Any]:
+    return {"success": True, "contract": contracts.public(contracts.by_token(t), for_party=True)}
+
+
+@router.post("/contract/sign")
+def contract_sign(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    c = contracts.sign(str(payload.get("t", "")), str(payload.get("phone4", "")), bool(payload.get("agree")))
+    return {"success": True, "contract": contracts.public(c, for_party=True)}
+
+
+# ── 임대인 ──
+@router.get("/lessor/contracts")
+def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    return {"success": True, "contracts": contracts.listing("lease", _scope(user, branch).branch)}
+
+
+@router.post("/lessor/contracts")
+def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = "",
+                           user: User = Depends(staff)) -> Dict[str, Any]:
+    c, token = contracts.create_lease(user, _scope(user, branch).branch, payload)
+    return {"success": True, "contract": contracts.public(c), "token": token}
+
+
+@router.post("/lessor/contracts/{contract_id}/{action}")
+def lessor_contract_action(contract_id: str, action: str, branch: str = "",
+                           user: User = Depends(staff)) -> Dict[str, Any]:
+    return _contract_action(contracts.require(contract_id, "lease", _scope(user, branch).branch), action)
 
 
 # ── 임대인 ──
@@ -168,7 +235,7 @@ def tenant_me(user: User = Depends(tenant_only)) -> Dict[str, Any]:
 
 
 @router.post("/account/password")
-def account_password(payload: Dict[str, Any] = Body(...), user: User = Depends(tenant_only)) -> Dict[str, Any]:
+def account_password(payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
     accounts.change_password(user, str(payload.get("current", "")), str(payload.get("new", "")))
     return {"success": True}
 

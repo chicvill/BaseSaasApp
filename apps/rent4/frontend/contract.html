@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 계약 확인</title>
+  <meta name="description" content="받은 계약 링크에서 계약 내용을 확인하고 동의합니다. 체결되면 아이디와 임시 비밀번호가 표시됩니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+  <style>
+    dl.terms { display: grid; grid-template-columns: 110px 1fr; gap: 8px 12px; margin: 0; font-size: 14px; }
+    dl.terms dt { color: var(--muted); }
+    dl.terms dd { margin: 0; font-variant-numeric: tabular-nums; }
+    .steps { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+    .steps span { padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .steps span.on { color: var(--text); border-color: var(--primary); background: hsl(258 90% 66% / .18); }
+    .cred { font: 700 20px ui-monospace, Consolas, monospace; letter-spacing: .04em; }
+  </style>
+</head>
+<body>
+<main class="bass-container" style="max-width:560px">
+  <header class="top">
+    <div>
+      <h1>📝 계약 확인</h1>
+      <p class="sub bass-muted" id="kind">불러오는 중...</p>
+    </div>
+  </header>
+  <div id="app-alert"></div>
+
+  <section id="body" class="stack hide">
+    <div class="steps" id="steps"></div>
+    <div class="bass-card stack"><dl class="terms" id="terms"></dl></div>
+
+    <form id="signForm" class="bass-card stack hide">
+      <h2 style="margin:0;font-size:17px">본인 확인 후 동의</h2>
+      <p class="bass-muted" style="margin:0;font-size:13.5px">계약서에 등록된 휴대폰 <b id="maskedPhone"></b> 의 뒤 4자리를 입력하고, 위 계약 내용에 동의해 주세요.</p>
+      <div><label class="bass-label" for="phone4">휴대폰 뒤 4자리</label>
+        <input class="bass-input" id="phone4" inputmode="numeric" maxlength="4" pattern="\d{4}" required></div>
+      <label class="bass-row" style="gap:8px;font-size:14px"><input type="checkbox" id="agree" aria-label="계약 내용 동의"> 위 계약 내용을 확인했으며 동의합니다.</label>
+      <button class="bass-btn bass-btn--primary" id="btnSign" type="submit">동의하고 계약 확인</button>
+    </form>
+
+    <div id="stateCard" class="bass-card stack hide"></div>
+  </section>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = Bass.escapeHtml;
+  const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+  const token = new URLSearchParams(location.search).get("t") || "";
+  const period = (c) => (c.start || c.end) ? `${c.start || "미정"} ~ ${c.end || "미정"}` : "미정";
+  const STEPS = [["sent", "① 계약 발행"], ["signed", "② 상대방 확인"], ["active", "③ 납부 확인 · 체결"]];
+
+  async function load() {
+    const { contract: c } = await Bass.api("rent4", `/contract/view?t=${encodeURIComponent(token)}`);
+    render(c);
+  }
+
+  function render(c) {
+    $("body").classList.remove("hide");
+    $("kind").textContent = `${c.kind_label} · ${c.building_name}${c.room ? ` ${c.room}호` : ""} · ${c.status_label}`;
+    const reached = { sent: 1, signed: 2, active: 3, cancelled: 0 }[c.status];
+    $("steps").innerHTML = STEPS.map(([, label], i) => `<span class="${i < reached ? "on" : ""}">${label}</span>`).join("");
+    const rows = c.kind === "membership"
+      ? [["계약", "Rent4 가맹 계약 (건물 임대인)"], ["건물", c.building_name], ["건물 코드 / 아이디", c.building_code],
+         ["임대인", c.party_name], ["가맹비", won(c.fee)], ["계약 기간", period(c)]]
+      : [["계약", "주택 임대차 계약"], ["건물 · 호실", `${c.building_name} ${c.room}호`], ["임차인", c.party_name],
+         ["구분", `${c.lease_type} · ${c.pay_timing}`], ["보증금", won(c.deposit)],
+         ["월 임차료", won(c.rent)], ["월 관리비", won(c.mgmt)], ["계약 기간", period(c)]];
+    $("terms").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+
+    $("signForm").classList.toggle("hide", c.status !== "sent");
+    $("maskedPhone").textContent = c.party_phone_masked;
+    const box = $("stateCard");
+    box.classList.toggle("hide", c.status === "sent");
+    const pay = c.kind === "membership" ? "가맹비" : "잔금";
+    if (c.status === "signed") {
+      box.innerHTML = `<strong>✅ 계약을 확인했습니다 (${esc(c.signed_at.replace("T", " "))})</strong>
+        <div class="bass-muted">${pay} 입금이 확인되면 계약이 체결되고, 이 링크에 아이디와 임시 비밀번호가 나타납니다. 나중에 이 링크를 다시 열어 주세요.</div>`;
+    } else if (c.status === "active" && c.login) {
+      const l = c.login;
+      box.innerHTML = l.activated
+        ? `<strong>🎉 계약이 체결되었고 계정을 이미 쓰고 계십니다.</strong>
+           <div>아이디 <b class="cred">${esc(l.username)}</b></div>
+           <a class="bass-btn bass-btn--primary" href="index.html">로그인하러 가기</a>`
+        : `<strong>🎉 계약이 체결되었습니다 (${pay} 확인 ${esc((c.paid_at || "").slice(0, 10))})</strong>
+           <div class="bass-muted">아래 아이디와 임시 비밀번호로 로그인한 뒤, 바로 새 비밀번호로 바꿔 주세요. 임시 비밀번호는 바꾸는 즉시 사라집니다.</div>
+           <dl class="terms"><dt>아이디</dt><dd class="cred">${esc(l.username)}</dd><dt>임시 비밀번호</dt><dd class="cred">${esc(l.temp_password)}</dd></dl>
+           <a class="bass-btn bass-btn--primary" href="index.html">로그인하러 가기</a>`;
+    } else if (c.status === "active") {
+      box.innerHTML = `<strong>🎉 계약이 체결되었습니다.</strong><div class="bass-muted">기존 계정을 그대로 쓰시면 됩니다.</div>
+        <a class="bass-btn bass-btn--primary" href="index.html">로그인하러 가기</a>`;
+    } else if (c.status === "cancelled") {
+      box.innerHTML = `<strong>이 계약은 취소되었습니다.</strong><div class="bass-muted">계약을 보낸 분에게 문의해 주세요.</div>`;
+    }
+  }
+
+  $("signForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnSign"), async () => {
+      const { contract } = await Bass.api("rent4", "/contract/sign", { method: "POST",
+        body: { t: token, phone4: $("phone4").value.trim(), agree: $("agree").checked } });
+      Bass.updateAppAlert("success", "계약을 확인했습니다.", "납부가 확인되면 이 링크에 로그인 정보가 나타납니다.");
+      render(contract);
+    }, "확인 중...");
+  });
+
+  if (!token) {
+    Bass.updateAppAlert("error", "계약 링크가 올바르지 않습니다.", "받은 링크 전체를 그대로 열어 주세요.");
+  } else {
+    load().catch(Bass.showError);
+  }
+})();
+</script>
+</body>
+</html>

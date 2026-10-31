@@ -22,18 +22,7 @@
   </header>
   <div id="app-alert"></div>
 
-  <!-- 첫 로그인: 비밀번호 변경 -->
-  <form id="pwForm" class="bass-card stack hide">
-    <h2 style="margin:0">처음 오셨네요 — 비밀번호를 바꿔 주세요</h2>
-    <p class="bass-muted" style="margin:0;font-size:13.5px">임대인에게 받은 6자리 코드는 첫 로그인에만 쓸 수 있습니다. 앞으로 쓸 비밀번호를 정하면 입금 내역을 볼 수 있습니다.</p>
-    <div><label class="bass-label" for="pwCurrent">받은 코드 (현재 비밀번호)</label>
-      <input class="bass-input" id="pwCurrent" type="password" autocomplete="current-password" required></div>
-    <div><label class="bass-label" for="pwNew">새 비밀번호 (6자 이상)</label>
-      <input class="bass-input" id="pwNew" type="password" autocomplete="new-password" minlength="6" required></div>
-    <div><label class="bass-label" for="pwNew2">새 비밀번호 확인</label>
-      <input class="bass-input" id="pwNew2" type="password" autocomplete="new-password" minlength="6" required></div>
-    <button class="bass-btn bass-btn--primary" id="btnPw" type="submit">비밀번호 바꾸고 계속</button>
-  </form>
+  <div id="pwBox" class="hide"></div>
 
   <section id="result" class="stack hide">
     <div class="bass-card stack" id="roomCard"></div>
@@ -55,31 +44,9 @@
 
   async function boot() {
     const me = await Rent4.guard(["tenant"]);
-    if (me.must_change_password) {
-      $("pwForm").classList.remove("hide");
-      return;
-    }
-    await load();
-  }
-
-  async function load() {
-    $("pwForm").classList.add("hide");
+    await Rent4.passwordGate(me, $("pwBox"));
     render(await Bass.api("rent4", "/tenant/me"));
   }
-
-  $("pwForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    if ($("pwNew").value !== $("pwNew2").value) {
-      Bass.updateAppAlert("diff", "새 비밀번호 두 칸이 서로 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
-      return;
-    }
-    Bass.withLock($("btnPw"), async () => {
-      await Bass.api("rent4", "/account/password", { method: "POST",
-        body: { current: $("pwCurrent").value, new: $("pwNew").value } });
-      Bass.updateAppAlert("success", "비밀번호를 바꿨습니다.", "다음부터는 새 비밀번호로 로그인하세요.");
-      await load();
-    }, "저장 중...");
-  });
 
   function render(v) {
     const r = v.room, s = v.summary;

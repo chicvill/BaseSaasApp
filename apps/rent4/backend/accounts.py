@@ -3,8 +3,9 @@ apps/rent4/backend/accounts.py — 건물 목록 · 임차인 계정 · 로그�
 
 역할 (core.auth 로그인 하나로 통일)
     관리인  : superadmin / admin        → admin.html  (모든 건물)
-    임대인  : branch_admin              → lessor.html (자기 지점 건물)
+    임대인  : branch_admin + LessorAccount → lessor.html (자기 지점 건물) — 가맹 계약 체결로만 생긴다
     임차인  : user + TenantAccount      → tenant.html (자기 호실)
+    임대인·임차인 모두 첫 로그인 때 임시 비밀번호를 바꿔야 화면을 쓸 수 있다.
 
 임차인 계정
     - 아이디 = 건물 코드 + 호실 (예: chic603). 거주 중인 호실마다 자동 생성.
@@ -22,8 +23,8 @@ from typing import Dict, List, Optional
 from core.auth import User
 from core.errors import DomainError, Forbidden, Mismatch, NotFound
 
-from .models import Building, Room, TenantAccount
-from .pool import now_iso
+from .models import Building, LessorAccount, Room, TenantAccount
+from .pool import PoolObj, now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
     ("chic", "시크빌", "main"),
@@ -127,10 +128,19 @@ def tenant_account(user: User) -> TenantAccount:
     return acc
 
 
-def change_password(user: User, current: str, new: str) -> TenantAccount:
-    acc = tenant_account(user)
+def lessor_account(user: User) -> LessorAccount:
+    """가맹 계약으로 활성화된 임대인만 임대인 화면을 쓴다 (core 기본 지점 계정만으로는 안 됨)."""
+    acc = LessorAccount.first(username=user.username) if user.role in LESSOR_ROLES else None
+    if not acc or acc.branch != user.branch:
+        raise Forbidden("가맹 계약이 체결된 임대인 계정이 아닙니다.",
+                        hint="관리인이 보낸 가맹 계약 링크에서 계약을 확인하고, 가맹비 확인 후 받은 아이디로 로그인하세요.")
+    return acc
+
+
+def change_password(user: User, current: str, new: str) -> PoolObj:
+    acc = lessor_account(user) if user.role in LESSOR_ROLES else tenant_account(user)
     if not user.check_password(current):
-        raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="처음이라면 임대인에게 받은 6자리 코드를 입력하세요.")
+        raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="처음이라면 계약 링크에서 받은 임시 비밀번호를 입력하세요.")
     if len(new) < 6 or new.isdigit() and len(set(new)) == 1:
         raise Mismatch("새 비밀번호는 6자 이상, 같은 숫자 반복이 아니어야 합니다.")
     if new == current:
@@ -146,8 +156,10 @@ def whoami(user: User) -> Dict:
     if user.role in ADMIN_ROLES:
         return {**base, "kind": "admin", "label": "관리인", "home": "admin.html"}
     if user.role in LESSOR_ROLES:
-        b = building_of(user.branch)
+        acc = lessor_account(user)
+        b = building_of(acc.branch)
         return {**base, "kind": "lessor", "label": "임대인", "home": "lessor.html",
+                "must_change_password": acc.must_change,
                 "building": {"code": b.code, "name": b.name, "branch": b.branch}}
     acc = tenant_account(user)
     b = building_of(acc.branch)

@@ -30,10 +30,19 @@ description: Business rules for the rent4 app (bank deposit SMS → rent ledger 
 ## 월 상태
 paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입주월, 미납 아님) · vacant · move_out · prior(현 임차인 입주 전).
 
+## 계약 상호 확인 → 계정 (`backend/contracts.py`)
+- 상태: sent(발행자 확인·링크) → signed(상대방이 링크에서 휴대폰 뒤 4자리 확인 + 동의) → active(발행자 납부 확인) | cancelled.
+- membership(관리인→임대인): 가맹비 확인 시 Building 생성(없으면) + core User(branch_admin, 아이디=건물 코드) + LessorAccount(임시 비밀번호).
+- lease(임대인→임차인): 잔금 확인 시 Room 입주 처리(이름·전화·입주일·금액) → 임차인 계정 동기화(새 임차인이면 새 코드).
+- 링크 토큰은 sha256 해시만 저장. 재발급하면 이전 링크 무효. 서명 실패 10분 5회면 잠금.
+- 납부 확인은 signed 상태에서만. active 는 취소 불가.
+- core 기본 계정(admin/chic/sunho/sinbi)의 고정 비밀번호 1212 는 폐기 — BASS_SEED_PASSWORD 또는 무작위(로그 1회). 남아 있으면 시드 때 교체.
+- core 의 branch_admin 이라도 LessorAccount(가맹 체결) 없으면 rent4 임대인 아님.
+
 ## 로그인 · 권한
 - 로그인은 core `/auth/login` 하나. 로그인 뒤 `GET /me` 가 역할과 첫 페이지를 정한다.
   - superadmin/admin → 관리인 `admin.html` (건물 목록) → `lessor.html?branch=<지점>`
-  - branch_admin → 임대인 `lessor.html` (자기 지점 고정, 다른 branch 요청은 403)
+  - branch_admin + LessorAccount → 임대인 `lessor.html` (자기 지점 고정, 다른 branch 요청은 403, 비밀번호 변경 전 403)
   - user + TenantAccount → 임차인 `tenant.html` (자기 호실만)
 - 임차인 계정: 아이디 = 건물 코드 + 호실(`chic603`). 거주 호실마다 시작·Excel 반영 때 자동 생성.
   - 첫 비밀번호 = 무작위 6자리 코드 (임대인 '임차인 계정' 탭에서 확인·재발급). 첫 로그인에 변경 필수 — 변경 전 `/tenant/me` 는 403.

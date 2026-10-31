@@ -4,6 +4,8 @@ core/auth.py — 플랫폼 공통 인증 (모든 앱이 상속 없이 그대로 
 - 사용자도 Kernel Obj (core.user) 로 저장 → 별도 테이블/마이그레이션 없음
 - 표준 라이브러리만 사용 (pbkdf2 해싱 + HMAC 서명 토큰)
 - 기본 관리자 시드는 저장소당 1회만 수행하고 메모리 플래그로 캐싱 (_seeded_for)
+- 시드 비밀번호는 코드에 두지 않는다: 환경변수 BASS_SEED_PASSWORD, 없으면 계정마다 무작위로 만들어
+  생성(또는 예전 고정 비밀번호 교체) 때 서버 로그에 한 번만 남긴다.
 
 앱 라우터에서의 사용:
     from core.auth import require_role
@@ -13,6 +15,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
 import time
@@ -23,15 +26,18 @@ from fastapi import APIRouter, Body, Depends, Header
 from .errors import DomainError, Forbidden
 from .kernel import Obj, store
 
+logger = logging.getLogger("bass.auth")
+
 TOKEN_TTL_SECONDS = 60 * 60 * 12
 ROLES = ("superadmin", "branch_admin", "admin", "user")
 DEFAULT_ACCOUNTS = (
-    # username, password, name, role, branch
-    ("admin", "1212", "본사 총괄 최고관리자", "superadmin", None),
-    ("chic", "1212", "시크빌 관리자", "branch_admin", "main"),
-    ("sunho", "1212", "선호아트빌 관리자", "branch_admin", "sunho"),
-    ("sinbi", "1212", "신비주택 관리자", "branch_admin", "sinbi"),
+    # username, name, role, branch
+    ("admin", "본사 총괄 최고관리자", "superadmin", None),
+    ("chic", "시크빌 관리자", "branch_admin", "main"),
+    ("sunho", "선호아트빌 관리자", "branch_admin", "sunho"),
+    ("sinbi", "신비주택 관리자", "branch_admin", "sinbi"),
 )
+RETIRED_PASSWORDS = ("1212",)          # 테스트용으로 쓰던 고정 비밀번호 — 남아 있으면 시드 때 교체
 
 _secret_cache: Optional[bytes] = None
 _seeded_for: Optional[int] = None      # 시드를 마친 Store 객체의 id (저장소 교체 시 자동 재시드)
@@ -110,20 +116,30 @@ def verify_token(token: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _seed_password(username: str) -> str:
+    env = os.getenv("BASS_SEED_PASSWORD")
+    if env:
+        return env
+    raw = secrets.token_urlsafe(9)
+    logger.warning("[seed] '%s' 계정 비밀번호를 새로 만들었습니다: %s  (BASS_SEED_PASSWORD 로 지정 가능)", username, raw)
+    return raw
+
+
 def ensure_default_admins() -> None:
     """기본 계정 시드 — 저장소당 1회만 DB 를 조회한다."""
     global _seeded_for
     current = id(store())
     if _seeded_for == current:
         return
-    for item in DEFAULT_ACCOUNTS:
-        username, password, name, role = item[0], item[1], item[2], item[3]
-        branch = item[4] if len(item) > 4 else None
+    for username, name, role, branch in DEFAULT_ACCOUNTS:
         u = User.by_username(username)
         if not u:
-            User(username=username, name=name, role=role, branch=branch).set_password(password).save("seeded")
+            User(username=username, name=name, role=role, branch=branch).set_password(_seed_password(username)).save("seeded")
         else:
             updated = False
+            if any(u.check_password(p) for p in RETIRED_PASSWORDS):
+                u.set_password(_seed_password(username))
+                updated = True
             if u.role != role:
                 u.role = role
                 updated = True

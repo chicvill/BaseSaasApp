@@ -22,11 +22,13 @@
     </div>
   </header>
   <div id="app-alert"></div>
+  <div id="pwBox" class="hide"></div>
 
   <section id="workspace" class="hide">
     <nav class="tabs" role="tablist">
       <button class="bass-btn is-active" data-tab="bank" role="tab">💬 입금 문자 반영</button>
       <button class="bass-btn" data-tab="board" role="tab">📅 수납 현황</button>
+      <button class="bass-btn" data-tab="contracts" role="tab">📝 임대 계약</button>
       <button class="bass-btn" data-tab="accounts" role="tab">🔑 임차인 계정</button>
       <button class="bass-btn" data-tab="import" role="tab">📥 Excel 가져오기</button>
     </nav>
@@ -66,6 +68,27 @@
         <span><i style="border:1px solid hsl(152 65% 50%)"></i>입금 문자로 반영</span>
         <span>흐린 칸: 현 임차인 입주 전 · <b style="color:var(--diff)">!</b> 확인 필요</span>
       </div>
+    </section>
+
+    <!-- 임대 계약 -->
+    <section class="panel stack" data-panel="contracts" hidden>
+      <form id="leaseForm" class="bass-card stack">
+        <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임차인이 링크에서 본인 확인 후 동의하고, 잔금 입금을 확인하면 호실에 입주 처리되고 임차인 계정(아이디 = 건물 코드 + 호실)과 임시 비밀번호가 발급됩니다. 대면 계약도 같은 링크를 임차인 휴대폰으로 열어 확인합니다.</div>
+        <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:10px">
+          <div><label class="bass-label" for="lRoom">호실</label><input class="bass-input" id="lRoom" required inputmode="numeric" placeholder="예: 303"></div>
+          <div><label class="bass-label" for="lName">임차인 이름</label><input class="bass-input" id="lName" required></div>
+          <div><label class="bass-label" for="lPhone">임차인 휴대폰</label><input class="bass-input" id="lPhone" required inputmode="tel" placeholder="010-0000-0000"></div>
+          <div><label class="bass-label" for="lType">구분</label><select class="bass-select bass-input" id="lType"><option>월세</option><option>전세</option></select></div>
+          <div><label class="bass-label" for="lTiming">납부</label><select class="bass-select bass-input" id="lTiming"><option>후불</option><option>선불</option><option>반선불</option></select></div>
+          <div><label class="bass-label" for="lDeposit">보증금 (원)</label><input class="bass-input" id="lDeposit" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lRent">월 임차료 (원)</label><input class="bass-input" id="lRent" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lMgmt">월 관리비 (원)</label><input class="bass-input" id="lMgmt" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lStart">입주일</label><input class="bass-input" id="lStart" type="date" required></div>
+          <div><label class="bass-label" for="lEnd">만기일</label><input class="bass-input" id="lEnd" type="date"></div>
+        </div>
+        <button class="bass-btn bass-btn--primary" id="btnLease" type="submit" style="justify-self:start">계약 발행하고 링크 만들기</button>
+      </form>
+      <div class="board-wrap"><table class="board" id="leases" style="min-width:640px"></table></div>
     </section>
 
     <!-- 임차인 계정 -->

@@ -31,6 +31,8 @@
       $("backAdmin").classList.remove("hide");
     } else {
       branch = me.building.branch;
+      $("buildingName").textContent = `${me.building.name} 임대인`;
+      await Rent4.passwordGate(me, $("pwBox"));
     }
     $("workspace").classList.remove("hide");
     await loadBoard();
@@ -44,7 +46,31 @@
     document.querySelectorAll(".panel").forEach((p) => { p.hidden = p.dataset.panel !== btn.dataset.tab; });
     if (btn.dataset.tab === "board") loadBoard().catch(Bass.showError);
     if (btn.dataset.tab === "accounts") loadAccounts().catch(Bass.showError);
+    if (btn.dataset.tab === "contracts") loadLeases().catch(Bass.showError);
   }));
+
+  // ── 임대 계약 ──
+  const callLease = (path, opts) => api(`/lessor/contracts${path}`, { method: "POST", ...opts });
+
+  async function loadLeases() {
+    const { contracts } = await api("/lessor/contracts");
+    Rent4.contractTable($("leases"), contracts, { call: callLease, reload: loadLeases, partyLabel: "임차인" });
+  }
+
+  $("leaseForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnLease"), async () => {
+      const num = (id) => Number($(id).value || 0);
+      const res = await callLease("", { body: {
+        room: $("lRoom").value.trim(), party_name: $("lName").value.trim(), party_phone: $("lPhone").value.trim(),
+        lease_type: $("lType").value, pay_timing: $("lTiming").value,
+        deposit: num("lDeposit"), rent: num("lRent"), mgmt: num("lMgmt"),
+        start: $("lStart").value || null, end: $("lEnd").value || null } });
+      await Rent4.announceLink(res.token, `${res.contract.room}호 임대차 계약을 발행했습니다.`);
+      $("leaseForm").reset();
+      await loadLeases();
+    }, "발행 중...");
+  });
 
   // ── 임차인 계정 ──
   async function loadAccounts() {

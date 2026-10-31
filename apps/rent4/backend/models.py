@@ -53,6 +53,53 @@ class TenantAccount(PoolObj):
     activated_at: Optional[str] = None
 
 
+class LessorAccount(PoolObj):
+    """가맹 계약으로 만들어진 임대인 계정. 비밀번호는 core.auth User 에 해시로 저장된다."""
+    collection: ClassVar[str] = "lessor_accounts"
+
+    username: str
+    branch: str
+    contract_id: str = ""
+    initial_code: str = ""         # 계약 링크에 보여 줄 임시 비밀번호. 바꾸면 지운다
+    must_change: bool = True
+    activated_at: Optional[str] = None
+
+
+class Contract(PoolObj):
+    """네트워크 상호 확인 계약.
+
+    membership : 관리인 ↔ 임대인 가맹 계약 (가맹비 확인 → 임대인 계정)
+    lease      : 임대인 ↔ 임차인 임대차 계약 (잔금 확인 → 호실 입주 + 임차인 계정)
+
+    sent(발행자 확인·링크 발급) → signed(상대방이 링크에서 본인 확인 후 동의)
+      → active(발행자가 가맹비/잔금 납부 확인 → 임시 비밀번호 발급) | cancelled
+    """
+    collection: ClassVar[str] = "contracts"
+
+    kind: str                      # membership | lease
+    branch: str
+    building_name: str = ""
+    building_code: str = ""
+    room: str = ""
+    party_name: str
+    party_phone: str
+    deposit: int = 0
+    rent: int = 0
+    mgmt: int = 0
+    fee: int = 0                   # 가맹비 (membership)
+    start: Optional[str] = None
+    end: Optional[str] = None
+    lease_type: str = "월세"
+    pay_timing: str = "후불"
+    status: str = "sent"
+    token_hash: str = ""
+    issued_by: str = ""
+    signed_at: Optional[str] = None
+    paid_at: Optional[str] = None
+    activated_at: Optional[str] = None
+    username: str = ""             # 활성화 때 발급된 아이디
+
+
 class Room(PoolObj):
     collection: ClassVar[str] = "rooms"
 

@@ -23,6 +23,22 @@
   <div id="app-alert"></div>
   <h2 style="margin:10px 0 12px;font-size:17px">건물 선택</h2>
   <div class="bass-grid" id="buildings"></div>
+
+  <h2 style="margin:28px 0 12px;font-size:17px">📝 가맹 계약 (임대인 등록)</h2>
+  <form id="memberForm" class="bass-card stack">
+    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임대인이 링크에서 본인 확인 후 동의하고, 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드)과 임시 비밀번호가 발급됩니다.</div>
+    <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
+      <div><label class="bass-label" for="mBuilding">건물 이름</label><input class="bass-input" id="mBuilding" required placeholder="예: 시크빌"></div>
+      <div><label class="bass-label" for="mCode">건물 코드 (임대인 아이디)</label><input class="bass-input" id="mCode" required placeholder="예: chic" autocapitalize="none"></div>
+      <div><label class="bass-label" for="mName">임대인 이름</label><input class="bass-input" id="mName" required></div>
+      <div><label class="bass-label" for="mPhone">임대인 휴대폰</label><input class="bass-input" id="mPhone" required inputmode="tel" placeholder="010-0000-0000"></div>
+      <div><label class="bass-label" for="mFee">가맹비 (원)</label><input class="bass-input" id="mFee" type="number" min="0" value="0"></div>
+      <div><label class="bass-label" for="mStart">계약 시작일</label><input class="bass-input" id="mStart" type="date"></div>
+      <div><label class="bass-label" for="mEnd">계약 종료일</label><input class="bass-input" id="mEnd" type="date"></div>
+    </div>
+    <button class="bass-btn bass-btn--primary" id="btnMember" type="submit" style="justify-self:start">계약 발행하고 링크 만들기</button>
+  </form>
+  <div class="board-wrap" style="margin-top:12px"><table class="board" id="memberships" style="min-width:640px"></table></div>
 </main>
 <script src="/shared/ui/bass.js"></script>
 <script src="rent4.js"></script>
@@ -31,8 +47,39 @@
   "use strict";
   const esc = Bass.escapeHtml;
   const man = (n) => `${Math.round(n / 10000).toLocaleString("ko-KR")}만원`;
+  const $ = (id) => document.getElementById(id);
+  const call = (path, opts) => Bass.api("rent4", `/admin/contracts${path}`, { method: "POST", ...opts });
+
+  async function loadContracts() {
+    const { contracts } = await Bass.api("rent4", "/admin/contracts");
+    Rent4.contractTable($("memberships"), contracts, { call, reload: reloadAll, partyLabel: "임대인" });
+  }
+
+  async function reloadAll() {
+    await Promise.all([loadBuildings(), loadContracts()]);
+  }
+
+  $("memberForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnMember"), async () => {
+      const res = await call("", { body: {
+        building_name: $("mBuilding").value.trim(), building_code: $("mCode").value.trim(),
+        party_name: $("mName").value.trim(), party_phone: $("mPhone").value.trim(),
+        fee: Number($("mFee").value || 0), start: $("mStart").value || null, end: $("mEnd").value || null } });
+      await Rent4.announceLink(res.token, `${res.contract.building_name} 가맹 계약을 발행했습니다.`);
+      $("memberForm").reset();
+      await loadContracts();
+    }, "발행 중...");
+  });
+
   try {
     await Rent4.guard(["admin"]);
+    await reloadAll();
+  } catch (err) {
+    Bass.showError(err);
+  }
+
+  async function loadBuildings() {
     const { buildings } = await Bass.api("rent4", "/admin/buildings");
     document.getElementById("buildings").innerHTML = buildings.map((b) => `
       <a class="bass-card is-interactive stack" style="text-decoration:none;color:inherit;gap:10px"
@@ -47,8 +94,6 @@
                     : "아직 가져온 수납부가 없습니다. 들어가서 Excel 가져오기로 시작하세요."}</div>
         <span class="bass-btn bass-btn--sm">임대인 화면으로 →</span>
       </a>`).join("");
-  } catch (err) {
-    Bass.showError(err);
   }
 })();
 </script>
