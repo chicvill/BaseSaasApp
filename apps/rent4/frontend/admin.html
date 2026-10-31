@@ -27,6 +27,13 @@
   <h2 style="margin:10px 0 12px;font-size:17px">건물 선택</h2>
   <div class="bass-grid" id="buildings"></div>
 
+  <h2 style="margin:28px 0 12px;font-size:17px">📨 문자 발송 방식</h2>
+  <div class="bass-card bass-row" style="gap:10px">
+    <select class="bass-select bass-input" id="smsProvider" style="max-width:260px"></select>
+    <button class="bass-btn" id="btnSms" type="button">저장</button>
+    <span class="bass-muted" id="smsNote" style="font-size:13px"></span>
+  </div>
+
   <h2 style="margin:28px 0 12px;font-size:17px">📝 가맹 계약 (임대인 등록)</h2>
   <form id="memberForm" class="bass-card stack">
     <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 임대인 휴대폰으로 안내 문자가 갑니다. 임대인은 '비밀번호 설정'에서 휴대폰 번호로 인증해 비밀번호를 정하고, 계약에 동의합니다. 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드, 같은 비밀번호)이 열리고 체결 문자가 갑니다.</div>
@@ -59,7 +66,23 @@
     Rent4.contractTable($("memberships"), contracts, { call, reload: reloadAll, partyLabel: "임대인" });
   }
 
+  async function loadSms() {
+    const r = await Bass.api("rent4", "/sms/info");
+    $("smsProvider").innerHTML = r.available.map((p) =>
+      `<option value="${esc(p.id)}" ${p.id === r.provider ? "selected" : ""}>${esc(p.label)}</option>`).join("");
+    $("smsNote").innerHTML = r.provider === "telegram" && r.telegram_bot
+      ? `받는 사람은 텔레그램에서 <a href="${esc(r.telegram_bot)}" target="_blank" rel="noopener">${esc(r.telegram_bot)}</a> 에 '시작' → 전화번호 공유를 먼저 합니다.`
+      : r.provider === "dev" ? "실제로 보내지 않고 서버 로그에만 남습니다." : "";
+  }
+
+  $("btnSms").addEventListener("click", (e) => Bass.withLock(e.currentTarget, async () => {
+    const r = await Bass.api("rent4", "/admin/sms", { method: "POST", body: { provider: $("smsProvider").value } });
+    Bass.updateAppAlert("success", `문자 발송 방식: ${r.label}`);
+    await loadSms();
+  }));
+
   async function reloadAll() {
+    await loadSms();
     await Promise.all([loadBuildings(), loadContracts()]);
   }
 

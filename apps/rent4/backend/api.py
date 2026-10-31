@@ -106,7 +106,7 @@ def admin_contracts(user: User = Depends(admin_only)) -> Dict[str, Any]:
 @router.post("/admin/contracts")
 def admin_contract_create(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
     c = contracts.create_membership(user, payload)
-    return {"success": True, "contract": contracts.public(c), "sms": not sms.configured() and "dev" or "sent"}
+    return {"success": True, "contract": contracts.public(c), "sms": sms.provider()}
 
 
 @router.post("/admin/contracts/{contract_id}/{action}")
@@ -160,7 +160,7 @@ def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str,
 def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = "",
                            user: User = Depends(staff)) -> Dict[str, Any]:
     c = contracts.create_lease(user, _scope(user, branch).branch, payload)
-    return {"success": True, "contract": contracts.public(c), "sms": not sms.configured() and "dev" or "sent"}
+    return {"success": True, "contract": contracts.public(c), "sms": sms.provider()}
 
 
 @router.post("/lessor/contracts/{contract_id}/{action}")
@@ -277,6 +277,18 @@ def oauth_callback(provider: str, request: Request, code: str = "", state: str =
     api_base = str(request.url).split("?")[0].rsplit("/oauth/", 1)[0]                 # …/api/rent4 또는 …/api
     site = api_base.replace("/api/rent4", "/rent4/") if api_base.endswith("/api/rent4") else api_base[: -len("/api")] + "/"
     return RedirectResponse(site + page, status_code=302)
+
+
+# ── 문자 발송 방식 ──
+@router.get("/sms/info")
+def sms_info() -> Dict[str, Any]:
+    return {"success": True, **sms.info()}
+
+
+@router.post("/admin/sms")
+def admin_sms(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
+    sms.set_provider(str(payload.get("provider", "")))
+    return {"success": True, **sms.info()}
 
 
 # ── 휴대폰 문자 인증 (로그인 전) ──

@@ -63,6 +63,8 @@
     <table class="t">
       <tr><th>서비스</th><th>발급처</th><th>환경변수</th></tr>
       <tr><td>문자 (솔라피)</td><td>solapi.com 가입 → 발신번호 등록(휴대폰 인증) → API Key</td><td><code>SOLAPI_API_KEY</code> · <code>SOLAPI_API_SECRET</code> · <code>SMS_SENDER</code></td></tr>
+      <tr><td>텔레그램 (솔라피 전 테스트)</td><td>텔레그램에서 <b>@BotFather</b> → <code>/newbot</code> → 봇 이름·아이디 입력 → 토큰 복사.
+        관리인 화면 <b>📨 문자 발송 방식</b>에서 '텔레그램'을 고릅니다. 받는 사람은 봇에서 <b>시작 → 📱 전화번호 공유</b>를 한 번 합니다.</td><td><code>TELEGRAM_BOT_TOKEN</code></td></tr>
       <tr><td>카카오</td><td>developers.kakao.com → 애플리케이션 추가 → 카카오 로그인 활성화 → Redirect URI 등록</td><td><code>KAKAO_REST_API_KEY</code> (<code>KAKAO_CLIENT_SECRET</code> 선택)</td></tr>
       <tr><td>구글</td><td>console.cloud.google.com → OAuth 동의 화면 → 사용자 인증 정보(웹 애플리케이션) → 승인된 리디렉션 URI</td><td><code>GOOGLE_CLIENT_ID</code> · <code>GOOGLE_CLIENT_SECRET</code></td></tr>
       <tr><td>접속 주소</td><td>문자에 넣을 주소</td><td><code>RENT4_PUBLIC_URL</code></td></tr>

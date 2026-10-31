@@ -68,3 +68,6 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 비밀번호 설정·찾기 = `POST /otp/request` → `POST /otp/set-password` (6자리, 해시 저장, 5분, 5회, 재요청 1분). 그 번호의 모든 계정(임대인·임차인·계약 진행 `k<id>`)에 같은 비밀번호.
 - 계약 동의 전 본인 확인: 카카오/구글 OAuth(`backend/oauth.py`, state 해시 10분). 키가 하나라도 설정되면 `verified_at` 없이는 동의 불가. 연결한 계정은 소셜 로그인에도 쓴다(체결 뒤에는 최종 아이디로).
 - 계약 relink/reset, 임차인 invite, contract join/start/view?t 엔드포인트는 없앴다. 관리인 설정 링크(setup)만 남음.
+- 문자 발송 방식은 관리인 화면에서 고른다 (`SmsSetting`): dev(로그) · telegram(봇, `TELEGRAM_BOT_TOKEN`, 테스트용) · solapi(운영). 키가 있는 것만 고를 수 있고, 선택이 없으면 solapi > telegram > dev.
+- 텔레그램: 봇에서 /start → 전화번호 공유 버튼, 본인 연락처(contact.user_id == from.id)만 번호 연결(`TelegramLink`). getUpdates 롱 폴링 데몬 스레드(`RENT4_TELEGRAM_POLLING=0` 이면 끔) + 보낼 때 한 번 더 확인.
+- 인증번호는 발송에 성공했을 때만 저장한다 (실패 뒤 재요청이 1분 제한에 걸리지 않게).

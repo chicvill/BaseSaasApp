@@ -281,9 +281,9 @@ def request_code(phone: str) -> Dict:
     for o in OtpCode.find(phone=d):
         o.delete()
     code = f"{secrets.randbelow(10 ** 6):06d}"
+    result = sms.send(d, f"[Rent4] 인증번호 {code} — 5분 안에 입력해 주세요.")   # 못 보내면 저장하지 않는다
     OtpCode(phone=d, code_hash=_code_hash(d, code), expires_at=now + OTP_TTL).save()
-    result = sms.send(d, f"[Rent4] 인증번호 {code} — 5분 안에 입력해 주세요.")
-    return {"sent": True, "dev_mode": result["mode"] == "dev"}
+    return {"sent": True, "mode": result["mode"], "dev_mode": result["mode"] == "dev"}
 
 
 def set_password_by_code(phone: str, code: str, new_password: str) -> Dict:

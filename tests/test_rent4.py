@@ -159,7 +159,8 @@ class TestLedger(Rent4Case):
 class ApiCase(Rent4Case):
     def setUp(self):
         super().setUp()
-        for k in ("SOLAPI_API_KEY", "SOLAPI_API_SECRET", "SMS_SENDER"):
+        os.environ["RENT4_TELEGRAM_POLLING"] = "0"
+        for k in ("SOLAPI_API_KEY", "SOLAPI_API_SECRET", "SMS_SENDER", "TELEGRAM_BOT_TOKEN"):
             os.environ.pop(k, None)                      # 개발 모드: 문자는 sms.outbox 로
         sms.outbox.clear()
         self.client = TestClient(create_gateway(db_path=":memory:", only=["rent4"]))
@@ -538,6 +539,65 @@ class TestOAuth(ApiCase):
     def test_link_requires_login(self):
         res = self.client.post("/api/rent4/oauth/kakao/start", json={"purpose": "link"})
         self.assertEqual(res.status_code, 400)
+
+
+class TestTelegram(ApiCase):
+    """텔레그램 봇 API 는 가짜로 시험한다."""
+
+    def setUp(self):
+        super().setUp()                                   # 시크빌 임대인 준비는 개발 모드로
+        from unittest import mock
+        env = mock.patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "123:test"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.updates, self.sent = [], []
+        fake = mock.patch.object(sms, "_telegram", side_effect=self._fake)
+        fake.start()
+        self.addCleanup(fake.stop)
+        sms._bot_username, sms._update_offset = None, 0
+        self.import_sheet()
+
+    def _fake(self, method, params=None, timeout=10):
+        if method == "getMe":
+            return {"username": "rent4_test_bot"}
+        if method == "getUpdates":
+            out, self.updates = self.updates, []
+            return out
+        if method == "sendMessage":
+            self.sent.append(params)
+            return {}
+        raise AssertionError(method)
+
+    def bot_message(self, uid, **message):
+        self.updates.append({"update_id": len(self.sent) + len(self.updates) + 100,
+                             "message": {"chat": {"id": 900 + uid}, "from": {"id": uid}, **message}})
+
+    def test_provider_choice(self):
+        info = self.client.get("/api/rent4/sms/info").json()
+        self.assertEqual((info["provider"], info["telegram_bot"]), ("telegram", "https://t.me/rent4_test_bot"))
+        self.assertEqual([p["id"] for p in info["available"]], ["dev", "telegram"])
+        self.assertEqual(self.client.post("/api/rent4/admin/sms", headers=self.admin, json={"provider": "dev"}).json()["provider"], "dev")
+        self.assertEqual(self.client.post("/api/rent4/admin/sms", headers=self.admin, json={"provider": "solapi"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/rent4/admin/sms", headers=self.chic, json={"provider": "dev"}).status_code, 403)
+
+    def test_link_by_shared_contact_then_code_by_telegram(self):
+        res = self.client.post("/api/rent4/otp/request", json={"phone": "010-1111-2222"})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("t.me/rent4_test_bot", res.json()["hint"])
+        self.bot_message(7, text="/start")
+        self.bot_message(7, contact={"phone_number": "+821099990000", "user_id": 8})       # 남의 연락처
+        self.bot_message(7, contact={"phone_number": "+82 10-1111-2222", "user_id": 7})    # 본인 연락처
+        self.assertEqual(sms.process_updates(), 3)
+        self.assertTrue(self.sent[0]["reply_markup"]["keyboard"][0][0]["request_contact"])
+        self.assertIn("본인 연락처만", self.sent[1]["text"])
+        self.assertIn("01011112222", self.sent[2]["text"])
+        res = self.client.post("/api/rent4/otp/request", json={"phone": "010-1111-2222"}).json()
+        self.assertEqual(res["mode"], "telegram")
+        msg = self.sent[-1]
+        self.assertEqual(msg["chat_id"], 907)
+        code = re.search(r"인증번호 (\d{6})", msg["text"])[1]
+        done = self.client.post("/api/rent4/otp/set-password", json={"phone": "010-1111-2222", "code": code, "new": "tg-pass-101"})
+        self.assertEqual(done.json()["home"], "임차인.html")
 
 
 class TestSms(unittest.TestCase):
