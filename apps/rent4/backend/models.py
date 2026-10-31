@@ -48,7 +48,7 @@ class TenantAccount(PoolObj):
     branch: str
     room: str
     tenant_key: str = ""           # 현 임차인 식별 (이름+전화 해시) — 바뀌면 계정 초기화
-    initial_code: str = ""         # 임대인이 전달할 첫 비밀번호. 임차인이 바꾸면 지운다
+    initial_code: str = ""         # 안내 링크로 전달할 임시 비밀번호(8자). 임차인이 바꾸면 지운다
     must_change: bool = True
     activated_at: Optional[str] = None
     invite_hash: str = ""          # 안내 링크 토큰 해시 (임차인이 바뀌면 비운다)

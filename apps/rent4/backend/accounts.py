@@ -9,8 +9,8 @@ apps/rent4/backend/accounts.py — 건물 목록 · 임차인 계정 · 로그�
 
 임차인 계정
     - 아이디 = 건물 코드 + 호실 (예: chic603). 거주 중인 호실마다 자동 생성.
-    - 첫 비밀번호는 무작위 6자리 코드 — 임대인 화면 '임차인 계정' 탭에서 확인해 임차인에게 전달.
-    - 첫 로그인 때 새 비밀번호로 바꿔야 수납 내역을 볼 수 있다. 바꾸면 코드는 지워진다.
+    - 첫 비밀번호는 임대인과 같은 8자 임시 비밀번호 — 임대인이 보낸 안내 링크에서 휴대폰 뒤 4자리 확인 후 받는다.
+    - 첫 로그인 때 새 비밀번호로 바꿔야 수납 내역을 볼 수 있다. 바꾸면 임시 비밀번호는 지워진다.
     - 호실의 임차인(이름·전화)이 바뀌면 계정을 초기화해 이전 임차인이 더는 들어오지 못하게 한다.
 """
 from __future__ import annotations
@@ -86,10 +86,6 @@ def building_of(branch: Optional[str]) -> Building:
     return b
 
 
-def _new_code() -> str:
-    return f"{secrets.randbelow(10 ** 6):06d}"
-
-
 def _tenant_key(room: Room) -> str:
     raw = f"{room.tenant_name}|{re.sub(r'\D', '', room.phone)}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
@@ -109,7 +105,7 @@ def sync_tenant_accounts() -> Dict[str, int]:
     """거주 중인 호실마다 임차인 계정을 맞춘다 (생성 / 임차인 변경 시 초기화 / 퇴거 시 잠금)."""
     codes = {b.branch: b.code for b in Building.all()}
     accounts = {(a.branch, a.room): a for a in TenantAccount.all()}
-    stats = {"created": 0, "reset": 0, "locked": 0}
+    stats = {"created": 0, "reset": 0, "locked": 0, "upgraded": 0}
     for room in Room.all():
         acc = accounts.get((room.branch, room.room))
         if room.status != "occupied" or not room.tenant_name:
@@ -121,6 +117,11 @@ def sync_tenant_accounts() -> Dict[str, int]:
             continue
         key = _tenant_key(room)
         if acc and acc.tenant_key == key:
+            if acc.must_change and acc.initial_code.isdigit():      # 예전 6자리 숫자 코드 → 8자 임시 비밀번호
+                acc.initial_code = temp_password()
+                _set_core_password(acc.username, acc.branch, room.tenant_name, acc.initial_code)
+                acc.save()
+                stats["upgraded"] += 1
             continue
         if acc is None:
             prefix = codes.get(room.branch, room.branch)
@@ -128,7 +129,7 @@ def sync_tenant_accounts() -> Dict[str, int]:
             stats["created"] += 1
         else:
             stats["reset"] += 1
-        acc.tenant_key, acc.initial_code, acc.must_change, acc.activated_at = key, _new_code(), True, None
+        acc.tenant_key, acc.initial_code, acc.must_change, acc.activated_at = key, temp_password(), True, None
         acc.invite_hash = ""                     # 이전 임차인에게 보낸 안내 링크 무효
         _set_core_password(acc.username, acc.branch, room.tenant_name, acc.initial_code)
         acc.save()
@@ -140,13 +141,13 @@ def reset_account(branch: str, room_no: str) -> TenantAccount:
     room = Room.first(branch=branch, room=room_no)
     if not acc or not room or room.status != "occupied":
         raise NotFound(f"{room_no}호에는 임차인 계정이 없습니다.")
-    acc.initial_code, acc.must_change, acc.activated_at = _new_code(), True, None
+    acc.initial_code, acc.must_change, acc.activated_at = temp_password(), True, None
     _set_core_password(acc.username, branch, room.tenant_name, acc.initial_code)
     return acc.save()
 
 
 def list_accounts(branch: str) -> List[Dict]:
-    """임대인 화면용. 첫 비밀번호 코드는 보여 주지 않는다 — 임차인은 안내 링크에서 본인 확인 후 받는다."""
+    """임대인 화면용. 임시 비밀번호는 보여 주지 않는다 — 임차인은 안내 링크에서 본인 확인 후 받는다."""
     rooms = {r.room: r for r in Room.find(branch=branch)}
     out = []
     for acc in sorted(TenantAccount.find(branch=branch), key=lambda a: a.room):
@@ -169,13 +170,13 @@ def _hash(token: str) -> str:
 
 
 def issue_invite(branch: str, room_no: str, reissue: bool = False) -> Tuple[TenantAccount, str]:
-    """안내 링크 발급. reissue=True 면 첫 비밀번호 코드도 새로 만든다 (분실 · 다시 보내기)."""
+    """안내 링크 발급. reissue=True 면 임시 비밀번호도 새로 만든다 (분실 · 다시 보내기)."""
     acc = reset_account(branch, room_no) if reissue else TenantAccount.first(branch=branch, room=room_no)
     room = Room.first(branch=branch, room=room_no)
     if not acc or not room or room.status != "occupied":
         raise NotFound(f"{room_no}호에는 임차인 계정이 없습니다.")
     if not acc.must_change:
-        raise Conflict("이미 임차인이 쓰고 있는 계정입니다.", hint="비밀번호를 잊었다면 '코드 재발급'을 누르세요.")
+        raise Conflict("이미 임차인이 쓰고 있는 계정입니다.", hint="비밀번호를 잊었다면 '비밀번호 초기화'를 누르세요.")
     token = secrets.token_urlsafe(24)
     acc.invite_hash = _hash(token)
     return acc.save(), token
@@ -196,7 +197,7 @@ def invite_view(token: str) -> Dict:
 
 
 def invite_open(token: str, phone4: str) -> Dict:
-    """휴대폰 뒤 4자리로 본인 확인 → 아이디와 첫 비밀번호 코드 (첫 로그인 전까지만)."""
+    """휴대폰 뒤 4자리로 본인 확인 → 아이디와 임시 비밀번호 (첫 로그인 전까지만)."""
     acc, room = _invite(token)
     now = time.time()
     recent = [t for t in _invite_failures[acc.id] if now - t < INVITE_WINDOW]

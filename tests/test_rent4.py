@@ -380,6 +380,25 @@ class TestContracts(ApiCase):
         self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=sunho).status_code, 404)
 
 class TestPasswords(ApiCase):
+    def test_tenant_temp_password_matches_lessor_format(self):
+        self.import_sheet()
+        from apps.rent4.backend.accounts import TEMP_ALPHABET
+        for acc in TenantAccount.find(branch="main"):
+            self.assertEqual(len(acc.initial_code), 8, acc.initial_code)
+            self.assertTrue(set(acc.initial_code) <= set(TEMP_ALPHABET))
+
+    def test_legacy_six_digit_codes_upgraded_on_sync(self):
+        from apps.rent4.backend import accounts as acc_mod
+        self.import_sheet()
+        legacy = TenantAccount.first(branch="main", room="102")
+        legacy.initial_code = "123456"
+        legacy.save()
+        self.assertEqual(acc_mod.sync_tenant_accounts()["upgraded"], 1)
+        code = TenantAccount.first(branch="main", room="102").initial_code
+        self.assertEqual(len(code), 8)
+        self.login("chic102", code)
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic102", "password": "123456"}).status_code, 401)
+
     def membership(self, code):
         rows = self.client.get("/api/rent4/admin/contracts", headers=self.admin).json()["contracts"]
         return next(c for c in rows if c["building_code"] == code)

@@ -84,7 +84,7 @@
               : `<span class="bass-badge bass-badge--warn">안내 전</span>`}</td>
         <td style="text-align:right">
           ${a.activated ? "" : `<button class="bass-btn bass-btn--sm bass-btn--primary" data-link="invite" data-room="${esc(a.room)}">📨 안내 링크</button>`}
-          <button class="bass-btn bass-btn--sm" data-link="reset" data-room="${esc(a.room)}" title="비밀번호를 잊었을 때: 새 코드 + 새 링크">코드 재발급</button>
+          <button class="bass-btn bass-btn--sm" data-link="reset" data-room="${esc(a.room)}" title="비밀번호를 잊었을 때: 새 임시 비밀번호 + 새 링크">🔑 비밀번호 초기화</button>
         </td>
       </tr>`).join("")}</tbody>`;
   }
@@ -96,11 +96,11 @@
     Bass.withLock(btn, async () => {
       const r = await api(`/lessor/accounts/${encodeURIComponent(btn.dataset.room)}/${btn.dataset.link}`, { method: "POST" });
       Rent4.sendLink({
-        title: reset ? `${r.room}호 코드를 재발급했습니다` : `${r.room}호 안내 링크를 만들었습니다`,
+        title: reset ? `${r.room}호 비밀번호를 초기화했습니다` : `${r.room}호 안내 링크를 만들었습니다`,
         name: r.tenant_name, phone: r.phone, link: Rent4.inviteLink(r.token),
         message: reset
-          ? `[Rent4] ${r.tenant_name}님, ${r.room}호 비밀번호가 초기화되었습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 새 첫 비밀번호를 받아 로그인해 주세요.`
-          : `[Rent4] ${r.tenant_name}님, ${r.room}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 아이디와 첫 비밀번호를 받아 주세요.`,
+          ? `[Rent4] ${r.tenant_name}님, ${r.room}호 비밀번호가 초기화되었습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 새 임시 비밀번호를 받아 로그인해 주세요.`
+          : `[Rent4] ${r.tenant_name}님, ${r.room}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 아이디와 임시 비밀번호를 받아 주세요.`,
         note: reset ? "이전 비밀번호와 이전 안내 링크는 이미 막혔습니다." : "",
       });
       await loadAccounts();
@@ -277,7 +277,7 @@
     const r = await api("/lessor/import/commit", { method: "POST", body: { text: $("excelText").value } });
     renderImport(r, true);
     Bass.updateAppAlert("success", `${r.year}년 수납부를 Knowledge Pool 에 반영했습니다.`,
-      `임차인 계정: 새로 만듦 ${r.accounts.created} · 초기화 ${r.accounts.reset} · 잠금 ${r.accounts.locked}. 임차인 계정 탭에서 코드를 확인하세요.`);
+      `임차인 계정: 새로 만듦 ${r.accounts.created} · 초기화 ${r.accounts.reset} · 잠금 ${r.accounts.locked}. 임차인 계정 탭에서 📨 안내 링크를 보내세요.`);
     year = r.year;
     await loadBoard();
   }, "반영 중... ⏳"));
