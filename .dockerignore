@@ -12,3 +12,8 @@ tests/scratch_apps
 .agents/skills/**/scratch
 data/*.db-shm
 data/*.db-wal
+
+# 런타임 데이터·비밀은 이미지에 넣지 않는다 (운영 데이터는 이미지 밖 저장소에 둔다)
+.env
+data/platform.db
+data/rent4_pool/
