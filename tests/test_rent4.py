@@ -600,6 +600,64 @@ class TestTelegram(ApiCase):
         self.assertEqual(done.json()["home"], "임차인.html")
 
 
+class TestResetLink(ApiCase):
+    """임대인 비밀번호 초기화 → 채팅으로 링크 → 임차인 새 비밀번호 → 로그인."""
+
+    def reset(self, room="101", auth=None):
+        res = self.client.post(f"/api/rent4/lessor/accounts/{room}/reset", headers=auth or self.chic)
+        self.assertEqual(res.status_code, 200, res.text)
+        return res.json()
+
+    def test_reset_then_tenant_sets_password_and_logs_in(self):
+        self.import_sheet()
+        self.tenant_login("101")                                     # 쓰던 비밀번호 secret-101
+        r = self.reset("101")
+        self.assertEqual((r["username"], r["tenant_name"], r["expires_hours"]), ("chic101", "홍길동", 24))
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "secret-101"}).status_code, 401)
+        view = self.client.get(f"/api/rent4/reset/view?t={r['token']}").json()
+        self.assertEqual((view["room"], view["username"]), ("101", "chic101"))
+        weak = self.client.post("/api/rent4/reset/set", json={"t": r["token"], "new": "111111"})
+        self.assertEqual(weak.status_code, 422)                          # 약한 비밀번호는 거절, 링크는 그대로
+        done = self.client.post("/api/rent4/reset/set", json={"t": r["token"], "new": "after-reset-101"}).json()
+        self.assertEqual(done["home"], "임차인.html")
+        me = self.client.get("/api/rent4/me", headers={"Authorization": f"Bearer {done['token']}"}).json()
+        self.assertEqual((me["kind"], me["must_change_password"]), ("tenant", False))
+        self.login("chic101", "after-reset-101")
+        self.assertEqual(self.client.get(f"/api/rent4/reset/view?t={r['token']}").status_code, 404)   # 한 번만
+        self.assertEqual(self.client.post("/api/rent4/reset/set", json={"t": r["token"], "new": "again-again"}).status_code, 404)
+
+    def test_new_reset_replaces_old_link(self):
+        self.import_sheet()
+        first = self.reset("102")["token"]
+        second = self.reset("102")["token"]
+        self.assertEqual(self.client.get(f"/api/rent4/reset/view?t={first}").status_code, 404)
+        self.assertEqual(self.client.get(f"/api/rent4/reset/view?t={second}").status_code, 200)
+
+    def test_expired_link(self):
+        self.import_sheet()
+        token = self.reset("103")["token"]
+        acc = TenantAccount.first(branch="main", room="103")
+        acc.invite_expires = 1.0
+        acc.save()
+        self.assertEqual(self.client.post("/api/rent4/reset/set", json={"t": token, "new": "late-pw-103"}).status_code, 404)
+
+    def test_other_building_lessor_cannot_reset(self):
+        self.import_sheet()
+        sunho = self.make_lessor("sunho", "선호아트빌", "박임대", "010-2222-3333")
+        self.assertEqual(self.client.post("/api/rent4/lessor/accounts/101/reset", headers=sunho).status_code, 404)
+        self.assertEqual(self.client.post("/api/rent4/lessor/accounts/101/reset").status_code, 401)
+
+    def test_tenant_change_invalidates_link(self):
+        self.import_sheet()
+        token = self.reset("101")["token"]
+        changed = SHEET.replace("홍길동", "고길동").replace("010-1111-2222", "010-9999-8888")
+        self.client.post("/api/rent4/lessor/import/commit", json={"text": changed}, headers=self.chic)
+        self.assertEqual(self.client.get(f"/api/rent4/reset/view?t={token}").status_code, 404)
+
+    def test_reset_page_served(self):
+        self.assertEqual(self.client.get("/rent4/reset.html").status_code, 200)
+
+
 class TestSms(unittest.TestCase):
     def test_solapi_request_is_signed(self):
         import json as _json

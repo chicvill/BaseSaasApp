@@ -71,3 +71,4 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 문자 발송 방식은 관리인 화면에서 고른다 (`SmsSetting`): dev(로그) · telegram(봇, `TELEGRAM_BOT_TOKEN`, 테스트용) · solapi(운영). 키가 있는 것만 고를 수 있고, 선택이 없으면 solapi > telegram > dev.
 - 텔레그램: 봇에서 /start → 전화번호 공유 버튼, 본인 연락처(contact.user_id == from.id)만 번호 연결(`TelegramLink`). getUpdates 롱 폴링 데몬 스레드(`RENT4_TELEGRAM_POLLING=0` 이면 끔) + 보낼 때 한 번 더 확인.
 - 인증번호는 발송에 성공했을 때만 저장한다 (실패 뒤 재요청이 1분 제한에 걸리지 않게).
+- 임차인 비밀번호 초기화 (대면 계약 마무리 · 분실): 임대인 '🔑 비밀번호 초기화' → `POST /lessor/accounts/{room}/reset` 이 이전 비밀번호를 즉시 막고 한 번만 쓰는 재설정 링크(`reset.html?t=`, 해시 저장 `invite_hash`, 24시간 `invite_expires`)를 만든다. 임대인은 링크를 채팅(카카오톡 등)으로 보내고, 임차인은 `POST /reset/set` 으로 새 비밀번호(해시 저장)를 정하면 바로 로그인 + 링크 만료. 자기 건물 호실만, 임차인이 바뀌면 링크 무효.

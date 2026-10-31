@@ -83,16 +83,32 @@
               : a.link_sent ? `<span class="bass-badge bass-badge--info">링크 보냄</span>`
               : `<span class="bass-badge bass-badge--warn">안내 전</span>`}</td>
         <td style="text-align:right">
-          ${a.activated ? "" : `<button class="bass-btn bass-btn--sm bass-btn--primary" data-room="${esc(a.room)}">📱 안내 문자</button>`}
+          ${a.activated ? "" : `<button class="bass-btn bass-btn--sm" data-act="notify" data-room="${esc(a.room)}">📱 안내 문자</button>`}
+          <button class="bass-btn bass-btn--sm bass-btn--primary" data-act="reset" data-room="${esc(a.room)}"
+            title="지금 비밀번호를 막고, 한 번만 쓰는 재설정 링크를 만들어 채팅으로 보냅니다">🔑 비밀번호 초기화</button>
         </td>
       </tr>`).join("")}</tbody>`;
   }
 
   $("accounts").addEventListener("click", (e) => {
-    const btn = e.target.closest("[data-room]");
+    const btn = e.target.closest("[data-act]");
     if (!btn) return;
+    const room = encodeURIComponent(btn.dataset.room);
+    if (btn.dataset.act === "reset") {
+      Bass.withLock(btn, async () => {
+        const r = await api(`/lessor/accounts/${room}/reset`, { method: "POST" });
+        Rent4.shareLink({
+          title: `${r.room}호 비밀번호를 초기화했습니다`, name: r.tenant_name, phone: r.phone,
+          link: new URL(`reset.html?t=${encodeURIComponent(r.token)}`, location.href).href,
+          message: `[Rent4] ${r.tenant_name}님, 아래 링크를 열어 새 비밀번호를 정해 주세요. 정하면 바로 로그인되고, 다음부터는 아이디 ${r.username} 또는 휴대폰 번호와 새 비밀번호로 로그인합니다. (${r.expires_hours}시간 안에, 한 번만 사용)`,
+          note: "이전 비밀번호는 이미 막혔습니다. 임차인이 새 비밀번호를 정하면 이 링크도 바로 만료됩니다.",
+        });
+        await loadAccounts();
+      }, "초기화 중...");
+      return;
+    }
     Bass.withLock(btn, async () => {
-      const r = await api(`/lessor/accounts/${encodeURIComponent(btn.dataset.room)}/notify`, { method: "POST" });
+      const r = await api(`/lessor/accounts/${room}/notify`, { method: "POST" });
       Bass.updateAppAlert("success", `${r.room}호 ${r.tenant_name}님에게 안내 문자를 보냈습니다.`,
         "임차인은 '비밀번호 설정'에서 휴대폰 번호로 인증하고 바로 시작합니다.");
     }, "보내는 중...");

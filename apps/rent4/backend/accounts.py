@@ -331,6 +331,58 @@ def notify_tenant(branch: str, room_no: str) -> Dict:
     return {"room": room_no, "tenant_name": room.tenant_name, "phone": room.phone}
 
 
+# ── 임대인이 만드는 비밀번호 재설정 링크 (대면 계약 마무리 · 비밀번호 분실) ──
+RESET_LINK_TTL = 24 * 3600
+
+
+def issue_reset_link(branch: str, room_no: str) -> Tuple[TenantAccount, Room, str]:
+    """임차인 비밀번호 초기화: 지금 비밀번호는 바로 막고, 한 번만 쓰는 재설정 링크(24시간)를 만든다.
+
+    임대인은 이 링크를 카카오톡 등 채팅으로 보내고, 임차인은 링크에서 새 비밀번호를 정하면 바로 로그인된다.
+    """
+    room = Room.first(branch=branch, room=room_no)
+    acc = TenantAccount.first(branch=branch, room=room_no)
+    if not room or room.status != "occupied" or not acc or not acc.tenant_key:
+        raise NotFound(f"{room_no}호에는 임차인 계정이 없습니다.")
+    _set_core_password(acc.username, branch, room.tenant_name, secrets.token_hex(16))   # 이전 비밀번호 즉시 무효
+    token = secrets.token_urlsafe(24)
+    acc.invite_hash, acc.invite_expires = _hash(token), time.time() + RESET_LINK_TTL
+    acc.initial_code, acc.must_change = "", True
+    acc.save()
+    return acc, room, token
+
+
+def _reset_target(token: str) -> Tuple[TenantAccount, Room]:
+    acc = TenantAccount.first(invite_hash=_hash(token or "")) if token else None
+    room = Room.first(branch=acc.branch, room=acc.room) if acc else None
+    if (acc is None or room is None or room.status != "occupied" or not acc.tenant_key
+            or acc.invite_expires < time.time()):
+        raise NotFound("비밀번호 재설정 링크가 올바르지 않거나 만료되었습니다.",
+                       hint="이미 비밀번호를 정했다면 로그인하세요. 다시 필요하면 임대인에게 비밀번호 초기화를 요청하세요.")
+    return acc, room
+
+
+def reset_link_view(token: str) -> Dict:
+    acc, room = _reset_target(token)
+    return {"building": building_of(acc.branch).name, "room": acc.room, "tenant_name": room.tenant_name,
+            "username": acc.username}
+
+
+def reset_link_set(token: str, new_password: str) -> Dict:
+    """링크에서 새 비밀번호를 정한다 (해시로만 저장). 링크는 이 순간 만료되고 바로 로그인된다."""
+    acc, room = _reset_target(token)
+    validate_new_password(new_password)
+    user = User.by_username(acc.username)
+    if user is None:
+        raise NotFound("계정을 찾을 수 없습니다.")
+    user.set_password(new_password).save("rent4_password_set_by_reset_link")
+    acc.initial_code, acc.must_change, acc.invite_hash, acc.invite_expires = "", False, "", 0
+    acc.activated_at = acc.activated_at or now_iso()
+    acc.save()
+    expire_links(acc.username)
+    return {"token": issue_token(user), "home": "임차인.html"}
+
+
 def expire_links(username: str) -> None:
     """비밀번호를 정하면 그 계정으로 들어오던 링크(계약·안내·관리인 설정)는 모두 더 이상 열리지 않는다."""
     for c in Contract.find(username=username):

@@ -51,7 +51,8 @@ class TenantAccount(PoolObj):
     initial_code: str = ""         # 안내 링크로 전달할 임시 비밀번호(8자). 임차인이 바꾸면 지운다
     must_change: bool = True
     activated_at: Optional[str] = None
-    invite_hash: str = ""          # 안내 링크 토큰 해시 (임차인이 바뀌면 비운다)
+    invite_hash: str = ""          # 비밀번호 재설정 링크 토큰 해시 (임차인이 바뀌면 비운다)
+    invite_expires: float = 0      # 재설정 링크 만료 시각 (epoch 초)
 
 
 class AdminAccount(PoolObj):

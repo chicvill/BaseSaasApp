@@ -291,6 +291,25 @@ def admin_sms(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_on
     return {"success": True, **sms.info()}
 
 
+@router.post("/lessor/accounts/{room_no}/reset")
+def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    """임차인 비밀번호 초기화 → 한 번만 쓰는 재설정 링크 (임대인이 채팅으로 전달)."""
+    acc, room, token = accounts.issue_reset_link(_scope(user, branch).branch, room_no)
+    return {"success": True, "token": token, "username": acc.username, "room": acc.room,
+            "tenant_name": room.tenant_name, "phone": room.phone, "expires_hours": accounts.RESET_LINK_TTL // 3600}
+
+
+# ── 비밀번호 재설정 링크 (로그인 전) ──
+@router.get("/reset/view")
+def reset_view(t: str = "") -> Dict[str, Any]:
+    return {"success": True, **accounts.reset_link_view(t)}
+
+
+@router.post("/reset/set")
+def reset_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.reset_link_set(str(payload.get("t", "")), str(payload.get("new", "")))}
+
+
 # ── 휴대폰 문자 인증 (로그인 전) ──
 @router.post("/otp/request")
 def otp_request(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:

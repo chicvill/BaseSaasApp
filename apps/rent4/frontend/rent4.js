@@ -226,5 +226,70 @@
         : "상대방은 '비밀번호 설정'에서 휴대폰 번호로 인증한 뒤 계약을 확인하고 동의합니다.");
   }
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice };
+  /** 클립보드 복사: 클릭 직후 동기 방식 먼저, 안 되면 클립보드 API. */
+  async function copyText(text) {
+    const host = document.querySelector("dialog[open]") || document.body;
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+    host.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    ta.remove();
+    if (ok) return true;
+    try { await global.navigator.clipboard.writeText(text); return true; } catch (_) { return false; }
+  }
+
+  /** 링크 보내기 창: 채팅(카카오톡 등)으로 보낼 문구 + 링크. */
+  function shareLink({ title, name, phone, link, message, note }) {
+    const esc = Bass.escapeHtml;
+    const text = `${message}\n${link}`;
+    let dlg = document.getElementById("shareDialog");
+    if (!dlg) {
+      dlg = document.createElement("dialog");
+      dlg.id = "shareDialog";
+      dlg.className = "detail";
+      document.body.append(dlg);
+      dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
+    }
+    const digits = String(phone || "").replace(/\D/g, "");
+    const canShare = typeof global.navigator.share === "function";
+    dlg.innerHTML = `
+      <div class="stack">
+        <h2 style="margin:0;font-size:18px">🔑 ${esc(title)}</h2>
+        <div class="bass-muted" style="font-size:13px">${esc(name)}님에게 채팅(카카오톡 등)으로 아래 내용을 보내 주세요.</div>
+        <textarea class="bass-input" readonly style="min-height:110px;font-size:13px">${esc(text)}</textarea>
+        <div class="bass-row" style="flex-wrap:nowrap">
+          <input class="bass-input" readonly value="${esc(link)}" style="font-size:12.5px;min-width:0" onfocus="this.select()">
+          <button class="bass-btn bass-btn--sm" data-share="copy-link" style="white-space:nowrap">🔗 링크만 복사</button>
+        </div>
+        ${note ? `<div style="font-size:12.5px;color:var(--warn)">${esc(note)}</div>` : ""}
+        <div class="bass-row">
+          ${canShare ? `<button class="bass-btn bass-btn--primary" data-share="share">📤 카카오톡 등으로 공유</button>` : ""}
+          <button class="bass-btn ${canShare ? "" : "bass-btn--primary"}" data-share="copy">📋 문구 전체 복사</button>
+          ${digits ? `<a class="bass-btn" href="sms:${digits}?&body=${encodeURIComponent(text)}">💬 문자 앱</a>` : ""}
+          <button class="bass-btn bass-btn--ghost" data-share="close">닫기</button>
+        </div>
+      </div>`;
+    const flash = (btn, ok) => {
+      const original = btn.textContent;
+      btn.textContent = ok ? "✓ 복사됨" : "복사 실패";
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    };
+    dlg.onclick = async (e) => {
+      const btn = e.target.closest("[data-share]");
+      const act = btn && btn.dataset.share;
+      if (act === "close") dlg.close();
+      if (act === "copy") flash(btn, await copyText(text));
+      if (act === "copy-link") flash(btn, await copyText(link));
+      if (act === "share") {
+        try { await global.navigator.share({ title: "Rent4", text }); dlg.close(); } catch (_) { /* 취소 */ }
+      }
+    };
+    if (!dlg.open) dlg.showModal();
+  }
+
+  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink };
 })(window);
