@@ -8,6 +8,7 @@ tests/test_rent4.py — Rent4 (입금 문자 수납부) 검증.
   5. 계약 상호 확인: 발행 → 상대방 본인 확인·동의 → 납부 확인 → 임시 비밀번호 → 변경
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -23,7 +24,7 @@ SEED_PW = os.environ["BASS_SEED_PASSWORD"]
 from fastapi.testclient import TestClient
 
 from core.gateway import create_gateway
-from apps.rent4.backend import accounts, bank_parser, excel_import, ledger
+from apps.rent4.backend import accounts, bank_parser, excel_import, ledger, sms
 from apps.rent4.backend.models import Payment, Room, TenantAccount
 from apps.rent4.backend.pool import use_pool_dir
 
@@ -158,6 +159,9 @@ class TestLedger(Rent4Case):
 class ApiCase(Rent4Case):
     def setUp(self):
         super().setUp()
+        for k in ("SOLAPI_API_KEY", "SOLAPI_API_SECRET", "SMS_SENDER"):
+            os.environ.pop(k, None)                      # 개발 모드: 문자는 sms.outbox 로
+        sms.outbox.clear()
         self.client = TestClient(create_gateway(db_path=":memory:", only=["rent4"]))
         self.admin = self.login("admin", SEED_PW)
         self.chic = self.make_lessor("chic", "시크빌", "김임대", "010-1234-5678")
@@ -171,25 +175,25 @@ class ApiCase(Rent4Case):
         res = self.client.post("/api/rent4/account/password", headers=auth, json={"current": current, "new": new})
         self.assertEqual(res.status_code, 200, res.text)
 
-    def set_first_pw(self, auth, new):
-        """링크로 들어온 첫 설정: 현재 비밀번호 없이."""
-        self.change_pw(auth, "", new)
+    def last_code(self, phone):
+        digits = re.sub(r"\D", "", phone)
+        for m in reversed(sms.outbox):
+            if m["to"] == digits and "인증번호" in m["text"]:
+                return re.search(r"인증번호 (\d{6})", m["text"])[1]
+        self.fail(f"{phone} 로 보낸 인증번호가 없습니다")
 
-    def start(self, path, body, home):
-        """링크로 바로 로그인 → 세션 헤더. 임시 비밀번호는 응답에 없다."""
-        res = self.client.post(f"/api/rent4/{path}", json=body)
+    def sms_password(self, phone, password, home=None):
+        """비밀번호 설정·찾기: 휴대폰 번호 → 문자 인증번호 → 비밀번호 → 바로 로그인."""
+        res = self.client.post("/api/rent4/otp/request", json={"phone": phone})
         self.assertEqual(res.status_code, 200, res.text)
-        data = res.json()
-        self.assertEqual(data["home"], home)
-        self.assertNotIn("temp_password", data)
-        return {"Authorization": f"Bearer {data['token']}"}
+        res = self.client.post("/api/rent4/otp/set-password", json={"phone": phone, "code": self.last_code(phone), "new": password})
+        self.assertEqual(res.status_code, 200, res.text)
+        if home:
+            self.assertEqual(res.json()["home"], home)
+        return {"Authorization": f"Bearer {res.json()['token']}"}
 
-    def join(self, token, phone, password):
-        """① 계약 링크: 휴대폰 뒤 4자리 + 비밀번호 설정 → 계약 진행용 로그인."""
-        return self.start("contract/join", {"t": token, "phone4": phone[-4:], "new": password}, "contract.html")
-
-    def sign_and_conclude(self, party, cid, issuer, kind_path, home):
-        """② 동의 → ③ 납부 확인 → '시작하기'로 최종 계정 세션 (비밀번호는 그대로 넘어간다)."""
+    def conclude(self, party, cid, issuer, kind_path, home):
+        """동의 → 납부 확인 → '시작하기'로 최종 계정 세션 (비밀번호는 그대로)."""
         self.assertEqual(self.client.post("/api/rent4/contract/mine/sign", headers=party, json={"agree": True}).status_code, 200)
         self.assertEqual(self.client.post(f"/api/rent4/{kind_path}/{cid}/paid", headers=issuer).status_code, 200)
         res = self.client.post("/api/rent4/contract/mine/continue", headers=party)
@@ -198,32 +202,21 @@ class ApiCase(Rent4Case):
         return {"Authorization": f"Bearer {res.json()['token']}"}
 
     def make_lessor(self, code, name, party, phone):
-        """관리인 가맹 계약 발행 → 임대인이 링크에서 비밀번호 설정 → 동의 → 가맹비 확인 → 시작."""
         res = self.client.post("/api/rent4/admin/contracts", headers=self.admin, json={
             "building_name": name, "building_code": code, "party_name": party, "party_phone": phone, "fee": 300000})
         self.assertEqual(res.status_code, 200, res.text)
-        cid, token = res.json()["contract"]["id"], res.json()["token"]
-        party_auth = self.join(token, phone, f"pw-{code}-owner")
-        return self.sign_and_conclude(party_auth, cid, self.admin, "admin/contracts", "임대인.html")
+        self.assertNotIn("token", res.json())
+        cid = res.json()["contract"]["id"]
+        party_auth = self.sms_password(phone, f"pw-{code}-owner", "contract.html")
+        return self.conclude(party_auth, cid, self.admin, "admin/contracts", "임대인.html")
 
     def import_sheet(self, auth=None, branch=""):
         q = f"?branch={branch}" if branch else ""
         return self.client.post(f"/api/rent4/lessor/import/commit{q}", json={"text": SHEET}, headers=auth or self.chic).json()
 
-    def invite(self, room, action="reset"):
-        res = self.client.post(f"/api/rent4/lessor/accounts/{room}/{action}", headers=self.chic)
-        self.assertEqual(res.status_code, 200, res.text)
-        return res.json()["token"]
-
-    def start_invite(self, token, room):
-        phone4 = Room.first(branch="main", room=room).phone[-4:]
-        return self.start("invite/start", {"t": token, "phone4": phone4}, "임차인.html")
-
     def tenant_login(self, room="103"):
-        """임대인이 보낸 안내 링크 → 휴대폰 확인 → 바로 로그인 → 비밀번호 설정까지 마친 임차인 헤더."""
-        auth = self.start_invite(self.invite(room), room)
-        self.set_first_pw(auth, "secret-" + room)
-        return auth
+        phone = Room.first(branch="main", room=room).phone
+        return self.sms_password(phone, "secret-" + room, "임차인.html")
 
 
 class TestApi(ApiCase):
@@ -236,24 +229,33 @@ class TestApi(ApiCase):
         self.assertEqual((me["kind"], me["home"], me["building"]["name"]), ("lessor", "임대인.html", "시크빌"))
         admin = self.client.get("/api/rent4/me", headers=self.admin).json()
         self.assertEqual((admin["kind"], admin["home"]), ("admin", "admin.html"))
-        auth = self.start_invite(self.invite("101"), "101")
-        t = self.client.get("/api/rent4/me", headers=auth).json()
-        self.assertEqual((t["kind"], t["room"], t["home"], t["must_change_password"]), ("tenant", "101", "임차인.html", True))
+        t = self.client.get("/api/rent4/me", headers=self.tenant_login("101")).json()
+        self.assertEqual((t["kind"], t["room"], t["home"], t["must_change_password"]), ("tenant", "101", "임차인.html", False))
 
-    def test_pages_served_with_korean_names(self):
-        for page in ("index.html", "admin.html", "임대인.html", "임차인.html"):
+    def test_pages_served(self):
+        for page in ("index.html", "password.html", "admin.html", "contract.html", "임대인.html", "임차인.html"):
             self.assertEqual(self.client.get(f"/rent4/{page}").status_code, 200, page)
+        self.assertEqual(self.client.get("/rent4/invite.html").status_code, 404)
 
-    def test_tenant_must_set_password_first(self):
+    def test_sms_code_rules(self):
         self.import_sheet()
-        auth = self.start_invite(self.invite("103"), "103")
-        self.assertEqual(self.client.get("/api/rent4/tenant/me", headers=auth).status_code, 403)
-        weak = self.client.post("/api/rent4/account/password", headers=auth, json={"current": "", "new": "111111"})
+        self.assertEqual(self.client.post("/api/rent4/otp/request", json={"phone": "010-0000-9999"}).status_code, 404)
+        self.client.post("/api/rent4/otp/request", json={"phone": "010-5555-6666"})
+        self.assertEqual(self.client.post("/api/rent4/otp/request", json={"phone": "010-5555-6666"}).status_code, 409)   # 1분 재요청 제한
+        wrong = self.client.post("/api/rent4/otp/set-password", json={"phone": "010-5555-6666", "code": "000000", "new": "secret-103"})
+        self.assertEqual(wrong.status_code, 422)
+        weak = self.client.post("/api/rent4/otp/set-password", json={"phone": "010-5555-6666", "code": self.last_code("010-5555-6666"), "new": "111111"})
         self.assertEqual(weak.status_code, 422)
-        self.set_first_pw(auth, "secret-103")
-        self.assertEqual(self.client.get("/api/rent4/tenant/me", headers=auth).status_code, 200)
-        self.login("chic103", "secret-103")
-        self.assertEqual(TenantAccount.first(branch="main", room="103").initial_code, "")
+        self.assertNotIn(self.last_code("010-5555-6666"), str(self.client.get("/api/rent4/lessor/accounts", headers=self.chic).json()))
+
+    def test_code_expires_after_five_wrong_tries(self):
+        self.import_sheet()
+        self.client.post("/api/rent4/otp/request", json={"phone": "010-5555-6666"})
+        code = self.last_code("010-5555-6666")
+        for _ in range(5):
+            self.client.post("/api/rent4/otp/set-password", json={"phone": "010-5555-6666", "code": "000000", "new": "secret-103"})
+        res = self.client.post("/api/rent4/otp/set-password", json={"phone": "010-5555-6666", "code": code, "new": "secret-103"})
+        self.assertEqual(res.status_code, 422)
 
     def test_after_setup_current_password_is_required(self):
         self.import_sheet()
@@ -268,7 +270,6 @@ class TestApi(ApiCase):
         self.assertEqual(prev["items"][0]["months"], ["2026-02"])
         done = self.client.post("/api/rent4/lessor/bank/commit", json={"items": prev["items"]}, headers=self.chic).json()
         self.assertEqual(done["saved"], 1)
-
         view = self.client.get("/api/rent4/tenant/me", headers=self.tenant_login("103")).json()
         self.assertEqual({m["ym"]: m["status"] for m in view["months"]},
                          {"2026-01": "paid", "2026-02": "paid", "2026-03": "due"})
@@ -289,11 +290,10 @@ class TestApi(ApiCase):
         self.assertEqual(self.client.get("/api/rent4/lessor/board?branch=main", headers=sunho).status_code, 403)
         own = self.client.get("/api/rent4/lessor/board?year=2026", headers=sunho).json()
         self.assertEqual((own["building"], own["rooms"]), ("선호아트빌", []))
-        admin = self.admin
-        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=admin).status_code, 400)
-        board = self.client.get("/api/rent4/lessor/board?year=2026&branch=main", headers=admin).json()
+        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=self.admin).status_code, 400)
+        board = self.client.get("/api/rent4/lessor/board?year=2026&branch=main", headers=self.admin).json()
         self.assertEqual(len(board["rooms"]), 4)
-        names = [b["name"] for b in self.client.get("/api/rent4/admin/buildings", headers=admin).json()["buildings"]]
+        names = [b["name"] for b in self.client.get("/api/rent4/admin/buildings", headers=self.admin).json()["buildings"]]
         self.assertEqual(names, ["시크빌", "선호아트빌", "신비주택"])
 
     def test_new_tenant_resets_account(self):
@@ -301,9 +301,9 @@ class TestApi(ApiCase):
         self.tenant_login("101")
         changed = SHEET.replace("홍길동", "고길동").replace("010-1111-2222", "010-9999-8888")
         self.client.post("/api/rent4/lessor/import/commit", json={"text": changed}, headers=self.chic)
-        acc = TenantAccount.first(branch="main", room="101")
-        self.assertTrue(acc.must_change and acc.initial_code)
         self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "secret-101"}).status_code, 401)
+        self.assertEqual(self.client.post("/api/rent4/otp/request", json={"phone": "010-1111-2222"}).status_code, 404)
+        self.sms_password("010-9999-8888", "new-tenant-101", "임차인.html")
 
     def test_board_and_delete_bank_payment(self):
         self.import_sheet()
@@ -317,38 +317,15 @@ class TestApi(ApiCase):
         self.assertEqual(self.client.delete(f"/api/rent4/lessor/payments/{pid}", headers=self.chic).status_code, 200)
         self.assertEqual(len(Payment.find(room="101", source="bank")), 0)
 
-    def test_accounts_list_hides_codes(self):
+    def test_accounts_list_and_notify_sms(self):
         self.import_sheet()
         rows = self.client.get("/api/rent4/lessor/accounts", headers=self.chic).json()["accounts"]
         self.assertEqual([r["username"] for r in rows], ["chic101", "chic102", "chic103"])
         self.assertNotIn("initial_code", rows[0])
-        self.assertEqual((rows[0]["phone"], rows[0]["link_sent"]), ("010-1111-2222", False))
-
-    def test_invite_link_needs_phone_then_logs_in_once(self):
-        self.import_sheet()
-        r = self.client.post("/api/rent4/lessor/accounts/101/reset", headers=self.chic).json()
-        self.assertEqual((r["username"], r["tenant_name"], r["phone"]), ("chic101", "홍길동", "010-1111-2222"))
-        view = self.client.get(f"/api/rent4/invite/view?t={r['token']}").json()
-        self.assertEqual((view["room"], view["phone_masked"], view["activated"]), ("101", "***-****-2222", False))
-        bad = self.client.post("/api/rent4/invite/start", json={"t": r["token"], "phone4": "0000"})
-        self.assertEqual(bad.status_code, 422)
-        auth = self.start_invite(r["token"], "101")
-        self.set_first_pw(auth, "invited-101")
-        # 비밀번호를 정하면 링크는 만료 — 열리지도, 로그인되지도 않는다
-        self.assertEqual(self.client.get(f"/api/rent4/invite/view?t={r['token']}").status_code, 404)
-        self.assertEqual(self.client.post("/api/rent4/invite/start", json={"t": r["token"], "phone4": "2222"}).status_code, 404)
-        self.assertEqual(self.client.post("/api/rent4/lessor/accounts/101/invite", headers=self.chic).status_code, 404)
-
-    def test_reset_kills_old_link_and_password(self):
-        self.import_sheet()
-        self.tenant_login("101")
-        first = self.invite("101", "reset")
-        second = self.invite("101", "reset")
-        self.assertEqual(self.client.get(f"/api/rent4/invite/view?t={first}").status_code, 404)
-        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "secret-101"}).status_code, 401)
-        auth = self.start_invite(second, "101")
-        self.set_first_pw(auth, "after-reset-101")
-        self.login("chic101", "after-reset-101")
+        res = self.client.post("/api/rent4/lessor/accounts/101/notify", headers=self.chic).json()
+        self.assertEqual((res["tenant_name"], res["phone"]), ("홍길동", "010-1111-2222"))
+        self.assertIn("비밀번호 설정", sms.outbox[-1]["text"])
+        self.assertNotIn("t=", sms.outbox[-1]["text"])                     # 링크·토큰 없이 접속 주소만
 
     def test_existing_tenant_can_log_in_by_phone(self):
         self.import_sheet()
@@ -358,12 +335,12 @@ class TestApi(ApiCase):
         wrong = self.client.post("/api/rent4/login", json={"username": "010-1111-2222", "password": "nope-nope"})
         self.assertEqual(wrong.status_code, 401)
 
-    def test_new_tenant_invalidates_old_invite(self):
+    def test_forgot_password_same_flow(self):
         self.import_sheet()
-        token = self.invite("101")
-        changed = SHEET.replace("홍길동", "고길동").replace("010-1111-2222", "010-9999-8888")
-        self.client.post("/api/rent4/lessor/import/commit", json={"text": changed}, headers=self.chic)
-        self.assertEqual(self.client.get(f"/api/rent4/invite/view?t={token}").status_code, 404)
+        self.tenant_login("101")
+        self.sms_password("010-1111-2222", "forgot-new-101", "임차인.html")
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "secret-101"}).status_code, 401)
+        self.login("chic101", "forgot-new-101")
 
 
 class TestContracts(ApiCase):
@@ -372,50 +349,40 @@ class TestContracts(ApiCase):
         sinbi = self.login("sinbi", SEED_PW)
         self.assertEqual(self.client.get("/api/rent4/me", headers=sinbi).status_code, 403)
 
-    def test_membership_password_first_then_continue_by_phone(self):
+    def test_membership_by_sms_then_continue_by_phone(self):
         res = self.client.post("/api/rent4/admin/contracts", headers=self.admin, json={
             "building_name": "새빌딩", "building_code": "newb", "party_name": "최임대", "party_phone": "010-5555-1234"}).json()
-        cid, token = res["contract"]["id"], res["token"]
-        view = self.client.get(f"/api/rent4/contract/view?t={token}").json()["contract"]
-        self.assertEqual((view["status"], view["party_phone_masked"], view["final_username"], view["password_set"]),
-                         ("sent", "***-****-1234", "newb", False))
-        self.assertNotIn("party_phone", view)
-        bad = self.client.post("/api/rent4/contract/join", json={"t": token, "phone4": "0000", "new": "newb-strong-pw"})
-        self.assertEqual(bad.status_code, 422)
-        party = self.join(token, "010-5555-1234", "newb-strong-pw")
-        # ① 비밀번호를 정하면 링크는 만료 — 링크를 잃어버린 셈 치고 휴대폰 번호로 다시 로그인해서 이어 간다
-        self.assertEqual(self.client.get(f"/api/rent4/contract/view?t={token}").status_code, 404)
-        res = self.client.post("/api/rent4/login", json={"username": "010-5555-1234", "password": "newb-strong-pw"})
-        self.assertEqual(res.status_code, 200, res.text)
-        party = {"Authorization": f"Bearer {res.json()['token']}"}
+        cid = res["contract"]["id"]
+        self.assertIn("새빌딩 가맹 계약", sms.outbox[-1]["text"])
+        party = self.sms_password("010-5555-1234", "newb-strong-pw", "contract.html")
         me = self.client.get("/api/rent4/me", headers=party).json()
         self.assertEqual((me["kind"], me["home"]), ("party", "contract.html"))
+        mine = self.client.get("/api/rent4/contract/mine", headers=party).json()["contract"]
+        self.assertEqual((mine["status"], mine["final_username"]), ("sent", "newb"))
         self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=party).status_code, 403)
         self.assertEqual(self.client.post(f"/api/rent4/admin/contracts/{cid}/paid", headers=self.admin).status_code, 409)
-        self.assertEqual(self.client.post("/api/rent4/contract/mine/continue", headers=party).status_code, 409)
-        auth = self.sign_and_conclude(party, cid, self.admin, "admin/contracts", "임대인.html")
+        res = self.client.post("/api/rent4/login", json={"username": "010-5555-1234", "password": "newb-strong-pw"})
+        party = {"Authorization": f"Bearer {res.json()['token']}"}
+        auth = self.conclude(party, cid, self.admin, "admin/contracts", "임대인.html")
+        self.assertIn("체결", sms.outbox[-1]["text"])
         me = self.client.get("/api/rent4/me", headers=auth).json()
         self.assertEqual((me["kind"], me["must_change_password"], me["building"]["name"]), ("lessor", False, "새빌딩"))
-        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 200)
-        # 같은 비밀번호로 최종 아이디와 휴대폰 번호 모두 로그인 — 계약 진행용 로그인은 닫힘
         self.login("newb", "newb-strong-pw")
         by_phone = self.client.post("/api/rent4/login", json={"username": "01055551234", "password": "newb-strong-pw"}).json()
         self.assertEqual(by_phone["user"]["username"], "newb")
         self.assertEqual(self.client.post("/auth/login", json={"username": f"k{cid}", "password": "newb-strong-pw"}).status_code, 401)
-        self.assertEqual(self.client.post(f"/api/rent4/admin/contracts/{cid}/relink", headers=self.admin).status_code, 404)
 
-    def test_lease_contract_moves_tenant_in_and_logs_in_by_link(self):
+    def test_lease_contract_moves_tenant_in(self):
         self.import_sheet()
         res = self.client.post("/api/rent4/lessor/contracts", headers=self.chic, json={
             "room": "101", "party_name": "신입주", "party_phone": "010-7777-4321", "deposit": 3000000,
             "rent": 300000, "mgmt": 100000, "start": "2026-03-15", "end": "2027-03-14"}).json()
-        cid, token = res["contract"]["id"], res["token"]
-        party = self.join(token, "010-7777-4321", "new-tenant-pw")
-        self.assertEqual(self.client.get("/api/rent4/contract/view?t=" + token).status_code, 404)
-        auth = self.sign_and_conclude(party, cid, self.chic, "lessor/contracts", "임차인.html")
+        cid = res["contract"]["id"]
+        party = self.sms_password("010-7777-4321", "new-tenant-pw", "contract.html")
+        auth = self.conclude(party, cid, self.chic, "lessor/contracts", "임차인.html")
         room = Room.first(branch="main", room="101")
         self.assertEqual((room.tenant_name, room.monthly_due, room.move_in), ("신입주", 400000, "2026-03-15"))
-        self.login("chic101", "new-tenant-pw")                       # 링크에서 정한 비밀번호가 그대로
+        self.login("chic101", "new-tenant-pw")
         view = self.client.get("/api/rent4/tenant/me", headers=auth).json()
         self.assertEqual([m["ym"] for m in view["months"]], ["2026-03"])     # 이전 임차인 기록 없음
 
@@ -425,6 +392,12 @@ class TestContracts(ApiCase):
             "room": "102", "party_name": "가", "party_phone": "010-1111-0000", "start": "2026-04-01"}).json()["contract"]["id"]
         sunho = self.make_lessor("sunho", "선호아트빌", "박임대", "010-2222-3333")
         self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=sunho).status_code, 404)
+
+    def test_link_actions_are_gone(self):
+        cid = self.client.get("/api/rent4/admin/contracts", headers=self.admin).json()["contracts"][0]["id"]
+        for action in ("relink", "reset"):
+            self.assertEqual(self.client.post(f"/api/rent4/admin/contracts/{cid}/{action}", headers=self.admin).status_code, 404)
+        self.assertIn(self.client.post("/api/rent4/contract/join", json={}).status_code, (404, 405))
 
 
 class TestPasswords(ApiCase):
@@ -442,13 +415,7 @@ class TestPasswords(ApiCase):
         legacy.initial_code = "123456"
         legacy.save()
         self.assertEqual(acc_mod.sync_tenant_accounts()["upgraded"], 1)
-        code = TenantAccount.first(branch="main", room="102").initial_code
-        self.assertEqual(len(code), 8)
         self.assertEqual(self.client.post("/auth/login", json={"username": "chic102", "password": "123456"}).status_code, 401)
-
-    def membership(self, code):
-        rows = self.client.get("/api/rent4/admin/contracts", headers=self.admin).json()["contracts"]
-        return next(c for c in rows if c["building_code"] == code)
 
     def test_change_anytime_after_setup(self):
         self.import_sheet()
@@ -465,38 +432,10 @@ class TestPasswords(ApiCase):
         self.change_pw(self.admin, SEED_PW, "admin-new-password")
         self.login("admin", "admin-new-password")
 
-    def test_lessor_lost_password_reset_by_new_link(self):
-        c = self.membership("chic")
-        res = self.client.post(f"/api/rent4/admin/contracts/{c['id']}/reset", headers=self.admin).json()
-        self.assertEqual(self.client.post("/auth/login", json={"username": "chic", "password": "pw-chic-owner"}).status_code, 401)
-        view = self.client.get(f"/api/rent4/contract/view?t={res['token']}").json()["contract"]
-        self.assertTrue(view["reset_at"])
-        auth = self.start("contract/start", {"t": res["token"]}, "임대인.html")
-        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 403)
-        self.set_first_pw(auth, "pw-chic-after-reset")
+    def test_lessor_forgot_password_by_sms(self):
+        auth = self.sms_password("010-1234-5678", "pw-chic-found", "임대인.html")
         self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 200)
-
-    def test_reset_again_after_setup_reopens_once(self):
-        c = self.membership("chic")
-        for i in range(2):
-            token = self.client.post(f"/api/rent4/admin/contracts/{c['id']}/reset", headers=self.admin).json()["token"]
-            auth = self.start("contract/start", {"t": token}, "임대인.html")
-            self.set_first_pw(auth, f"chic-round-{i}")
-            self.assertEqual(self.client.get(f"/api/rent4/contract/view?t={token}").status_code, 404)
-        self.login("chic", "chic-round-1")
-
-    def test_tenant_reset_only_while_still_resident(self):
-        self.import_sheet()
-        res = self.client.post("/api/rent4/lessor/contracts", headers=self.chic, json={
-            "room": "101", "party_name": "신입주", "party_phone": "010-7777-4321", "rent": 300000, "mgmt": 100000,
-            "start": "2026-03-15"}).json()
-        cid, token = res["contract"]["id"], res["token"]
-        self.sign_and_conclude(self.join(token, "010-7777-4321", "first-pw-101"), cid, self.chic, "lessor/contracts", "임차인.html")
-        new = self.client.post(f"/api/rent4/lessor/contracts/{cid}/reset", headers=self.chic).json()["token"]
-        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "first-pw-101"}).status_code, 401)
-        self.assertTrue(self.client.get(f"/api/rent4/contract/view?t={new}").json()["contract"]["login"]["can_start"])
-        self.import_sheet()                                     # 수납부상 101호 임차인이 다시 홍길동으로 바뀜
-        self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/reset", headers=self.chic).status_code, 409)
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic", "password": "pw-chic-owner"}).status_code, 401)
 
 
 class TestAdminSetupLink(ApiCase):
@@ -505,23 +444,115 @@ class TestAdminSetupLink(ApiCase):
         self.assertEqual(self.client.post("/auth/login", json={"username": "admin", "password": SEED_PW}).status_code, 401)
         view = self.client.get(f"/api/rent4/setup/view?t={token}").json()
         self.assertEqual((view["username"], view["activated"]), ("admin", False))
-        self.assertNotIn("temp_password", view)
-        auth = self.start("setup/start", {"t": token}, "admin.html")
-        me = self.client.get("/api/rent4/me", headers=auth).json()
-        self.assertEqual((me["kind"], me["must_change_password"]), ("admin", True))
+        res = self.client.post("/api/rent4/setup/start", json={"t": token}).json()
+        auth = {"Authorization": f"Bearer {res['token']}"}
         self.assertEqual(self.client.get("/api/rent4/admin/buildings", headers=auth).status_code, 403)
-        self.assertEqual(self.client.get("/api/rent4/lessor/board?branch=main", headers=auth).status_code, 403)
-        self.set_first_pw(auth, "admin-chosen-pw")
+        self.change_pw(auth, "", "admin-chosen-pw")
         self.assertEqual(self.client.get("/api/rent4/admin/buildings", headers=auth).status_code, 200)
         self.assertEqual(self.client.get(f"/api/rent4/setup/view?t={token}").status_code, 404)
-        self.assertEqual(self.client.post("/api/rent4/setup/start", json={"t": token}).status_code, 404)
 
-    def test_new_link_blocks_previous_link(self):
-        _, first = accounts.issue_admin_link("admin")
-        _, second = accounts.issue_admin_link("admin")
-        self.assertEqual(self.client.get(f"/api/rent4/setup/view?t={first}").status_code, 404)
-        self.assertEqual(self.client.post("/api/rent4/setup/start", json={"t": first}).status_code, 404)
-        self.start("setup/start", {"t": second}, "admin.html")
+
+class TestOAuth(ApiCase):
+    """카카오·구글은 실제 서버 대신 가짜 응답으로 시험한다."""
+
+    def setUp(self):
+        from unittest import mock
+        from apps.rent4.backend import oauth
+        self.oauth = oauth
+        env = mock.patch.dict(os.environ, {"KAKAO_REST_API_KEY": "kakao-test-key"})
+        env.start()
+        self.addCleanup(env.stop)
+        self.profiles = {"kakao-code-1": 111, "kakao-code-2": 222}
+        fake = mock.patch.object(oauth, "_http_json", side_effect=self._fake_http)
+        fake.start()
+        self.addCleanup(fake.stop)
+        super().setUp()
+
+    def _fake_http(self, url, data=None, token=""):
+        if url == self.oauth.PROVIDERS["kakao"]["token"]:
+            return {"access_token": "at-" + data["code"]}
+        uid = self.profiles[token[3:]]
+        return {"id": uid, "kakao_account": {"profile": {"nickname": f"사용자{uid}"}, "email": f"{uid}@kakao.test"}}
+
+    def kakao(self, purpose, code, auth=None):
+        res = self.client.post("/api/rent4/oauth/kakao/start", json={"purpose": purpose}, headers=auth or {})
+        self.assertEqual(res.status_code, 200, res.text)
+        url = res.json()["url"]
+        self.assertIn("client_id=kakao-test-key", url)
+        state = re.search(r"state=([^&]+)", url)[1]
+        back = self.client.get(f"/api/rent4/oauth/kakao/callback?code={code}&state={state}", follow_redirects=False)
+        self.assertEqual(back.status_code, 302)
+        return back.headers["location"]
+
+    def new_lease_party(self):
+        self.import_sheet()
+        cid = self.client.post("/api/rent4/lessor/contracts", headers=self.chic, json={
+            "room": "101", "party_name": "신입주", "party_phone": "010-7777-4321", "rent": 300000, "mgmt": 100000,
+            "start": "2026-03-15"}).json()["contract"]["id"]
+        return cid, self.sms_password("010-7777-4321", "new-tenant-pw", "contract.html")
+
+    def make_lessor(self, code, name, party, phone):
+        """setUp 의 시크빌 임대인도 본인 확인을 거쳐야 동의할 수 있다."""
+        res = self.client.post("/api/rent4/admin/contracts", headers=self.admin, json={
+            "building_name": name, "building_code": code, "party_name": party, "party_phone": phone, "fee": 300000})
+        cid = res.json()["contract"]["id"]
+        party_auth = self.sms_password(phone, f"pw-{code}-owner", "contract.html")
+        self.profiles[f"kakao-{code}"] = hash(code) % 10000 + 1000
+        self.kakao("link", f"kakao-{code}", party_auth)
+        return self.conclude(party_auth, cid, self.admin, "admin/contracts", "임대인.html")
+
+    def test_providers_listed(self):
+        res = self.client.get("/api/rent4/oauth/providers").json()
+        self.assertEqual(res["providers"], [{"id": "kakao", "label": "카카오"}])
+
+    def test_sign_requires_verification_then_allowed(self):
+        cid, party = self.new_lease_party()
+        mine = self.client.get("/api/rent4/contract/mine", headers=party).json()["contract"]
+        self.assertEqual((mine["verify_required"], mine["verified"]), (True, None))
+        blocked = self.client.post("/api/rent4/contract/mine/sign", headers=party, json={"agree": True})
+        self.assertEqual(blocked.status_code, 422)
+        self.assertTrue(self.kakao("link", "kakao-code-1", party).endswith("/rent4/contract.html#oauth=linked"))
+        mine = self.client.get("/api/rent4/contract/mine", headers=party).json()["contract"]
+        self.assertEqual((mine["verified"]["provider"], mine["verified"]["name"]), ("kakao", "사용자111"))
+        self.conclude(party, cid, self.chic, "lessor/contracts", "임차인.html")
+
+    def test_login_with_linked_account_goes_to_final_id(self):
+        cid, party = self.new_lease_party()
+        self.kakao("link", "kakao-code-1", party)
+        self.conclude(party, cid, self.chic, "lessor/contracts", "임차인.html")
+        loc = self.kakao("login", "kakao-code-1")
+        token = re.search(r"#token=(.+)$", loc)[1]
+        me = self.client.get("/api/rent4/me", headers={"Authorization": f"Bearer {token}"}).json()
+        self.assertEqual((me["kind"], me["username"]), ("tenant", "chic101"))
+
+    def test_unlinked_and_reused_accounts(self):
+        self.assertTrue(self.kakao("login", "kakao-code-2").endswith("index.html#oauth=unlinked"))
+        cid, party = self.new_lease_party()
+        self.kakao("link", "kakao-code-1", party)
+        other = self.tenant_login("102")
+        self.client.post("/api/rent4/lessor/contracts", headers=self.chic, json={
+            "room": "103", "party_name": "다른사람", "party_phone": "010-8888-1111", "start": "2026-04-01"})
+        other = self.sms_password("010-8888-1111", "other-pw-1", "contract.html")
+        self.assertTrue(self.kakao("link", "kakao-code-1", other).endswith("contract.html#oauth=used"))
+
+    def test_link_requires_login(self):
+        res = self.client.post("/api/rent4/oauth/kakao/start", json={"purpose": "link"})
+        self.assertEqual(res.status_code, 400)
+
+
+class TestSms(unittest.TestCase):
+    def test_solapi_request_is_signed(self):
+        import json as _json
+        from unittest import mock
+        env = {"SOLAPI_API_KEY": "KEY123", "SOLAPI_API_SECRET": "SECRET", "SMS_SENDER": "010-1111-0000"}
+        with mock.patch.dict(os.environ, env), mock.patch("urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = b"{}"
+            self.assertEqual(sms.send("010-2222-3333", "안녕")["mode"], "solapi")
+            req = urlopen.call_args[0][0]
+        self.assertEqual(req.full_url, sms.SOLAPI_URL)
+        self.assertTrue(req.get_header("Authorization").startswith("HMAC-SHA256 apiKey=KEY123, date="))
+        body = _json.loads(req.data)
+        self.assertEqual(body["message"], {"to": "01022223333", "from": "01011110000", "text": "안녕"})
 
 
 if __name__ == "__main__":

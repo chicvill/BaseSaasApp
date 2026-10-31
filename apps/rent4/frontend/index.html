@@ -25,10 +25,11 @@
     <div><label class="bass-label" for="password">비밀번호</label>
       <input class="bass-input" id="password" type="password" autocomplete="current-password" required></div>
     <button class="bass-btn bass-btn--primary" id="btnLogin" type="submit">로그인</button>
+    <div class="bass-row hide" id="socialRow" style="gap:8px"></div>
   </form>
 
   <div class="bass-card stack" style="margin-top:14px;font-size:13.5px">
-    <div><b>📝 처음이신가요?</b><br><span class="bass-muted">계정은 계약이 체결되면 생깁니다. 받은 <b>계약 링크</b>에서 먼저 비밀번호를 정하세요. 링크를 잃어버려도 여기서 <b>휴대폰 번호와 그 비밀번호</b>로 로그인해 계약 동의·체결 상황을 이어서 볼 수 있고, 체결되면 같은 비밀번호로 아이디도 쓸 수 있습니다.</span></div>
+    <div><b>📱 처음이신가요? 비밀번호를 잊으셨나요?</b><br><span class="bass-muted">계약할 때 알려 준 휴대폰 번호로 문자 인증번호를 받아 비밀번호를 정합니다.</span><br><a class="bass-btn bass-btn--sm" href="password.html" style="margin-top:8px">비밀번호 설정 · 찾기 →</a></div>
     <div><b>🔑 아이디</b><br><span class="bass-muted">임대인 = 건물 코드(예: <code>chic</code>) · 임차인 = 건물 코드 + 호실(예: <code>chic603</code>) · 휴대폰 번호로도 로그인할 수 있습니다</span></div>
     <a class="bass-muted" href="manual.html">📘 사용 설명서</a>
   </div>
@@ -44,6 +45,31 @@
     const info = await Rent4.me();
     Rent4.go(info.home);
   }
+
+  const hash = location.hash;
+  const linkedToken = (hash.match(/token=([^&]+)/) || [])[1];
+  const oauthResult = (hash.match(/oauth=(\w+)/) || [])[1];
+  if (hash) history.replaceState(null, "", location.pathname);
+  if (linkedToken) Bass.setToken(decodeURIComponent(linkedToken));
+  if (oauthResult === "unlinked") Bass.updateAppAlert("warning", "아직 연결되지 않은 계정입니다.",
+    "먼저 휴대폰 번호로 로그인한 뒤 계약 화면에서 카카오·구글 본인 확인을 하면, 다음부터 이 버튼으로 로그인할 수 있습니다.");
+  if (oauthResult === "expired") Bass.updateAppAlert("warning", "로그인 시간이 지났습니다.", "다시 시도해 주세요.");
+
+  Bass.api("rent4", "/oauth/providers").then(({ providers }) => {
+    if (!providers.length) return;
+    const row = $("socialRow");
+    row.innerHTML = providers.map((p) =>
+      `<button class="bass-btn" type="button" data-provider="${Bass.escapeHtml(p.id)}" style="flex:1">${Bass.escapeHtml(p.label)}로 로그인</button>`).join("");
+    row.classList.remove("hide");
+    row.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-provider]");
+      if (!btn) return;
+      Bass.withLock(btn, async () => {
+        const r = await Bass.api("rent4", `/oauth/${btn.dataset.provider}/start`, { method: "POST", body: { purpose: "login" } });
+        location.href = r.url;
+      }, "이동 중...");
+    });
+  }).catch(() => {});
 
   if (Bass.token()) goHome().catch(() => Bass.setToken(""));
 

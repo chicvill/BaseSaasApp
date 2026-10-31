@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rent4 계약 확인</title>
-  <meta name="description" content="받은 계약 링크에서 먼저 비밀번호를 정하고, 계약 동의와 체결까지 이어서 진행합니다.">
+  <meta name="description" content="로그인한 계약 상대방이 계약 내용을 확인·동의하고 체결 뒤 시작합니다.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
   <style>
@@ -32,23 +32,18 @@
     <div class="steps" id="steps"></div>
     <div class="bass-card stack"><dl class="terms" id="terms"></dl></div>
 
-    <!-- ① 링크로 처음 들어왔을 때: 본인 확인 + 비밀번호 설정 -->
-    <form id="joinForm" class="bass-card stack hide">
-      <h2 style="margin:0;font-size:17px">① 본인 확인 · 비밀번호 설정</h2>
-      <p class="bass-muted" style="margin:0;font-size:13.5px">먼저 비밀번호를 정해 두면, 이 링크를 잃어버려도
-        <b>로그인 페이지에서 휴대폰 번호와 이 비밀번호</b>로 이어서 진행할 수 있습니다. 계약이 체결되면 같은 비밀번호로 <b id="finalId"></b> 아이디도 쓸 수 있습니다.</p>
-      <div><label class="bass-label" for="phone4">계약서 휴대폰 <span id="maskedPhone"></span> 의 뒤 4자리</label>
-        <input class="bass-input" id="phone4" inputmode="numeric" maxlength="4" pattern="\d{4}" required></div>
-      <div><label class="bass-label" for="pw1">비밀번호 (6자 이상)</label>
-        <input class="bass-input" id="pw1" type="password" autocomplete="new-password" minlength="6" required></div>
-      <div><label class="bass-label" for="pw2">비밀번호 확인</label>
-        <input class="bass-input" id="pw2" type="password" autocomplete="new-password" minlength="6" required></div>
-      <button class="bass-btn bass-btn--primary" id="btnJoin" type="submit">비밀번호 정하고 계속</button>
-    </form>
+    <!-- 계약 전 본인 확인 (카카오 · 구글) -->
+    <div id="verifyCard" class="bass-card stack hide">
+      <h2 style="margin:0;font-size:17px">본인 확인</h2>
+      <p class="bass-muted" style="margin:0;font-size:13.5px">계약에 동의하기 전에 쓰고 계신 카카오 또는 구글 계정으로 본인 확인을 해 주세요.
+        확인한 계정으로 다음부터 바로 로그인할 수도 있습니다.</p>
+      <div class="bass-row" id="verifyButtons"></div>
+    </div>
+    <div id="verifiedNote" class="bass-muted hide" style="font-size:13.5px"></div>
 
     <!-- ② 로그인한 상태: 계약 동의 -->
     <form id="signForm" class="bass-card stack hide">
-      <h2 style="margin:0;font-size:17px">② 계약 내용 동의</h2>
+      <h2 style="margin:0;font-size:17px">계약 내용 동의</h2>
       <label class="bass-row" style="gap:8px;font-size:14px"><input type="checkbox" id="agree" aria-label="계약 내용 동의"> 위 계약 내용을 확인했으며 동의합니다.</label>
       <button class="bass-btn bass-btn--primary" id="btnSign" type="submit">동의하고 계약 확인</button>
     </form>
@@ -64,28 +59,44 @@
   const $ = (id) => document.getElementById(id);
   const esc = Bass.escapeHtml;
   const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
-  const token = new URLSearchParams(location.search).get("t") || "";
   const period = (c) => (c.start || c.end) ? `${c.start || "미정"} ~ ${c.end || "미정"}` : "미정";
   const STEPS = ["① 비밀번호 설정", "② 계약 동의", "③ 납부 확인 · 체결"];
-  const LOGIN_HINT = "링크를 잃어버려도 로그인 페이지에서 휴대폰 번호와 정한 비밀번호로 이어서 확인할 수 있습니다.";
-
-  /** 링크로 연 경우: 계약 보기 (아직 비밀번호 설정 전, 또는 체결 뒤 비밀번호 초기화 링크). */
-  async function loadByLink() {
-    const { contract: c } = await Bass.api("rent4", `/contract/view?t=${encodeURIComponent(token)}`);
-    render(c, "link");
-  }
+  const LOGIN_HINT = "언제든 로그인 페이지에서 휴대폰 번호와 비밀번호로 들어와 진행 상황을 볼 수 있습니다.";
 
   /** 로그인한 경우: 내 계약 진행 상황. */
-  async function loadMine() {
-    const { contract: c } = await Bass.api("rent4", "/contract/mine");
-    $("btnLogout").classList.remove("hide");
-    render(c, "session");
+  async function loadProviders() {
+    const { providers } = await Bass.api("rent4", "/oauth/providers");
+    $("verifyButtons").innerHTML = providers.map((p) =>
+      `<button class="bass-btn ${p.id === "kakao" ? "bass-btn--primary" : ""}" type="button" data-provider="${esc(p.id)}">${esc(p.label)}로 본인 확인</button>`).join("");
   }
 
-  function render(c, mode) {
+  $("verifyButtons").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-provider]");
+    if (!btn) return;
+    Bass.withLock(btn, async () => {
+      const r = await Bass.api("rent4", `/oauth/${btn.dataset.provider}/start`, { method: "POST", body: { purpose: "link" } });
+      location.href = r.url;
+    }, "이동 중...");
+  });
+
+  const oauthResult = (location.hash.match(/oauth=(\w+)/) || [])[1];
+  if (oauthResult) {
+    history.replaceState(null, "", location.pathname);
+    if (oauthResult === "linked") Bass.updateAppAlert("success", "본인 확인이 끝났습니다.", "이제 계약 내용에 동의할 수 있습니다.");
+    if (oauthResult === "used") Bass.updateAppAlert("error", "이미 다른 사람이 연결한 계정입니다.", "본인 계정으로 다시 확인해 주세요.");
+  }
+
+  async function loadMine() {
+    await loadProviders();
+    const { contract: c } = await Bass.api("rent4", "/contract/mine");
+    $("btnLogout").classList.remove("hide");
+    render(c);
+  }
+
+  function render(c) {
     $("body").classList.remove("hide");
     $("kind").textContent = `${c.kind_label} · ${c.building_name}${c.room ? ` ${c.room}호` : ""} · ${c.status_label}`;
-    const reached = c.status === "cancelled" ? 0 : c.status === "active" ? 3 : c.status === "signed" ? 2 : (c.password_set ? 1 : 0);
+    const reached = c.status === "cancelled" ? 0 : c.status === "active" ? 3 : c.status === "signed" ? 2 : 1;
     $("steps").innerHTML = STEPS.map((label, i) => `<span class="${i < reached ? "on" : ""}">${label}</span>`).join("");
     const rows = c.kind === "membership"
       ? [["계약", "Rent4 가맹 계약 (건물 임대인)"], ["건물", c.building_name], ["건물 코드 / 아이디", c.building_code],
@@ -95,29 +106,24 @@
          ["월 임차료", won(c.rent)], ["월 관리비", won(c.mgmt)], ["계약 기간", period(c)]];
     $("terms").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
-    const showJoin = mode === "link" && c.status === "sent" && !c.password_set;
-    $("joinForm").classList.toggle("hide", !showJoin);
-    $("signForm").classList.toggle("hide", !(mode === "session" && c.status === "sent"));
-    $("maskedPhone").textContent = c.party_phone_masked || "";
-    $("finalId").textContent = c.final_username || "";
+    const needVerify = c.status === "sent" && c.verify_required && !c.verified;
+    $("verifyCard").classList.toggle("hide", !needVerify);
+    $("signForm").classList.toggle("hide", c.status !== "sent" || needVerify);
+    $("verifiedNote").classList.toggle("hide", !c.verified);
+    if (c.verified) $("verifiedNote").textContent = `✅ ${c.verified.provider === "kakao" ? "카카오" : "구글"} 계정으로 본인 확인 완료 (${c.verified.name || ""})`;
 
     const box = $("stateCard");
     const pay = c.kind === "membership" ? "가맹비" : "잔금";
     let html = "";
-    if (mode === "session" && c.status === "sent") {
+    if (c.status === "sent") {
       html = `<div class="bass-muted">${esc(LOGIN_HINT)}</div>`;
     } else if (c.status === "signed") {
       html = `<strong>✅ 계약에 동의했습니다 (${esc((c.signed_at || "").replace("T", " "))})</strong>
         <div class="bass-muted">${pay} 입금이 확인되면 계약이 체결됩니다. ${esc(LOGIN_HINT)}</div>`;
-    } else if (c.status === "active" && mode === "session") {
+    } else if (c.status === "active") {
       html = `<strong>🎉 계약이 체결되었습니다 (${pay} 확인 ${esc((c.paid_at || "").slice(0, 10))})</strong>
         <div class="bass-muted">앞으로는 아이디 <b>${esc(c.final_username)}</b> 또는 휴대폰 번호와 지금 비밀번호로 로그인합니다.</div>
         <button class="bass-btn bass-btn--primary" data-go="continue" type="button">▶ 시작하기</button>`;
-    } else if (c.status === "active" && c.login && c.login.can_start) {
-      html = `<strong>🔑 비밀번호가 초기화되었습니다</strong>
-        <div class="bass-muted">아래 버튼을 누르면 바로 로그인되고, 앞으로 쓸 비밀번호를 정하면 끝납니다.</div>
-        <dl class="terms"><dt>아이디</dt><dd class="cred">${esc(c.login.username)}</dd></dl>
-        <button class="bass-btn bass-btn--primary" data-go="start" type="button">▶ 시작하기</button>`;
     } else if (c.status === "cancelled") {
       html = `<strong>이 계약은 취소되었습니다.</strong><div class="bass-muted">계약을 보낸 분에게 문의해 주세요.</div>`;
     }
@@ -125,26 +131,12 @@
     box.classList.toggle("hide", !html);
   }
 
-  $("joinForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    if ($("pw1").value !== $("pw2").value) {
-      Bass.updateAppAlert("diff", "비밀번호 두 칸이 서로 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
-      return;
-    }
-    Bass.withLock($("btnJoin"), async () => {
-      const r = await Bass.api("rent4", "/contract/join", { method: "POST",
-        body: { t: token, phone4: $("phone4").value.trim(), new: $("pw1").value } });
-      Bass.setToken(r.token);
-      location.replace("contract.html");      // 링크는 만료 — 이제 로그인 상태로 이어서
-    }, "확인 중...");
-  });
-
   $("signForm").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnSign"), async () => {
       const { contract } = await Bass.api("rent4", "/contract/mine/sign", { method: "POST", body: { agree: $("agree").checked } });
       Bass.updateAppAlert("success", "계약에 동의했습니다.", LOGIN_HINT);
-      render(contract, "session");
+      render(contract);
     }, "확인 중...");
   });
 
@@ -152,10 +144,7 @@
     const btn = e.target.closest("[data-go]");
     if (!btn) return;
     Bass.withLock(btn, async () => {
-      const r = btn.dataset.go === "continue"
-        ? await Bass.api("rent4", "/contract/mine/continue", { method: "POST" })
-        : await Bass.api("rent4", "/contract/start", { method: "POST", body: { t: token } });
-      if (r.activated) return location.replace("index.html");
+      const r = await Bass.api("rent4", "/contract/mine/continue", { method: "POST" });
       Bass.setToken(r.token);
       location.replace(r.home);
     }, "시작하는 중...");
@@ -167,9 +156,7 @@
     $("kind").textContent = "계약을 열 수 없습니다";
   }
 
-  if (token) {
-    loadByLink().catch((err) => { failed(); Bass.showError(err); });
-  } else if (Bass.token()) {
+  if (Bass.token()) {
     loadMine().catch((err) => {
       if (err.status === 401) return Rent4.go("index.html");
       failed();

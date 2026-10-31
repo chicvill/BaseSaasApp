@@ -29,7 +29,7 @@
 
   <h2 style="margin:28px 0 12px;font-size:17px">📝 가맹 계약 (임대인 등록)</h2>
   <form id="memberForm" class="bass-card stack">
-    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임대인이 링크에서 본인 확인 후 동의하고, 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드)이 만들어지고, 임대인은 같은 링크의 '시작하기'로 바로 로그인해 비밀번호를 정합니다.</div>
+    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 임대인 휴대폰으로 안내 문자가 갑니다. 임대인은 '비밀번호 설정'에서 휴대폰 번호로 인증해 비밀번호를 정하고, 계약에 동의합니다. 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드, 같은 비밀번호)이 열리고 체결 문자가 갑니다.</div>
     <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
       <div><label class="bass-label" for="mBuilding">건물 이름</label><input class="bass-input" id="mBuilding" required placeholder="예: 시크빌"></div>
       <div><label class="bass-label" for="mCode">건물 코드 (임대인 아이디)</label><input class="bass-input" id="mCode" required placeholder="예: chic" autocapitalize="none"></div>
@@ -39,7 +39,7 @@
       <div><label class="bass-label" for="mStart">계약 시작일</label><input class="bass-input" id="mStart" type="date"></div>
       <div><label class="bass-label" for="mEnd">계약 종료일</label><input class="bass-input" id="mEnd" type="date"></div>
     </div>
-    <button class="bass-btn bass-btn--primary" id="btnMember" type="submit" style="justify-self:start">계약 발행하고 링크 만들기</button>
+    <button class="bass-btn bass-btn--primary" id="btnMember" type="submit" style="justify-self:start">계약 발행하고 안내 문자 보내기</button>
   </form>
   <div class="board-wrap" style="margin-top:12px"><table class="board" id="memberships" style="min-width:640px"></table></div>
   </section>
@@ -70,7 +70,7 @@
         building_name: $("mBuilding").value.trim(), building_code: $("mCode").value.trim(),
         party_name: $("mName").value.trim(), party_phone: $("mPhone").value.trim(),
         fee: Number($("mFee").value || 0), start: $("mStart").value || null, end: $("mEnd").value || null } });
-      Rent4.sendContract(res.contract, res.token);
+      Rent4.issuedNotice(res.contract, res.sms);
       $("memberForm").reset();
       await loadContracts();
     }, "발행 중...");

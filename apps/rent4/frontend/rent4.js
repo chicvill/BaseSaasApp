@@ -136,35 +136,7 @@
     dlg.showModal();
   }
 
-  /** 계약 링크 (상대방에게 보낼 주소). */
-  function contractLink(token) {
-    return new URL(`contract.html?t=${encodeURIComponent(token)}`, global.location.href).href;
-  }
 
-  /**
-   * 클립보드 복사. 클릭 직후 동기 방식(숨은 입력칸 선택 + execCommand)을 먼저 쓰고,
-   * 안 되면 클립보드 API 를 쓴다. 클립보드 API 는 권한 대기로 응답이 늦거나 막히는 브라우저가 있다.
-   */
-  async function copy(text) {
-    const host = document.querySelector("dialog[open]") || document.body;   // 모달이 열려 있으면 그 안에서만 선택 가능
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
-    host.append(ta);
-    ta.select();
-    let ok = false;
-    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
-    ta.remove();
-    if (ok) return true;
-    try {
-      await Promise.race([global.navigator.clipboard.writeText(text),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500))]);
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
 
   const STATUS_TONE = { sent: "warn", signed: "info", active: "ok", cancelled: "err" };
 
@@ -179,7 +151,6 @@
         const acts = [
           c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
           ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">취소</button>` : "",
-          c.status === "active" ? `<button class="bass-btn bass-btn--sm" data-act="reset" data-id="${esc(c.id)}" title="요청·분실·계약 정리·처음 안내 등: 지금 비밀번호를 막고 새 링크로 다시 설정">🔑 비밀번호 초기화</button>` : "",
         ].join(" ");
         return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
           <td style="white-space:normal;text-align:left">${esc(terms)}</td>
@@ -196,96 +167,17 @@
       const c = table._items[btn.dataset.id];
       Bass.withLock(btn, async () => {
         const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
-        if (btn.dataset.act === "paid") sendLink({
-          title: "계약이 체결되었습니다", name: c.party_name, phone: c.party_phone,
-          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 로그인 페이지에서 휴대폰 번호와 계약 때 정한 비밀번호로 로그인한 뒤 '시작하기'를 누르세요.`,
-        });
+        if (btn.dataset.act === "paid") Bass.updateAppAlert("success", "납부를 확인해 계약이 체결되었습니다.",
+          `${c.party_name}님에게 체결 문자를 보냈습니다. 휴대폰 번호와 비밀번호로 로그인하면 바로 시작됩니다.`);
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
-        if (btn.dataset.act === "reset") sendLink({
-          title: `${res.contract.username} 비밀번호를 초기화했습니다`, name: c.party_name, phone: c.party_phone,
-          link: contractLink(res.token),
-          message: `[Rent4] ${c.party_name}님, 비밀번호가 초기화되었습니다. 아래 링크를 열고 '시작하기'를 누르면 바로 로그인되어 비밀번호를 다시 설정할 수 있습니다.`,
-          note: "이전 비밀번호와 이전 링크는 이미 막혔습니다.",
-        });
         await reload();
       });
     });
   }
 
-  function contractTitle(c) {
-    return c.kind === "membership" ? `${c.building_name} 가맹 계약` : `${c.building_name} ${c.room}호 임대차 계약`;
-  }
 
-  /** 계약 발행 · 링크 재발급 뒤 상대방에게 계약 링크 보내기. */
-  function sendContract(c, token, title) {
-    sendLink({
-      title: title || `${contractTitle(c)}을 발행했습니다`, name: c.party_name, phone: c.party_phone,
-      link: contractLink(token),
-      message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}서입니다. 아래 링크를 열어 먼저 비밀번호를 정한 뒤 계약 내용을 확인하고 동의해 주세요. 링크를 잃어버려도 로그인 페이지에서 휴대폰 번호와 그 비밀번호로 이어서 진행할 수 있습니다.`,
-    });
-  }
 
-  /** 임차인 안내 링크 (Excel 로 등록된 기존 임차인). */
-  function inviteLink(token) {
-    return new URL(`invite.html?t=${encodeURIComponent(token)}`, global.location.href).href;
-  }
 
-  /**
-   * 링크 보내기 창: 안내 문구 + [📤 카카오톡 등으로 공유] [💬 문자 보내기] [📋 복사].
-   * 휴대폰에서는 공유 버튼이 카카오톡·메시지 앱 선택 창을 연다. 문구는 열자마자 클립보드에도 복사한다.
-   */
-  async function sendLink({ title, name, phone, link, message, note }) {
-    const esc = Bass.escapeHtml;
-    const text = link ? `${message}\n${link}` : message;
-    const copied = await copy(text);
-    let dlg = document.getElementById("sendDialog");
-    if (!dlg) {
-      dlg = document.createElement("dialog");
-      dlg.id = "sendDialog";
-      dlg.className = "detail";
-      document.body.append(dlg);
-      dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
-    }
-    const digits = String(phone || "").replace(/\D/g, "");
-    const canShare = typeof global.navigator.share === "function";
-    dlg.innerHTML = `
-      <div class="stack">
-        <h2 style="margin:0;font-size:18px">📨 ${esc(title)}</h2>
-        <div class="bass-muted" style="font-size:13px">${esc(name)}님${digits ? ` (${esc(phone)})` : ""}에게 아래 내용을 보내 주세요.${copied ? " 이미 복사해 두었습니다." : ""}</div>
-        <textarea class="bass-input" readonly style="min-height:120px;font-size:13px">${esc(text)}</textarea>
-        ${link ? `<div>
-          <label class="bass-label">링크만 (브라우저 주소창에는 이 링크만 붙여 넣으세요)</label>
-          <div class="bass-row" style="flex-wrap:nowrap">
-            <input class="bass-input" readonly value="${esc(link)}" style="font-size:12.5px;min-width:0" onfocus="this.select()">
-            <button class="bass-btn bass-btn--sm" data-send="copy-link" style="white-space:nowrap">🔗 링크만 복사</button>
-            <a class="bass-btn bass-btn--sm" href="${esc(link)}" target="_blank" rel="noopener" style="white-space:nowrap">↗ 열기</a>
-          </div></div>` : ""}
-        ${note ? `<div style="font-size:12.5px;color:var(--warn)">${esc(note)}</div>` : ""}
-        <div class="bass-row">
-          ${canShare ? `<button class="bass-btn bass-btn--primary" data-send="share">📤 카카오톡 등으로 공유</button>` : ""}
-          ${digits ? `<a class="bass-btn ${canShare ? "" : "bass-btn--primary"}" href="sms:${digits}?&body=${encodeURIComponent(text)}">💬 문자 보내기</a>` : ""}
-          <button class="bass-btn" data-send="copy">📋 문구 전체 복사</button>
-          <button class="bass-btn bass-btn--ghost" data-send="close">닫기</button>
-        </div>
-        ${canShare ? "" : `<div class="bass-muted" style="font-size:12px">문구 전체는 카카오톡 PC·문자 앱에 붙여 넣으세요 (받는 쪽에서 링크가 눌립니다). 휴대폰에서 열면 카카오톡 공유 버튼이 나타납니다.</div>`}
-      </div>`;
-    const flash = (btn, ok) => {
-      const original = btn.textContent;
-      btn.textContent = ok ? "✓ 복사됨" : "복사 실패";
-      setTimeout(() => { btn.textContent = original; }, 1500);
-    };
-    dlg.onclick = async (e) => {
-      const btn = e.target.closest("[data-send]");
-      const act = btn?.dataset.send;
-      if (act === "close") dlg.close();
-      if (act === "copy") flash(btn, await copy(text));
-      if (act === "copy-link") flash(btn, await copy(link));
-      if (act === "share") {
-        try { await global.navigator.share({ title: "Rent4", text }); dlg.close(); } catch (_) { /* 사용자가 취소 */ }
-      }
-    };
-    if (!dlg.open) dlg.showModal();
-  }
 
   /** 비밀번호 칸마다 [보기/숨기기] 버튼을 붙인다. 나중에 생기는 칸(비밀번호 변경 창 등)도 자동으로. */
   function addRevealToggle(input) {
@@ -327,5 +219,12 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchPasswords);
   else watchPasswords();
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractLink, inviteLink, copy, contractTable, sendContract, sendLink };
+  /** 계약 발행 뒤 안내 (상대방에게는 서버가 문자를 보냈다). */
+  function issuedNotice(c, smsMode) {
+    Bass.updateAppAlert("success", `${c.party_name}님에게 계약 안내 문자를 보냈습니다.`,
+      smsMode === "dev" ? "개발 모드: 실제 문자 대신 서버 로그에 남았습니다."
+        : "상대방은 '비밀번호 설정'에서 휴대폰 번호로 인증한 뒤 계약을 확인하고 동의합니다.");
+  }
+
+  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice };
 })(window);

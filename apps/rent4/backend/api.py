@@ -38,12 +38,13 @@ from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Body, Depends, Request
+from fastapi.responses import RedirectResponse
 
-from core.auth import User, require_role, require_user
+from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, contracts, excel_import, ledger
+from . import accounts, bank_parser, contracts, excel_import, ledger, oauth, sms
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -104,8 +105,8 @@ def admin_contracts(user: User = Depends(admin_only)) -> Dict[str, Any]:
 
 @router.post("/admin/contracts")
 def admin_contract_create(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
-    c, token = contracts.create_membership(user, payload)
-    return {"success": True, "contract": contracts.public(c), "token": token}
+    c = contracts.create_membership(user, payload)
+    return {"success": True, "contract": contracts.public(c), "sms": not sms.configured() and "dev" or "sent"}
 
 
 @router.post("/admin/contracts/{contract_id}/{action}")
@@ -118,8 +119,6 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
         return {"success": True, "contract": contracts.public(contracts.confirm_paid(c))}
     if action == "cancel":
         return {"success": True, "contract": contracts.public(contracts.cancel(c))}
-    if action == "reset":
-        return {"success": True, "token": contracts.reset_password(c), "contract": contracts.public(c)}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
 
 
@@ -135,17 +134,6 @@ def setup_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
 
 
 # ── 계약 상대방 (링크 토큰, 로그인 전) ──
-@router.get("/contract/view")
-def contract_view(t: str = "") -> Dict[str, Any]:
-    return {"success": True, "contract": contracts.public(contracts.by_token(t), for_party=True)}
-
-
-@router.post("/contract/join")
-def contract_join(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **contracts.join(str(payload.get("t", "")), str(payload.get("phone4", "")),
-                                              str(payload.get("new", "")))}
-
-
 @router.get("/contract/mine")
 def contract_mine(user: User = Depends(require_user)) -> Dict[str, Any]:
     return {"success": True, "contract": contracts.public(contracts.party_contract(user), for_party=True)}
@@ -162,11 +150,6 @@ def contract_mine_continue(user: User = Depends(require_user)) -> Dict[str, Any]
     return {"success": True, **contracts.continue_as_account(user)}
 
 
-@router.post("/contract/start")
-def contract_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **contracts.start_session(str(payload.get("t", "")))}
-
-
 # ── 임대인 ──
 @router.get("/lessor/contracts")
 def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
@@ -176,8 +159,8 @@ def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str,
 @router.post("/lessor/contracts")
 def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = "",
                            user: User = Depends(staff)) -> Dict[str, Any]:
-    c, token = contracts.create_lease(user, _scope(user, branch).branch, payload)
-    return {"success": True, "contract": contracts.public(c), "token": token}
+    c = contracts.create_lease(user, _scope(user, branch).branch, payload)
+    return {"success": True, "contract": contracts.public(c), "sms": not sms.configured() and "dev" or "sent"}
 
 
 @router.post("/lessor/contracts/{contract_id}/{action}")
@@ -270,28 +253,46 @@ def lessor_accounts(branch: str = "", user: User = Depends(staff)) -> Dict[str, 
     return {"success": True, "building": b.name, "accounts": accounts.list_accounts(b.branch)}
 
 
-@router.post("/lessor/accounts/{room_no}/{action}")
-def lessor_account_link(room_no: str, action: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
-    """reset = 비밀번호 초기화 + 새 안내 링크 (처음 안내도 같은 방법)."""
-    if action != "reset":
-        raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
-    acc, token = accounts.issue_invite(_scope(user, branch).branch, room_no, reissue=True)
-    room = Room.first(branch=acc.branch, room=acc.room)
-    return {"success": True, "token": token, "username": acc.username, "room": acc.room,
-            "tenant_name": room.tenant_name, "phone": room.phone}
+@router.post("/lessor/accounts/{room_no}/notify")
+def lessor_account_notify(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    """기존 임차인에게 안내 문자 (접속 주소 + 휴대폰 번호로 비밀번호 설정)."""
+    return {"success": True, **accounts.notify_tenant(_scope(user, branch).branch, room_no)}
+
+
+# ── 카카오 · 구글 (계약 전 본인 확인 · 소셜 로그인) ──
+@router.get("/oauth/providers")
+def oauth_providers(user=Depends(current_user)) -> Dict[str, Any]:
+    return {"success": True, "providers": oauth.configured(), "linked": oauth.linked(user.username) if user else []}
+
+
+@router.post("/oauth/{provider}/start")
+def oauth_start(provider: str, request: Request, payload: Dict[str, Any] = Body(...), user=Depends(current_user)) -> Dict[str, Any]:
+    redirect_uri = str(request.url).split("?")[0].rsplit("/", 1)[0] + "/callback"
+    return {"success": True, **oauth.start(provider, str(payload.get("purpose", "")), redirect_uri, user)}
+
+
+@router.get("/oauth/{provider}/callback")
+def oauth_callback(provider: str, request: Request, code: str = "", state: str = "") -> RedirectResponse:
+    page = oauth.callback(provider, code, state)
+    api_base = str(request.url).split("?")[0].rsplit("/oauth/", 1)[0]                 # …/api/rent4 또는 …/api
+    site = api_base.replace("/api/rent4", "/rent4/") if api_base.endswith("/api/rent4") else api_base[: -len("/api")] + "/"
+    return RedirectResponse(site + page, status_code=302)
+
+
+# ── 휴대폰 문자 인증 (로그인 전) ──
+@router.post("/otp/request")
+def otp_request(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.request_code(str(payload.get("phone", "")))}
+
+
+@router.post("/otp/set-password")
+def otp_set_password(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.set_password_by_code(
+        str(payload.get("phone", "")), str(payload.get("code", "")), str(payload.get("new", "")))}
+
 
 
 # ── 임차인 안내 링크 (로그인 전) ──
-@router.get("/invite/view")
-def invite_view(t: str = "") -> Dict[str, Any]:
-    return {"success": True, **accounts.invite_view(t)}
-
-
-@router.post("/invite/start")
-def invite_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **accounts.invite_start(str(payload.get("t", "")), str(payload.get("phone4", "")))}
-
-
 # ── 임차인 ──
 @router.get("/tenant/me")
 def tenant_me(user: User = Depends(tenant_only)) -> Dict[str, Any]:
