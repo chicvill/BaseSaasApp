@@ -1,18 +1,18 @@
 {
   "pool_name": "rent3_pool",
-  "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
-  "total_revision": 63,
-  "total_objects": 37,
+  "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\Rent3_Standalone\\data\\rent3_pool",
+  "total_revision": 812,
+  "total_objects": 118,
   "last_updated_collection": "",
-  "updated_at": "2026-10-29T23:09:52",
+  "updated_at": "2026-10-31T09:12:19",
   "collections": {
     "users": {
       "file": "users.json",
       "exists": true,
-      "count": 8,
-      "revision": 9,
-      "size_bytes": 5090,
-      "updated_at": "2026-10-29T19:17:01"
+      "count": 34,
+      "revision": 38,
+      "size_bytes": 22753,
+      "updated_at": "2026-10-31T07:40:07"
     },
     "buildings": {
       "file": "buildings.json",
@@ -25,10 +25,10 @@
     "rooms": {
       "file": "rooms.json",
       "exists": true,
-      "count": 7,
-      "revision": 8,
-      "size_bytes": 12606,
-      "updated_at": "2026-10-29T19:17:01"
+      "count": 33,
+      "revision": 74,
+      "size_bytes": 128791,
+      "updated_at": "2026-10-31T07:40:07"
     },
     "cosign_sessions": {
       "file": "cosign_sessions.json",
@@ -41,26 +41,26 @@
     "contracts": {
       "file": "contracts.json",
       "exists": true,
-      "count": 4,
-      "revision": 6,
-      "size_bytes": 5254,
-      "updated_at": "2026-10-29T20:40:58"
+      "count": 5,
+      "revision": 10,
+      "size_bytes": 6726,
+      "updated_at": "2026-10-31T07:40:03"
     },
     "payments": {
       "file": "payments.json",
       "exists": true,
-      "count": 5,
-      "revision": 6,
-      "size_bytes": 4102,
-      "updated_at": "2026-10-29T19:17:02"
+      "count": 2,
+      "revision": 81,
+      "size_bytes": 1757,
+      "updated_at": "2026-10-31T07:40:03"
     },
     "outlays": {
       "file": "outlays.json",
       "exists": true,
-      "count": 3,
-      "revision": 4,
-      "size_bytes": 1517,
-      "updated_at": "2026-10-29T19:17:02"
+      "count": 34,
+      "revision": 35,
+      "size_bytes": 15792,
+      "updated_at": "2026-10-30T17:05:19"
     },
     "ops": {
       "file": "ops.json",

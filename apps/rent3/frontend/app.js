@@ -17,6 +17,10 @@
   };
 
   const $ = (id) => document.getElementById(id);
+  const safeOn = (id, event, fn) => {
+    const el = $(id);
+    if (el) el.addEventListener(event, fn);
+  };
   const esc = Bass.escapeHtml;
 
   function fmtMan(won) {
@@ -407,12 +411,83 @@
   }
 
   // ── Event Bindings ──
-  $("btnNavSignIn").addEventListener("click", () => openAuthModal({ tab: "login" }));
-  $("btnOpenLoginSection").addEventListener("click", () => openAuthModal({ tab: "login" }));
-  $("stripSwitchBtn").addEventListener("click", () => openAuthModal({ tab: "login" }));
-  $("btnCloseAuthModal").addEventListener("click", closeAuthModal);
+  const btnMobileMenuToggle = $("btnMobileMenuToggle");
+  const orNavMenu = $("orNavMenu");
+  function closeMobileMenu() {
+    if (!orNavMenu || !btnMobileMenuToggle) return;
+    orNavMenu.classList.remove("is-open");
+    btnMobileMenuToggle.classList.remove("is-active");
+    btnMobileMenuToggle.setAttribute("aria-expanded", "false");
+    btnMobileMenuToggle.textContent = "☰";
+  }
+  if (btnMobileMenuToggle && orNavMenu) {
+    btnMobileMenuToggle.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const willOpen = !orNavMenu.classList.contains("is-open");
+      orNavMenu.classList.toggle("is-open", willOpen);
+      btnMobileMenuToggle.classList.toggle("is-active", willOpen);
+      btnMobileMenuToggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      btnMobileMenuToggle.textContent = willOpen ? "✕" : "☰";
+    });
+    orNavMenu.addEventListener("click", (e) => {
+      const link = e.target.closest("a.or-navlink");
+      if (!link) {
+        if (e.target.closest(".or-navlink")) closeMobileMenu();
+        return;
+      }
+      const href = link.getAttribute("href") || "";
+      const user = getSession();
+      const isAdmin = Boolean(user && user.role === "admin");
 
-  $("btnNavAddListing").addEventListener("click", () => {
+      if (href.startsWith("/rent3_admin")) {
+        if (!isAdmin) {
+          e.preventDefault();
+          closeMobileMenu();
+          openAuthModal({ tab: "login", preset: "admin" });
+          Bass.updateAppAlert("warning", "총괄 관리인(admin) 로그인이 필요합니다.");
+          return;
+        }
+      } else if (href.startsWith("/rent3_lessor")) {
+        if (!isAdmin && (!user || user.role !== "lessor")) {
+          e.preventDefault();
+          closeMobileMenu();
+          openAuthModal({ tab: "login", preset: "lessor" });
+          Bass.updateAppAlert("warning", "임대인(건물주) 또는 총괄 관리인 로그인이 필요합니다.");
+          return;
+        }
+      } else if (href.startsWith("/rent3_tenant")) {
+        if (!isAdmin && (!user || (user.role !== "tenant" && user.role !== "prospect"))) {
+          e.preventDefault();
+          closeMobileMenu();
+          openAuthModal({ tab: "login", preset: "tenant" });
+          Bass.updateAppAlert("warning", "입주 임차인 또는 예비 임차인 로그인이 필요합니다.");
+          return;
+        }
+      } else if (href.startsWith("/rent3_contract")) {
+        if (!isAdmin && (!user || !user.name)) {
+          e.preventDefault();
+          closeMobileMenu();
+          navigateToCoSignOrLogin();
+          return;
+        }
+      }
+      closeMobileMenu();
+    });
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".or-navbar")) closeMobileMenu();
+    });
+  }
+
+  safeOn("btnNavSignIn", "click", () => {
+    closeMobileMenu();
+    openAuthModal({ tab: "login" });
+  });
+  safeOn("btnOpenLoginSection", "click", () => openAuthModal({ tab: "login" }));
+  safeOn("stripSwitchBtn", "click", () => openAuthModal({ tab: "login" }));
+  safeOn("btnCloseAuthModal", "click", closeAuthModal);
+
+  safeOn("btnNavAddListing", "click", () => {
+    closeMobileMenu();
     const user = getSession();
     if (user && user.role === "lessor" && user.branch) {
       window.location.href = `/rent3_lessor/?branch=${encodeURIComponent(user.branch)}&tab=rooms`;
@@ -421,7 +496,7 @@
     openAuthModal({ tab: "login", preset: "lessor", targetHint: "add_listing" });
   });
 
-  $("btnPillarBroker").addEventListener("click", () => {
+  safeOn("btnPillarBroker", "click", () => {
     const user = getSession();
     if (user && user.role === "lessor" && user.branch) {
       window.location.href = `/rent3_lessor/?branch=${encodeURIComponent(user.branch)}&tab=broker`;
@@ -430,7 +505,7 @@
     openAuthModal({ tab: "login", preset: "lessor", targetHint: "broker" });
   });
 
-  $("btnNavLogout").addEventListener("click", () => {
+  safeOn("btnNavLogout", "click", () => {
     clearSession();
     renderSessionUI();
     Bass.updateAppAlert("success", "안전하게 로그아웃되었습니다.", "다시 로그인하면 역할에 맞는 전용 페이지로 이동합니다.");
@@ -447,34 +522,35 @@
     });
   });
 
-  $("btnQuickCosignGo").addEventListener("click", () => {
+  safeOn("btnQuickCosignGo", "click", () => {
     navigateToCoSignOrLogin();
   });
 
-  $("authModalTabs").addEventListener("click", (e) => {
+  safeOn("authModalTabs", "click", (e) => {
     const tabBtn = e.target.closest("[data-auth-tab]");
     if (!tabBtn) return;
     switchAuthTab(tabBtn.dataset.authTab);
   });
 
-  $("regRole").addEventListener("change", () => {
-    $("regLessorFields").style.display = $("regRole").value === "lessor" ? "block" : "none";
+  safeOn("regRole", "change", () => {
+    const rf = $("regLessorFields");
+    if (rf) rf.style.display = $("regRole").value === "lessor" ? "block" : "none";
   });
 
   // 통합 계정 본인인증 로그인 제출 -> 역할 판별 후 자동 리다이렉트
-  $("formAccountLogin").addEventListener("submit", (e) => {
+  safeOn("formAccountLogin", "submit", (e) => {
     e.preventDefault();
     const btn = $("btnSubmitLogin");
     Bass.withLock(btn, async () => {
-      let hint = $("loginTargetHint").value || "";
-      if ($("chkAdminPoolHub").checked && !hint) hint = "pool";
+      let hint = ($("loginTargetHint") && $("loginTargetHint").value) || "";
+      if ($("chkAdminPoolHub") && $("chkAdminPoolHub").checked && !hint) hint = "pool";
 
       const res = await Bass.api(APP_ID, "/pool/auth/login", {
         method: "POST",
         body: {
           login_mode: "account",
-          identifier: $("loginIdentifier").value,
-          password: $("loginPassword").value,
+          identifier: ($("loginIdentifier") && $("loginIdentifier").value) || "",
+          password: ($("loginPassword") && $("loginPassword").value) || "",
           target_hint: hint,
         },
       });
@@ -486,20 +562,20 @@
   });
 
   // 간편 본인인증 회원가입 -> Data Pool 등록 후 역할/공동계약 페이지로 자동 이동
-  $("formRegister").addEventListener("submit", (e) => {
+  safeOn("formRegister", "submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnSubmitRegister"), async () => {
       const res = await Bass.api(APP_ID, "/pool/auth/register", {
         method: "POST",
         body: {
-          role: $("regRole").value,
-          name: $("regName").value,
-          phone: $("regPhone").value,
-          username: $("regUsername").value,
-          building_name: $("regBuildingName").value,
-          address: $("regAddress").value,
-          password: $("regPassword").value,
-          target_hint: $("loginTargetHint").value || "",
+          role: ($("regRole") && $("regRole").value) || "tenant",
+          name: ($("regName") && $("regName").value) || "",
+          phone: ($("regPhone") && $("regPhone").value) || "",
+          username: ($("regUsername") && $("regUsername").value) || "",
+          building_name: ($("regBuildingName") && $("regBuildingName").value) || "",
+          address: ($("regAddress") && $("regAddress").value) || "",
+          password: ($("regPassword") && $("regPassword").value) || "",
+          target_hint: ($("loginTargetHint") && $("loginTargetHint").value) || "",
         },
       });
       saveSession(res.user, res.token);
@@ -510,18 +586,18 @@
   });
 
   // 검색 & 필터 바인딩
-  $("heroSearchForm").addEventListener("submit", (e) => {
+  safeOn("heroSearchForm", "submit", (e) => {
     e.preventDefault();
     renderListings();
-    $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
+    if ($("listingsSection")) $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  $("searchBranch").addEventListener("change", renderListings);
-  $("searchCategory").addEventListener("change", renderListings);
-  $("btnRefreshListings").addEventListener("click", function () {
+  safeOn("searchBranch", "change", renderListings);
+  safeOn("searchCategory", "change", renderListings);
+  safeOn("btnRefreshListings", "click", function () {
     Bass.withLock(this, loadPortalData, "갱신 중...");
   });
 
-  $("quickFilterBar").addEventListener("click", (e) => {
+  safeOn("quickFilterBar", "click", (e) => {
     const chip = e.target.closest("[data-filter]");
     if (!chip) return;
     state.quickFilter = chip.dataset.filter;
@@ -532,71 +608,74 @@
   });
 
   // Affordability Calculator
-  $("btnToggleAfford").addEventListener("click", () => {
+  safeOn("btnToggleAfford", "click", () => {
     const p = $("affordPanel");
+    if (!p) return;
     const open = p.style.display === "none";
     p.style.display = open ? "block" : "none";
-    $("btnToggleAfford").classList.toggle("is-active", open);
+    if ($("btnToggleAfford")) $("btnToggleAfford").classList.toggle("is-active", open);
     updateAffordPreview();
   });
-  $("calcIncomeMan").addEventListener("input", updateAffordPreview);
-  $("btnApplyBudget").addEventListener("click", () => {
+  safeOn("calcIncomeMan", "input", updateAffordPreview);
+  safeOn("btnApplyBudget", "click", () => {
     state.maxMonthlyWon = updateAffordPreview();
-    state.maxDepositWon = Number($("calcDepositMan").value || 0) * 10000;
+    state.maxDepositWon = Number(($("calcDepositMan") && $("calcDepositMan").value) || 0) * 10000;
     state.budgetActive = true;
     renderListings();
     Bass.updateAppAlert(
       "success",
       `월세+관리비 ${fmtMan(state.maxMonthlyWon)} 이하 · 보증금 ${fmtMan(state.maxDepositWon)} 이하 조건으로 필터링했습니다.`
     );
-    $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
+    if ($("listingsSection")) $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  $("btnResetBudget").addEventListener("click", () => {
+  safeOn("btnResetBudget", "click", () => {
     state.budgetActive = false;
     renderListings();
     Bass.updateAppAlert("warning", "월세 예산 필터가 해제되었습니다.");
   });
 
   // 1:1 방문투어 문의 모달
-  $("btnCloseInquiryModal").addEventListener("click", () => $("inquiryModal").classList.remove("is-open"));
-  $("formInquiry").addEventListener("submit", (e) => {
+  safeOn("btnCloseInquiryModal", "click", () => { if ($("inquiryModal")) $("inquiryModal").classList.remove("is-open"); });
+  safeOn("formInquiry", "submit", (e) => {
     e.preventDefault();
-    Bass.withLock($("btnSubmitInquiry"), async () => {
+    const btn = $("btnSubmitInquiry");
+    Bass.withLock(btn, async () => {
       const res = await Bass.api(APP_ID, "/pool/inquiries", {
         method: "POST",
         body: {
-          branch: $("inqBranch").value,
-          room_no: $("inqRoomNo").value,
-          sender_name: $("inqSenderName").value,
-          sender_phone: $("inqSenderPhone").value,
-          visit_date: $("inqVisitDate").value,
-          message: $("inqMessage").value,
+          branch: ($("inqBranch") && $("inqBranch").value) || "",
+          room_no: ($("inqRoomNo") && $("inqRoomNo").value) || "",
+          sender_name: ($("inqSenderName") && $("inqSenderName").value) || "",
+          sender_phone: ($("inqSenderPhone") && $("inqSenderPhone").value) || "",
+          visit_date: ($("inqVisitDate") && $("inqVisitDate").value) || "",
+          message: ($("inqMessage") && $("inqMessage").value) || "",
         },
       });
-      $("inquiryModal").classList.remove("is-open");
-      $("inqMessage").value = "";
+      if ($("inquiryModal")) $("inquiryModal").classList.remove("is-open");
+      if ($("inqMessage")) $("inqMessage").value = "";
       Bass.updateAppAlert("success", res.message, "임대인 콘솔(rent3_lessor) 1:1 채팅함에 즉시 기록되었습니다.");
     }, "전송 중... ⏳");
   });
 
   // Rent Now 상대방 호출 모달
-  $("btnCloseRentNowModal").addEventListener("click", () => $("rentNowModal").classList.remove("is-open"));
-  $("formRentNow").addEventListener("submit", (e) => {
+  safeOn("btnCloseRentNowModal", "click", () => { if ($("rentNowModal")) $("rentNowModal").classList.remove("is-open"); });
+  safeOn("formRentNow", "submit", (e) => {
     e.preventDefault();
     const u = getSession();
-    Bass.withLock($("btnSubmitRentNow"), async () => {
+    const btn = $("btnSubmitRentNow");
+    Bass.withLock(btn, async () => {
       const res = await Bass.api(APP_ID, "/pool/cosign-open", {
         method: "POST",
         body: {
-          caller_role: $("rnCallerRole").value || "tenant",
-          branch: $("rnBranch").value,
-          room_no: $("rnRoomNo").value,
-          tenant_name: $("rnTenantName").value,
-          tenant_phone: $("rnTenantPhone").value,
+          caller_role: ($("rnCallerRole") && $("rnCallerRole").value) || "tenant",
+          branch: ($("rnBranch") && $("rnBranch").value) || "",
+          room_no: ($("rnRoomNo") && $("rnRoomNo").value) || "",
+          tenant_name: ($("rnTenantName") && $("rnTenantName").value) || "",
+          tenant_phone: ($("rnTenantPhone") && $("rnTenantPhone").value) || "",
           id_tenant: u && (u.tenant_id || (u.role !== "lessor" ? u.id : "")) ? (u.tenant_id || u.id) : "",
         },
       });
-      $("rentNowModal").classList.remove("is-open");
+      if ($("rentNowModal")) $("rentNowModal").classList.remove("is-open");
       Bass.updateAppAlert("success", res.message);
       window.location.href = res.redirect_url;
     }, "상대방 호출 발송 중... ⏳");
@@ -604,8 +683,9 @@
 
   // 모달 바깥 배경 클릭 시 닫기
   ["authModal", "inquiryModal", "rentNowModal"].forEach((mid) => {
-    $(mid).addEventListener("click", (e) => {
-      if (e.target === $(mid)) $(mid).classList.remove("is-open");
+    safeOn(mid, "click", (e) => {
+      const m = $(mid);
+      if (m && e.target === m) m.classList.remove("is-open");
     });
   });
 

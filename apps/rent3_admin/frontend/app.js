@@ -14,10 +14,14 @@
   }
 
   async function refresh() {
+    if (window.__rent3_blocked) return;
+    const elBadge = document.getElementById("poolBadge");
+    if (!elBadge || !elTabContent) return;
+
     ov = await Bass.api(APP_ID, "/overview");
     const meta = ov.pool_meta || {};
     const kpi = ov.kpi || {};
-    document.getElementById("poolBadge").textContent = `JSON Pool v${meta.total_revision} (${meta.total_objects} 객체)`;
+    elBadge.textContent = `JSON Pool v${meta.total_revision} (${meta.total_objects} 객체)`;
 
     document.getElementById("kpiGrid").innerHTML = `
       <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">가맹 건물 / 전체 호실</div><div class="kpi-val">${kpi.total_buildings}채 / ${kpi.occupied_rooms}/${kpi.total_rooms}실</div></div>
@@ -192,6 +196,8 @@
     });
   }
 
-  refresh().catch(Bass.showError);
+  if (!window.__rent3_blocked) {
+    refresh().catch(Bass.showError);
+  }
 })();
 

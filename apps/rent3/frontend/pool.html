@@ -64,7 +64,18 @@
     </header>
 
     <section class="bass-card" style="margin-top:14px;">
-      <h3>📂 공동 JSON Data Pool 파일별 실시간 상태 (클릭 시 원문 즉시 확인)</h3>
+      <div class="bass-row" style="justify-content:space-between;align-items:center;">
+        <div>
+          <h3 style="margin:0;">🏠 건물·호실·전입일별 분리 저장 호실 객체 (<code>data/rent3_pool/rooms/*.json</code>)</h3>
+          <p class="bass-muted" style="font-size:12.5px;margin:3px 0 0;">단일 대형 파일 접근 지연을 없애기 위해 호실별 독립 JSON 파일로 실시간 분리 저장되며 $O(1)$ 고속 접근을 지원합니다.</p>
+        </div>
+        <span id="roomFilesCountBadge" class="bass-badge bass-badge--ok">0개 호실 파일</span>
+      </div>
+      <div id="roomFilesGrid" class="file-grid" style="margin-top:10px;"></div>
+    </section>
+
+    <section class="bass-card" style="margin-top:14px;">
+      <h3>📂 공동 JSON Data Pool 컬렉션 원본 (클릭 시 원문 즉시 확인)</h3>
       <div id="fileGrid" class="file-grid"></div>
       <pre id="rawJsonBox" class="json-box">로딩 중...</pre>
     </section>
@@ -81,30 +92,64 @@
     (function () {
       "use strict";
       let currentCol = "rooms";
+      let selectedRoomFile = "";
 
       async function loadHub() {
         const res = await Bass.api("rent3", "/pool/overview");
         const meta = res.meta || {};
         document.getElementById("hubRevBadge").textContent = `Pool v${meta.total_revision} · 총 ${meta.total_objects}개 객체`;
 
+        // 1. 개별 호실 분리 파일 (rooms/*.json) 로딩
+        try {
+          const roomFilesRes = await Bass.api("rent3", "/pool/rooms/files");
+          const rFiles = (roomFilesRes && roomFilesRes.files) || [];
+          document.getElementById("roomFilesCountBadge").textContent = `${rFiles.length}개 호실 파일`;
+          document.getElementById("roomFilesGrid").innerHTML = rFiles.map((rf) => `
+            <div class="file-card ${rf.file_name === selectedRoomFile ? "is-active" : ""}" data-room-file="${rf.file_name}" style="background:hsl(230 35% 10%);">
+              <div style="font-weight:800;font-size:12.5px;color:var(--primary-2);word-break:break-all;">🏠 ${Bass.escapeHtml(rf.file_name)}</div>
+              <div style="font-size:13px;font-weight:700;margin:3px 0;">${Bass.escapeHtml(rf.building_name)} ${Bass.escapeHtml(rf.room_no)}호 ${rf.is_occupied ? '<span class="bass-badge bass-badge--ok" style="font-size:10px;">입주</span>' : '<span class="bass-badge bass-badge--warn" style="font-size:10px;">공실</span>'}</div>
+              <div class="bass-muted" style="font-size:11px;">전입: ${Bass.escapeHtml(rf.move_in_date || "미정")} · ${(rf.size_bytes || 0).toLocaleString()} B</div>
+            </div>
+          `).join("");
+
+          document.querySelectorAll("[data-room-file]").forEach((el) => {
+            el.addEventListener("click", async () => {
+              selectedRoomFile = el.dataset.roomFile;
+              document.querySelectorAll(".file-card").forEach((c) => c.classList.remove("is-active"));
+              el.classList.add("is-active");
+              try {
+                const singleDoc = await Bass.api("rent3", `/pool/rooms/files/${encodeURIComponent(selectedRoomFile)}`);
+                document.getElementById("rawJsonBox").textContent = JSON.stringify(singleDoc, null, 2);
+                document.getElementById("rawJsonBox").scrollIntoView({ behavior: "smooth", block: "center" });
+              } catch (err) {
+                Bass.showError(err);
+              }
+            });
+          });
+        } catch (_) {}
+
+        // 2. 컬렉션 전체 상태
         const cols = meta.collections || {};
         document.getElementById("fileGrid").innerHTML = Object.entries(cols).map(([name, info]) => `
-          <div class="file-card ${name === currentCol ? "is-active" : ""}" data-col="${name}">
+          <div class="file-card ${name === currentCol && !selectedRoomFile ? "is-active" : ""}" data-col="${name}">
             <div style="font-weight:800;font-size:13.5px;">📄 ${Bass.escapeHtml(info.file)}</div>
             <div style="font-size:18px;font-weight:800;color:var(--primary-2);margin:4px 0;">${info.count} 객체</div>
             <div class="bass-muted" style="font-size:11px;">v${info.revision} · ${(info.size_bytes || 0).toLocaleString()} B</div>
           </div>
         `).join("");
 
-        document.querySelectorAll(".file-card").forEach((el) => {
+        document.querySelectorAll("[data-col]").forEach((el) => {
           el.addEventListener("click", () => {
+            selectedRoomFile = "";
             currentCol = el.dataset.col;
             loadHub().catch(Bass.showError);
           });
         });
 
-        const rawRes = await Bass.api("rent3", `/pool/files/${encodeURIComponent(currentCol)}`);
-        document.getElementById("rawJsonBox").textContent = JSON.stringify(rawRes, null, 2);
+        if (!selectedRoomFile) {
+          const rawRes = await Bass.api("rent3", `/pool/files/${encodeURIComponent(currentCol)}`);
+          document.getElementById("rawJsonBox").textContent = JSON.stringify(rawRes, null, 2);
+        }
 
         document.getElementById("eventList").innerHTML = (res.recent_events || []).slice(0, 15).map((e) => `
           <div style="padding:7px 8px;border-bottom:1px solid var(--border);font-size:12.5px;">
@@ -115,7 +160,7 @@
       }
 
       loadHub().catch(Bass.showError);
-      setInterval(() => { if (!document.hidden) loadHub().catch(() => {}); }, 3000);
+      setInterval(() => { if (!document.hidden && !selectedRoomFile) loadHub().catch(() => {}); }, 4000);
     })();
   </script>
 </body>

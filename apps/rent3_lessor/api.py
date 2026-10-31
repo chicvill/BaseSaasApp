@@ -128,7 +128,7 @@ def get_status(branch: str = "main"):
 
 
 @router.get("/dashboard")
-def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
+def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None, year: Optional[int] = None):
     ensure_pool_seeded()
     b_id = normalize_branch_id(branch)
     ref_dt = RentBillingNotice._parse_ref_date(as_of_date)
@@ -142,12 +142,47 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
     room_cards: List[Dict[str, Any]] = []
     expiry_notice_rooms: List[Dict[str, Any]] = []
     total_unpaid_branch = 0
+    cur_ym_str = ref_dt.strftime("%Y-%m")
+    cur_month_due_target = 0
+    cur_month_paid_amount = 0
+    overdue_rooms_summary: List[Dict[str, Any]] = []
+
     for r in rooms:
         ct = Contract.get(r.active_contract_id) if r.active_contract_id else None
         ledger = ct.ledger(up_to_ym=up_to_ym) if ct else None
+        tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
+
         if ledger:
             total_unpaid_branch += int(ledger["total_unpaid"])
-        tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
+            # 미납 개월(횟수) 계산: UNPAID 또는 PARTIAL 상태의 청구월 목록
+            unpaid_months = [
+                m["ym"] for m in (ledger.get("months") or [])
+                if m.get("status") in ("UNPAID", "PARTIAL") and m.get("unpaid", 0) > 0
+            ]
+            unpaid_count = len(unpaid_months)
+            room_unpaid_amt = int(ledger["total_unpaid"])
+
+            # 당월(현재월) 수납 목표 및 실제 수납액 집계
+            for m in (ledger.get("months") or []):
+                if m.get("ym") == cur_ym_str:
+                    cur_month_due_target += int(m.get("due", 0))
+                    cur_month_paid_amount += int(m.get("paid", 0))
+
+            if room_unpaid_amt > 0:
+                overdue_rooms_summary.append({
+                    "room_no": r.room_no,
+                    "tenant_name": (tenant.name if tenant else (ct.tenant_name if ct else "세입자")),
+                    "tenant_phone": (tenant.phone if tenant else (ct.tenant_phone if ct else "")),
+                    "unpaid_count": unpaid_count,
+                    "unpaid_amount": room_unpaid_amt,
+                    "unpaid_months": unpaid_months,
+                    "monthly_rent": r.monthly_rent,
+                    "maintenance_fee": r.maintenance_fee,
+                    "pay_timing": r.pay_timing,
+                    "payment_day": getattr(ct, "payment_day", 1) or 1,
+                    "is_critical_2plus": unpaid_count >= 2, # 주임법 2기 연체 해지 요건
+                })
+
         exp_win = ct.expiry_window_status() if ct else None
         exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
         bill_sched = ct.billing_notice_schedule(as_of=ref_dt) if ct else None
@@ -174,6 +209,22 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
                 "check_status": exp_chk.status if exp_chk else "UNREQUESTED",
             })
 
+    # 미납 횟수 및 금액 내림차순 정렬
+    overdue_rooms_summary.sort(key=lambda x: (x["unpaid_count"], x["unpaid_amount"]), reverse=True)
+
+    # 당월 수납 달성률 계산
+    cur_rate_pct = round((cur_month_paid_amount / cur_month_due_target * 100.0), 1) if cur_month_due_target > 0 else 100.0
+    current_month_kpi = {
+        "year_month": cur_ym_str,
+        "due_target": cur_month_due_target,
+        "paid_amount": cur_month_paid_amount,
+        "collection_rate_pct": cur_rate_pct,
+        "overdue_room_count": len(overdue_rooms_summary),
+        "total_rooms": len(rooms),
+        "paid_room_count": max(0, len(rooms) - len(overdue_rooms_summary)),
+        "overdue_list": overdue_rooms_summary,
+    }
+
     payments = sorted(Pay.find(branch=b_id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
     outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
     tickets = sorted(MaintenanceTicket.find(branch=b_id), key=lambda t: t.updated_at, reverse=True)
@@ -183,7 +234,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
     recent_billing_notices = sorted(
         RentBillingNotice.find(branch=b_id), key=lambda x: x.created_at, reverse=True
     )[:15]
-    fin = TaxAndCertificateService.branch_financial_summary(b_id)
+    fin = TaxAndCertificateService.branch_financial_summary(b_id, year=year)
 
     return {
         "success": True,
@@ -195,6 +246,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         "building": bldg.model_dump() if bldg else None,
         "lessor": lessor.model_dump() if lessor else None,
         "total_unpaid_branch": total_unpaid_branch,
+        "current_month_kpi": current_month_kpi,
         "rooms": room_cards,
         "expiry_notice_rooms": expiry_notice_rooms,
         "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],

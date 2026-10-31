@@ -20,6 +20,7 @@
   const openExpiryRooms = new Set();
   const closedExpiryRooms = new Set();
   let selectedAsOfDate = "";
+  let selectedTaxYear = 2026;
 
   function expiryStatusLabel(ec) {
     if (!ec) return "";
@@ -41,9 +42,14 @@
   }
 
   async function refresh() {
+    if (window.__rent3_blocked) return;
+    const elBadge = document.getElementById("poolRevBadge");
+    if (!elBadge || !elTabContent || !elBranch) return;
+
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
-    dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
-    document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
+    const qYr = selectedTaxYear ? `&year=${selectedTaxYear}` : "";
+    dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}${qYr}`);
+    elBadge.textContent = `JSON Pool v${dash.pool_revision}`;
 
     elBranch.innerHTML = (dash.branches || []).map((b) =>
       `<option value="${b.branch}" ${b.branch === dash.branch ? "selected" : ""}>🏢 ${Bass.escapeHtml(b.building_name)} (${b.branch})</option>`
@@ -54,11 +60,32 @@
     document.getElementById("bldgSubtitle").textContent = `${b.building_name || ""} · ${b.address || ""} · 소유자: ${l.name || "-"}`;
 
     const fin = dash.financial_summary || {};
+    const curKpi = dash.current_month_kpi || {};
+    const ymLabel = curKpi.year_month ? `${curKpi.year_month.split("-")[0]}년 ${parseInt(curKpi.year_month.split("-")[1], 10)}월` : "당월";
+
     document.getElementById("kpiGrid").innerHTML = `
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">가동 호실 / 전체</div><div class="kpi-val">${fin.occupied_rooms || 0} / ${fin.total_rooms || 0}실 (${fin.occupancy_rate || 0}%)</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">지점 미납 합계 (가짜체납 0)</div><div class="kpi-val" style="color:${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">${fmtWon(dash.total_unpaid_branch)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">연간 누적 수납액</div><div class="kpi-val">${fmtWon(fin.gross_revenue)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">순운영이익 (NOI)</div><div class="kpi-val" style="color:var(--primary-2);">${fmtWon(fin.noi)}</div></div>
+      <div class="kpi-box" style="border-left:4px solid var(--primary);">
+        <div class="bass-muted" style="font-size:12px;">🎯 ${ymLabel} 청구 목표액</div>
+        <div class="kpi-val">${fmtWon(curKpi.due_target)}</div>
+        <div class="bass-muted" style="font-size:11.5px;margin-top:2px;">전체 ${curKpi.total_rooms || 0}실 기준</div>
+      </div>
+      <div class="kpi-box" style="border-left:4px solid var(--ok);">
+        <div class="bass-muted" style="font-size:12px;">💰 실제 수납 완료액</div>
+        <div class="kpi-val" style="color:var(--ok);">${fmtWon(curKpi.paid_amount)}</div>
+        <div class="bass-muted" style="font-size:11.5px;margin-top:2px;">수납 완료 ${curKpi.paid_room_count || 0}실</div>
+      </div>
+      <div class="kpi-box" style="border-left:4px solid ${curKpi.collection_rate_pct >= 90 ? "var(--ok)" : "var(--warn)"};">
+        <div class="bass-muted" style="font-size:12px;">📊 당월 수납 달성률</div>
+        <div class="kpi-val" style="color:${curKpi.collection_rate_pct >= 90 ? "var(--ok)" : "var(--warn)"};">${curKpi.collection_rate_pct || 0}%</div>
+        <div class="bass-muted" style="font-size:11.5px;margin-top:2px;">목표 대비 입금 진척도</div>
+      </div>
+      <div class="kpi-box" style="border-left:4px solid ${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">
+        <div class="bass-muted" style="font-size:12px;">🚨 현재 미납 호실 / 총 미납액</div>
+        <div class="kpi-val" style="color:${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">
+          ${curKpi.overdue_room_count || 0}실 / ${fmtWon(dash.total_unpaid_branch)}
+        </div>
+        <div class="bass-muted" style="font-size:11.5px;margin-top:2px;">가동률: ${fin.occupancy_rate || 0}% (${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실)</div>
+      </div>
     `;
 
     renderTab();
@@ -94,7 +121,83 @@
   function renderLedgerTab() {
     const rooms = dash.rooms || [];
     const noticeRooms = dash.expiry_notice_rooms || [];
+    const curKpi = dash.current_month_kpi || {};
+    const overdueList = curKpi.overdue_list || [];
+
     elTabContent.innerHTML = `
+      <!-- 🚨 임대인 최우선 관제: 당월 수납 진척도 및 미납 호실 집중 모니터링 -->
+      <div class="bass-card" style="margin-bottom:14px;border-left:5px solid ${overdueList.length > 0 ? "var(--err)" : "var(--ok)"};background:hsl(230 30% 9%);">
+        <div class="bass-row" style="justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <h3 style="margin:0;font-size:17px;">🚨 당월 미납 집중 관제 대장 (${curKpi.year_month || "당월"})</h3>
+              <span class="bass-badge ${overdueList.length > 0 ? "bass-badge--err" : "bass-badge--ok"}">
+                ${overdueList.length > 0 ? `미납 ${overdueList.length}실 집중 관리` : "전 호실 완납 정상"}
+              </span>
+            </div>
+            <p class="bass-muted" style="font-size:12.5px;margin:4px 0 0;">
+              목표액 <strong>${fmtWon(curKpi.due_target)}</strong> 중 <strong>${fmtWon(curKpi.paid_amount)}</strong> 수납 완료 (달성률 <strong>${curKpi.collection_rate_pct || 0}%</strong>) · 미납 ${overdueList.length}실 / 완납 ${curKpi.paid_room_count || 0}실
+            </p>
+          </div>
+          <div style="font-size:12px;color:var(--muted);text-align:right;">
+            ※ <strong>2회 이상 연체 호실</strong>은 주택임대차보호법 제6조의3에 따른 계약해지 및 갱신거절 요건에 해당합니다.
+          </div>
+        </div>
+
+        <!-- 수납 달성률 프로그레스 바 -->
+        <div style="margin:12px 0 10px;background:hsl(230 20% 18%);height:10px;border-radius:6px;overflow:hidden;position:relative;">
+          <div style="background:linear-gradient(90deg, var(--primary), var(--ok));height:100%;width:${Math.min(100, curKpi.collection_rate_pct || 0)}%;transition:width .4s ease;"></div>
+        </div>
+
+        ${overdueList.length > 0 ? `
+          <div style="margin-top:10px;overflow-x:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:left;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);color:var(--muted);">
+                  <th style="padding:6px 8px;">호실</th>
+                  <th style="padding:6px 8px;">세입자</th>
+                  <th style="padding:6px 8px;">연락처</th>
+                  <th style="padding:6px 8px;">약정 조건</th>
+                  <th style="padding:6px 8px;text-align:center;">미납 횟수</th>
+                  <th style="padding:6px 8px;text-align:right;">총 미납액</th>
+                  <th style="padding:6px 8px;">체납 내역</th>
+                  <th style="padding:6px 8px;text-align:center;">원클릭 조치</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${overdueList.map((ov) => `
+                  <tr style="border-bottom:1px solid hsl(230 20% 16%);background:${ov.is_critical_2plus ? "hsl(356 60% 12% / .3)" : "transparent"};">
+                    <td style="padding:8px;font-weight:800;color:var(--primary-2);">🚪 ${Bass.escapeHtml(ov.room_no)}호</td>
+                    <td style="padding:8px;font-weight:700;">${Bass.escapeHtml(ov.tenant_name)}</td>
+                    <td style="padding:8px;color:var(--muted);">${Bass.escapeHtml(ov.tenant_phone || "-")}</td>
+                    <td style="padding:8px;font-size:12px;">월 ${fmtWon(ov.monthly_rent)} / 관 ${fmtWon(ov.maintenance_fee)}</td>
+                    <td style="padding:8px;text-align:center;">
+                      <span class="bass-badge ${ov.is_critical_2plus ? "bass-badge--err" : "bass-badge--warn"}" style="font-weight:800;">
+                        ${ov.is_critical_2plus ? `⚠️ ${ov.unpaid_count}회 연속 체납 (해지요건)` : `${ov.unpaid_count}회 미납`}
+                      </span>
+                    </td>
+                    <td style="padding:8px;text-align:right;font-weight:800;color:var(--err);font-size:14px;">
+                      ${fmtWon(ov.unpaid_amount)}
+                    </td>
+                    <td style="padding:8px;font-size:11.5px;color:var(--muted);">
+                      ${ov.unpaid_months.join(", ")}
+                    </td>
+                    <td style="padding:8px;text-align:center;">
+                      <button class="bass-btn bass-btn--sm bass-btn--danger btn-send-billing-notice" data-room="${ov.room_no}" data-type="OVERDUE_1D" type="button">
+                        🚨 미납 독촉 발송
+                      </button>
+                    </td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          </div>
+        ` : `
+          <div style="padding:14px;text-align:center;color:var(--ok);font-weight:700;font-size:14px;">
+            🎉 축하합니다! 현재 미납된 호실이 1곳도 없으며 전 호실 정상 완납 상태입니다.
+          </div>
+        `}
+      </div>
       ${noticeRooms.length > 0 ? `
         <div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
           <div class="bass-row" style="justify-content:space-between;">
@@ -776,12 +879,18 @@
     const cats = dash.expense_categories || {};
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <div class="bass-row" style="justify-content:space-between;">
+        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
           <div>
             <h3>📊 ${fin.year}년 공용 운영비 실결산 & 순운영이익(NOI)</h3>
             <div class="bass-muted" style="font-size:13px;">총수입 ${fmtWon(fin.gross_revenue)} − 필요경비 ${fmtWon(fin.total_operating_expense)} = <strong>순이익 ${fmtWon(fin.noi)}</strong> (15.4% 분리과세 예상세액 ${fmtWon(fin.estimated_separate_tax)})</div>
           </div>
-          <a class="bass-btn bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${fin.year}">📥 5월 종소세 홈택스 CSV 다운로드</a>
+          <div class="bass-row" style="gap:8px;align-items:center;flex-wrap:wrap;">
+            <select id="selTaxYear" class="bass-select" style="width:auto;font-weight:700;">
+              <option value="2026" ${fin.year === 2026 ? "selected" : ""}>📅 2026년 결산</option>
+              <option value="2025" ${fin.year === 2025 ? "selected" : ""}>📅 2025년 결산</option>
+            </select>
+            <a class="bass-btn bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${fin.year}">📥 ${fin.year}년 종소세 홈택스 CSV 다운로드</a>
+          </div>
         </div>
         <div class="field-grid" style="margin-top:12px;">
           ${(fin.expenses_by_category || []).map((c) => `
@@ -806,6 +915,14 @@
         <button id="btnAddOutlay" class="bass-btn bass-btn--primary" type="button">➕ 공용 운영비 저장</button>
       </div>
     `;
+
+    const selYr = document.getElementById("selTaxYear");
+    if (selYr) {
+      selYr.addEventListener("change", () => {
+        selectedTaxYear = Number(selYr.value);
+        refresh().catch(Bass.showError);
+      });
+    }
 
     document.getElementById("btnAddOutlay").addEventListener("click", function () {
       Bass.withLock(this, async () => {
@@ -1049,6 +1166,8 @@
     });
   }
 
-  refresh().catch(Bass.showError);
+  if (!window.__rent3_blocked) {
+    refresh().catch(Bass.showError);
+  }
 })();
 

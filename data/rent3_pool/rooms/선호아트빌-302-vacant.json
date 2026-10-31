@@ -1,0 +1,74 @@
+{
+  "pool": "rent3_pool",
+  "collection": "rooms",
+  "file_name": "선호아트빌-302-vacant.json",
+  "building_name": "선호아트빌",
+  "room_no": "302",
+  "move_in_date": "",
+  "is_occupied": false,
+  "updated_at": "2026-10-31T07:40:07",
+  "data": {
+    "id": "room_sunho_302",
+    "created_at": "2026-10-29T19:17:01",
+    "updated_at": "2026-10-30T18:33:19",
+    "branch": "sunho",
+    "id_building": "bldg_sunho",
+    "room_no": "302",
+    "name": "302호 (조용한 주택가 풀옵션 공실)",
+    "floor": 3,
+    "area_sqm": 20.4,
+    "room_category": "주거용 원룸",
+    "vat_applicable": false,
+    "id_tenant": "",
+    "active_contract_id": "",
+    "doorlock_pwd": "3020*",
+    "registry_checked": true,
+    "registry_info": {
+      "issue_number": "1101-2026-884920",
+      "owner_name": "김임대",
+      "mortgage_amount": 0,
+      "clean_title": true,
+      "verified_at": "2026-10-29"
+    },
+    "status_description": "도배·장판 신규 시공 완료, 지하철 도보 4분",
+    "option_list": [
+      {
+        "item": "시스템 에어컨",
+        "quantity": 1,
+        "condition": "정상(최상)"
+      },
+      {
+        "item": "드럼 세탁기",
+        "quantity": 1,
+        "condition": "정상(양호)"
+      },
+      {
+        "item": "빌트인 냉장고",
+        "quantity": 1,
+        "condition": "정상(최상)"
+      },
+      {
+        "item": "인덕션 쿡탑",
+        "quantity": 1,
+        "condition": "정상"
+      },
+      {
+        "item": "디지털 도어락",
+        "quantity": 1,
+        "condition": "신규 교체"
+      }
+    ],
+    "lease_type": "월세",
+    "pay_timing": "후불",
+    "deposit": 3000000,
+    "monthly_rent": 450000,
+    "maintenance_fee": 40000,
+    "available_from": "즉시입주",
+    "pre_moveout_notice": false,
+    "is_published": true,
+    "images": [],
+    "move_in_date": null,
+    "_kind": "room",
+    "payments": []
+  }
+}

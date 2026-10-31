@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -58,9 +59,14 @@ class JsonDataPool:
 
     def ensure_dir(self) -> None:
         os.makedirs(self.pool_dir, exist_ok=True)
+        os.makedirs(self.rooms_dir, exist_ok=True)
 
     def file_path(self, collection: str) -> str:
         return os.path.join(self.pool_dir, f"{collection}.json")
+
+    @property
+    def rooms_dir(self) -> str:
+        return os.path.join(self.pool_dir, "rooms")
 
     @property
     def meta_path(self) -> str:
@@ -124,10 +130,219 @@ class JsonDataPool:
         self._mtimes[collection] = mtime
         return self._cache[collection]
 
+    def _clean_building_name(self, raw_name: Optional[str], branch: Optional[str] = None) -> str:
+        name = (raw_name or "").strip()
+        if not name and branch:
+            alias = {"main": "시크빌", "sunho": "선호아트빌", "sinbi": "신비주택"}
+            name = alias.get(branch.lower(), branch)
+        if not name:
+            name = "시크빌"
+        parts = re.split(r"[\s·/&]+", name)
+        clean = parts[0] if parts else name
+        clean = re.sub(r"[^\w가-힣0-9]", "", clean)
+        return clean or "시크빌"
+
+    def _extract_move_in_date_8digits(self, date_val: Any) -> str:
+        s = str(date_val or "").strip()
+        nums = re.findall(r"\d+", s)
+        if len(nums) >= 3:
+            y, m, d = int(nums[0]), int(nums[1]), int(nums[2])
+            return f"{y:04d}{m:02d}{d:02d}"
+        digits = "".join(nums)
+        if len(digits) == 8:
+            return digits
+        return "vacant"
+
+    def _normalize_billing_ym_int(self, ym_val: Any) -> int:
+        """연월 값을 6자리 정수(예: 202601)로 정규화."""
+        s = str(ym_val or "").strip()
+        nums = re.findall(r"\d+", s)
+        if len(nums) >= 2:
+            return int(nums[0]) * 100 + int(nums[1])
+        digits = "".join(nums)
+        if len(digits) >= 6:
+            return int(digits[:6])
+        return 0
+
+    def _format_paid_date_dots(self, paid_val: Any) -> str:
+        """수납일 값을 'YYYY.M.D' 점 표기 형식으로 정규화 (예: '2026.1.12')."""
+        s = str(paid_val or "").strip()
+        nums = re.findall(r"\d+", s)
+        if len(nums) >= 3:
+            return f"{int(nums[0])}.{int(nums[1])}.{int(nums[2])}"
+        return s or ""
+
+    def format_room_filename(self, room_data: Dict[str, Any]) -> str:
+        """건물/호실/전입일 기준 고유 파일명 생성 (예: '시크빌-201-20250101.json')."""
+        branch = room_data.get("branch", "main")
+        bldg_name = room_data.get("building_name")
+        if not bldg_name:
+            b_id = room_data.get("id_building")
+            if b_id:
+                for b in self._load_collection_unlocked("buildings"):
+                    if b.get("id") == b_id:
+                        bldg_name = b.get("building_name")
+                        break
+        clean_bldg = self._clean_building_name(bldg_name, branch)
+        room_no = str(room_data.get("room_no") or "").strip() or "0"
+
+        move_in = room_data.get("move_in_date")
+        if not move_in:
+            ct_id = room_data.get("active_contract_id")
+            if ct_id:
+                for ct in self._load_collection_unlocked("contracts"):
+                    if ct.get("id") == ct_id:
+                        move_in = ct.get("move_in_date")
+                        break
+        date_8d = self._extract_move_in_date_8digits(move_in)
+        return f"{clean_bldg}-{room_no}-{date_8d}.json"
+
+    def _sync_individual_room_files_unlocked(self, rooms: List[Dict[str, Any]]) -> None:
+        """각 호실 객체를 건물/호실/전입일 기준 개별 json 파일로 data/rent3_pool/rooms/ 에 분리 저장.
+        또한 각 호실 객체에 [적용수납년월, 수납일, 임대료, 관리비, 부가세] 형식의 수납 이력(payments)을 동기화."""
+        os.makedirs(self.rooms_dir, exist_ok=True)
+        active_filenames = set()
+
+        # payments.json 의 수납 내역을 id_room 및 (branch, room_no) 기준으로 맵핑
+        all_payments = self._load_collection_unlocked("payments")
+        payments_by_room: Dict[str, List[List[Any]]] = {}
+        for p in all_payments:
+            id_room = p.get("id_room") or ""
+            branch = p.get("branch") or ""
+            room_no = str(p.get("room_no") or "").strip()
+
+            ym = self._normalize_billing_ym_int(p.get("billing_month") or p.get("billing_ym"))
+            paid_d = self._format_paid_date_dots(p.get("paid_date"))
+            rent = int(p.get("rent_amount") or 0)
+            maint = int(p.get("maintenance_amount") or 0)
+            vat = int(p.get("vat_amount") or 0)
+            rec = [ym, paid_d, rent, maint, vat]
+
+            if id_room:
+                payments_by_room.setdefault(f"id:{id_room}", []).append(rec)
+            if branch and room_no:
+                payments_by_room.setdefault(f"br:{branch}:{room_no}", []).append(rec)
+
+        for r in rooms:
+            fn = self.format_room_filename(r)
+            active_filenames.add(fn)
+
+            # 불필요한 내부 파일경로 중복 필드 제거
+            r.pop("room_file", None)
+            r.pop("room_file_path", None)
+
+            # name에서 '201호 (남향 풀옵션)'처럼 status_description과 중복되는 부가 수식어가 있으면 호실 번호 중심 또는 명확한 명칭으로 간소화
+            clean_bldg = fn.split("-")[0] if "-" in fn else "시크빌"
+            room_no = str(r.get("room_no") or "").strip()
+            move_in = r.get("move_in_date") or ""
+
+            # 호실의 기존 payments 목록과 payments.json 의 내역을 합쳐서 최신화
+            existing_pmts = list(r.get("payments") or [])
+            matched_pool_pmts = (
+                payments_by_room.get(f"id:{r.get('id', '')}")
+                or payments_by_room.get(f"br:{r.get('branch', '')}:{room_no}")
+                or []
+            )
+            combined_dict: Dict[tuple, List[Any]] = {}
+            for item in existing_pmts:
+                if isinstance(item, list) and len(item) >= 5:
+                    combined_dict[(item[0], str(item[1]))] = [
+                        self._normalize_billing_ym_int(item[0]),
+                        self._format_paid_date_dots(item[1]),
+                        int(item[2]),
+                        int(item[3]),
+                        int(item[4]),
+                    ]
+            for item in matched_pool_pmts:
+                combined_dict[(item[0], str(item[1]))] = item
+
+            sorted_payments = sorted(combined_dict.values(), key=lambda x: (x[0], x[1]))
+            r["payments"] = sorted_payments
+
+            # 파일 내부 data 객체 최적화 (중복 정보 및 무의미한 경로 제거)
+            clean_r = dict(r)
+            clean_r.pop("room_file", None)
+            clean_r.pop("room_file_path", None)
+
+            # name과 status_description 중복 정리: name이 단순히 '201호 (남향 풀옵션)'처럼 status_description의 앞부분과 중복되면 간소화
+            raw_name = clean_r.get("name", "")
+            stat_desc = clean_r.get("status_description", "")
+            if "남향 풀옵션" in raw_name and "남향 풀옵션" in stat_desc:
+                # name을 호실명으로 단정화하여 중복 제거
+                clean_r["name"] = f"{room_no}호"
+
+            target_path = os.path.join(self.rooms_dir, fn)
+            payload = {
+                "pool": "rent3_pool",
+                "collection": "rooms",
+                "file_name": fn,
+                "building_name": clean_bldg,
+                "room_no": room_no,
+                "move_in_date": move_in,
+                "is_occupied": bool(r.get("id_tenant") and r.get("active_contract_id")),
+                "updated_at": now_iso(),
+                "data": clean_r,
+            }
+            self._atomic_write_json(target_path, payload)
+
+        try:
+            for fname in os.listdir(self.rooms_dir):
+                if fname.endswith(".json") and fname not in active_filenames:
+                    try:
+                        os.remove(os.path.join(self.rooms_dir, fname))
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    def get_room_file(self, filename: str) -> Optional[Dict[str, Any]]:
+        """rooms/*.json 개별 호실 파일을 O(1)로 직접 읽기."""
+        if not filename.endswith(".json"):
+            filename = f"{filename}.json"
+        path = os.path.join(self.rooms_dir, filename)
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as fp:
+                return json.load(fp)
+        except Exception:
+            return None
+
+    def list_room_files(self) -> List[Dict[str, Any]]:
+        """rooms/ 디렉터리에 분리 저장된 모든 개별 호실 파일 메타데이터 목록."""
+        if not os.path.exists(self.rooms_dir):
+            return []
+        items = []
+        try:
+            for fn in sorted(os.listdir(self.rooms_dir)):
+                if not fn.endswith(".json"):
+                    continue
+                fpath = os.path.join(self.rooms_dir, fn)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as fp:
+                        raw = json.load(fp)
+                    items.append({
+                        "file_name": fn,
+                        "file_path": fpath,
+                        "building_name": raw.get("building_name", ""),
+                        "room_no": raw.get("room_no", ""),
+                        "move_in_date": raw.get("move_in_date", ""),
+                        "is_occupied": raw.get("is_occupied", False),
+                        "size_bytes": os.path.getsize(fpath),
+                        "updated_at": raw.get("updated_at", ""),
+                    })
+                except Exception:
+                    pass
+        except OSError:
+            pass
+        return items
+
     def _save_collection_unlocked(self, collection: str, items: List[Dict[str, Any]]) -> Dict[str, Any]:
         path = self.file_path(collection)
         rev = self._revisions.get(collection, 0) + 1
         updated = now_iso()
+        if collection == "rooms":
+            self._sync_individual_room_files_unlocked(items)
         envelope = {
             "pool": "rent3_pool",
             "collection": collection,
@@ -237,7 +452,50 @@ class JsonDataPool:
                 summary=summary or f"{kind}:{obj_id}",
                 app_source=app_source,
             )
+
+            # 수납(payments)이 저장될 때, 해당하는 room의 payments 리스트에도 자동 동기화
+            if collection == "payments":
+                try:
+                    self._sync_payment_to_room_unlocked(record)
+                except Exception:
+                    pass
+
             return record
+
+    def _sync_payment_to_room_unlocked(self, payment_record: Dict[str, Any]) -> None:
+        """새로 저장된 payment_record를 매칭되는 room 객체의 payments 배열에 실시간 반영."""
+        id_room = payment_record.get("id_room") or ""
+        branch = payment_record.get("branch") or ""
+        room_no = str(payment_record.get("room_no") or "").strip()
+
+        rooms = list(self._load_collection_unlocked("rooms"))
+        target_idx = None
+        for idx, r in enumerate(rooms):
+            if id_room and r.get("id") == id_room:
+                target_idx = idx
+                break
+            if branch and room_no and r.get("branch") == branch and str(r.get("room_no", "")).strip() == room_no:
+                target_idx = idx
+                break
+
+        if target_idx is not None:
+            r = rooms[target_idx]
+            ym = self._normalize_billing_ym_int(payment_record.get("billing_month") or payment_record.get("billing_ym"))
+            paid_d = self._format_paid_date_dots(payment_record.get("paid_date"))
+            rent = int(payment_record.get("rent_amount") or 0)
+            maint = int(payment_record.get("maintenance_amount") or 0)
+            vat = int(payment_record.get("vat_amount") or 0)
+            entry = [ym, paid_d, rent, maint, vat]
+
+            current_list = list(r.get("payments") or [])
+            filtered = [
+                it for it in current_list
+                if not (isinstance(it, list) and len(it) >= 2 and it[0] == ym and str(it[1]) == paid_d)
+            ]
+            filtered.append(entry)
+            r["payments"] = sorted(filtered, key=lambda x: (x[0], x[1]))
+            # 방 컬렉션 및 개별 파일 갱신
+            self._save_collection_unlocked("rooms", rooms)
 
     def get(self, collection: str, kind: str, obj_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:

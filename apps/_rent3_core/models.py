@@ -286,10 +286,54 @@ class Room(PoolObj):
     pre_moveout_notice: bool = False         # 만기 전출예정 회신 시 사전 공실 매물 예고 플래그
     is_published: bool = True
     images: List[str] = Field(default_factory=list)
+    move_in_date: Optional[str] = None       # 전입일 (예: '2025-01-01' 또는 '2025.1.1')
+    room_file: Optional[str] = None          # 개별 호실 파일명 (예: '시크빌-201-20250101.json')
+    room_file_path: Optional[str] = None     # 개별 파일 전체 경로
+    payments: List[List[Any]] = Field(default_factory=list)  # 수납이력: [[적용수납년월(202601), 수납일(2026.1.12), 임대료(290000), 관리비(150000), 부가세(0)], ...]
 
     @property
     def is_occupied(self) -> bool:
         return bool(self.id_tenant and self.active_contract_id)
+
+    def add_payment_record(
+        self,
+        billing_ym: Any,
+        paid_date: str,
+        rent_amount: int,
+        maintenance_amount: int,
+        vat_amount: int = 0,
+        app_source: str = "rent3_pool",
+    ) -> "Room":
+        """호실 객체 내에 [적용수납년월, 수납일, 임대료, 관리비, 부가세] 형식의 수납 배열 추가 및 저장."""
+        from .pool import pool
+        ym_norm = pool()._normalize_billing_ym_6digits(billing_ym)
+        p_date = pool()._format_paid_date_dots(paid_date)
+        entry = [ym_norm, p_date, int(rent_amount), int(maintenance_amount), int(vat_amount)]
+        # 중복 방지 (동일 수납년월, 수납일자 기준 대체 또는 추가)
+        replaced = False
+        for idx, item in enumerate(self.payments):
+            if len(item) >= 2 and item[0] == ym_norm and item[1] == p_date:
+                self.payments[idx] = entry
+                replaced = True
+                break
+        if not replaced:
+            self.payments.append(entry)
+        self.payments.sort(key=lambda x: str(x[0]))
+        return self.save(action="payment_record_added", app_source=app_source)
+
+    def get_room_filename(self) -> str:
+        """이 호실의 건물/호실/전입일 기준 분리 파일명 반환."""
+        from .pool import pool
+        return pool().format_room_filename(self.model_dump())
+
+    @classmethod
+    def load_by_file(cls, filename: str) -> Optional["Room"]:
+        """rooms/*.json 개별 분리 파일에서 O(1)로 직접 Room 객체 로딩."""
+        from .pool import pool
+        doc = pool().get_room_file(filename)
+        if not doc or "data" not in doc:
+            return None
+        return cls(**doc["data"])
 
     def summary(self) -> str:
         state = "입주중" if self.is_occupied else ("공실게시" if self.is_published else "공실비공개")

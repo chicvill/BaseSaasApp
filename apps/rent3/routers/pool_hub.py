@@ -127,6 +127,32 @@ def pool_file_raw(collection: str) -> Dict[str, Any]:
     }
 
 
+@router.get("/rooms/files")
+def list_room_files_endpoint() -> Dict[str, Any]:
+    """분리 저장된 개별 호실 파일 (data/rent3_pool/rooms/*.json) 메타데이터 목록."""
+    ensure_pool_seeded()
+    files = pool().list_room_files()
+    return {
+        "success": True,
+        "count": len(files),
+        "files": files,
+    }
+
+
+@router.get("/rooms/files/{filename}")
+def get_room_file_endpoint(filename: str) -> Dict[str, Any]:
+    """특정 개별 호실 파일 (예: '시크빌-201-20250101.json') 원본 조회."""
+    ensure_pool_seeded()
+    doc = pool().get_room_file(filename)
+    if not doc:
+        raise NotFound(f"호실 파일을 찾을 수 없습니다: {filename}", hint="예: 시크빌-201-20250101.json")
+    return {
+        "success": True,
+        "file_name": filename,
+        "data": doc,
+    }
+
+
 @router.get("/landing")
 def portal_landing() -> Dict[str, Any]:
     """OpenRent 스타일 직거래 포털 메인 화면용 실시간 Data Pool 집계."""
