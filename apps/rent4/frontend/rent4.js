@@ -140,8 +140,29 @@
     return new URL(`contract.html?t=${encodeURIComponent(token)}`, global.location.href).href;
   }
 
+  /**
+   * 클립보드 복사. 클릭 직후 동기 방식(숨은 입력칸 선택 + execCommand)을 먼저 쓰고,
+   * 안 되면 클립보드 API 를 쓴다. 클립보드 API 는 권한 대기로 응답이 늦거나 막히는 브라우저가 있다.
+   */
   async function copy(text) {
-    try { await global.navigator.clipboard.writeText(text); return true; } catch (_) { return false; }
+    const host = document.querySelector("dialog[open]") || document.body;   // 모달이 열려 있으면 그 안에서만 선택 가능
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+    host.append(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (_) { ok = false; }
+    ta.remove();
+    if (ok) return true;
+    try {
+      await Promise.race([global.navigator.clipboard.writeText(text),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500))]);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   const STATUS_TONE = { sent: "warn", signed: "info", active: "ok", cancelled: "err" };
@@ -233,20 +254,33 @@
         <h2 style="margin:0;font-size:18px">📨 ${esc(title)}</h2>
         <div class="bass-muted" style="font-size:13px">${esc(name)}님${digits ? ` (${esc(phone)})` : ""}에게 아래 내용을 보내 주세요.${copied ? " 이미 복사해 두었습니다." : ""}</div>
         <textarea class="bass-input" readonly style="min-height:120px;font-size:13px">${esc(text)}</textarea>
+        ${link ? `<div>
+          <label class="bass-label">링크만 (브라우저 주소창에는 이 링크만 붙여 넣으세요)</label>
+          <div class="bass-row" style="flex-wrap:nowrap">
+            <input class="bass-input" readonly value="${esc(link)}" style="font-size:12.5px;min-width:0" onfocus="this.select()">
+            <button class="bass-btn bass-btn--sm" data-send="copy-link" style="white-space:nowrap">🔗 링크만 복사</button>
+            <a class="bass-btn bass-btn--sm" href="${esc(link)}" target="_blank" rel="noopener" style="white-space:nowrap">↗ 열기</a>
+          </div></div>` : ""}
         ${note ? `<div style="font-size:12.5px;color:var(--warn)">${esc(note)}</div>` : ""}
         <div class="bass-row">
           ${canShare ? `<button class="bass-btn bass-btn--primary" data-send="share">📤 카카오톡 등으로 공유</button>` : ""}
           ${digits ? `<a class="bass-btn ${canShare ? "" : "bass-btn--primary"}" href="sms:${digits}?&body=${encodeURIComponent(text)}">💬 문자 보내기</a>` : ""}
-          <button class="bass-btn" data-send="copy">📋 복사</button>
+          <button class="bass-btn" data-send="copy">📋 문구 전체 복사</button>
           <button class="bass-btn bass-btn--ghost" data-send="close">닫기</button>
         </div>
-        ${canShare ? "" : `<div class="bass-muted" style="font-size:12px">PC 에서는 복사한 내용을 카카오톡 PC·문자 앱에 붙여 넣으세요. 휴대폰에서 열면 카카오톡 공유 버튼이 나타납니다.</div>`}
+        ${canShare ? "" : `<div class="bass-muted" style="font-size:12px">문구 전체는 카카오톡 PC·문자 앱에 붙여 넣으세요 (받는 쪽에서 링크가 눌립니다). 휴대폰에서 열면 카카오톡 공유 버튼이 나타납니다.</div>`}
       </div>`;
+    const flash = (btn, ok) => {
+      const original = btn.textContent;
+      btn.textContent = ok ? "✓ 복사됨" : "복사 실패";
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    };
     dlg.onclick = async (e) => {
-      const act = e.target.closest("[data-send]")?.dataset.send;
+      const btn = e.target.closest("[data-send]");
+      const act = btn?.dataset.send;
       if (act === "close") dlg.close();
-      if (act === "copy") Bass.updateAppAlert("success", (await copy(text)) ? "복사했습니다." : "복사하지 못했습니다.",
-        "카카오톡이나 문자 앱에 붙여 넣으세요.");
+      if (act === "copy") flash(btn, await copy(text));
+      if (act === "copy-link") flash(btn, await copy(link));
       if (act === "share") {
         try { await global.navigator.share({ title: "Rent4", text }); dlg.close(); } catch (_) { /* 사용자가 취소 */ }
       }
