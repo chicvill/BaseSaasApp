@@ -5,14 +5,15 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
 
 공통
     GET    /me                             역할(admin|lessor|tenant), 소속 건물·호실, 이동할 페이지
-    GET    /setup/view?t=                  관리인 설정 링크: 아이디와 임시 비밀번호 (첫 로그인 전까지)
+    GET    /setup/view?t=  POST /setup/start      관리인 설정 링크 → 바로 로그인 (비밀번호를 정하기 전까지)
 관리인 (superadmin)
     GET    /admin/buildings                건물 목록과 이번 달 요약
     GET|POST /admin/contracts              가맹 계약 목록 / 발행 (계약 링크 토큰 반환)
     POST   /admin/contracts/{id}/relink|paid|cancel|reset   (reset = 비밀번호 분실: 새 임시 비밀번호 + 새 링크)
 계약 상대방 (로그인 전, 계약 링크의 토큰 t)
-    GET    /contract/view?t=               계약 내용 · 상태 · (체결 후) 아이디와 임시 비밀번호
-    GET    /invite/view?t=  POST /invite/open   임차인 안내 링크: 휴대폰 뒤 4자리 확인 → 아이디·임시 비밀번호
+    GET    /contract/view?t=               계약 내용 · 상태
+    POST   /contract/start                 체결된 계약 링크 → 바로 로그인 (비밀번호를 정하기 전까지)
+    GET    /invite/view?t=  POST /invite/start  임차인 안내 링크: 휴대폰 뒤 4자리 확인 → 바로 로그인
     POST   /contract/sign                  휴대폰 뒤 4자리 본인 확인 + 동의
 임대인 (branch_admin = 자기 건물 / 관리인은 ?branch= 로 건물 지정)
     GET    /lessor/board?year=2026         호실 × 12개월 수납 현황
@@ -27,7 +28,7 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     POST   /lessor/contracts/{id}/relink|paid|cancel|reset
 임차인 (로그인)
     GET    /tenant/me                      내 호실의 입금 반영 결과
-    POST   /account/password               비밀번호 변경 (관리인·임대인·임차인, 언제든. 첫 로그인 때는 필수)
+    POST   /account/password               비밀번호 설정·변경 (링크로 처음 들어온 경우 현재 비밀번호 없이 설정)
 """
 from __future__ import annotations
 
@@ -122,6 +123,11 @@ def setup_view(t: str = "") -> Dict[str, Any]:
     return {"success": True, **accounts.admin_link_view(t)}
 
 
+@router.post("/setup/start")
+def setup_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.admin_link_start(str(payload.get("t", "")))}
+
+
 # ── 계약 상대방 (링크 토큰, 로그인 전) ──
 @router.get("/contract/view")
 def contract_view(t: str = "") -> Dict[str, Any]:
@@ -132,6 +138,11 @@ def contract_view(t: str = "") -> Dict[str, Any]:
 def contract_sign(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     c = contracts.sign(str(payload.get("t", "")), str(payload.get("phone4", "")), bool(payload.get("agree")))
     return {"success": True, "contract": contracts.public(c, for_party=True)}
+
+
+@router.post("/contract/start")
+def contract_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **contracts.start_session(str(payload.get("t", "")))}
 
 
 # ── 임대인 ──
@@ -254,9 +265,9 @@ def invite_view(t: str = "") -> Dict[str, Any]:
     return {"success": True, **accounts.invite_view(t)}
 
 
-@router.post("/invite/open")
-def invite_open(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **accounts.invite_open(str(payload.get("t", "")), str(payload.get("phone4", "")))}
+@router.post("/invite/start")
+def invite_start(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **accounts.invite_start(str(payload.get("t", "")), str(payload.get("phone4", "")))}
 
 
 # ── 임차인 ──

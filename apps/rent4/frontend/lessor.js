@@ -84,7 +84,7 @@
               : `<span class="bass-badge bass-badge--warn">안내 전</span>`}</td>
         <td style="text-align:right">
           ${a.activated ? "" : `<button class="bass-btn bass-btn--sm bass-btn--primary" data-link="invite" data-room="${esc(a.room)}">📨 안내 링크</button>`}
-          <button class="bass-btn bass-btn--sm" data-link="reset" data-room="${esc(a.room)}" title="비밀번호를 잊었을 때: 새 임시 비밀번호 + 새 링크">🔑 비밀번호 초기화</button>
+          <button class="bass-btn bass-btn--sm" data-link="reset" data-room="${esc(a.room)}" title="비밀번호를 잊었을 때: 새 링크로 다시 설정">🔑 비밀번호 초기화</button>
         </td>
       </tr>`).join("")}</tbody>`;
   }
@@ -99,8 +99,8 @@
         title: reset ? `${r.room}호 비밀번호를 초기화했습니다` : `${r.room}호 안내 링크를 만들었습니다`,
         name: r.tenant_name, phone: r.phone, link: Rent4.inviteLink(r.token),
         message: reset
-          ? `[Rent4] ${r.tenant_name}님, ${r.room}호 비밀번호가 초기화되었습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 새 임시 비밀번호를 받아 로그인해 주세요.`
-          : `[Rent4] ${r.tenant_name}님, ${r.room}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 아이디와 임시 비밀번호를 받아 주세요.`,
+          ? `[Rent4] ${r.tenant_name}님, ${r.room}호 비밀번호가 초기화되었습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 바로 로그인되어 비밀번호를 다시 설정할 수 있습니다.`
+          : `[Rent4] ${r.tenant_name}님, ${r.room}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. 아래 링크에서 휴대폰 뒤 4자리로 본인 확인 후 바로 로그인되어 비밀번호를 설정할 수 있습니다.`,
         note: reset ? "이전 비밀번호와 이전 안내 링크는 이미 막혔습니다." : "",
       });
       await loadAccounts();

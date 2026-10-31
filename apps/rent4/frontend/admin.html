@@ -29,7 +29,7 @@
 
   <h2 style="margin:28px 0 12px;font-size:17px">📝 가맹 계약 (임대인 등록)</h2>
   <form id="memberForm" class="bass-card stack">
-    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임대인이 링크에서 본인 확인 후 동의하고, 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드)과 임시 비밀번호가 발급됩니다.</div>
+    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임대인이 링크에서 본인 확인 후 동의하고, 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드)이 만들어지고, 임대인은 같은 링크의 '시작하기'로 바로 로그인해 비밀번호를 정합니다.</div>
     <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
       <div><label class="bass-label" for="mBuilding">건물 이름</label><input class="bass-input" id="mBuilding" required placeholder="예: 시크빌"></div>
       <div><label class="bass-label" for="mCode">건물 코드 (임대인 아이디)</label><input class="bass-input" id="mCode" required placeholder="예: chic" autocapitalize="none"></div>
@@ -89,7 +89,7 @@
     const { buildings } = await Bass.api("rent4", "/admin/buildings");
     document.getElementById("buildings").innerHTML = buildings.map((b) => `
       <a class="bass-card is-interactive stack" style="text-decoration:none;color:inherit;gap:10px"
-         href="lessor.html?branch=${encodeURIComponent(b.branch)}">
+         href="임대인.html?branch=${encodeURIComponent(b.branch)}">
         <div class="bass-row" style="justify-content:space-between">
           <strong style="font-size:18px">🏢 ${esc(b.name)}</strong>
           <span class="bass-badge ${b.rooms ? (b.unpaid_rooms ? "bass-badge--err" : "bass-badge--ok") : "bass-badge--info"}">

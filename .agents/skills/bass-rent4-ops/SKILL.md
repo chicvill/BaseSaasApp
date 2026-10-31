@@ -44,10 +44,14 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 관리인: 서버 콘솔 `scripts/admin_link.py` → 설정 링크(setup.html, 토큰 해시 저장) + 임시 비밀번호 10자 → 첫 로그인 변경(8자 이상) 전에는 관리 API 403. 다시 발급하면 이전 링크·비밀번호 무효. AdminAccount 기록이 없는 관리인(BASS_SEED_PASSWORD 시드)은 변경 강제 없음.
 
 ## 로그인 · 권한
+- **링크 = 첫 로그인 (임시 비밀번호는 사용자에게 보이지 않는다)**: 계정이 생기거나 초기화되면 내부적으로 무작위 임시 비밀번호를 걸어 두되, 화면·API 응답에 내보내지 않는다.
+  - 관리인 `setup.html` → `POST /setup/start`, 임대인·임차인 계약 링크 `contract.html` (active) → `POST /contract/start`, 기존 임차인 안내 링크 `invite.html` → 휴대폰 뒤 4자리 확인 + `POST /invite/start`. 응답은 로그인 토큰 + 이동할 페이지(admin.html / 임대인.html / 임차인.html).
+  - 링크 로그인은 must_change 동안만 된다. 비밀번호를 정하면 같은 링크는 `{activated: true}` 만 돌려준다 → 로그인 페이지로.
+  - must_change 상태의 첫 설정은 현재 비밀번호 없이 `/account/password` (링크로 받은 세션이 본인 확인). 그 뒤 변경은 현재 비밀번호 필수.
 - 로그인은 core `/auth/login` 하나. 로그인 뒤 `GET /me` 가 역할과 첫 페이지를 정한다.
-  - superadmin/admin → 관리인 `admin.html` (건물 목록) → `lessor.html?branch=<지점>`
-  - branch_admin + LessorAccount → 임대인 `lessor.html` (자기 지점 고정, 다른 branch 요청은 403, 비밀번호 변경 전 403)
-  - user + TenantAccount → 임차인 `tenant.html` (자기 호실만)
+  - superadmin/admin → 관리인 `admin.html` (건물 목록) → `임대인.html?branch=<지점>`
+  - branch_admin + LessorAccount → 임대인 `임대인.html` (자기 지점 고정, 다른 branch 요청은 403, 비밀번호 변경 전 403)
+  - user + TenantAccount → 임차인 `임차인.html` (자기 호실만)
 - 임차인 계정: 아이디 = 건물 코드 + 호실(`chic603`). 거주 호실마다 시작·Excel 반영 때 자동 생성.
   - 첫 비밀번호 = 임대인과 같은 8자 임시 비밀번호(`temp_password`, 0/O·1/l/I 제외). 임대인 화면에는 보이지 않는다 — '📨 안내 링크'(invite, 그대로) 또는 '🔑 비밀번호 초기화'(reset, 새 임시 비밀번호)가 안내 링크를 만들고, 임차인은 링크에서 휴대폰 뒤 4자리 확인 후 받는다(10분 5회 실패 잠금). 첫 로그인에 변경 필수 — 변경 전 `/tenant/me` 는 403.
   - 안내 링크 토큰은 해시만 저장(`invite_hash`). 새 링크·재발급·임차인 변경·퇴거 때 이전 링크 무효. 사용 중 계정에는 invite 불가(분실이면 reset).

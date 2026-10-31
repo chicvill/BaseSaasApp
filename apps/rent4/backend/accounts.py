@@ -3,8 +3,8 @@ apps/rent4/backend/accounts.py — 건물 목록 · 임차인 계정 · 로그�
 
 역할 (core.auth 로그인 하나로 통일)
     관리인  : superadmin / admin        → admin.html  (모든 건물)
-    임대인  : branch_admin + LessorAccount → lessor.html (자기 지점 건물) — 가맹 계약 체결로만 생긴다
-    임차인  : user + TenantAccount      → tenant.html (자기 호실)
+    임대인  : branch_admin + LessorAccount → 임대인.html (자기 지점 건물) — 가맹 계약 체결로만 생긴다
+    임차인  : user + TenantAccount      → 임차인.html (자기 호실)
     임대인·임차인 모두 첫 로그인 때 임시 비밀번호를 바꿔야 화면을 쓸 수 있다.
 
 임차인 계정
@@ -22,7 +22,7 @@ import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from core.auth import User
+from core.auth import User, issue_token
 from core.errors import Conflict, DomainError, Forbidden, Mismatch, NotFound
 
 from .models import AdminAccount, Building, LessorAccount, Room, TenantAccount
@@ -57,12 +57,31 @@ def issue_admin_link(username: str = "admin") -> Tuple[AdminAccount, str]:
     return acc.save(), token
 
 
-def admin_link_view(token: str) -> Dict:
+def _admin_by_link(token: str) -> AdminAccount:
     acc = AdminAccount.first(link_hash=_hash(token or "")) if token else None
     if not acc:
         raise NotFound("설정 링크가 올바르지 않거나 만료되었습니다.", hint="서버 관리자에게 링크를 다시 만들어 달라고 요청하세요.")
-    return {"username": acc.username, "temp_password": acc.initial_code if acc.must_change else "",
-            "activated": not acc.must_change}
+    return acc
+
+
+def admin_link_view(token: str) -> Dict:
+    acc = _admin_by_link(token)
+    return {"username": acc.username, "activated": not acc.must_change}
+
+
+def link_session(username: str, home: str) -> Dict:
+    """링크로 들어온 사용자에게 바로 로그인 세션을 준다 (비밀번호를 정하기 전까지만 쓰인다)."""
+    user = User.by_username(username)
+    if user is None:
+        raise NotFound("계정을 찾을 수 없습니다.")
+    return {"token": issue_token(user), "home": home, "activated": False}
+
+
+def admin_link_start(token: str) -> Dict:
+    acc = _admin_by_link(token)
+    if not acc.must_change:
+        return {"activated": True}
+    return link_session(acc.username, "admin.html")
 
 
 def require_ready(user: User) -> None:
@@ -196,8 +215,8 @@ def invite_view(token: str) -> Dict:
             "phone_masked": f"***-****-{re.sub(r'\D', '', room.phone)[-4:]}", "activated": not acc.must_change}
 
 
-def invite_open(token: str, phone4: str) -> Dict:
-    """휴대폰 뒤 4자리로 본인 확인 → 아이디와 임시 비밀번호 (첫 로그인 전까지만)."""
+def invite_start(token: str, phone4: str) -> Dict:
+    """휴대폰 뒤 4자리로 본인 확인 → 바로 로그인 (비밀번호를 정하기 전까지만)."""
     acc, room = _invite(token)
     now = time.time()
     recent = [t for t in _invite_failures[acc.id] if now - t < INVITE_WINDOW]
@@ -208,8 +227,9 @@ def invite_open(token: str, phone4: str) -> Dict:
         _invite_failures[acc.id].append(now)
         raise Mismatch("휴대폰 번호 뒤 4자리가 등록된 번호와 다릅니다.", hint="임대인에게 등록한 휴대폰 번호를 확인하세요.")
     _invite_failures.pop(acc.id, None)
-    return {"username": acc.username, "temp_password": "" if not acc.must_change else acc.initial_code,
-            "activated": not acc.must_change}
+    if not acc.must_change:
+        return {"activated": True}
+    return link_session(acc.username, "임차인.html")
 
 
 def tenant_account(user: User) -> TenantAccount:
@@ -229,17 +249,19 @@ def lessor_account(user: User) -> LessorAccount:
 
 
 def change_password(user: User, current: str, new: str) -> None:
-    """첫 로그인(임시 비밀번호)이든 평소든 같은 규칙으로 바꾼다. 관리인은 계정 기록 없이 core 비밀번호만 바꾼다."""
+    """처음 설정(링크로 로그인한 상태 — 현재 비밀번호 없이)이든 평소 변경이든 같은 규칙.
+    관리인은 AdminAccount 기록이 없으면 core 비밀번호만 바꾼다."""
     if user.role in ADMIN_ROLES:
         acc, min_len = AdminAccount.first(username=user.username), 8
     else:
         acc = lessor_account(user) if user.role in LESSOR_ROLES else tenant_account(user)
         min_len = 6
-    if not user.check_password(current):
-        raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="처음이라면 계약 링크에서 받은 임시 비밀번호를 입력하세요.")
+    first_time = acc is not None and acc.must_change
+    if not first_time and not user.check_password(current):
+        raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="비밀번호를 잊었다면 링크를 다시 요청하세요.")
     if len(new) < min_len or new.isdigit() and len(set(new)) == 1:
         raise Mismatch(f"새 비밀번호는 {min_len}자 이상, 같은 숫자 반복이 아니어야 합니다.")
-    if new == current:
+    if not first_time and new == current:
         raise Mismatch("새 비밀번호가 지금 비밀번호와 같습니다.")
     user.set_password(new).save("rent4_password_changed")
     if acc is not None:
@@ -258,11 +280,11 @@ def whoami(user: User) -> Dict:
     if user.role in LESSOR_ROLES:
         acc = lessor_account(user)
         b = building_of(acc.branch)
-        return {**base, "kind": "lessor", "label": "임대인", "home": "lessor.html",
+        return {**base, "kind": "lessor", "label": "임대인", "home": "임대인.html",
                 "must_change_password": acc.must_change,
                 "building": {"code": b.code, "name": b.name, "branch": b.branch}}
     acc = tenant_account(user)
     b = building_of(acc.branch)
-    return {**base, "kind": "tenant", "label": "임차인", "home": "tenant.html", "room": acc.room,
+    return {**base, "kind": "tenant", "label": "임차인", "home": "임차인.html", "room": acc.room,
             "must_change_password": acc.must_change,
             "building": {"code": b.code, "name": b.name, "branch": b.branch}}

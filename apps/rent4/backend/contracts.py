@@ -246,17 +246,32 @@ def public(c: Contract, for_party: bool = False) -> Dict:
     return data
 
 
-def _login_info(c: Contract) -> Optional[Dict]:
-    """체결된 계약의 상대방에게 보여 줄 아이디와 임시 비밀번호 (첫 로그인 전까지만)."""
+def _account(c: Contract):
     if c.kind == "membership":
-        acc = LessorAccount.first(username=c.username)
-        code, done = (acc.initial_code, not acc.must_change) if acc else ("", True)
-    else:
-        acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
-        if not acc or acc.username != c.username:
-            return None
-        code, done = acc.initial_code, not acc.must_change
-    return {"username": c.username, "temp_password": "" if done else code, "activated": done}
+        return LessorAccount.first(username=c.username)
+    acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
+    return acc if acc and acc.username == c.username else None
+
+
+def _login_info(c: Contract) -> Optional[Dict]:
+    """체결된 계약 링크의 상태: 아직 비밀번호를 정하지 않았으면 '시작하기'로 바로 로그인할 수 있다."""
+    acc = _account(c)
+    if acc is None:
+        return None
+    return {"username": c.username, "activated": not acc.must_change, "can_start": acc.must_change}
+
+
+def start_session(token: str) -> Dict:
+    """체결된 계약 링크 → 바로 로그인 (임시 비밀번호는 보여 주지 않는다). 비밀번호를 정한 뒤에는 쓸 수 없다."""
+    c = by_token(token)
+    if c.status != "active":
+        raise Conflict("계약이 아직 체결되지 않았습니다.", hint="납부 확인이 끝나면 다시 열어 주세요.")
+    acc = _account(c)
+    if acc is None:
+        raise Conflict("이 계약의 계정을 찾을 수 없습니다.", hint="계약을 보낸 분에게 문의해 주세요.")
+    if not acc.must_change:
+        return {"activated": True}
+    return accounts.link_session(c.username, "임대인.html" if c.kind == "membership" else "임차인.html")
 
 
 def listing(kind: str, branch: Optional[str] = None) -> List[Dict]:

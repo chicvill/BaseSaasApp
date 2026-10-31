@@ -56,30 +56,31 @@
   }
 
   /** 비밀번호 변경 폼 (첫 로그인 카드와 평소 변경 창이 같이 쓴다). 바꾸고 나면 onDone 을 부른다. */
-  function passwordForm({ title, intro, currentLabel, submitLabel, minLen }, onDone) {
+  function passwordForm({ title, intro, currentLabel, submitLabel, minLen, firstTime }, onDone) {
     const esc = Bass.escapeHtml;
     const form = document.createElement("form");
     form.className = "stack";
     form.innerHTML = `
       <h2 style="margin:0;font-size:19px">${esc(title)}</h2>
       ${intro ? `<p class="bass-muted" style="margin:0;font-size:13.5px">${esc(intro)}</p>` : ""}
-      <div><label class="bass-label">${esc(currentLabel)}
-        <input class="bass-input" name="current" type="password" autocomplete="current-password" required></label></div>
-      <div><label class="bass-label">새 비밀번호 (${minLen}자 이상)
+      ${firstTime ? "" : `<div><label class="bass-label">${esc(currentLabel)}
+        <input class="bass-input" name="current" type="password" autocomplete="current-password" required></label></div>`}
+      <div><label class="bass-label">${firstTime ? "비밀번호" : "새 비밀번호"} (${minLen}자 이상)
         <input class="bass-input" name="new" type="password" autocomplete="new-password" minlength="${minLen}" required></label></div>
-      <div><label class="bass-label">새 비밀번호 확인
+      <div><label class="bass-label">${firstTime ? "비밀번호" : "새 비밀번호"} 확인
         <input class="bass-input" name="new2" type="password" autocomplete="new-password" minlength="${minLen}" required></label></div>
       <div class="bass-row"><button class="bass-btn bass-btn--primary" type="submit">${esc(submitLabel)}</button></div>`;
     form.addEventListener("submit", (e) => {
       e.preventDefault();
-      const v = (n) => form.elements[n].value;
+      const v = (n) => (form.elements[n] ? form.elements[n].value : "");
       if (v("new") !== v("new2")) {
-        Bass.updateAppAlert("diff", "새 비밀번호 두 칸이 서로 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
+        Bass.updateAppAlert("diff", "비밀번호 두 칸이 서로 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
         return;
       }
       Bass.withLock(form.querySelector("button[type=submit]"), async () => {
         await Bass.api("rent4", "/account/password", { method: "POST", body: { current: v("current"), new: v("new") } });
-        Bass.updateAppAlert("success", "비밀번호를 바꿨습니다.", "다음부터는 새 비밀번호로 로그인하세요.");
+        Bass.updateAppAlert("success", firstTime ? "비밀번호를 설정했습니다." : "비밀번호를 바꿨습니다.",
+          "다음부터는 아이디와 이 비밀번호로 로그인하세요.");
         form.reset();
         onDone();
       }, "저장 중...");
@@ -87,7 +88,7 @@
     return form;
   }
 
-  /** 첫 로그인(임시 비밀번호)이면 비밀번호 변경 카드를 보여 주고, 바꾼 뒤에 resolve 된다. */
+  /** 링크로 처음 들어온 사용자면 비밀번호 설정 카드를 보여 주고, 정한 뒤에 resolve 된다. */
   function passwordGate(info, mount) {
     if (!info.must_change_password) return Promise.resolve();
     return new Promise((resolve) => {
@@ -95,9 +96,9 @@
       card.className = "bass-card";
       card.style.maxWidth = "460px";
       card.append(passwordForm({
-        title: "처음 오셨네요 — 비밀번호를 바꿔 주세요",
-        intro: `${info.kind === "admin" ? "설정 링크" : "계약 링크"}에서 받은 임시 비밀번호는 첫 로그인에만 쓸 수 있습니다. 앞으로 쓸 비밀번호를 정하면 ${info.label} 화면을 쓸 수 있습니다.`,
-        currentLabel: "임시 비밀번호 (현재 비밀번호)", submitLabel: "비밀번호 바꾸고 계속",
+        title: "환영합니다 — 비밀번호를 설정해 주세요",
+        intro: `아이디는 ${info.username} 입니다. 앞으로 로그인할 때 쓸 비밀번호를 정하면 ${info.label} 화면이 열립니다.`,
+        currentLabel: "", submitLabel: "비밀번호 설정하고 시작", firstTime: true,
         minLen: info.kind === "admin" ? 8 : 6,
       }, () => {
         mount.replaceChildren();
@@ -179,7 +180,7 @@
           c.status !== "cancelled" ? `<button class="bass-btn bass-btn--sm" data-act="relink" data-id="${esc(c.id)}">🔗 링크</button>` : "",
           c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
           ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">취소</button>` : "",
-          c.status === "active" ? `<button class="bass-btn bass-btn--sm" data-act="reset" data-id="${esc(c.id)}" title="비밀번호를 잊었을 때: 새 임시 비밀번호와 새 링크">🔑 비밀번호 초기화</button>` : "",
+          c.status === "active" ? `<button class="bass-btn bass-btn--sm" data-act="reset" data-id="${esc(c.id)}" title="비밀번호를 잊었을 때: 새 링크로 다시 설정">🔑 비밀번호 초기화</button>` : "",
         ].join(" ");
         return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
           <td style="white-space:normal;text-align:left">${esc(terms)}</td>
@@ -199,13 +200,13 @@
         if (btn.dataset.act === "relink") sendContract(c, res.token, "새 링크를 만들었습니다 (이전 링크는 막힘)");
         if (btn.dataset.act === "paid") sendLink({
           title: "계약이 체결되었습니다", name: c.party_name, phone: c.party_phone,
-          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 받으신 계약 링크를 다시 열면 아이디와 임시 비밀번호가 보입니다.`,
+          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 받으신 계약 링크를 다시 열고 '시작하기'를 누르면 바로 로그인되어 비밀번호를 설정할 수 있습니다.`,
         });
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
         if (btn.dataset.act === "reset") sendLink({
           title: `${res.contract.username} 비밀번호를 초기화했습니다`, name: c.party_name, phone: c.party_phone,
           link: contractLink(res.token),
-          message: `[Rent4] ${c.party_name}님, 비밀번호가 초기화되었습니다. 아래 링크에서 새 임시 비밀번호를 확인하고 로그인한 뒤 바로 바꿔 주세요.`,
+          message: `[Rent4] ${c.party_name}님, 비밀번호가 초기화되었습니다. 아래 링크를 열고 '시작하기'를 누르면 바로 로그인되어 비밀번호를 다시 설정할 수 있습니다.`,
           note: "이전 비밀번호와 이전 링크는 이미 막혔습니다.",
         });
         await reload();

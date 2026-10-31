@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rent4 입금 확인 안내</title>
-  <meta name="description" content="임대인이 보낸 안내 링크에서 본인 확인 후 아이디와 임시 비밀번호를 받습니다.">
+  <meta name="description" content="임대인이 보낸 안내 링크에서 본인 확인 후 바로 시작합니다.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
   <style>
@@ -26,10 +26,10 @@
 
   <form id="openForm" class="bass-card stack hide">
     <div id="greeting" style="font-size:15px"></div>
-    <p class="bass-muted" style="margin:0;font-size:13.5px">임대인에게 등록한 휴대폰 <b id="maskedPhone"></b> 의 뒤 4자리를 입력하면 아이디와 임시 비밀번호가 나타납니다.</p>
+    <p class="bass-muted" style="margin:0;font-size:13.5px">임대인에게 등록한 휴대폰 <b id="maskedPhone"></b> 의 뒤 4자리를 입력하면 바로 로그인되어 비밀번호를 정할 수 있습니다.</p>
     <div><label class="bass-label" for="phone4">휴대폰 뒤 4자리</label>
       <input class="bass-input" id="phone4" inputmode="numeric" maxlength="4" pattern="\d{4}" required></div>
-    <button class="bass-btn bass-btn--primary" id="btnOpen" type="submit">본인 확인</button>
+    <button class="bass-btn bass-btn--primary" id="btnOpen" type="submit">본인 확인하고 시작</button>
   </form>
 
   <div id="result" class="bass-card stack hide"></div>
@@ -64,14 +64,10 @@
   $("openForm").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnOpen"), async () => {
-      const r = await Bass.api("rent4", "/invite/open", { method: "POST", body: { t: token, phone4: $("phone4").value.trim() } });
+      const r = await Bass.api("rent4", "/invite/start", { method: "POST", body: { t: token, phone4: $("phone4").value.trim() } });
       if (r.activated) return showDone();
-      $("openForm").classList.add("hide");
-      $("result").classList.remove("hide");
-      $("result").innerHTML = `<strong>✅ 본인 확인이 끝났습니다</strong>
-        <div class="bass-muted">아래 아이디와 임시 비밀번호로 로그인한 뒤, 바로 새 비밀번호로 바꿔 주세요. 임시 비밀번호는 바꾸는 즉시 사라집니다.</div>
-        <dl class="terms"><dt>아이디</dt><dd class="cred">${esc(r.username)}</dd><dt>임시 비밀번호</dt><dd class="cred">${esc(r.temp_password)}</dd></dl>
-        <a class="bass-btn bass-btn--primary" href="index.html">로그인하러 가기</a>`;
+      Bass.setToken(r.token);
+      location.replace(r.home);
     }, "확인 중...");
   });
 

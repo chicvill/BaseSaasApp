@@ -74,7 +74,7 @@
     <!-- 임대 계약 -->
     <section class="panel stack" data-panel="contracts" hidden>
       <form id="leaseForm" class="bass-card stack">
-        <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임차인이 링크에서 본인 확인 후 동의하고, 잔금 입금을 확인하면 호실에 입주 처리되고 임차인 계정(아이디 = 건물 코드 + 호실)과 임시 비밀번호가 발급됩니다. 대면 계약도 같은 링크를 임차인 휴대폰으로 열어 확인합니다.</div>
+        <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 링크가 만들어집니다. 임차인이 링크에서 본인 확인 후 동의하고, 잔금 입금을 확인하면 호실에 입주 처리되고 임차인 계정(아이디 = 건물 코드 + 호실)이 만들어집니다. 임차인은 같은 링크의 '시작하기'로 바로 로그인해 비밀번호를 정합니다. 대면 계약도 같은 링크를 임차인 휴대폰으로 열어 확인합니다.</div>
         <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:10px">
           <div><label class="bass-label" for="lRoom">호실</label><input class="bass-input" id="lRoom" required inputmode="numeric" placeholder="예: 303"></div>
           <div><label class="bass-label" for="lName">임차인 이름</label><input class="bass-input" id="lName" required></div>
@@ -96,8 +96,8 @@
     <section class="panel stack" data-panel="accounts" hidden>
       <div class="bass-card stack" style="font-size:13.5px">
         <div>거주 중인 호실마다 임차인 계정이 자동으로 만들어집니다. <b>📨 안내 링크</b>를 누르면 안내 문구가 준비되고, 카카오톡 공유나 문자 보내기로 바로 보낼 수 있습니다.
-          임차인은 링크에서 휴대폰 뒤 4자리로 본인 확인 후 아이디와 임시 비밀번호를 받고, 처음 로그인할 때 비밀번호를 바꿉니다.</div>
-        <div class="bass-muted">임차인(이름·전화)이 바뀐 호실은 Excel 을 다시 가져올 때 계정이 초기화되어 이전 임차인과 이전 링크는 더 들어올 수 없습니다. 비밀번호를 잊은 임차인은 '🔑 비밀번호 초기화' — 새 임시 비밀번호와 새 링크가 만들어집니다.</div>
+          임차인은 링크에서 휴대폰 뒤 4자리로 본인 확인하면 바로 로그인되어 비밀번호를 정합니다.</div>
+        <div class="bass-muted">임차인(이름·전화)이 바뀐 호실은 Excel 을 다시 가져올 때 계정이 초기화되어 이전 임차인과 이전 링크는 더 들어올 수 없습니다. 비밀번호를 잊은 임차인은 '🔑 비밀번호 초기화' — 새 링크를 보내면 임차인이 다시 설정합니다.</div>
       </div>
       <div class="board-wrap"><table class="board" id="accounts" style="min-width:520px"></table></div>
     </section>
