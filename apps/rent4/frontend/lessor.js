@@ -16,58 +16,63 @@
   let rooms = [];
   let preview = [];
   let boardData = null;
+  let branch = "";      // 관리인이 고른 건물 (임대인은 서버가 자기 건물로 고정)
 
-  // ── 로그인 ──
+  /** 모든 임대인 API 호출에 건물(branch)을 붙인다. */
+  const api = (path, opts) =>
+    Bass.api("rent4", `${path}${path.includes("?") ? "&" : "?"}branch=${encodeURIComponent(branch)}`, opts);
+
+  // ── 로그인 확인 (관리인 · 임대인만) ──
   async function boot() {
-    if (!Bass.token()) return showLogin();
-    try {
-      const { user } = await Bass.request("/auth/me");
-      if (!["branch_admin", "superadmin"].includes(user.role)) {
-        Bass.setToken("");
-        Bass.updateAppAlert("warning", "임대인(지점 관리자) 계정이 아닙니다.", "임대인 계정으로 다시 로그인해 주세요.");
-        return showLogin();
-      }
-      $("who").textContent = `${user.name} (${user.username})`;
-      $("loginBox").classList.add("hide");
-      $("workspace").classList.remove("hide");
-      $("btnLogout").classList.remove("hide");
-      await loadBoard();
-    } catch (err) {
-      Bass.setToken("");
-      showLogin();
+    const me = await Rent4.guard(["lessor", "admin"]);
+    if (me.kind === "admin") {
+      branch = new URLSearchParams(location.search).get("branch") || "";
+      if (!branch) return Rent4.go("admin.html");
+      $("backAdmin").classList.remove("hide");
+    } else {
+      branch = me.building.branch;
     }
+    $("workspace").classList.remove("hide");
+    await loadBoard();
+    $("buildingName").textContent = `${boardData.building} 임대인`;
+    document.title = `Rent4 · ${boardData.building}`;
   }
-
-  function showLogin() {
-    $("loginBox").classList.remove("hide");
-    $("workspace").classList.add("hide");
-    $("btnLogout").classList.add("hide");
-    $("who").textContent = "로그인이 필요합니다";
-  }
-
-  $("loginForm").addEventListener("submit", (e) => {
-    e.preventDefault();
-    Bass.withLock($("btnLogin"), async () => {
-      const res = await Bass.request("/auth/login", { method: "POST",
-        body: { username: $("username").value.trim(), password: $("password").value } });
-      Bass.setToken(res.token);
-      $("password").value = "";
-      await boot();
-    }, "로그인 중...");
-  });
-
-  $("btnLogout").addEventListener("click", () => { Bass.setToken(""); showLogin(); });
 
   // ── 탭 ──
   document.querySelectorAll(".tabs button").forEach((btn) => btn.addEventListener("click", () => {
     document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("is-active", b === btn));
     document.querySelectorAll(".panel").forEach((p) => { p.hidden = p.dataset.panel !== btn.dataset.tab; });
     if (btn.dataset.tab === "board") loadBoard().catch(Bass.showError);
+    if (btn.dataset.tab === "accounts") loadAccounts().catch(Bass.showError);
   }));
+
+  // ── 임차인 계정 ──
+  async function loadAccounts() {
+    const { accounts } = await api("/lessor/accounts");
+    $("accounts").innerHTML = `<thead><tr><th>호실</th><th>임차인</th><th>아이디</th><th>첫 비밀번호 코드</th><th>상태</th><th></th></tr></thead>
+      <tbody>${accounts.map((a) => `<tr>
+        <td><b>${esc(a.room)}</b></td><td>${esc(a.tenant_name)}</td>
+        <td><code>${esc(a.username)}</code></td>
+        <td>${a.initial_code ? `<code style="font-size:14px">${esc(a.initial_code)}</code>` : "—"}</td>
+        <td>${a.activated ? `<span class="bass-badge bass-badge--ok">사용 중</span>` : `<span class="bass-badge bass-badge--warn">첫 로그인 전</span>`}</td>
+        <td><button class="bass-btn bass-btn--sm" data-reset="${esc(a.room)}">코드 재발급</button></td>
+      </tr>`).join("")}</tbody>`;
+  }
+
+  $("accounts").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-reset]");
+    if (!btn) return;
+    Bass.withLock(btn, async () => {
+      const r = await api(`/lessor/accounts/${encodeURIComponent(btn.dataset.reset)}/reset`, { method: "POST" });
+      Bass.updateAppAlert("success", `${btn.dataset.reset}호 새 코드: ${r.initial_code}`,
+        `아이디 ${r.username} 와 이 코드를 임차인에게 전달하세요. 이전 비밀번호로는 더 이상 로그인할 수 없습니다.`);
+      await loadAccounts();
+    });
+  });
 
   // ── 수납 현황 ──
   async function loadBoard() {
-    boardData = await Bass.api("rent4", `/lessor/board?year=${year}`);
+    boardData = await api(`/lessor/board?year=${year}`);
     rooms = boardData.rooms.map((r) => r.room).filter((r) => r.status === "occupied");
     renderBoard();
   }
@@ -134,7 +139,7 @@
     const del = e.target.closest("[data-del]");
     if (del) {
       Bass.withLock(del, async () => {
-        await Bass.api("rent4", `/lessor/payments/${del.dataset.del}`, { method: "DELETE" });
+        await api(`/lessor/payments/${del.dataset.del}`, { method: "DELETE" });
         dlg.close();
         Bass.updateAppAlert("success", "입금 반영을 취소했습니다.", "필요하면 문자를 다시 분석해 반영하세요.");
         await loadBoard();
@@ -147,7 +152,7 @@
 
   // ── 입금 문자 ──
   $("btnPreview").addEventListener("click", (e) => Bass.withLock(e.currentTarget, async () => {
-    const res = await Bass.api("rent4", "/lessor/bank/preview", { method: "POST", body: { text: $("bankText").value } });
+    const res = await api("/lessor/bank/preview", { method: "POST", body: { text: $("bankText").value } });
     preview = res.items;
     renderPreview(res.counts);
   }, "분석 중... ⏳"));
@@ -198,7 +203,7 @@
       Bass.updateAppAlert("warning", "반영할 입금을 체크해 주세요.", "금액 확인·호실 확인 건은 내용을 고친 뒤 체크하면 반영됩니다.");
       return;
     }
-    const res = await Bass.api("rent4", "/lessor/bank/commit", { method: "POST", body: { items } });
+    const res = await api("/lessor/bank/commit", { method: "POST", body: { items } });
     Bass.updateAppAlert("success", `입금 ${res.saved}건을 수납 기록에 반영했습니다.`, "수납 현황 탭에서 확인할 수 있습니다.");
     $("bankText").value = "";
     $("previewBox").classList.add("hide");
@@ -226,18 +231,19 @@
   }
 
   $("btnImportPreview").addEventListener("click", (e) => Bass.withLock(e.currentTarget, async () => {
-    const r = await Bass.api("rent4", "/lessor/import/preview", { method: "POST", body: { text: $("excelText").value } });
+    const r = await api("/lessor/import/preview", { method: "POST", body: { text: $("excelText").value } });
     renderImport(r, false);
     $("btnImportCommit").disabled = false;
   }, "분석 중... ⏳"));
 
   $("btnImportCommit").addEventListener("click", (e) => Bass.withLock(e.currentTarget, async () => {
-    const r = await Bass.api("rent4", "/lessor/import/commit", { method: "POST", body: { text: $("excelText").value } });
+    const r = await api("/lessor/import/commit", { method: "POST", body: { text: $("excelText").value } });
     renderImport(r, true);
-    Bass.updateAppAlert("success", `${r.year}년 수납부를 Knowledge Pool 에 반영했습니다.`, "수납 현황 탭에서 확인하세요.");
+    Bass.updateAppAlert("success", `${r.year}년 수납부를 Knowledge Pool 에 반영했습니다.`,
+      `임차인 계정: 새로 만듦 ${r.accounts.created} · 초기화 ${r.accounts.reset} · 잠금 ${r.accounts.locked}. 임차인 계정 탭에서 코드를 확인하세요.`);
     year = r.year;
     await loadBoard();
   }, "반영 중... ⏳"));
 
-  boot();
+  boot().catch(Bass.showError);
 })();

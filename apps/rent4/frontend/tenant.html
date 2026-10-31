@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rent4 입금 확인</title>
-  <meta name="description" content="호실 번호와 휴대폰 뒤 4자리로 월세·관리비 입금 반영 결과를 확인합니다.">
+  <title>Rent4 내 입금</title>
+  <meta name="description" content="로그인한 임차인의 월세·관리비 입금 반영 결과.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
 </head>
@@ -12,24 +12,30 @@
 <main class="bass-container" style="max-width:640px">
   <header class="top">
     <div>
-      <h1><a href="./">🔑 내 입금 확인</a></h1>
-      <p class="sub bass-muted">임대인이 반영한 월세·관리비 입금 내역</p>
+      <h1>🔑 내 입금 확인</h1>
+      <p class="sub bass-muted" id="who">확인 중...</p>
     </div>
-    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+    <div class="bass-row">
+      <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnLogout">로그아웃</button>
+    </div>
   </header>
   <div id="app-alert"></div>
 
-  <form id="lookupForm" class="bass-card stack">
-    <div class="bass-row" style="align-items:flex-end">
-      <div style="flex:1 1 120px"><label class="bass-label" for="room">호실</label>
-        <input class="bass-input" id="room" inputmode="numeric" placeholder="예: 303" required></div>
-      <div style="flex:1 1 140px"><label class="bass-label" for="phone4">휴대폰 뒤 4자리</label>
-        <input class="bass-input" id="phone4" inputmode="numeric" maxlength="4" pattern="\d{4}" placeholder="0000" required></div>
-      <button class="bass-btn bass-btn--primary" id="btnLookup" type="submit" style="flex:1 1 100px">조회</button>
-    </div>
+  <!-- 첫 로그인: 비밀번호 변경 -->
+  <form id="pwForm" class="bass-card stack hide">
+    <h2 style="margin:0">처음 오셨네요 — 비밀번호를 바꿔 주세요</h2>
+    <p class="bass-muted" style="margin:0;font-size:13.5px">임대인에게 받은 6자리 코드는 첫 로그인에만 쓸 수 있습니다. 앞으로 쓸 비밀번호를 정하면 입금 내역을 볼 수 있습니다.</p>
+    <div><label class="bass-label" for="pwCurrent">받은 코드 (현재 비밀번호)</label>
+      <input class="bass-input" id="pwCurrent" type="password" autocomplete="current-password" required></div>
+    <div><label class="bass-label" for="pwNew">새 비밀번호 (6자 이상)</label>
+      <input class="bass-input" id="pwNew" type="password" autocomplete="new-password" minlength="6" required></div>
+    <div><label class="bass-label" for="pwNew2">새 비밀번호 확인</label>
+      <input class="bass-input" id="pwNew2" type="password" autocomplete="new-password" minlength="6" required></div>
+    <button class="bass-btn bass-btn--primary" id="btnPw" type="submit">비밀번호 바꾸고 계속</button>
   </form>
 
-  <section id="result" class="stack hide" style="margin-top:14px">
+  <section id="result" class="stack hide">
     <div class="bass-card stack" id="roomCard"></div>
     <div class="stats" id="sumCards"></div>
     <div class="months-list" id="months"></div>
@@ -37,6 +43,7 @@
   </section>
 </main>
 <script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
 <script>
 (function () {
   "use strict";
@@ -46,13 +53,32 @@
   const LABEL = { paid: ["ok", "입금 확인"], unpaid: ["err", "미납"], due: ["warn", "이번 달 납부 대기"],
     move_in: ["info", "입주월"], move_out: ["info", "전출"], vacant: ["info", "공실"] };
 
-  $("lookupForm").addEventListener("submit", (e) => {
+  async function boot() {
+    const me = await Rent4.guard(["tenant"]);
+    if (me.must_change_password) {
+      $("pwForm").classList.remove("hide");
+      return;
+    }
+    await load();
+  }
+
+  async function load() {
+    $("pwForm").classList.add("hide");
+    render(await Bass.api("rent4", "/tenant/me"));
+  }
+
+  $("pwForm").addEventListener("submit", (e) => {
     e.preventDefault();
-    Bass.withLock($("btnLookup"), async () => {
-      const v = await Bass.api("rent4", "/tenant/lookup", { method: "POST",
-        body: { room: $("room").value.trim(), phone4: $("phone4").value.trim() } });
-      render(v);
-    }, "조회 중...");
+    if ($("pwNew").value !== $("pwNew2").value) {
+      Bass.updateAppAlert("diff", "새 비밀번호 두 칸이 서로 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
+      return;
+    }
+    Bass.withLock($("btnPw"), async () => {
+      await Bass.api("rent4", "/account/password", { method: "POST",
+        body: { current: $("pwCurrent").value, new: $("pwNew").value } });
+      Bass.updateAppAlert("success", "비밀번호를 바꿨습니다.", "다음부터는 새 비밀번호로 로그인하세요.");
+      await load();
+    }, "저장 중...");
   });
 
   function render(v) {
@@ -60,7 +86,7 @@
     $("result").classList.remove("hide");
     $("roomCard").innerHTML = `
       <div class="bass-row" style="justify-content:space-between">
-        <strong style="font-size:18px">${esc(r.building)} ${esc(r.room)}호 · ${esc(r.tenant_name)}님</strong>
+        <strong style="font-size:18px">${esc(v.building)} ${esc(r.room)}호 · ${esc(r.tenant_name)}님</strong>
         <span class="bass-badge bass-badge--info">${esc(r.lease_type)} · ${esc(r.pay_timing)}</span>
       </div>
       <div class="bass-muted" style="font-size:13.5px">월 ${won(r.monthly_due)} (임차료 ${won(r.rent)} + 관리비 ${won(r.mgmt)}) · 보증금 ${won(r.deposit)}
@@ -81,6 +107,8 @@
       </div>`;
     }).join("");
   }
+
+  boot().catch(Bass.showError);
 })();
 </script>
 </body>

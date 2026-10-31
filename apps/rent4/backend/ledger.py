@@ -1,6 +1,8 @@
 """
 apps/rent4/backend/ledger.py — 수납 원장 계산 (월별 상태 · 입금 매칭 · FIFO 배정 · 임차인 조회).
 
+모든 계산은 건물(branch) 단위다. 호실 번호는 건물 안에서만 유일하다.
+
 월별 상태
     paid     : 해당 연월 수납 기록 있음
     vacant   : 공실 표기
@@ -26,8 +28,8 @@ def today() -> date:
     return date.today()
 
 
-def first_data_ym() -> Optional[str]:
-    yms = [p.ym for p in Payment.all()] + [m.ym for m in MonthMark.all()]
+def first_data_ym(branch: str) -> Optional[str]:
+    yms = [p.ym for p in Payment.find(branch=branch)] + [m.ym for m in MonthMark.find(branch=branch)]
     return min(yms) if yms else None
 
 
@@ -63,16 +65,15 @@ def month_status(room: Room, ym: str, pays: List[Payment], marks: List[MonthMark
 
 def room_months(room: Room, yms: List[str], current_ym: Optional[str] = None) -> List[Dict]:
     current_ym = current_ym or ym_of(today())
-    pays = Payment.find(room=room.room)
-    marks = MonthMark.find(room=room.room)
+    pays = Payment.find(branch=room.branch, room=room.room)
+    marks = MonthMark.find(branch=room.branch, room=room.room)
     return [month_status(room, ym, pays, marks, current_ym) for ym in yms]
 
 
-def board(year: int, branch: Optional[str]) -> Dict:
+def board(year: int, branch: str) -> Dict:
     yms = [f"{year:04d}-{m:02d}" for m in range(1, 13)]
-    rooms = [r for r in Room.all() if branch is None or r.branch == branch]
     rows = []
-    for r in rooms:
+    for r in Room.find(branch=branch):
         months = room_months(r, yms) if r.status != "owner" else []
         rows.append({"room": public_room(r, full=True), "months": months,
                      "unpaid": sum(1 for c in months if c["status"] == "unpaid")})
@@ -84,6 +85,21 @@ def board(year: int, branch: Optional[str]) -> Dict:
     return {"year": year, "rooms": rows, "totals": totals}
 
 
+def building_stats(branch: str) -> Dict:
+    """관리인 화면의 건물 카드용 요약 (이번 달 기준)."""
+    current = ym_of(today())
+    first = first_data_ym(branch) or current
+    rooms = Room.find(branch=branch)
+    occupied = [r for r in rooms if r.status == "occupied"]
+    paid_now = unpaid_rooms = 0
+    for r in occupied:
+        cells = room_months(r, ym_range(max(r.move_in_ym or first, first), current), current)
+        paid_now += bool(cells and cells[-1]["status"] == "paid")
+        unpaid_rooms += any(c["status"] == "unpaid" for c in cells)
+    return {"rooms": len(rooms), "occupied": len(occupied), "paid_this_month": paid_now,
+            "unpaid_rooms": unpaid_rooms, "monthly_due": sum(r.monthly_due for r in occupied)}
+
+
 def public_room(r: Room, full: bool = False) -> Dict:
     data = {"room": r.room, "building": r.building, "status": r.status, "tenant_name": r.tenant_name,
             "move_in": r.move_in, "expire": r.expire, "lease_type": r.lease_type, "pay_timing": r.pay_timing,
@@ -93,20 +109,19 @@ def public_room(r: Room, full: bool = False) -> Dict:
     return data
 
 
-# ── 임차인 조회 ──
-def tenant_view(room_no: str, phone4: str) -> Dict:
-    room = Room.first(room=room_no.strip())
-    if not room or room.status != "occupied" or not room.phone_last4 or room.phone_last4 != phone4.strip():
-        raise NotFound("호실 또는 전화번호 뒤 4자리가 일치하지 않습니다.",
-                       hint="임대차 계약 때 등록한 휴대폰 번호의 마지막 4자리를 입력해 주세요.")
+# ── 임차인 조회 (로그인한 임차인 자신의 호실) ──
+def tenant_view(branch: str, room_no: str) -> Dict:
+    room = Room.first(branch=branch, room=room_no)
+    if not room or room.status != "occupied":
+        raise NotFound(f"{room_no}호의 임대 정보를 찾을 수 없습니다.", hint="임대인에게 문의해 주세요.")
     current = ym_of(today())
-    start = room.move_in_ym or first_data_ym() or current
-    start = max(start, first_data_ym() or start)
+    first = first_data_ym(branch) or current
+    start = max(room.move_in_ym or first, first)
     months = [c for c in room_months(room, ym_range(start, current), current) if not c["prior"]]
     for c in months:
+        c.pop("prior", None)
         for p in c["payments"]:
             p.pop("id", None)
-        c.pop("prior", None)
     unpaid = [c for c in months if c["status"] == "unpaid"]
     return {
         "room": public_room(room),
@@ -138,12 +153,12 @@ def match_room(dep: Deposit, rooms: List[Room]) -> Dict:
 
 def open_months(room: Room, current_ym: str) -> List[str]:
     """미납 → 이번 달(대기) → 다음 달 순으로, 수납 기록이 없는 귀속월."""
-    start = max(room.move_in_ym or current_ym, first_data_ym() or current_ym)
+    start = max(room.move_in_ym or current_ym, first_data_ym(room.branch) or current_ym)
     cells = room_months(room, ym_range(start, ym_add(current_ym, 12)), current_ym)
     return [c["ym"] for c in cells if c["status"] in ("unpaid", "due", "future")]
 
 
-def propose(dep: Deposit, existing_fingerprints: set) -> Dict:
+def propose(dep: Deposit, existing_fingerprints: set, branch: str) -> Dict:
     """입금 1건의 처리 제안 (아직 저장하지 않음)."""
     out: Dict = {**dep.to_dict(), "status": "ready", "room": None, "months": [], "message": "", "matched_by": ""}
     if dep.kind != "deposit":
@@ -156,7 +171,7 @@ def propose(dep: Deposit, existing_fingerprints: set) -> Dict:
         out.update(status="needs_review", message="입금액을 찾지 못했습니다. 금액을 직접 입력해 주세요.")
         return out
 
-    m = match_room(dep, Room.all())
+    m = match_room(dep, Room.find(branch=branch))
     room: Optional[Room] = m["room"]
     if room is None:
         hint = f" 후보: {', '.join(m['candidates'])}호" if m["candidates"] else ""
@@ -182,9 +197,9 @@ def propose(dep: Deposit, existing_fingerprints: set) -> Dict:
     return out
 
 
-def commit(item: Dict) -> Dict:
+def commit(item: Dict, branch: str) -> Dict:
     """제안(또는 임대인이 고친 제안) 1건을 수납 기록으로 저장한다."""
-    room = Room.first(room=str(item.get("room") or ""))
+    room = Room.first(branch=branch, room=str(item.get("room") or ""))
     if not room:
         raise NotFound("호실을 지정해 주세요.", hint="미확인 입금은 호실을 고른 뒤 다시 반영하세요.")
     months: List[str] = [m for m in item.get("months") or [] if re.match(r"^\d{4}-\d{2}$", m)]
@@ -192,10 +207,10 @@ def commit(item: Dict) -> Dict:
     if not months or amount <= 0:
         raise Mismatch("귀속월과 입금액이 필요합니다.", hint="귀속월(YYYY-MM)을 1개 이상 선택해 주세요.")
     fingerprint = item.get("fingerprint") or ""
-    if fingerprint and BankMessage.first(fingerprint=fingerprint):
+    if fingerprint and BankMessage.first(branch=branch, fingerprint=fingerprint):
         return {"status": "duplicate", "room": room.room, "payment_ids": []}
 
-    msg = BankMessage(raw=item.get("raw", ""), fingerprint=fingerprint, bank=item.get("bank", ""),
+    msg = BankMessage(raw=item.get("raw", ""), fingerprint=fingerprint, branch=branch, bank=item.get("bank", ""),
                       deposit_date=item.get("deposit_date"), deposit_time=item.get("deposit_time", ""),
                       amount=amount, depositor=", ".join(item.get("names") or []), room=room.room,
                       months=months, parsed_by=item.get("parsed_by", "rule"))
@@ -206,7 +221,7 @@ def commit(item: Dict) -> Dict:
         remaining -= share
         mgmt = min(room.mgmt, share)
         flags = [] if share == room.monthly_due else [f"청구액 {room.monthly_due:,}원과 다른 입금 {share:,}원"]
-        payments.append(Payment(room=room.room, ym=ym, paid_date=item.get("deposit_date"),
+        payments.append(Payment(branch=branch, room=room.room, ym=ym, paid_date=item.get("deposit_date"),
                                 paid_date_raw=f"{item.get('deposit_date') or ''} {item.get('deposit_time') or ''}".strip(),
                                 rent=share - mgmt, mgmt=mgmt, source="bank", bank_message_id=msg.id,
                                 depositor=msg.depositor, flags=flags))

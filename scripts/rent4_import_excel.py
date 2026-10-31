@@ -32,7 +32,7 @@ def main():
     for path in args.files:
         with open(path, encoding="utf-8-sig") as f:
             result = excel_import.parse_sheet(f.read(), building=args.building, branch=args.branch)
-        report = result.summary() if args.dry_run else excel_import.apply_sheet(result)
+        report = result.summary() if args.dry_run else excel_import.apply_sheet(result, args.branch)
         ok = sum(1 for t in report["totals_check"] if t["ok"])
         print(f"\n== {os.path.basename(path)}: {report['year']}년 {len(report['months'])}개월, "
               f"호실 {report['rooms']}, 수납 {report['payments']}건 (확인 필요 {report['flagged']}건), "

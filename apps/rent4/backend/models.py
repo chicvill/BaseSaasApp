@@ -31,6 +31,28 @@ def ym_range(start: str, end: str) -> List[str]:
     return out
 
 
+class Building(PoolObj):
+    """건물. branch 는 core.auth 의 지점 코드 (임대인 계정의 branch 와 같다)."""
+    collection: ClassVar[str] = "buildings"
+
+    code: str                      # 임차인 아이디 접두어 (예: chic → chic603)
+    name: str
+    branch: str
+
+
+class TenantAccount(PoolObj):
+    """임차인 로그인 계정과 호실의 연결. 비밀번호 자체는 core.auth User 에 해시로 저장된다."""
+    collection: ClassVar[str] = "tenant_accounts"
+
+    username: str
+    branch: str
+    room: str
+    tenant_key: str = ""           # 현 임차인 식별 (이름+전화 해시) — 바뀌면 계정 초기화
+    initial_code: str = ""         # 임대인이 전달할 첫 비밀번호. 임차인이 바꾸면 지운다
+    must_change: bool = True
+    activated_at: Optional[str] = None
+
+
 class Room(PoolObj):
     collection: ClassVar[str] = "rooms"
 
@@ -65,6 +87,7 @@ class Room(PoolObj):
 class Payment(PoolObj):
     collection: ClassVar[str] = "payments"
 
+    branch: str = "main"
     room: str
     ym: str                        # 귀속 연월 (YYYY-MM)
     paid_date: Optional[str] = None
@@ -85,6 +108,7 @@ class MonthMark(PoolObj):
     """Excel 의 '공실 / 미납 / 전입 / 전출' 표기를 그대로 보존한다."""
     collection: ClassVar[str] = "marks"
 
+    branch: str = "main"
     room: str
     ym: str
     kind: str                      # vacant | unpaid | move_in | move_out
@@ -97,6 +121,7 @@ class BankMessage(PoolObj):
 
     raw: str
     fingerprint: str
+    branch: str = "main"
     bank: str = ""
     deposit_date: Optional[str] = None
     deposit_time: str = ""

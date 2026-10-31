@@ -7,7 +7,9 @@ description: Business rules for the rent4 app (bank deposit SMS → rent ledger 
 
 ## Knowledge Pool
 - 위치: `data/rent4_pool/` (환경변수 `RENT4_POOL_DIR` 로 교체 가능). git 제외 — 임차인 이름·전화번호 포함.
-- 컬렉션: `rooms` · `payments` · `marks`(공실/미납/전입/전출 표기) · `bank_messages`(반영한 문자 원문).
+- 컬렉션: `buildings` · `rooms` · `payments` · `marks`(공실/미납/전입/전출 표기) · `bank_messages`(반영한 문자 원문) · `tenant_accounts`.
+- 모든 기록은 건물(`branch`, core.auth 지점 코드) 단위다. 호실 번호는 건물 안에서만 유일하다.
+- 건물: chic=시크빌(main) · sunho=선호아트빌(sunho) · sinbi=신비주택(sinbi). 시작 때 없으면 만든다.
 - 주민번호는 어떤 컬렉션에도 저장하지 않는다. Excel 가져오기에서 3번째 칸을 읽지 않는다.
 
 ## Excel 수납부 가져오기 (`backend/excel_import.py`)
@@ -28,6 +30,13 @@ description: Business rules for the rent4 app (bank deposit SMS → rent ledger 
 ## 월 상태
 paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입주월, 미납 아님) · vacant · move_out · prior(현 임차인 입주 전).
 
-## 권한
-- 임대인: core.auth `branch_admin`(자기 지점 호실만) 또는 `superadmin`.
-- 임차인: 호실 + 휴대폰 뒤 4자리. 10분에 5회 실패하면 해당 호실 조회 잠금. 입주월 이전 기록과 전화번호는 보여 주지 않는다.
+## 로그인 · 권한
+- 로그인은 core `/auth/login` 하나. 로그인 뒤 `GET /me` 가 역할과 첫 페이지를 정한다.
+  - superadmin/admin → 관리인 `admin.html` (건물 목록) → `lessor.html?branch=<지점>`
+  - branch_admin → 임대인 `lessor.html` (자기 지점 고정, 다른 branch 요청은 403)
+  - user + TenantAccount → 임차인 `tenant.html` (자기 호실만)
+- 임차인 계정: 아이디 = 건물 코드 + 호실(`chic603`). 거주 호실마다 시작·Excel 반영 때 자동 생성.
+  - 첫 비밀번호 = 무작위 6자리 코드 (임대인 '임차인 계정' 탭에서 확인·재발급). 첫 로그인에 변경 필수 — 변경 전 `/tenant/me` 는 403.
+  - 새 비밀번호 6자 이상, 같은 숫자 반복 금지. 변경하면 코드는 pool 에서 지운다.
+  - 호실의 임차인(이름+전화 해시)이 바뀌면 계정 초기화, 퇴거·공실이면 잠금(무작위 비밀번호).
+- 임차인 화면에는 입주월 이전 기록과 전화번호를 보여 주지 않는다.

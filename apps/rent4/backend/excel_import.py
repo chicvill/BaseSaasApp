@@ -170,9 +170,9 @@ def _parse_cell(result: SheetResult, room: Room, ym: str, d_raw: str,
                 rent: Optional[int], mgmt: Optional[int]) -> None:
     for word, kind in (("공실", "vacant"), ("미납", "unpaid"), ("전입", "move_in"), ("전출", "move_out")):
         if word in d_raw:
-            result.marks.append(MonthMark(room=room.room, ym=ym, kind=kind, raw=d_raw))
+            result.marks.append(MonthMark(branch=room.branch, room=room.room, ym=ym, kind=kind, raw=d_raw))
             if (rent or 0) + (mgmt or 0) > 0:      # 예: 전출월에 관리비만 정산
-                result.payments.append(Payment(room=room.room, ym=ym, paid_date_raw=d_raw,
+                result.payments.append(Payment(branch=room.branch, room=room.room, ym=ym, paid_date_raw=d_raw,
                                                rent=rent or 0, mgmt=mgmt or 0,
                                                flags=[f"'{d_raw}' 표기와 함께 입금액이 있어 입금일 미상"]))
             return
@@ -199,7 +199,7 @@ def _parse_cell(result: SheetResult, room: Room, ym: str, d_raw: str,
         flags.append("입금일 비어 있음")
 
     result.payments.append(Payment(
-        room=room.room, ym=ym, paid_date=paid.isoformat() if paid else None, paid_date_raw=d_raw,
+        branch=room.branch, room=room.room, ym=ym, paid_date=paid.isoformat() if paid else None, paid_date_raw=d_raw,
         rent=rent or 0, mgmt=mgmt or 0, flags=flags,
     ))
 
@@ -228,34 +228,39 @@ def _check_totals(result: SheetResult, total_rows: List[List[str]]) -> None:
                 f"분석 임차료 {got_rent:,} / 관리비 {got_mgmt:,}")
 
 
-def apply_sheet(result: SheetResult) -> Dict:
-    """분석 결과를 Knowledge Pool 에 반영한다.
+def apply_sheet(result: SheetResult, branch: str) -> Dict:
+    """분석 결과를 Knowledge Pool 의 한 건물(branch)에 반영한다.
 
     - 호실 정보: 시트 값으로 갱신 (나중에 가져온 시트가 최신)
     - 해당 연월의 Excel 출처 수납·표기는 교체, 은행 문자/수동 입력은 보존
     - 같은 호실·연월에 은행/수동 기록이 이미 있으면 Excel 행은 건너뛴다
     """
     months = set(result.months)
-    rooms = {r.room: r for r in Room.all()}
-    for no, new in result.rooms.items():
-        if no in rooms:
-            new.id, new.created_at = rooms[no].id, rooms[no].created_at
-        rooms[no] = new
-    Room.replace_all(sorted(rooms.values(), key=lambda r: r.room))
+    sheet_rooms = set(result.rooms)
+    mine = lambda o: o.branch == branch and o.room in sheet_rooms and o.ym in months  # noqa: E731
 
-    kept, skipped = [], 0
-    for p in Payment.all():
-        if p.source == "excel" and p.ym in months and p.room in result.rooms:
-            continue
-        kept.append(p)
-    other = {(p.room, p.ym) for p in kept if p.source != "excel"}
+    rooms = {(r.branch, r.room): r for r in Room.all()}
+    for no, new in result.rooms.items():
+        new.branch = branch
+        old = rooms.get((branch, no))
+        if old:
+            new.id, new.created_at = old.id, old.created_at
+        rooms[(branch, no)] = new
+    Room.replace_all(sorted(rooms.values(), key=lambda r: (r.branch, r.room)))
+
+    kept = [p for p in Payment.all() if not (p.source == "excel" and mine(p))]
+    other = {(p.branch, p.room, p.ym) for p in kept if p.source != "excel"}
+    skipped = 0
     for p in result.payments:
-        if (p.room, p.ym) in other:
+        p.branch = branch
+        if (branch, p.room, p.ym) in other:
             skipped += 1
             continue
         kept.append(p)
-    Payment.replace_all(sorted(kept, key=lambda p: (p.room, p.ym, p.paid_date or "")))
+    Payment.replace_all(sorted(kept, key=lambda p: (p.branch, p.room, p.ym, p.paid_date or "")))
 
-    marks = [m for m in MonthMark.all() if not (m.ym in months and m.room in result.rooms)] + result.marks
-    MonthMark.replace_all(sorted(marks, key=lambda m: (m.room, m.ym)))
+    for m in result.marks:
+        m.branch = branch
+    marks = [m for m in MonthMark.all() if not mine(m)] + result.marks
+    MonthMark.replace_all(sorted(marks, key=lambda m: (m.branch, m.room, m.ym)))
     return {**result.summary(), "skipped_existing": skipped}
