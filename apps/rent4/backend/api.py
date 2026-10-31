@@ -9,9 +9,12 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
 관리인 (superadmin)
     GET    /admin/buildings                건물 목록과 이번 달 요약
     GET|POST /admin/contracts              가맹 계약 목록 / 발행 (계약 링크 토큰 반환)
-    POST   /admin/contracts/{id}/relink|paid|cancel|reset   (reset = 비밀번호 분실: 새 임시 비밀번호 + 새 링크)
+    POST   /admin/contracts/{id}/paid|cancel|reset   (reset = 비밀번호 초기화 + 새 링크)
 계약 상대방 (로그인 전, 계약 링크의 토큰 t)
     GET    /contract/view?t=               계약 내용 · 상태
+    POST   /contract/join                  1단계: 휴대폰 뒤 4자리 + 비밀번호 설정 → 바로 로그인 (링크 만료)
+    GET    /contract/mine  POST /contract/mine/sign|continue   로그인한 상대방: 진행 확인 · 동의 · 체결 뒤 최종 계정으로
+    POST   /login                          아이디 또는 휴대폰 번호 + 비밀번호
     POST   /contract/start                 체결된 계약 링크 → 바로 로그인 (비밀번호를 정하기 전까지)
     GET    /invite/view?t=  POST /invite/start  임차인 안내 링크: 휴대폰 뒤 4자리 확인 → 바로 로그인
     POST   /contract/sign                  휴대폰 뒤 4자리 본인 확인 + 동의
@@ -22,10 +25,9 @@ apps/rent4/backend/api.py — Rent4 API (/api/rent4, 단독 실행 시 /api).
     DELETE /lessor/payments/{id}           잘못 반영한 은행/수동 기록 취소
     POST   /lessor/import/preview|commit   연간 수납 Excel 표 붙여넣기 → 분석 / 반영
     GET    /lessor/accounts                임차인 계정 (아이디 · 링크 발송 · 사용 여부)
-    POST   /lessor/accounts/{room}/invite  임차인 안내 링크 (아이디·임시 비밀번호는 링크에서 본인 확인 후)
-    POST   /lessor/accounts/{room}/reset   비밀번호 초기화 (새 임시 비밀번호 + 새 안내 링크)
+    POST   /lessor/accounts/{room}/reset   비밀번호 초기화 + 새 안내 링크 (처음 안내도 이것으로)
     GET|POST /lessor/contracts             임대차 계약 목록 / 발행
-    POST   /lessor/contracts/{id}/relink|paid|cancel|reset
+    POST   /lessor/contracts/{id}/paid|cancel|reset
 임차인 (로그인)
     GET    /tenant/me                      내 호실의 입금 반영 결과
     POST   /account/password               비밀번호 설정·변경 (링크로 처음 들어온 경우 현재 비밀번호 없이 설정)
@@ -76,6 +78,12 @@ def summary() -> Dict[str, Any]:
     return {"success": True, "buildings": len(Building.all()), "rooms": len(Room.all())}
 
 
+@router.post("/login")
+def login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """아이디 또는 휴대폰 번호로 로그인 (core /auth/login 과 같은 토큰)."""
+    return {"success": True, **accounts.login(str(payload.get("username", "")), str(payload.get("password", "")))}
+
+
 @router.get("/me")
 def me(user: User = Depends(require_user)) -> Dict[str, Any]:
     return {"success": True, **accounts.whoami(user)}
@@ -106,8 +114,6 @@ def admin_contract_action(contract_id: str, action: str, user: User = Depends(ad
 
 
 def _contract_action(c, action: str) -> Dict[str, Any]:
-    if action == "relink":
-        return {"success": True, "token": contracts.relink(c), "contract": contracts.public(c)}
     if action == "paid":
         return {"success": True, "contract": contracts.public(contracts.confirm_paid(c))}
     if action == "cancel":
@@ -134,10 +140,26 @@ def contract_view(t: str = "") -> Dict[str, Any]:
     return {"success": True, "contract": contracts.public(contracts.by_token(t), for_party=True)}
 
 
-@router.post("/contract/sign")
-def contract_sign(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    c = contracts.sign(str(payload.get("t", "")), str(payload.get("phone4", "")), bool(payload.get("agree")))
+@router.post("/contract/join")
+def contract_join(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **contracts.join(str(payload.get("t", "")), str(payload.get("phone4", "")),
+                                              str(payload.get("new", "")))}
+
+
+@router.get("/contract/mine")
+def contract_mine(user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, "contract": contracts.public(contracts.party_contract(user), for_party=True)}
+
+
+@router.post("/contract/mine/sign")
+def contract_mine_sign(payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
+    c = contracts.sign(user, bool(payload.get("agree")))
     return {"success": True, "contract": contracts.public(c, for_party=True)}
+
+
+@router.post("/contract/mine/continue")
+def contract_mine_continue(user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, **contracts.continue_as_account(user)}
 
 
 @router.post("/contract/start")
@@ -250,10 +272,10 @@ def lessor_accounts(branch: str = "", user: User = Depends(staff)) -> Dict[str, 
 
 @router.post("/lessor/accounts/{room_no}/{action}")
 def lessor_account_link(room_no: str, action: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
-    """invite = 안내 링크 보내기 (임시 비밀번호 그대로) · reset = 새 임시 비밀번호 + 새 안내 링크."""
-    if action not in ("invite", "reset"):
+    """reset = 비밀번호 초기화 + 새 안내 링크 (처음 안내도 같은 방법)."""
+    if action != "reset":
         raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
-    acc, token = accounts.issue_invite(_scope(user, branch).branch, room_no, reissue=action == "reset")
+    acc, token = accounts.issue_invite(_scope(user, branch).branch, room_no, reissue=True)
     room = Room.first(branch=acc.branch, room=acc.room)
     return {"success": True, "token": token, "username": acc.username, "room": acc.room,
             "tenant_name": room.tenant_name, "phone": room.phone}

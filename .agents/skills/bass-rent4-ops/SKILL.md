@@ -31,7 +31,9 @@ description: Business rules for the rent4 app (bank deposit SMS → rent ledger 
 paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입주월, 미납 아님) · vacant · move_out · prior(현 임차인 입주 전).
 
 ## 계약 상호 확인 → 계정 (`backend/contracts.py`)
-- 상태: sent(발행자 확인·링크) → signed(상대방이 링크에서 휴대폰 뒤 4자리 확인 + 동의) → active(발행자 납부 확인) | cancelled.
+- 상태: sent(발행자 확인·링크) → [상대방이 링크에서 휴대폰 뒤 4자리 + 비밀번호 설정 = `POST /contract/join`, 계약 진행용 로그인 `k<계약id>` 생성, 링크 만료] → signed(로그인 상태로 동의 `POST /contract/mine/sign`) → active(발행자 납부 확인) | cancelled.
+- 체결 전 상대방은 링크 없이 `POST /login` 에 **휴대폰 번호 + 비밀번호**로 들어와 `contract.html`(`/contract/mine`)에서 이어 간다. 체결되면 그 비밀번호 해시를 최종 아이디(건물 코드 / 코드+호실)로 옮기고(must_change=False) 진행용 로그인은 닫는다 → `POST /contract/mine/continue` 로 최종 계정 세션.
+- `POST /login`: 아이디, 또는 휴대폰 번호(숫자·하이픈만)면 최종 계정(임차인 Room.phone, 임대인 가맹 계약 party_phone) → 진행 중 계약 순으로 비밀번호를 맞춰 본다.
 - membership(관리인→임대인): 가맹비 확인 시 Building 생성(없으면) + core User(branch_admin, 아이디=건물 코드) + LessorAccount(임시 비밀번호).
 - lease(임대인→임차인): 잔금 확인 시 Room 입주 처리(이름·전화·입주일·금액) → 임차인 계정 동기화(새 임차인이면 새 코드).
 - 링크 토큰은 sha256 해시만 저장. 재발급하면 이전 링크 무효. 서명 실패 10분 5회면 잠금.
@@ -46,7 +48,8 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 ## 로그인 · 권한
 - **링크 = 첫 로그인 (임시 비밀번호는 사용자에게 보이지 않는다)**: 계정이 생기거나 초기화되면 내부적으로 무작위 임시 비밀번호를 걸어 두되, 화면·API 응답에 내보내지 않는다.
   - 관리인 `setup.html` → `POST /setup/start`, 임대인·임차인 계약 링크 `contract.html` (active) → `POST /contract/start`, 기존 임차인 안내 링크 `invite.html` → 휴대폰 뒤 4자리 확인 + `POST /invite/start`. 응답은 로그인 토큰 + 이동할 페이지(admin.html / 임대인.html / 임차인.html).
-  - 링크 로그인은 must_change 동안만 된다. 비밀번호를 정하면 같은 링크는 `{activated: true}` 만 돌려준다 → 로그인 페이지로.
+  - 링크 로그인은 must_change 동안만 된다. **비밀번호를 정하는 즉시 그 계정의 모든 링크(계약 token_hash · invite_hash · 관리인 link_hash)를 지워 만료**시킨다 → 404, 로그인 페이지로.
+  - **링크 (재)발급은 '🔑 비밀번호 초기화' 하나뿐** (본인 요청·분실·계약 정리·처음 안내 모두). 계약 relink, 임차인 invite 동작은 없앴다. 체결 전 링크를 잃으면 계약 취소 후 재발행.
   - must_change 상태의 첫 설정은 현재 비밀번호 없이 `/account/password` (링크로 받은 세션이 본인 확인). 그 뒤 변경은 현재 비밀번호 필수.
 - 로그인은 core `/auth/login` 하나. 로그인 뒤 `GET /me` 가 역할과 첫 페이지를 정한다.
   - superadmin/admin → 관리인 `admin.html` (건물 목록) → `임대인.html?branch=<지점>`

@@ -177,10 +177,9 @@
         const target = c.kind === "membership" ? `${c.building_name} (${c.building_code})` : `${c.room}호`;
         const terms = c.kind === "membership" ? `가맹비 ${won(c.fee)}` : `보증금 ${won(c.deposit)} · 월 ${won(c.rent + c.mgmt)} · ${c.start || ""}`;
         const acts = [
-          c.status !== "cancelled" ? `<button class="bass-btn bass-btn--sm" data-act="relink" data-id="${esc(c.id)}">🔗 링크</button>` : "",
           c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
           ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">취소</button>` : "",
-          c.status === "active" ? `<button class="bass-btn bass-btn--sm" data-act="reset" data-id="${esc(c.id)}" title="비밀번호를 잊었을 때: 새 링크로 다시 설정">🔑 비밀번호 초기화</button>` : "",
+          c.status === "active" ? `<button class="bass-btn bass-btn--sm" data-act="reset" data-id="${esc(c.id)}" title="요청·분실·계약 정리·처음 안내 등: 지금 비밀번호를 막고 새 링크로 다시 설정">🔑 비밀번호 초기화</button>` : "",
         ].join(" ");
         return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
           <td style="white-space:normal;text-align:left">${esc(terms)}</td>
@@ -197,10 +196,9 @@
       const c = table._items[btn.dataset.id];
       Bass.withLock(btn, async () => {
         const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
-        if (btn.dataset.act === "relink") sendContract(c, res.token, "새 링크를 만들었습니다 (이전 링크는 막힘)");
         if (btn.dataset.act === "paid") sendLink({
           title: "계약이 체결되었습니다", name: c.party_name, phone: c.party_phone,
-          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 받으신 계약 링크를 다시 열고 '시작하기'를 누르면 바로 로그인되어 비밀번호를 설정할 수 있습니다.`,
+          message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}이 체결되었습니다. 로그인 페이지에서 휴대폰 번호와 계약 때 정한 비밀번호로 로그인한 뒤 '시작하기'를 누르세요.`,
         });
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
         if (btn.dataset.act === "reset") sendLink({
@@ -223,7 +221,7 @@
     sendLink({
       title: title || `${contractTitle(c)}을 발행했습니다`, name: c.party_name, phone: c.party_phone,
       link: contractLink(token),
-      message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}서입니다. 아래 링크에서 계약 내용을 확인하고, 휴대폰 뒤 4자리로 본인 확인 후 동의해 주세요.`,
+      message: `[Rent4] ${c.party_name}님, ${contractTitle(c)}서입니다. 아래 링크를 열어 먼저 비밀번호를 정한 뒤 계약 내용을 확인하고 동의해 주세요. 링크를 잃어버려도 로그인 페이지에서 휴대폰 번호와 그 비밀번호로 이어서 진행할 수 있습니다.`,
     });
   }
 

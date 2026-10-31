@@ -22,10 +22,10 @@ import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Tuple
 
-from core.auth import User, issue_token
+from core.auth import Unauthorized, User, issue_token
 from core.errors import Conflict, DomainError, Forbidden, Mismatch, NotFound
 
-from .models import AdminAccount, Building, LessorAccount, Room, TenantAccount
+from .models import AdminAccount, Building, Contract, LessorAccount, Room, TenantAccount
 from .pool import now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
@@ -60,7 +60,7 @@ def issue_admin_link(username: str = "admin") -> Tuple[AdminAccount, str]:
 def _admin_by_link(token: str) -> AdminAccount:
     acc = AdminAccount.first(link_hash=_hash(token or "")) if token else None
     if not acc:
-        raise NotFound("설정 링크가 올바르지 않거나 만료되었습니다.", hint="서버 관리자에게 링크를 다시 만들어 달라고 요청하세요.")
+        raise NotFound("설정 링크가 올바르지 않거나 만료되었습니다.", hint="비밀번호를 이미 정했다면 로그인 페이지에서 로그인하세요. 링크가 다시 필요하면 비밀번호 초기화를 요청하세요.")
     return acc
 
 
@@ -189,7 +189,7 @@ def _hash(token: str) -> str:
 
 
 def issue_invite(branch: str, room_no: str, reissue: bool = False) -> Tuple[TenantAccount, str]:
-    """안내 링크 발급. reissue=True 면 임시 비밀번호도 새로 만든다 (분실 · 다시 보내기)."""
+    """안내 링크 발급. reissue=True(비밀번호 초기화)면 계정을 '설정 전' 상태로 되돌리고 새 링크를 만든다."""
     acc = reset_account(branch, room_no) if reissue else TenantAccount.first(branch=branch, room=room_no)
     room = Room.first(branch=branch, room=room_no)
     if not acc or not room or room.status != "occupied":
@@ -205,7 +205,7 @@ def _invite(token: str) -> Tuple[TenantAccount, Room]:
     acc = TenantAccount.first(invite_hash=_hash(token or "")) if token else None
     room = Room.first(branch=acc.branch, room=acc.room) if acc else None
     if not acc or not room or room.status != "occupied" or not acc.tenant_key:
-        raise NotFound("안내 링크가 올바르지 않거나 만료되었습니다.", hint="임대인에게 링크를 다시 요청하세요.")
+        raise NotFound("안내 링크가 올바르지 않거나 만료되었습니다.", hint="비밀번호를 이미 정했다면 로그인 페이지에서 로그인하세요. 링크가 다시 필요하면 비밀번호 초기화를 요청하세요.")
     return acc, room
 
 
@@ -248,6 +248,11 @@ def lessor_account(user: User) -> LessorAccount:
     return acc
 
 
+def validate_new_password(new: str, min_len: int = 6) -> None:
+    if len(new) < min_len or new.isdigit() and len(set(new)) == 1:
+        raise Mismatch(f"비밀번호는 {min_len}자 이상, 같은 숫자 반복이 아니어야 합니다.")
+
+
 def change_password(user: User, current: str, new: str) -> None:
     """처음 설정(링크로 로그인한 상태 — 현재 비밀번호 없이)이든 평소 변경이든 같은 규칙.
     관리인은 AdminAccount 기록이 없으면 core 비밀번호만 바꾼다."""
@@ -259,8 +264,7 @@ def change_password(user: User, current: str, new: str) -> None:
     first_time = acc is not None and acc.must_change
     if not first_time and not user.check_password(current):
         raise Mismatch("현재 비밀번호가 맞지 않습니다.", hint="비밀번호를 잊었다면 링크를 다시 요청하세요.")
-    if len(new) < min_len or new.isdigit() and len(set(new)) == 1:
-        raise Mismatch(f"새 비밀번호는 {min_len}자 이상, 같은 숫자 반복이 아니어야 합니다.")
+    validate_new_password(new, min_len)
     if not first_time and new == current:
         raise Mismatch("새 비밀번호가 지금 비밀번호와 같습니다.")
     user.set_password(new).save("rent4_password_changed")
@@ -268,6 +272,52 @@ def change_password(user: User, current: str, new: str) -> None:
         acc.initial_code, acc.must_change = "", False
         acc.activated_at = acc.activated_at or now_iso()
         acc.save()
+    if first_time:
+        expire_links(user.username)      # acc 저장 뒤에 — 먼저 지우면 위 save 가 예전 링크 해시를 되살린다
+
+
+def _phone_candidates(digits: str) -> List[str]:
+    """이 휴대폰 번호로 로그인할 수 있는 아이디들 (최종 계정 우선, 그다음 계약 진행 중)."""
+    same = lambda phone: re.sub(r"\D", "", phone or "") == digits  # noqa: E731
+    out: List[str] = []
+    for acc in TenantAccount.all():
+        room = Room.first(branch=acc.branch, room=acc.room) if acc.tenant_key else None
+        if room and same(room.phone):
+            out.append(acc.username)
+    for acc in LessorAccount.all():
+        c = Contract.first(id=acc.contract_id) if acc.contract_id else None
+        if c and same(c.party_phone):
+            out.append(acc.username)
+    for c in Contract.all():
+        if c.party_username and c.status in ("sent", "signed") and same(c.party_phone):
+            out.append(c.party_username)
+    return out
+
+
+def login(identifier: str, password: str) -> Dict:
+    """아이디 또는 휴대폰 번호 + 비밀번호. 계약 진행 중인 사람은 휴대폰 번호로 이어서 들어온다."""
+    ident = identifier.strip()
+    digits = re.sub(r"\D", "", ident)
+    names = _phone_candidates(digits) if len(digits) >= 10 and len(digits) == len(re.sub(r"[\s-]", "", ident)) else [ident]
+    for name in names:
+        user = User.by_username(name)
+        if user and user.check_password(password):
+            return {"token": issue_token(user), "user": user.public()}
+    raise Unauthorized("아이디(휴대폰 번호) 또는 비밀번호가 올바르지 않습니다.",
+                       hint="계약 링크에서 정한 비밀번호를 입력하세요. 잊었다면 계약을 보낸 분에게 문의하세요.")
+
+
+def expire_links(username: str) -> None:
+    """비밀번호를 정하면 그 계정으로 들어오던 링크(계약·안내·관리인 설정)는 모두 더 이상 열리지 않는다."""
+    for c in Contract.find(username=username):
+        if c.token_hash:
+            c.token_hash = ""
+            c.save()
+    for cls, field in ((TenantAccount, "invite_hash"), (AdminAccount, "link_hash")):
+        acc = cls.first(username=username)
+        if acc and getattr(acc, field):
+            setattr(acc, field, "")
+            acc.save()
 
 
 def whoami(user: User) -> Dict:
@@ -283,6 +333,9 @@ def whoami(user: User) -> Dict:
         return {**base, "kind": "lessor", "label": "임대인", "home": "임대인.html",
                 "must_change_password": acc.must_change,
                 "building": {"code": b.code, "name": b.name, "branch": b.branch}}
+    pending = Contract.first(party_username=user.username) if user.role == TENANT_ROLE else None
+    if pending is not None:
+        return {**base, "kind": "party", "label": "계약 진행", "home": "contract.html", "must_change_password": False}
     acc = tenant_account(user)
     b = building_of(acc.branch)
     return {**base, "kind": "tenant", "label": "임차인", "home": "임차인.html", "room": acc.room,

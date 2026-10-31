@@ -122,13 +122,6 @@ def create_lease(issuer: User, branch: str, data: Dict) -> Tuple[Contract, str]:
     return c.save(), token
 
 
-def relink(c: Contract) -> str:
-    if c.status not in ("sent", "signed", "active"):
-        raise Conflict("취소된 계약은 링크를 다시 만들 수 없습니다.")
-    token = _new_token(c)
-    c.save()
-    return token
-
 
 def cancel(c: Contract) -> Contract:
     if c.status == "active":
@@ -141,14 +134,32 @@ def cancel(c: Contract) -> Contract:
 def by_token(token: str) -> Contract:
     c = Contract.first(token_hash=_hash(token or "")) if token else None
     if not c:
-        raise NotFound("계약 링크가 올바르지 않거나 만료되었습니다.", hint="계약을 보낸 분에게 링크를 다시 요청하세요.")
+        raise NotFound("계약 링크가 올바르지 않거나 만료되었습니다.", hint="비밀번호를 이미 정했다면 로그인 페이지에서 로그인하세요. 링크가 다시 필요하면 비밀번호 초기화를 요청하세요.")
     return c
 
 
-def sign(token: str, phone4: str, agree: bool) -> Contract:
+def join(token: str, phone4: str, new_password: str) -> Dict:
+    """계약 링크 첫 단계: 휴대폰 뒤 4자리 확인 + 비밀번호 설정 → 바로 로그인.
+
+    링크는 이 순간 만료된다. 링크를 잃어버려도 로그인 페이지에서 휴대폰 번호와 이 비밀번호로 이어서 진행하고,
+    체결되면 같은 비밀번호가 최종 아이디(건물 코드 / 건물 코드+호실)로 넘어간다.
+    """
     c = by_token(token)
     if c.status != "sent":
-        raise Conflict("이미 확인한 계약입니다." if c.status != "cancelled" else "취소된 계약입니다.")
+        raise Conflict("이미 진행 중이거나 끝난 계약입니다." if c.status != "cancelled" else "취소된 계약입니다.",
+                       hint="로그인 페이지에서 휴대폰 번호와 비밀번호로 들어오세요.")
+    if c.party_username:
+        raise Conflict("이미 비밀번호를 정했습니다.", hint="로그인 페이지에서 휴대폰 번호와 비밀번호로 이어서 진행하세요.")
+    _check_phone(c, phone4)
+    accounts.validate_new_password(new_password)
+    c.party_username = f"k{c.id}"
+    User(username=c.party_username, role=accounts.TENANT_ROLE, name=c.party_name).set_password(new_password).save("rent4_contract_party")
+    c.token_hash = ""
+    c.save()
+    return {**accounts.link_session(c.party_username, "contract.html"), "contract": public(c, for_party=True)}
+
+
+def _check_phone(c: Contract, phone4: str) -> None:
     now = time.time()
     recent = [t for t in _sign_failures[c.id] if now - t < WINDOW_SECONDS]
     _sign_failures[c.id] = recent
@@ -157,11 +168,34 @@ def sign(token: str, phone4: str, agree: bool) -> Contract:
     if _digits(c.party_phone)[-4:] != str(phone4).strip():
         _sign_failures[c.id].append(now)
         raise Mismatch("휴대폰 번호 뒤 4자리가 계약서와 다릅니다.", hint="계약서에 등록한 휴대폰 번호를 확인하세요.")
+    _sign_failures.pop(c.id, None)
+
+
+# ── 로그인한 계약 상대방 (비밀번호를 정한 뒤) ──
+def party_contract(user: User) -> Contract:
+    c = Contract.first(party_username=user.username)
+    if c is None:
+        raise NotFound("진행 중인 계약이 없습니다.")
+    return c
+
+
+def sign(user: User, agree: bool) -> Contract:
+    """2단계: 계약 내용 동의 (로그인한 상태)."""
+    c = party_contract(user)
+    if c.status != "sent":
+        raise Conflict("이미 동의한 계약입니다." if c.status != "cancelled" else "취소된 계약입니다.")
     if not agree:
         raise Mismatch("계약 내용에 동의해야 확인이 완료됩니다.")
-    _sign_failures.pop(c.id, None)
     c.status, c.signed_at = "signed", now_iso()
     return c.save()
+
+
+def continue_as_account(user: User) -> Dict:
+    """체결 뒤: 계약 진행용 로그인을 최종 계정 로그인으로 바꾼다 (비밀번호는 이미 넘어가 있다)."""
+    c = party_contract(user)
+    if c.status != "active":
+        raise Conflict("아직 체결되지 않았습니다.", hint="납부가 확인되면 다시 눌러 주세요.")
+    return accounts.link_session(c.username, "임대인.html" if c.kind == "membership" else "임차인.html")
 
 
 # ── 3. 납부 확인 → 활성화 ──
@@ -171,8 +205,25 @@ def confirm_paid(c: Contract) -> Contract:
                        else f"이 계약은 '{STATUS_LABEL.get(c.status, c.status)}' 상태입니다.")
     c.paid_at = now_iso()
     (_activate_membership if c.kind == "membership" else _activate_lease)(c)
+    _carry_password(c)
     c.status, c.activated_at = "active", now_iso()
     return c.save()
+
+
+def _carry_password(c: Contract) -> None:
+    """계약 링크에서 정한 비밀번호를 최종 아이디로 옮기고, 계약 진행용 로그인은 막는다."""
+    party = User.by_username(c.party_username) if c.party_username else None
+    final = User.by_username(c.username)
+    if party is None or final is None:
+        return
+    final.salt, final.password_hash = party.salt, party.password_hash
+    final.save("rent4_password_carried")
+    acc = _account(c)
+    if acc is not None:
+        acc.initial_code, acc.must_change = "", False
+        acc.activated_at = acc.activated_at or now_iso()
+        acc.save()
+    party.set_password(secrets.token_hex(16)).save("rent4_contract_party_closed")
 
 
 def _activate_membership(c: Contract) -> None:
@@ -189,9 +240,9 @@ def _activate_membership(c: Contract) -> None:
 
 
 def reset_password(c: Contract) -> str:
-    """비밀번호 분실: 체결된 계약의 계정에 새 임시 비밀번호를 걸고, 계약 링크를 새로 만든다.
-
-    상대방은 새 링크를 열어 임시 비밀번호를 확인하고, 로그인 즉시 다시 바꿔야 한다. 이전 링크와 비밀번호는 바로 막힌다.
+    """비밀번호 초기화 (요청 · 분실 · 계약 정리 · 처음 설정 등 모든 경우): 체결된 계약의 계정을 '설정 전'으로 되돌리고
+    새 계약 링크를 만든다. 이전 링크와 비밀번호는 바로 막히고, 상대방은 새 링크로 바로 로그인해 비밀번호를 정한다.
+    정하는 즉시 그 링크도 만료된다.
     """
     if c.status != "active":
         raise Conflict("체결된 계약에서만 비밀번호를 초기화할 수 있습니다.")
@@ -242,6 +293,9 @@ def public(c: Contract, for_party: bool = False) -> Dict:
         data["party_phone"] = c.party_phone
     else:
         data["party_phone_masked"] = f"***-****-{_digits(c.party_phone)[-4:]}"
+        data["final_username"] = c.username or (c.building_code if c.kind == "membership"
+                                                else f"{accounts.building_of(c.branch).code}{c.room}")
+        data["password_set"] = bool(c.party_username)
         data["login"] = _login_info(c) if c.status == "active" else None
     return data
 

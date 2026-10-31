@@ -20,16 +20,16 @@
 
   <form id="loginForm" class="bass-card stack" style="margin-top:12px">
     <h2 style="margin:0">로그인</h2>
-    <div><label class="bass-label" for="username">아이디</label>
-      <input class="bass-input" id="username" autocomplete="username" autocapitalize="none" placeholder="예: chic603" required></div>
+    <div><label class="bass-label" for="username">아이디 또는 휴대폰 번호</label>
+      <input class="bass-input" id="username" autocomplete="username" autocapitalize="none" placeholder="예: chic603 또는 010-1234-5678" required></div>
     <div><label class="bass-label" for="password">비밀번호</label>
       <input class="bass-input" id="password" type="password" autocomplete="current-password" required></div>
     <button class="bass-btn bass-btn--primary" id="btnLogin" type="submit">로그인</button>
   </form>
 
   <div class="bass-card stack" style="margin-top:14px;font-size:13.5px">
-    <div><b>📝 처음이신가요?</b><br><span class="bass-muted">계정은 계약이 체결되면 생깁니다. 받은 <b>링크</b>에서 계약을 확인·동의하고 가맹비(임대인) 또는 잔금(임차인)이 확인되면, 같은 링크의 <b>시작하기</b>로 바로 로그인해 비밀번호를 정합니다. 그다음부터 여기서 로그인합니다.</span></div>
-    <div><b>🔑 아이디</b><br><span class="bass-muted">임대인 = 건물 코드(예: <code>chic</code>) · 임차인 = 건물 코드 + 호실(예: <code>chic603</code>)</span></div>
+    <div><b>📝 처음이신가요?</b><br><span class="bass-muted">계정은 계약이 체결되면 생깁니다. 받은 <b>계약 링크</b>에서 먼저 비밀번호를 정하세요. 링크를 잃어버려도 여기서 <b>휴대폰 번호와 그 비밀번호</b>로 로그인해 계약 동의·체결 상황을 이어서 볼 수 있고, 체결되면 같은 비밀번호로 아이디도 쓸 수 있습니다.</span></div>
+    <div><b>🔑 아이디</b><br><span class="bass-muted">임대인 = 건물 코드(예: <code>chic</code>) · 임차인 = 건물 코드 + 호실(예: <code>chic603</code>) · 휴대폰 번호로도 로그인할 수 있습니다</span></div>
     <a class="bass-muted" href="manual.html">📘 사용 설명서</a>
   </div>
 </main>
@@ -50,7 +50,7 @@
   $("loginForm").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnLogin"), async () => {
-      const res = await Bass.request("/auth/login", { method: "POST",
+      const res = await Bass.api("rent4", "/login", { method: "POST",
         body: { username: $("username").value.trim(), password: $("password").value } });
       Bass.setToken(res.token);
       try {
