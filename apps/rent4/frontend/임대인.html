@@ -31,12 +31,14 @@
 
     <!-- 붙여 넣기 -->
     <section class="stack">
-      <div class="bass-card stack">
-        <label class="bass-label" for="bankText">📋 붙여 넣기 — 은행 입금 알림 문자를 그대로 붙여 넣으세요 (여러 건 가능, 문자 사이는 빈 줄)</label>
-        <textarea class="bass-input" id="bankText" placeholder="[Web발신]&#10;신한 10/25 14:32&#10;110-***-123456&#10;입금 440,000&#10;잔액 3,456,789&#10;김수현"></textarea>
+      <div class="bass-card stack paste-box" id="pasteBox">
+        <label class="bass-label" for="bankText">📋 만능 붙여 넣기 — 은행 입금 문자 · 엑셀 표 · 구글 시트 주소 · 사진(입금 캡처 · 종이 계약서) · 엑셀 파일</label>
+        <textarea class="bass-input" id="bankText" placeholder="여기에 붙여 넣거나, 사진 · 엑셀 파일을 끌어다 놓으세요&#10;&#10;[Web발신]&#10;신한 10/25 14:32&#10;입금 440,000&#10;김수현"></textarea>
+        <div class="bass-row hide" id="pasteFile"></div>
         <div class="bass-row">
           <button class="bass-btn bass-btn--primary" id="btnPreview">🔍 분석하기</button>
-          <span class="bass-muted" style="font-size:12.5px">분석만 하고 저장하지 않습니다. 결과를 확인한 뒤 반영하세요.</span>
+          <label class="bass-btn">📎 파일 · 사진<input type="file" id="pasteInput" accept=".xlsx,.txt,.tsv,image/*" hidden></label>
+          <span class="bass-muted" style="font-size:12.5px">무엇인지 알아서 나눠 보여 줍니다. 확인하고 반영 · 등록하기 전에는 저장하지 않습니다.</span>
         </div>
       </div>
       <div id="previewBox" class="stack hide">
@@ -89,7 +91,11 @@
           <div><label class="bass-label" for="lStart">입주일</label><input class="bass-input" id="lStart" type="date" required></div>
           <div><label class="bass-label" for="lEnd">만기일</label><input class="bass-input" id="lEnd" type="date"></div>
         </div>
-        <button class="bass-btn bass-btn--primary" id="btnLease" type="submit" style="justify-self:start">계약 발행하고 시작 링크 만들기</button>
+        <div class="bass-row">
+          <button class="bass-btn bass-btn--primary" id="btnLease" type="submit">계약 발행하고 시작 링크 만들기</button>
+          <button class="bass-btn" id="btnPaper" type="button" title="이미 대면으로 체결한 계약: 바로 입주 처리하고 임차인 계정을 엽니다">📄 종이 계약서로 등록 (체결 완료)</button>
+        </div>
+        <div class="bass-muted hide" id="paperNote" style="font-size:12.5px">📷 사진에서 읽은 내용입니다. 틀린 곳을 고친 뒤 '종이 계약서로 등록'을 누르세요. 주민번호는 읽지도 저장하지도 않습니다.</div>
       </form>
       <div class="board-wrap"><table class="board" id="leases" style="min-width:640px"></table></div>
     </section>

@@ -145,7 +145,8 @@ def thread(user: User, other: str, limit: int = 100) -> List[Dict]:
     if not _allowed(user, other):
         raise Forbidden("대화할 수 없는 상대입니다.")
     touch(user.username)
-    msgs = [m for m in Message.find(to_username=user.username) if m.sender == other] +            [m for m in Message.find(sender=user.username) if m.to_username == other]
+    msgs = [m for m in Message.find(to_username=user.username) if m.sender == other] + \
+           [m for m in Message.find(sender=user.username) if m.to_username == other]
     for m in msgs:
         if m.to_username == user.username and not m.read_at:
             m.read_at = now_iso()

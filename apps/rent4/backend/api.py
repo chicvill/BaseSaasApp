@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth, paste
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -177,6 +177,22 @@ def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = ""
                            user: User = Depends(staff)) -> Dict[str, Any]:
     c = contracts.create_lease(user, _scope(user, branch).branch, payload)
     return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
+
+
+@router.post("/lessor/contracts/paper")
+def lessor_contract_paper(payload: Dict[str, Any] = Body(...), branch: str = "",
+                          user: User = Depends(staff)) -> Dict[str, Any]:
+    c = contracts.register_paper(user, _scope(user, branch).branch, payload)
+    return {"success": True, "contract": contracts.public(c)}
+
+
+@router.post("/lessor/paste")
+async def lessor_paste(payload: Dict[str, Any] = Body(...), branch: str = "",
+                       user: User = Depends(staff)) -> Dict[str, Any]:
+    """만능 붙여 넣기: 무엇인지 알아내 bank / excel / contract 로 나눈다 (저장하지 않음)."""
+    _scope(user, branch)
+    g = lambda k: str(payload.get(k) or "")  # noqa: E731
+    return {"success": True, **await paste.analyze(g("text"), g("file"), g("filename"), g("mime"))}
 
 
 @router.post("/lessor/contracts/{contract_id}/{action}")

@@ -111,6 +111,17 @@ def create_lease(issuer: User, branch: str, data: Dict) -> Contract:
 
 
 
+def register_paper(issuer: User, branch: str, data: Dict) -> Contract:
+    """종이 계약서 등록: 이미 대면으로 체결한 임대차 계약 → 바로 체결 완료 + 호실 입주 + 임차인 계정.
+    임차인은 임대인의 '🔑 비밀번호 초기화' 링크(또는 채팅)로 시작한다."""
+    c = create_lease(issuer, branch, data)
+    now = now_iso()
+    c.paper, c.signed_at, c.paid_at = True, now, now
+    _activate_lease(c)
+    c.status, c.activated_at = "active", now
+    return c.save()
+
+
 def cancel(c: Contract) -> Contract:
     if c.status == "active":
         raise Conflict("이미 체결된 계약은 취소할 수 없습니다.")
@@ -257,7 +268,7 @@ def public(c: Contract, for_party: bool = False) -> Dict:
             "deposit": c.deposit, "rent": c.rent, "mgmt": c.mgmt, "fee": c.fee, "start": c.start, "end": c.end,
             "lease_type": c.lease_type, "pay_timing": c.pay_timing, "created_at": c.created_at,
             "signed_at": c.signed_at, "paid_at": c.paid_at, "activated_at": c.activated_at, "username": c.username,
-            "reset_at": c.reset_at}
+            "reset_at": c.reset_at, "paper": c.paper}
     if not for_party:
         data["party_phone"] = c.party_phone
     else:

@@ -749,5 +749,73 @@ class TestChat(ApiCase):
         self.assertEqual(self.client.get("/api/rent4/chat/thread/chic102", headers=tenant).status_code, 403)
         self.assertEqual(self.send(self.admin, "chic101", "관리인 공지", "안내").status_code, 200)
 
+
+class TestPaste(ApiCase):
+    """만능 붙여 넣기: 텍스트 · 엑셀 파일 · 구글 시트 주소 · 사진(가짜 Gemini) → bank / excel / contract."""
+
+    def paste(self, **body):
+        return self.client.post("/api/rent4/lessor/paste", headers=self.chic, json=body)
+
+    def test_text_detection(self):
+        self.assertEqual(self.paste(text="신한 03/05 입금 250,000 홍길동").json()["kind"], "bank")
+        r = self.paste(text=SHEET).json()
+        self.assertEqual(r["kind"], "excel")
+        self.assertEqual(self.paste(text="https://example.com/a.xlsx").status_code, 422)
+        self.assertEqual(self.paste(text="  ").status_code, 422)
+
+    def test_xlsx_file_becomes_sheet_text(self):
+        import base64, io, openpyxl
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        for line in SHEET.split("\n"):
+            ws.append([int(c) if c.isdigit() and len(c) > 4 else (c or None) for c in line.split("\t")])
+        buf = io.BytesIO()
+        wb.save(buf)
+        r = self.paste(file=base64.b64encode(buf.getvalue()).decode(), filename="2026.xlsx").json()
+        self.assertEqual(r["kind"], "excel")
+        prev = self.client.post("/api/rent4/lessor/import/preview", headers=self.chic, json={"text": r["text"]})
+        self.assertEqual(prev.status_code, 200, prev.text)
+        self.assertEqual(prev.json()["year"], 2026)
+
+    def test_google_sheet_url(self):
+        from unittest import mock
+        fake = mock.MagicMock()
+        fake.__enter__.return_value.read.return_value = SHEET.encode()
+        fake.__enter__.return_value.headers = {"Content-Type": "text/tab-separated-values"}
+        with mock.patch("urllib.request.urlopen", return_value=fake) as urlopen:
+            r = self.paste(text="https://docs.google.com/spreadsheets/d/AbC123_x/edit#gid=42").json()
+        self.assertEqual(urlopen.call_args[0][0].full_url,
+                         "https://docs.google.com/spreadsheets/d/AbC123_x/export?format=tsv&gid=42")
+        self.assertEqual((r["kind"], r["source"]), ("excel", "url"))
+
+    def test_photo_of_paper_contract_then_register(self):
+        import json as _json
+        from unittest import mock
+        from shared.ai import gemini_client
+        self.import_sheet()
+        reply = _json.dumps({"kind": "contract", "contract": {
+            "room": "102호", "party_name": "종이임차", "party_phone": "010-3333-4444", "deposit": "5,000,000",
+            "rent": 350000, "mgmt": 50000, "start": "2026-11-01", "end": "2027-10-31", "lease_type": "월세",
+            "pay_timing": "선불", "jumin": "900101-1234567"}})
+        with mock.patch.object(gemini_client.GeminiClient, "is_available", True, create=True), \
+             mock.patch.object(gemini_client.GeminiClient, "generate_with_image", mock.AsyncMock(return_value=reply)):
+            r = self.paste(file="aGVsbG8=", filename="contract.jpg", mime="image/jpeg").json()
+        self.assertEqual(r["kind"], "contract", r)
+        draft = r["contract"]
+        self.assertEqual((draft["room"], draft["deposit"], draft["pay_timing"]), ("102", 5000000, "선불"))
+        self.assertNotIn("900101", str(r))                                  # 주민번호는 옮기지 않는다
+        res = self.client.post("/api/rent4/lessor/contracts/paper", headers=self.chic, json=draft)
+        self.assertEqual(res.status_code, 200, res.text)
+        c = res.json()["contract"]
+        self.assertEqual((c["status"], c["paper"], c["username"]), ("active", True, "chic102"))
+        room = Room.first(branch="main", room="102")
+        self.assertEqual((room.tenant_name, room.monthly_due, room.move_in), ("종이임차", 400000, "2026-11-01"))
+
+    def test_photo_without_ai_key(self):
+        from unittest import mock
+        from shared.ai import gemini_client
+        with mock.patch.object(gemini_client.GeminiClient, "is_available", False, create=True):
+            self.assertEqual(self.paste(file="aGVsbG8=", filename="a.png", mime="image/png").status_code, 400)
+
 if __name__ == "__main__":
     unittest.main()

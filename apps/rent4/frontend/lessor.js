@@ -36,6 +36,7 @@
     }
     $("workspace").classList.remove("hide");
     await loadBoard();
+    takeHandoff();
     $("buildingName").textContent = `${boardData.building} 임대인`;
     document.title = `Rent4 · ${boardData.building}`;
   }
@@ -59,19 +60,37 @@
     Rent4.contractTable($("leases"), contracts, { call: callLease, reload: loadLeases, partyLabel: "임차인" });
   }
 
+  function leaseBody() {
+    const num = (id) => Number($(id).value || 0);
+    return { room: $("lRoom").value.trim(), party_name: $("lName").value.trim(), party_phone: $("lPhone").value.trim(),
+      lease_type: $("lType").value, pay_timing: $("lTiming").value,
+      deposit: num("lDeposit"), rent: num("lRent"), mgmt: num("lMgmt"),
+      start: $("lStart").value || null, end: $("lEnd").value || null };
+  }
+
   $("leaseForm").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnLease"), async () => {
-      const num = (id) => Number($(id).value || 0);
-      const res = await callLease("", { body: {
-        room: $("lRoom").value.trim(), party_name: $("lName").value.trim(), party_phone: $("lPhone").value.trim(),
-        lease_type: $("lType").value, pay_timing: $("lTiming").value,
-        deposit: num("lDeposit"), rent: num("lRent"), mgmt: num("lMgmt"),
-        start: $("lStart").value || null, end: $("lEnd").value || null } });
+      const res = await callLease("", { body: leaseBody() });
       Rent4.issuedNotice(res);
       $("leaseForm").reset();
+      $("paperNote").classList.add("hide");
       await loadLeases();
     }, "발행 중...");
+  });
+
+  // 종이 계약서 등록: 이미 체결 → 바로 입주 + 임차인 계정 (시작은 🔑 비밀번호 초기화 링크로)
+  $("btnPaper").addEventListener("click", (e) => {
+    if (!$("leaseForm").reportValidity()) return;
+    Bass.withLock(e.currentTarget, async () => {
+      const res = await callLease("/paper", { body: leaseBody() });
+      const c = res.contract;
+      Bass.updateAppAlert("success", `${c.room}호 ${c.party_name}님 종이 계약서를 등록했습니다 (체결 완료).`,
+        `입주 처리하고 임차인 계정 ${c.username} 을 열었습니다. 임차인 계정 탭의 🔑 비밀번호 초기화로 시작 링크를 보내 주세요.`);
+      $("leaseForm").reset();
+      $("paperNote").classList.add("hide");
+      await Promise.all([loadLeases(), loadBoard()]);
+    }, "등록 중...");
   });
 
   // ── 임차인 계정 ──
@@ -199,11 +218,92 @@
   $("prevYear").addEventListener("click", () => { year -= 1; loadBoard().catch(Bass.showError); });
   $("nextYear").addEventListener("click", () => { year += 1; loadBoard().catch(Bass.showError); });
 
-  // ── 입금 문자 ──
+  // ── 만능 붙여 넣기: 텍스트 · 구글 시트 주소 · 엑셀 파일 · 사진 → 입금 문자 / Excel / 계약서 ──
+  let pasted = null;      // { name, type, data(dataURL) } — 붙여 넣거나 고른 파일 (서버에 저장하지 않음)
+
+  function setFile(file) {
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) { Bass.updateAppAlert("error", "파일이 너무 큽니다 (8MB 까지)."); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      pasted = { name: file.name || "붙여 넣은 사진.png", type: file.type, data: reader.result };
+      $("pasteFile").innerHTML = `<span class="bass-badge bass-badge--info">📎 ${esc(pasted.name)}</span>
+        <button class="bass-btn bass-btn--sm bass-btn--ghost" type="button" data-clear>✕ 빼기</button>`;
+      $("pasteFile").classList.remove("hide");
+    };
+    reader.readAsDataURL(file);
+  }
+  function clearFile() {
+    pasted = null;
+    $("pasteInput").value = "";
+    $("pasteFile").classList.add("hide");
+  }
+  $("pasteInput").addEventListener("change", () => setFile($("pasteInput").files[0]));
+  $("pasteFile").addEventListener("click", (e) => { if (e.target.closest("[data-clear]")) clearFile(); });
+  $("bankText").addEventListener("paste", (e) => {
+    const file = [...(e.clipboardData?.files || [])][0];
+    if (file) { e.preventDefault(); setFile(file); }
+  });
+  $("pasteBox").addEventListener("dragover", (e) => { e.preventDefault(); $("pasteBox").classList.add("is-drop"); });
+  $("pasteBox").addEventListener("dragleave", () => $("pasteBox").classList.remove("is-drop"));
+  $("pasteBox").addEventListener("drop", (e) => {
+    $("pasteBox").classList.remove("is-drop");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) { e.preventDefault(); setFile(file); }
+  });
+
+  /** 관리인 화면의 만능 붙여 넣기에서 넘어온 내용이 있으면 바로 분석한다. */
+  function takeHandoff() {
+    let h = null;
+    try { h = JSON.parse(sessionStorage.getItem("rent4.paste") || "null"); sessionStorage.removeItem("rent4.paste"); } catch (_) { h = null; }
+    if (!h) return;
+    $("bankText").value = h.text || "";
+    if (h.file) {
+      pasted = h.file;
+      $("pasteFile").innerHTML = `<span class="bass-badge bass-badge--info">📎 ${esc(pasted.name)}</span>
+        <button class="bass-btn bass-btn--sm bass-btn--ghost" type="button" data-clear>✕ 빼기</button>`;
+      $("pasteFile").classList.remove("hide");
+    }
+    $("btnPreview").click();
+  }
+
+  function openTab(tab) {
+    const btn = document.querySelector(`.tabs button[data-tab="${tab}"]`);
+    if (!btn.classList.contains("is-active")) btn.click();
+    document.querySelector(`.panel[data-panel="${tab}"]`).scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function fillLease(c) {
+    const set = (id, v) => { if (v !== undefined && v !== null && v !== "" && v !== 0) $(id).value = v; };
+    $("leaseForm").reset();
+    set("lRoom", c.room); set("lName", c.party_name); set("lPhone", c.party_phone);
+    set("lType", c.lease_type); set("lTiming", c.pay_timing);
+    set("lDeposit", c.deposit); set("lRent", c.rent); set("lMgmt", c.mgmt);
+    set("lStart", c.start); set("lEnd", c.end);
+    $("paperNote").classList.remove("hide");
+  }
+
   $("btnPreview").addEventListener("click", (e) => Bass.withLock(e.currentTarget, async () => {
-    const res = await api("/lessor/bank/preview", { method: "POST", body: { text: $("bankText").value } });
-    preview = res.items;
-    renderPreview(res.counts);
+    const body = pasted ? { file: pasted.data, filename: pasted.name, mime: pasted.type } : { text: $("bankText").value };
+    const r = await api("/lessor/paste", { method: "POST", body });
+    $("previewBox").classList.add("hide");
+    if (r.kind === "bank") {
+      const res = await api("/lessor/bank/preview", { method: "POST", body: { text: r.text } });
+      preview = res.items;
+      renderPreview(res.counts);
+      if (r.source === "image") Bass.updateAppAlert("success", "사진에서 입금 내역을 읽었습니다.", "금액 · 입금자를 확인한 뒤 반영하세요.");
+    } else if (r.kind === "excel") {
+      $("excelText").value = r.text;
+      openTab("import");
+      const res = await api("/lessor/import/preview", { method: "POST", body: { text: r.text } });
+      renderImport(res, false);
+      $("btnImportCommit").disabled = false;
+      Bass.updateAppAlert("success", "엑셀 수납부로 알아봤습니다.", "아래 분석 결과를 확인하고 'Knowledge Pool 에 반영'을 누르세요.");
+    } else if (r.kind === "contract") {
+      openTab("contracts");
+      fillLease(r.contract);
+      Bass.updateAppAlert("success", "종이 계약서로 알아봤습니다.", "계약 칸을 확인 · 수정한 뒤 '📄 종이 계약서로 등록'을 누르세요.");
+    }
   }, "분석 중... ⏳"));
 
   function roomOptions(selected) {
@@ -255,6 +355,7 @@
     const res = await api("/lessor/bank/commit", { method: "POST", body: { items } });
     Bass.updateAppAlert("success", `입금 ${res.saved}건을 수납 기록에 반영했습니다.`, "수납 현황 탭에서 확인할 수 있습니다.");
     $("bankText").value = "";
+    clearFile();
     $("previewBox").classList.add("hide");
     await loadBoard();
   }, "반영 중... ⏳"));

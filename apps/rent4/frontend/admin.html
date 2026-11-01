@@ -27,6 +27,18 @@
   <h2 style="margin:10px 0 12px;font-size:17px">🏢 가맹점 목록 <small class="bass-muted" style="font-weight:400;font-size:13px">눌러서 계약 · 월별 수납 펼쳐보기</small></h2>
   <div class="stack" id="buildings"></div>
 
+  <h2 style="margin:28px 0 12px;font-size:17px">📋 만능 붙여 넣기 <small class="bass-muted" style="font-weight:400;font-size:13px">은행 입금 문자 · 엑셀 표 · 구글 시트 주소 · 사진 · 엑셀 파일</small></h2>
+  <form id="adminPaste" class="bass-card stack">
+    <div><label class="bass-label" for="pBranch">어느 건물 자료인가요?</label>
+      <select class="bass-select bass-input" id="pBranch" required style="max-width:280px"></select></div>
+    <textarea class="bass-input" id="pText" placeholder="여기에 붙여 넣으세요 (사진은 붙여 넣거나 아래 📎 로)"></textarea>
+    <div class="bass-row">
+      <button class="bass-btn bass-btn--primary" type="submit">🔍 그 건물 화면에서 분석하기</button>
+      <label class="bass-btn">📎 파일 · 사진<input type="file" id="pFile" accept=".xlsx,.txt,.tsv,image/*" hidden></label>
+      <span class="bass-muted" id="pFileName" style="font-size:12.5px"></span>
+    </div>
+  </form>
+
   <h2 style="margin:28px 0 12px;font-size:17px">🏗️ 신규 빌딩 개설 <small class="bass-muted" style="font-weight:400;font-size:13px">건물 등록 + 임대인 가맹 계약</small></h2>
   <form id="memberForm" class="bass-card stack">
     <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 한 번만 쓰는 계약 시작 링크가 만들어집니다. 그 자리에서 임대인에게 카카오톡 등으로 보내 주세요. 임대인은 링크에서 비밀번호를 정하고 계약에 동의합니다. 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드, 같은 비밀번호)이 열립니다.</div>
@@ -85,8 +97,34 @@
     Bass.showError(err);
   }
 
+  // 만능 붙여 넣기: 고른 건물의 임대인 화면으로 넘겨 거기서 바로 분석한다 (이 브라우저 탭 안에서만 잠깐 보관)
+  let pFile = null;
+  const takeFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { pFile = { name: file.name || "붙여 넣은 사진.png", type: file.type, data: reader.result }; $("pFileName").textContent = `📎 ${pFile.name}`; };
+    reader.readAsDataURL(file);
+  };
+  $("pFile").addEventListener("change", () => takeFile($("pFile").files[0]));
+  $("pText").addEventListener("paste", (e) => {
+    const file = [...(e.clipboardData?.files || [])][0];
+    if (file) { e.preventDefault(); takeFile(file); }
+  });
+  $("adminPaste").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!pFile && !$("pText").value.trim()) { Bass.updateAppAlert("warning", "붙여 넣은 내용이 없습니다."); return; }
+    try {
+      sessionStorage.setItem("rent4.paste", JSON.stringify({ text: $("pText").value, file: pFile }));
+    } catch (_) {
+      Bass.updateAppAlert("error", "내용이 너무 커서 넘기지 못했습니다.", "건물 화면에서 직접 붙여 넣어 주세요.");
+      return;
+    }
+    location.href = `임대인.html?branch=${encodeURIComponent($("pBranch").value)}`;
+  });
+
   async function loadBuildings() {
     const { buildings } = await Bass.api("rent4", "/admin/buildings");
+    $("pBranch").innerHTML = buildings.map((b) => `<option value="${esc(b.branch)}">${esc(b.name)}</option>`).join("");
     $("buildings").innerHTML = buildings.map((b) => `
       <details class="bass-card fold" data-branch="${esc(b.branch)}">
         <summary>

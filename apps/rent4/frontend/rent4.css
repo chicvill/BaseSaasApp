@@ -124,3 +124,6 @@ details.fold > .fold-body { padding: 0 16px 16px; display: grid; gap: 14px; }
 dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
 dl.kv dt { color: var(--muted); }
 dl.kv dd { margin: 0; }
+
+/* 만능 붙여 넣기 */
+.paste-box.is-drop { border-color: var(--primary); box-shadow: 0 0 0 2px hsl(232 60% 60% / .4); }
