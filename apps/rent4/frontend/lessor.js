@@ -1,4 +1,4 @@
-/* apps/rent4/frontend/lessor.js — 임대인 화면: 입금 문자 반영 · 수납 현황 · Excel 가져오기 */
+/* apps/rent4/frontend/lessor.js — 임대인 화면: 당월 수납현황 · 붙여 넣기(입금 문자) · 신규 계약 · 월별 수납현황 · 임차인 계정 · Excel */
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id);
@@ -40,10 +40,12 @@
     document.title = `Rent4 · ${boardData.building}`;
   }
 
-  // ── 탭 ──
+  // ── 버튼: 누르면 그 화면을 열고, 다시 누르면 닫는다 ──
   document.querySelectorAll(".tabs button").forEach((btn) => btn.addEventListener("click", () => {
-    document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("is-active", b === btn));
-    document.querySelectorAll(".panel").forEach((p) => { p.hidden = p.dataset.panel !== btn.dataset.tab; });
+    const open = !btn.classList.contains("is-active");
+    document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("is-active", open && b === btn));
+    document.querySelectorAll(".panel").forEach((p) => { p.hidden = !open || p.dataset.panel !== btn.dataset.tab; });
+    if (!open) return;
     if (btn.dataset.tab === "board") loadBoard().catch(Bass.showError);
     if (btn.dataset.tab === "accounts") loadAccounts().catch(Bass.showError);
     if (btn.dataset.tab === "contracts") loadLeases().catch(Bass.showError);
@@ -112,7 +114,13 @@
   });
 
   // ── 수납 현황 ──
+  async function loadSummary() {
+    $("monthDash").innerHTML = Rent4.monthCard(await api("/lessor/summary"));
+    Rent4.startClock($("monthDash"));
+  }
+
   async function loadBoard() {
+    loadSummary().catch(Bass.showError);
     boardData = await api(`/lessor/board?year=${year}`);
     rooms = boardData.rooms.map((r) => r.room).filter((r) => r.status === "occupied");
     renderBoard();

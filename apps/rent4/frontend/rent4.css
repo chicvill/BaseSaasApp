@@ -83,3 +83,30 @@ dialog.detail::backdrop { background: hsl(232 40% 4% / .7); }
 .pw-toggle:hover { background: hsl(232 30% 30% / .9); }
 .pw-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .pw-toggle[aria-pressed="true"] { border-color: var(--primary); }
+
+/* 당월 수납현황 카드 (rent4.js monthCard) */
+.dash { gap: 10px; }
+.dash-amount { font-size: 14px; }
+.dash-amount b { font: 800 clamp(22px, 6vw, 28px) var(--font-display); font-variant-numeric: tabular-nums; }
+.dash-rate { margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: hsl(152 65% 40% / .2); font-weight: 700; }
+.dash-bar { height: 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+.dash-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-2)); }
+.dash-counts { display: flex; gap: 16px; flex-wrap: wrap; font-size: 14px; }
+.dash-counts b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.dash-counts .is-err b { color: hsl(356 90% 72%); }
+.dash-counts .is-muted { color: var(--muted); }
+
+/* 관리인 가맹점 목록 · 접기 */
+details.fold { padding: 0; }
+details.fold > summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; justify-content: space-between;
+  align-items: center; gap: 10px; flex-wrap: wrap; }
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::after { content: "▾"; color: var(--muted); }
+details.fold[open] > summary::after { content: "▴"; }
+details.fold > .fold-body { padding: 0 16px 16px; display: grid; gap: 14px; }
+.month-bars { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; align-items: end; height: 90px; }
+.month-bars div { display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; height: 100%; text-align: center; font-size: 10.5px; color: var(--muted); }
+.month-bars i { display: block; min-height: 2px; border-radius: 3px 3px 0 0; background: hsl(152 65% 45% / .6); }
+dl.kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 13.5px; }
+dl.kv dt { color: var(--muted); }
+dl.kv dd { margin: 0; }

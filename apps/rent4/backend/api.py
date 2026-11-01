@@ -98,6 +98,16 @@ def admin_buildings(user: User = Depends(admin_only)) -> Dict[str, Any]:
     return {"success": True, "buildings": items}
 
 
+@router.get("/admin/buildings/{branch}")
+def admin_building_detail(branch: str, year: int = 0, user: User = Depends(admin_only)) -> Dict[str, Any]:
+    """가맹점 펼쳐보기: 가맹 계약 · 이번 달 수납현황 · 월별 수납 합계."""
+    b = accounts.building_of(branch)
+    year = year or date.today().year
+    return {"success": True, "building": {"code": b.code, "name": b.name, "branch": b.branch},
+            "contracts": contracts.listing("membership", b.branch), "month": ledger.month_summary(b.branch),
+            "year": year, "totals": ledger.year_totals(b.branch, year)}
+
+
 @router.get("/admin/contracts")
 def admin_contracts(user: User = Depends(admin_only)) -> Dict[str, Any]:
     return {"success": True, "contracts": contracts.listing("membership")}
@@ -176,6 +186,11 @@ def lessor_contract_action(contract_id: str, action: str, branch: str = "",
 
 
 # ── 임대인 ──
+@router.get("/lessor/summary")
+def lessor_summary(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    return {"success": True, **ledger.month_summary(_scope(user, branch).branch)}
+
+
 @router.get("/lessor/board")
 def lessor_board(year: int = 0, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
     b = _scope(user, branch)

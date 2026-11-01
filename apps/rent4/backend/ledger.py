@@ -100,6 +100,36 @@ def building_stats(branch: str) -> Dict:
             "unpaid_rooms": unpaid_rooms, "monthly_due": sum(r.monthly_due for r in occupied)}
 
 
+def month_summary(branch: str, ym: Optional[str] = None) -> Dict:
+    """이번 달 수납현황: 수납액 / 예정액(%), 완납 · 미납(이번 달 미입금) · 공실 호실 수."""
+    ym = ym or ym_of(today())
+    rooms = [r for r in Room.find(branch=branch) if r.status != "owner"]
+    occupied = [r for r in rooms if r.status == "occupied"]
+    expected = sum(r.monthly_due for r in occupied)
+    collected = paid_rooms = 0
+    unpaid: List[str] = []
+    for r in occupied:
+        amount = sum(p.amount for p in Payment.find(branch=branch, room=r.room) if p.ym == ym)
+        collected += amount
+        if amount and amount >= r.monthly_due:
+            paid_rooms += 1
+        else:
+            unpaid.append(r.room)
+    return {"ym": ym, "collected": collected, "expected": expected,
+            "rate": round(collected * 100 / expected) if expected else 0,
+            "paid_rooms": paid_rooms, "unpaid_rooms": len(unpaid), "unpaid_list": unpaid,
+            "vacant_rooms": len(rooms) - len(occupied), "rooms": len(rooms)}
+
+
+def year_totals(branch: str, year: int) -> List[Dict]:
+    """월별 수납 합계 (관리인 가맹점 펼쳐보기)."""
+    totals = {f"{year:04d}-{m:02d}": 0 for m in range(1, 13)}
+    for p in Payment.find(branch=branch):
+        if p.ym in totals:
+            totals[p.ym] += p.amount
+    return [{"ym": ym, "amount": amount} for ym, amount in totals.items()]
+
+
 def public_room(r: Room, full: bool = False) -> Dict:
     data = {"room": r.room, "building": r.building, "status": r.status, "tenant_name": r.tenant_name,
             "move_in": r.move_in, "expire": r.expire, "lease_type": r.lease_type, "pay_timing": r.pay_timing,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rent4 관리인</title>
-  <meta name="description" content="관리인 전용: 모든 건물의 이번 달 수납 요약과 건물별 임대인 화면.">
+  <meta name="description" content="관리인 전용: 가맹점 목록(계약 · 월별 수납 펼쳐보기)과 신규 빌딩 개설.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
 </head>
@@ -24,10 +24,10 @@
   <div id="app-alert"></div>
   <div id="pwBox" class="hide"></div>
   <section id="adminBody" class="hide">
-  <h2 style="margin:10px 0 12px;font-size:17px">건물 선택</h2>
-  <div class="bass-grid" id="buildings"></div>
+  <h2 style="margin:10px 0 12px;font-size:17px">🏢 가맹점 목록 <small class="bass-muted" style="font-weight:400;font-size:13px">눌러서 계약 · 월별 수납 펼쳐보기</small></h2>
+  <div class="stack" id="buildings"></div>
 
-  <h2 style="margin:28px 0 12px;font-size:17px">📝 가맹 계약 (임대인 등록)</h2>
+  <h2 style="margin:28px 0 12px;font-size:17px">🏗️ 신규 빌딩 개설 <small class="bass-muted" style="font-weight:400;font-size:13px">건물 등록 + 임대인 가맹 계약</small></h2>
   <form id="memberForm" class="bass-card stack">
     <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 한 번만 쓰는 계약 시작 링크가 만들어집니다. 그 자리에서 임대인에게 카카오톡 등으로 보내 주세요. 임대인은 링크에서 비밀번호를 정하고 계약에 동의합니다. 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드, 같은 비밀번호)이 열립니다.</div>
     <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
@@ -87,20 +87,56 @@
 
   async function loadBuildings() {
     const { buildings } = await Bass.api("rent4", "/admin/buildings");
-    document.getElementById("buildings").innerHTML = buildings.map((b) => `
-      <a class="bass-card is-interactive stack" style="text-decoration:none;color:inherit;gap:10px"
-         href="임대인.html?branch=${encodeURIComponent(b.branch)}">
-        <div class="bass-row" style="justify-content:space-between">
-          <strong style="font-size:18px">🏢 ${esc(b.name)}</strong>
-          <span class="bass-badge ${b.rooms ? (b.unpaid_rooms ? "bass-badge--err" : "bass-badge--ok") : "bass-badge--info"}">
-            ${b.rooms ? (b.unpaid_rooms ? `미납 ${b.unpaid_rooms}실` : "미납 없음") : "데이터 없음"}</span>
-        </div>
-        <div class="bass-muted" style="font-size:13.5px">
-          ${b.rooms ? `호실 ${b.rooms} · 거주 ${b.occupied} · 이번 달 입금 ${b.paid_this_month}/${b.occupied} · 월 청구 ${man(b.monthly_due)}`
-                    : "아직 가져온 수납부가 없습니다. 들어가서 Excel 가져오기로 시작하세요."}</div>
-        <span class="bass-btn bass-btn--sm">임대인 화면으로 →</span>
-      </a>`).join("");
+    $("buildings").innerHTML = buildings.map((b) => `
+      <details class="bass-card fold" data-branch="${esc(b.branch)}">
+        <summary>
+          <strong style="font-size:17px">🏢 ${esc(b.name)} <small class="bass-muted">${esc(b.code)}</small></strong>
+          <span class="bass-row" style="gap:6px">
+            <span class="bass-muted" style="font-size:13px">${b.rooms ? `호실 ${b.rooms} · 거주 ${b.occupied} · 이번 달 입금 ${b.paid_this_month}/${b.occupied}` : "데이터 없음"}</span>
+            <span class="bass-badge ${b.rooms ? (b.unpaid_rooms ? "bass-badge--err" : "bass-badge--ok") : "bass-badge--info"}">
+              ${b.rooms ? (b.unpaid_rooms ? `미납 ${b.unpaid_rooms}실` : "미납 없음") : "준비 중"}</span>
+          </span>
+        </summary>
+        <div class="fold-body"><span class="bass-muted">불러오는 중...</span></div>
+      </details>`).join("") || `<div class="bass-card bass-muted">아직 가맹점이 없습니다. 아래 '신규 빌딩 개설'로 시작하세요.</div>`;
   }
+
+  // 펼칠 때 가맹 계약 · 이번 달 수납현황 · 월별 수납 합계를 불러온다
+  $("buildings").addEventListener("toggle", async (e) => {
+    const d = e.target;
+    if (!d.open || d.dataset.loaded) return;
+    const body = d.querySelector(".fold-body");
+    try {
+      const r = await Bass.api("rent4", `/admin/buildings/${encodeURIComponent(d.dataset.branch)}`);
+      d.dataset.loaded = "1";
+      const c = r.contracts.find((x) => x.status === "active") || r.contracts[0];
+      const max = Math.max(1, ...r.totals.map((t) => t.amount));
+      body.innerHTML = `
+        <div class="bass-card stack dash">${Rent4.monthCard(r.month)}</div>
+        <div>
+          <strong style="font-size:14px">📄 가맹 계약</strong>
+          ${c ? `<dl class="kv" style="margin-top:8px">
+            <dt>임대인</dt><dd>${esc(c.party_name)} · ${esc(c.party_phone || "")}</dd>
+            <dt>상태</dt><dd>${esc(c.status_label)}${c.username ? ` · 아이디 <code>${esc(c.username)}</code>` : ""}</dd>
+            <dt>가맹비</dt><dd>${Number(c.fee || 0).toLocaleString("ko-KR")}원</dd>
+            <dt>기간</dt><dd>${esc(c.start || "-")} ~ ${esc(c.end || "")}</dd>
+            <dt>체결일</dt><dd>${esc((c.activated_at || "-").slice(0, 10))}</dd>
+          </dl>` : `<p class="bass-muted" style="margin:6px 0 0">가맹 계약 기록이 없습니다 (기본 건물).</p>`}
+        </div>
+        <div>
+          <strong style="font-size:14px">📅 ${r.year}년 월별 수납</strong>
+          <div class="month-bars" style="margin-top:8px">${r.totals.map((t) => `
+            <div title="${esc(t.ym)} · ${t.amount.toLocaleString("ko-KR")}원">
+              <i style="height:${Math.round(t.amount / max * 70)}px"></i>${Number(t.ym.slice(5))}</div>`).join("")}</div>
+          <div class="bass-muted" style="font-size:12px;margin-top:4px">합계 ${man(r.totals.reduce((s, t) => s + t.amount, 0))}</div>
+        </div>
+        <a class="bass-btn bass-btn--sm" style="justify-self:start" href="임대인.html?branch=${encodeURIComponent(r.building.branch)}">임대인 화면으로 →</a>`;
+      Rent4.startClock(body);
+    } catch (err) {
+      body.textContent = "불러오지 못했습니다.";
+      Bass.showError(err);
+    }
+  }, true);
 })();
 </script>
 </body>

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rent4 임대인</title>
-  <meta name="description" content="은행 입금 문자 반영, 호실별 수납 현황, Excel 수납부 가져오기.">
+  <meta name="description" content="당월 수납현황, 입금 문자 붙여 넣기, 신규 계약, 월별 수납현황."> 
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
 </head>
@@ -25,19 +25,14 @@
   <div id="app-alert"></div>
   <div id="pwBox" class="hide"></div>
 
-  <section id="workspace" class="hide">
-    <nav class="tabs" role="tablist">
-      <button class="bass-btn is-active" data-tab="bank" role="tab">💬 입금 문자 반영</button>
-      <button class="bass-btn" data-tab="board" role="tab">📅 수납 현황</button>
-      <button class="bass-btn" data-tab="contracts" role="tab">📝 임대 계약</button>
-      <button class="bass-btn" data-tab="accounts" role="tab">🔑 임차인 계정</button>
-      <button class="bass-btn" data-tab="import" role="tab">📥 Excel 가져오기</button>
-    </nav>
+  <section id="workspace" class="hide stack">
+    <!-- 당월 수납현황 -->
+    <div class="bass-card stack dash" id="monthDash"><span class="bass-muted">불러오는 중...</span></div>
 
-    <!-- 입금 문자 -->
-    <section class="panel stack" data-panel="bank">
+    <!-- 붙여 넣기 -->
+    <section class="stack">
       <div class="bass-card stack">
-        <label class="bass-label" for="bankText">은행 입금 알림 문자를 그대로 붙여 넣으세요 (여러 건 가능, 문자 사이는 빈 줄)</label>
+        <label class="bass-label" for="bankText">📋 붙여 넣기 — 은행 입금 알림 문자를 그대로 붙여 넣으세요 (여러 건 가능, 문자 사이는 빈 줄)</label>
         <textarea class="bass-input" id="bankText" placeholder="[Web발신]&#10;신한 10/25 14:32&#10;110-***-123456&#10;입금 440,000&#10;잔액 3,456,789&#10;김수현"></textarea>
         <div class="bass-row">
           <button class="bass-btn bass-btn--primary" id="btnPreview">🔍 분석하기</button>
@@ -52,6 +47,13 @@
         <div id="previewList" class="stack"></div>
       </div>
     </section>
+
+    <nav class="tabs" role="tablist">
+      <button class="bass-btn" data-tab="contracts" role="tab">📝 신규 계약</button>
+      <button class="bass-btn" data-tab="board" role="tab">📅 월별 수납현황</button>
+      <button class="bass-btn" data-tab="accounts" role="tab">🔑 임차인 계정</button>
+      <button class="bass-btn" data-tab="import" role="tab">📥 Excel 가져오기</button>
+    </nav>
 
     <!-- 수납 현황 -->
     <section class="panel stack" data-panel="board" hidden>

@@ -380,5 +380,38 @@
     setInterval(poll, 5000);
   }
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat };
+  /** 당월 수납현황 카드 (임대인 첫 화면 · 관리인 가맹점 펼쳐보기). */
+  function monthCard(m) {
+    const esc = Bass.escapeHtml;
+    const man = (n) => `${(Number(n || 0) / 10000).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}만원`;
+    const [y, mo] = m.ym.split("-");
+    return `
+      <div class="bass-row" style="justify-content:space-between;align-items:baseline">
+        <strong style="font-size:16px">${Number(y)}년 ${Number(mo)}월 수납현황</strong>
+        <span class="bass-muted" data-clock style="font-size:13px;font-variant-numeric:tabular-nums"></span>
+      </div>
+      <div class="dash-amount"><b>${man(m.collected)}</b> <span class="bass-muted">/ 예정 ${man(m.expected)}</span>
+        <span class="dash-rate">${m.rate}%</span></div>
+      <div class="dash-bar"><i style="width:${Math.min(100, m.rate)}%"></i></div>
+      <div class="dash-counts">
+        <span><b>${m.paid_rooms}</b>실 완납</span>
+        <span class="is-err" title="${esc(m.unpaid_list.map((r) => r + "호").join(", "))}"><b>${m.unpaid_rooms}</b>실 미납</span>
+        <span class="is-muted"><b>${m.vacant_rooms}</b>실 공실</span>
+      </div>`;
+  }
+
+  /** [data-clock] 칸에 현재 년월일시 (1초마다). */
+  function startClock(root) {
+    const DAYS = "일월화수목금토";
+    const tick = () => {
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, "0");
+      const text = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${DAYS[d.getDay()]}) ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+      (root || document).querySelectorAll("[data-clock]").forEach((el) => { el.textContent = text; });
+    };
+    tick();
+    if (!startClock.timer) startClock.timer = setInterval(tick, 1000);
+  }
+
+  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat, monthCard, startClock };
 })(window);

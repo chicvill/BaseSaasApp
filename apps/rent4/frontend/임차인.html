@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Rent4 내 입금</title>
-  <meta name="description" content="로그인한 임차인의 월세·관리비 입금 반영 결과.">
+  <title>Rent4 내 계약 · 입금</title>
+  <meta name="description" content="로그인한 임차인의 계약 정보와 월별 납입 현황."> 
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
 </head>
@@ -12,7 +12,7 @@
 <main class="bass-container" style="max-width:640px">
   <header class="top">
     <div>
-      <h1>🔑 내 입금 확인</h1>
+      <h1>🔑 내 계약 · 납입</h1>
       <p class="sub bass-muted" id="who">확인 중...</p>
     </div>
     <div class="bass-row">
@@ -27,6 +27,7 @@
 
   <section id="result" class="stack hide">
     <div class="bass-card stack" id="roomCard"></div>
+    <h2 style="margin:10px 0 0;font-size:17px">📅 월별 납입 현황</h2>
     <div class="stats" id="sumCards"></div>
     <div class="months-list" id="months"></div>
     <p class="bass-muted" style="font-size:12.5px">입금 후 임대인이 은행 문자를 반영하면 이곳에 표시됩니다. 반영이 늦거나 다르면 임대인에게 문의해 주세요.</p>
@@ -54,11 +55,17 @@
     $("result").classList.remove("hide");
     $("roomCard").innerHTML = `
       <div class="bass-row" style="justify-content:space-between">
-        <strong style="font-size:18px">${esc(v.building)} ${esc(r.room)}호 · ${esc(r.tenant_name)}님</strong>
+        <strong style="font-size:18px">📄 계약 정보</strong>
         <span class="bass-badge bass-badge--info">${esc(r.lease_type)} · ${esc(r.pay_timing)}</span>
       </div>
-      <div class="bass-muted" style="font-size:13.5px">월 ${won(r.monthly_due)} (임차료 ${won(r.rent)} + 관리비 ${won(r.mgmt)}) · 보증금 ${won(r.deposit)}
-        ${r.move_in ? ` · 입주 ${esc(r.move_in)}` : ""}</div>`;
+      <dl class="kv">
+        <dt>건물 · 호실</dt><dd>${esc(v.building)} ${esc(r.room)}호</dd>
+        <dt>임차인</dt><dd>${esc(r.tenant_name)}님</dd>
+        <dt>보증금</dt><dd>${won(r.deposit)}</dd>
+        <dt>월 납부액</dt><dd><b>${won(r.monthly_due)}</b> (임차료 ${won(r.rent)} + 관리비 ${won(r.mgmt)})</dd>
+        <dt>납부 방식</dt><dd>${esc(r.pay_timing)}</dd>
+        <dt>계약 기간</dt><dd>${esc(r.move_in || "-")} ~ ${esc(r.expire || "")}</dd>
+      </dl>`;
     $("sumCards").innerHTML = [
       ["입금 확인", `${s.paid_months}개월`], ["미납", `${s.unpaid_months}개월`],
       ["미납 금액", won(s.unpaid_amount)], ["최근 입금", s.last_paid || "-"],

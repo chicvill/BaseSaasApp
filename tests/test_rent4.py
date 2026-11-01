@@ -226,6 +226,22 @@ class TestApi(ApiCase):
         for page in ("invite.html", "password.html"):
             self.assertEqual(self.client.get(f"/rent4/{page}").status_code, 404, page)
 
+    def test_month_summary_and_building_detail(self):
+        self.import_sheet()
+        ym = ledger.ym_of(ledger.today())
+        Payment(branch="main", room="101", ym=ym, rent=200000, mgmt=50000, source="manual").save()
+        m = self.client.get("/api/rent4/lessor/summary", headers=self.chic).json()
+        rooms = [r for r in Room.find(branch="main") if r.status != "owner"]
+        occupied = [r for r in rooms if r.status == "occupied"]
+        self.assertEqual(m["ym"], ym)
+        self.assertEqual(m["expected"], sum(r.monthly_due for r in occupied))
+        self.assertGreaterEqual(m["collected"], 250000)
+        self.assertEqual(m["paid_rooms"] + m["unpaid_rooms"], len(occupied))
+        self.assertEqual(m["vacant_rooms"], len(rooms) - len(occupied))
+        d = self.client.get("/api/rent4/admin/buildings/main", headers=self.admin).json()
+        self.assertEqual((d["building"]["name"], len(d["totals"]), d["contracts"][0]["status"]), ("시크빌", 12, "active"))
+        self.assertEqual(self.client.get("/api/rent4/admin/buildings/main", headers=self.chic).status_code, 403)
+
     def test_sms_routes_are_gone(self):
         for path in ("/api/rent4/otp/request", "/api/rent4/otp/set-password", "/api/rent4/admin/sms",
                      "/api/rent4/lessor/accounts/101/notify"):
