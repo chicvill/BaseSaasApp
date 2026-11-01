@@ -81,7 +81,7 @@
 
     <h2>4. 임대인 — 입금 문자 반영</h2>
     <ol>
-      <li>임대인 계정으로 로그인합니다 (관리인은 건물을 먼저 고릅니다).</li>
+      <li>로그인하면 역할에 맞는 화면으로 바로 이동합니다 — 임대인은 자기 건물, 임차인은 자기 호실 (관리인은 가맹점 목록에서 건물을 고릅니다).</li>
       <li><b>💬 입금 문자 반영</b> 탭에 은행 문자를 그대로 붙여 넣습니다. 여러 건은 빈 줄로 구분합니다.</li>
       <li><b>🔍 분석하기</b>를 누르면 문자마다 결과가 나옵니다. 이 단계에서는 저장되지 않습니다.</li>
       <li>결과를 확인하고 <b>✅ 체크한 입금 반영</b>을 누르면 수납 기록에 쌓입니다.</li>
@@ -126,5 +126,8 @@
     <p>모든 기록은 서버의 <code>data/rent4_pool/</code> 폴더에 사람이 읽을 수 있는 JSON 으로 저장됩니다 (buildings · rooms · payments · marks · bank_messages · tenant_accounts). 이 폴더는 임차인 개인정보가 있어 git 저장소에 올리지 않습니다.</p>
   </article>
 </main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>Rent4.requireLogin();   // 설명서는 로그인한 사람만</script>
 </body>
 </html>

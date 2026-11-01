@@ -157,8 +157,11 @@
   }
 
   if (Bass.token()) {
-    loadMine().catch((err) => {
-      if (err.status === 401) return Rent4.go("index.html");
+    Rent4.me().then((me) => {                     // 계약 진행 중인 사람만 — 다른 역할은 자기 화면으로
+      if (me.kind !== "party") return Rent4.go(me.home);
+      return loadMine();
+    }).catch((err) => {
+      if (err.status === 401 || err.status === 403) { Bass.setToken(""); return Rent4.go("index.html"); }
       failed();
       Bass.showError(err);
     });

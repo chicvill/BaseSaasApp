@@ -28,9 +28,25 @@
       throw err;
     }
     if (!kinds.includes(info.kind)) { go(info.home); return new Promise(() => {}); }
+    // 임대인은 자기 건물로 고정 — 주소에 다른 건물(?branch=)을 넣어도 지운다
+    if (info.kind !== "admin" && new URLSearchParams(location.search).has("branch")) {
+      history.replaceState(null, "", location.pathname);
+    }
     renderWho(info);
     startChat();
     return info;
+  }
+
+  /** 역할과 상관없이 로그인만 확인 (설명서 등). 안 했으면 로그인 화면으로. */
+  async function requireLogin() {
+    if (!Bass.token()) { go("index.html"); return new Promise(() => {}); }
+    try {
+      return await me();
+    } catch (err) {
+      Bass.setToken("");
+      go("index.html");
+      return new Promise(() => {});
+    }
   }
 
   function renderWho(info) {
@@ -490,5 +506,5 @@
     if (!startClock.timer) startClock.timer = setInterval(tick, 1000);
   }
 
-  global.Rent4 = { me, guard, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat, monthCard, startClock };
+  global.Rent4 = { me, guard, requireLogin, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat, monthCard, startClock };
 })(window);
