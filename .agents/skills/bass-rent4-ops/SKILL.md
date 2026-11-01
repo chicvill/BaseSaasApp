@@ -81,3 +81,11 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - `run.py` 가 시작 때 auto_sync_vault + load_encrypted_env (이미 있는 환경변수는 덮어쓰지 않음).
 - 2026-10-27~ 커밋된 예전 `.env.encrypted` 는 코드에 박힌 공개 키로 풀렸다 → 그 안의 키는 모두 폐기·재발급 대상. 새 키로 다시 암호화하기 전까지 서버는 그 파일을 못 읽는다(경고만).
 - 마스터 키 · 복호화 값은 출력 · 채팅 · 커밋 금지 (`vault.py decrypt` 는 키 이름만 출력).
+
+## 매물 · 회원 · 신청 · 전출 (2026-11)
+- 페이지: `index.html` = 누구나 보는 공개 매물 목록, 로그인은 `login.html`. 로그인 없이 열리는 곳은 index · login · signup · find · reset · setup 뿐. 나머지는 역할 검사(guard) — 임대인은 자기 건물 고정(주소 ?branch 무시), 임차인은 자기 호실, `manual.html` 은 로그인 필요.
+- 매물 (`listings.py`): 임대인 [🏷️ 매물] 공개 · 내리기. 공개 목록은 건물 · 호실 · 조건 · 설명만 (임차인 정보 없음). 체결(_activate_lease)되면 자동 마감(contracted).
+- 회원 (`members.py`): 구글 본인 확인(oauth purpose=signup) 필수 → 이름 · 휴대폰 · 본인 아이디(소문자 4~20, 기존 아이디 · 건물코드+숫자 모양 금지) · 비밀번호. 이미 연결된 구글이면 가입 건너뛰고 로그인. whoami kind=member, home=index.html.
+- 신청 (`contracts.apply/accept`): 회원이 매물 [계약 신청] → Contract status `requested`(party_username=회원 아이디, 가입 때 구글로 본인 확인됨) → 임대인 채팅 안내(분류 문의). 한 사람 한 번에 하나. 임대인 ✅ 수락 → sent(같은 호실 다른 신청은 cancelled + 채팅 '마감') → 동의 → 잔금 확인 → 회원 아이디로 그 호실 임차인(TenantAccount.username=회원, 이전 호실 아이디 잠금, 비밀번호 그대로). 회원 계약에는 시작 링크 없음.
+- 전출 (`accounts.move_out`, `POST /lessor/rooms/{room}/move-out`): 공실 + 전출 표기 + 임차인 자격 끝. 회원은 일반 회원으로(비밀번호 그대로, 호실 계정은 호실 아이디로 되돌림), 호실 아이디 계정은 잠금.
+- 일반 회원이 1년(INACTIVE_DAYS) 동안 로그인하지 않으면 시작 때 계정 · 구글 연결 · 개인정보 삭제 (임차인이거나 진행 중 계약이 있으면 제외).

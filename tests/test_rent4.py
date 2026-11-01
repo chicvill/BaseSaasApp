@@ -986,5 +986,55 @@ class TestApply(GoogleCase):
         self.assertEqual(self.apply(tenant, lid).status_code, 409)
         self.assertEqual(self.client.post(f"/api/rent4/listings/{lid}/apply", json={}).status_code, 401)
 
+
+class TestMoveOut(TestApply):
+    """전출: 공실 + 임차인 자격 끝. 회원은 일반 회원으로 돌아가고, 1년 안 쓰면 삭제."""
+
+    def concluded_member(self):
+        lid = self.listing()
+        member = self.member()
+        cid = self.apply(member, lid).json()["contract"]["id"]
+        self.client.post(f"/api/rent4/lessor/contracts/{cid}/accept", headers=self.chic)
+        self.client.post("/api/rent4/contract/mine/sign", headers=member, json={"agree": True})
+        self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=self.chic)
+        return member
+
+    def test_member_moves_out_back_to_member(self):
+        member = self.concluded_member()
+        res = self.client.post("/api/rent4/lessor/rooms/102/move-out", headers=self.chic, json={"date": "2027-05-31"})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(Room.first(branch="main", room="102").status, "vacant")
+        me = self.client.get("/api/rent4/me", headers=member).json()
+        self.assertEqual(me["kind"], "member")
+        self.assertEqual(self.client.get("/api/rent4/tenant/me", headers=member).status_code, 403)
+        self.login("hong77", "member-pw-1")                                   # 회원 비밀번호는 그대로
+        self.assertEqual(TenantAccount.first(branch="main", room="102").username, "chic102")
+        self.assertEqual([c["username"] for c in self.client.get("/api/rent4/chat/contacts", headers=member).json()["contacts"]], [])
+
+    def test_legacy_tenant_moves_out_locked(self):
+        self.import_sheet()
+        self.tenant_login("101")
+        self.assertEqual(self.client.post("/api/rent4/lessor/rooms/101/move-out", headers=self.chic, json={}).status_code, 200)
+        self.assertEqual(self.client.post("/auth/login", json={"username": "chic101", "password": "secret-101"}).status_code, 401)
+        self.assertEqual(self.client.post("/api/rent4/lessor/rooms/101/move-out", headers=self.chic, json={}).status_code, 404)
+
+    def test_inactive_member_purged_after_a_year(self):
+        from apps.rent4.backend import members
+        self.member()
+        m = members.MemberAccount.first(username="hong77")
+        m.last_active = "2020-01-01T00:00:00"
+        m.save()
+        self.assertEqual(members.purge_inactive(), 1)
+        self.assertEqual(self.client.post("/auth/login", json={"username": "hong77", "password": "member-pw-1"}).status_code, 401)
+        self.assertIsNone(self.oauth.SocialLink.first(username="hong77"))
+
+    def test_tenant_member_not_purged(self):
+        from apps.rent4.backend import members
+        self.concluded_member()
+        m = members.MemberAccount.first(username="hong77")
+        m.last_active = "2020-01-01T00:00:00"
+        m.save()
+        self.assertEqual(members.purge_inactive(), 0)
+
 if __name__ == "__main__":
     unittest.main()

@@ -124,9 +124,10 @@ def sync_tenant_accounts() -> Dict[str, int]:
     stats = {"created": 0, "reset": 0, "locked": 0, "upgraded": 0}
     for room in Room.all():
         acc = accounts.get((room.branch, room.room))
+        prefix = codes.get(room.branch, room.branch)
         if room.status != "occupied" or not room.tenant_name:
             if acc and acc.tenant_key:
-                _set_core_password(acc.username, acc.branch, "", secrets.token_hex(16))
+                _release(acc, prefix)
                 acc.tenant_key, acc.initial_code, acc.must_change, acc.invite_hash = "", "", True, ""
                 acc.save()
                 stats["locked"] += 1
@@ -140,10 +141,10 @@ def sync_tenant_accounts() -> Dict[str, int]:
                 stats["upgraded"] += 1
             continue
         if acc is None:
-            prefix = codes.get(room.branch, room.branch)
             acc = TenantAccount(username=f"{prefix}{room.room}", branch=room.branch, room=room.room)
             stats["created"] += 1
         else:
+            _release(acc, prefix)                # 이전 임차인이 회원이면 회원으로 돌려보내고 호실 아이디로
             stats["reset"] += 1
         acc.tenant_key, acc.initial_code, acc.must_change, acc.activated_at = key, temp_password(), True, None
         acc.invite_hash = ""                     # 이전 임차인에게 보낸 안내 링크 무효
@@ -151,6 +152,43 @@ def sync_tenant_accounts() -> Dict[str, int]:
         acc.save()
     return stats
 
+
+def _release(acc: TenantAccount, prefix: str) -> None:
+    """임차인 자격 끝 (전출 · 임차인 변경). 회원이면 비밀번호는 그대로 두고 일반 회원으로 돌아가며
+    호실 계정은 호실 아이디(예: chic102)로 되돌린다. 호실 아이디 계정은 잠근다 (무작위 비밀번호)."""
+    from .members import MemberAccount
+    if MemberAccount.first(username=acc.username):
+        user = User.by_username(acc.username)
+        if user is not None:
+            user.branch = None
+            user.save("rent4_member_moved_out")
+        acc.username = f"{prefix}{acc.room}"
+        if User.by_username(acc.username) is None:
+            User(username=acc.username, role=TENANT_ROLE, branch=acc.branch).set_password(secrets.token_hex(16)).save("rent4_room_account")
+        return
+    _set_core_password(acc.username, acc.branch, "", secrets.token_hex(16))
+
+
+def move_out(branch: str, room_no: str, date_text: str) -> Dict:
+    """임대인의 전출 처리: 호실을 공실로, 그 달에 '전출' 표기, 임차인 자격 끝 (회원은 일반 회원으로)."""
+    from datetime import date as _date
+    from .models import MonthMark
+    room = Room.first(branch=branch, room=room_no)
+    if not room or room.status != "occupied":
+        raise NotFound(f"{room_no}호에는 거주 중인 임차인이 없습니다.")
+    try:
+        day = _date.fromisoformat(date_text) if date_text else _date.today()
+    except ValueError:
+        raise Mismatch("전출일 형식이 올바르지 않습니다.", hint="YYYY-MM-DD")
+    name = room.tenant_name
+    ym = day.isoformat()[:7]
+    if not MonthMark.first(branch=branch, room=room_no, ym=ym, kind="move_out"):
+        MonthMark(branch=branch, room=room_no, ym=ym, kind="move_out", raw=f"전출 {day.isoformat()}").save()
+    room.status, room.tenant_name, room.phone = "vacant", "", ""
+    room.move_in, room.expire = None, None
+    room.save()
+    sync_tenant_accounts()
+    return {"room": room_no, "tenant_name": name, "move_out": day.isoformat()}
 
 
 def list_accounts(branch: str) -> List[Dict]:
@@ -250,6 +288,8 @@ def login(identifier: str, password: str) -> Dict:
     for name in names:
         user = User.by_username(name)
         if user and user.check_password(password):
+            from .members import touch
+            touch(user.username)
             return {"token": issue_token(user), "user": user.public()}
     raise Unauthorized("아이디(휴대폰 번호) 또는 비밀번호가 올바르지 않습니다.",
                        hint="계약 링크에서 정한 비밀번호를 입력하세요. 잊었다면 계약을 보낸 분에게 문의하세요.")

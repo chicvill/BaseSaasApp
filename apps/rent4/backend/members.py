@@ -47,6 +47,42 @@ class SignupSession(PoolObj):
     expires_at: float
 
 
+INACTIVE_DAYS = 365
+
+
+def touch(username: str) -> None:
+    """로그인할 때 마지막 활동 시각 (1년 동안 안 쓰면 삭제 기준)."""
+    m = MemberAccount.first(username=username)
+    if m is not None:
+        m.last_active = now_iso()
+        m.save()
+
+
+def purge_inactive(days: int = INACTIVE_DAYS) -> int:
+    """오래 쓰지 않은 일반 회원(임차인 아님 · 진행 중 계약 없음)은 계정 · 구글 연결 · 개인정보를 지운다."""
+    from datetime import datetime, timedelta
+    from . import oauth
+    from .models import Contract, TenantAccount
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    removed = 0
+    for m in MemberAccount.all():
+        if (m.last_active or m.created_at) > cutoff:
+            continue
+        tenant = TenantAccount.first(username=m.username)
+        if tenant and tenant.tenant_key:
+            continue
+        if any(c.status in ("requested", "sent", "signed") for c in Contract.find(party_username=m.username)):
+            continue
+        for link in oauth.SocialLink.find(username=m.username):
+            link.delete()
+        user = User.by_username(m.username)
+        if user is not None:
+            user.delete("rent4_member_purged")
+        m.delete()
+        removed += 1
+    return removed
+
+
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 

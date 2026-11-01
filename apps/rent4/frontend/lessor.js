@@ -153,6 +153,8 @@
         <td style="text-align:right">
           <button class="bass-btn bass-btn--sm bass-btn--primary" data-act="reset" data-room="${esc(a.room)}"
             title="지금 비밀번호를 막고, 한 번만 쓰는 재설정 링크를 만들어 채팅으로 보냅니다">🔑 비밀번호 초기화</button>
+          <button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="moveout" data-room="${esc(a.room)}" data-name="${esc(a.tenant_name)}"
+            title="공실로 바꾸고 임차인 자격을 끝냅니다 (회원은 일반 회원으로)">🚚 전출</button>
         </td>
       </tr>`).join("")}</tbody>`;
   }
@@ -161,6 +163,18 @@
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
     const room = encodeURIComponent(btn.dataset.room);
+    if (btn.dataset.act === "moveout") {
+      const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+      const day = window.prompt(`${btn.dataset.room}호 ${btn.dataset.name}님 전출일 (YYYY-MM-DD)\n전출하면 공실이 되고 이 임차인은 호실 · 납입 화면에 더 들어올 수 없습니다.`, today);
+      if (!day) return;
+      Bass.withLock(btn, async () => {
+        const r = await api(`/lessor/rooms/${room}/move-out`, { method: "POST", body: { date: day.trim() } });
+        Bass.updateAppAlert("success", `${r.room}호 ${r.tenant_name}님 전출 처리했습니다 (${r.move_out}).`,
+          "공실이 되었습니다. 🏷️ 매물 탭에서 다시 공개할 수 있습니다.");
+        await Promise.all([loadAccounts(), loadBoard()]);
+      }, "처리 중...");
+      return;
+    }
     if (btn.dataset.act === "reset") Bass.withLock(btn, async () => {
         const r = await api(`/lessor/accounts/${room}/reset`, { method: "POST" });
         if (r.delivered === "chat") {

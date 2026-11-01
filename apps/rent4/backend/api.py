@@ -350,6 +350,13 @@ def oauth_callback(provider: str, request: Request, code: str = "", state: str =
     return RedirectResponse(site + page, status_code=302)
 
 
+@router.post("/lessor/rooms/{room_no}/move-out")
+def lessor_move_out(room_no: str, payload: Dict[str, Any] = Body(default={}), branch: str = "",
+                    user: User = Depends(staff)) -> Dict[str, Any]:
+    """전출 처리 → 공실 + 임차인 자격 끝 (회원은 일반 회원으로 돌아감)."""
+    return {"success": True, **accounts.move_out(_scope(user, branch).branch, room_no, str(payload.get("date") or ""))}
+
+
 @router.post("/lessor/accounts/{room_no}/reset")
 def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
     """임차인 비밀번호 초기화 → 한 번만 쓰는 재설정 링크 (임대인이 채팅으로 전달)."""
@@ -470,4 +477,6 @@ def stats() -> Dict[str, Any]:
 
 def startup() -> Optional[Dict[str, int]]:
     accounts.ensure_buildings()
-    return accounts.sync_tenant_accounts()
+    stats = accounts.sync_tenant_accounts()
+    stats["members_purged"] = members.purge_inactive()      # 1년 동안 안 쓴 일반 회원 정리
+    return stats
