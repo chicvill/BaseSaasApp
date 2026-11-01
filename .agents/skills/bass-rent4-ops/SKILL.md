@@ -75,3 +75,9 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 대화 채팅 (`chat.py` contacts/thread/send, `/chat/contacts` · `/chat/thread/{상대}` · `/chat/send`): 분류 필수(고장 · 문의 · 안내, 1000자). 상대 제한 — 임차인 ↔ 자기 건물 임대인, 임대인 ↔ 관리인·자기 건물 임차인, 관리인 ↔ 모든 임대인·임차인. 대화를 열면 받은 메시지는 읽음. 순서는 (created_at, ts). 재설정 링크 같은 시스템 알림은 분류 없이 같은 대화에 들어간다.
 - 만능 붙여 넣기 (`backend/paste.py`, `POST /lessor/paste`, 저장 안 함): 텍스트(입금 문자 → bank, 탭 표/'호실' 헤더 → excel), 구글 시트 주소(docs.google.com 만, 공개 시트 TSV export → excel), .xlsx(A1 'YYYY년도' 시트 중 최신 → TSV, 월 칸 날짜는 m/d), 사진(Gemini: 입금 캡처 → bank, 종이 계약서 → contract 초안; 키 없으면 400). 8MB 까지, 원본은 저장하지 않음. 관리인 화면의 붙여 넣기는 고른 건물의 임대인 화면으로 sessionStorage(`rent4.paste`)로 넘겨 거기서 분석.
 - 종이 계약서 등록 (`POST /lessor/contracts/paper`, `contracts.register_paper`): 이미 체결된 임대차 → 바로 active(`paper=True`) + 호실 입주 + 임차인 계정. 임차인 시작은 🔑 비밀번호 초기화 링크.
+
+## 키 보관 (shared/core/vault.py)
+- `.env.shared`(평문, git 제외) → `.env.encrypted`(AES-256-GCM, 커밋). 마스터 키는 **저장소 밖**: 서버 `MASTER_CRYPTO_KEY`, 내 PC `.env.key`(git 제외, `vault.py newkey`). 코드에 기본 키 없음 — 없으면 읽지도 암호화하지도 않음.
+- `run.py` 가 시작 때 auto_sync_vault + load_encrypted_env (이미 있는 환경변수는 덮어쓰지 않음).
+- 2026-10-27~ 커밋된 예전 `.env.encrypted` 는 코드에 박힌 공개 키로 풀렸다 → 그 안의 키는 모두 폐기·재발급 대상. 새 키로 다시 암호화하기 전까지 서버는 그 파일을 못 읽는다(경고만).
+- 마스터 키 · 복호화 값은 출력 · 채팅 · 커밋 금지 (`vault.py decrypt` 는 키 이름만 출력).
