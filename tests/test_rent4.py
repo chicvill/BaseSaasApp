@@ -704,5 +704,50 @@ class TestFind(ApiCase):
 
 
 
+
+class TestChat(ApiCase):
+    """대화: 임차인 ↔ 자기 건물 임대인 · 임대인 ↔ 관리인 · 관리인 ↔ 모두. 분류 고장 · 문의 · 안내."""
+
+    def setUp(self):
+        from apps.rent4.backend import chat
+        chat._last_seen.clear()                   # 앞 테스트의 '접속 중' 기록이 재설정 링크를 채팅으로 보내지 않게
+        super().setUp()
+
+    def send(self, auth, to, text="보일러가 안 켜져요", category="고장"):
+        return self.client.post("/api/rent4/chat/send", headers=auth, json={"to": to, "text": text, "category": category})
+
+    def test_contacts_by_role(self):
+        self.import_sheet()
+        tenant = self.tenant_login("101")
+        names = lambda auth: [c["username"] for c in self.client.get("/api/rent4/chat/contacts", headers=auth).json()["contacts"]]  # noqa: E731
+        self.assertEqual(names(tenant), ["chic"])
+        self.assertIn("admin", names(self.chic))
+        self.assertIn("chic101", names(self.chic))
+        self.assertTrue({"chic", "chic101"} <= set(names(self.admin)))
+
+    def test_two_way_thread_and_read(self):
+        self.import_sheet()
+        tenant = self.tenant_login("101")
+        res = self.send(tenant, "chic")
+        self.assertEqual((res.status_code, res.json()["message"]["category"]), (200, "고장"), res.text)
+        c = self.client.get("/api/rent4/chat/contacts", headers=self.chic).json()["contacts"]
+        self.assertEqual(next(x for x in c if x["username"] == "chic101")["unread"], 1)
+        self.assertEqual(self.send(self.chic, "chic101", "내일 수리 기사 방문합니다", "안내").status_code, 200)
+        thread = self.client.get("/api/rent4/chat/thread/chic101", headers=self.chic).json()["messages"]
+        self.assertEqual([(m["mine"], m["category"]) for m in thread], [(False, "고장"), (True, "안내")])
+        self.assertTrue(thread[0]["read_at"])                                  # 열면 읽음
+        mine = self.client.get("/api/rent4/chat/thread/chic", headers=tenant).json()["messages"]
+        self.assertEqual(mine[-1]["text"], "내일 수리 기사 방문합니다")
+
+    def test_rules(self):
+        self.import_sheet()
+        tenant = self.tenant_login("101")
+        self.assertEqual(self.send(tenant, "chic", category="잡담").status_code, 422)
+        self.assertEqual(self.send(tenant, "chic", text="  ").status_code, 422)
+        self.assertEqual(self.send(tenant, "admin").status_code, 403)          # 임차인 → 관리인 직접은 안 됨
+        self.assertEqual(self.send(tenant, "chic102").status_code, 403)
+        self.assertEqual(self.client.get("/api/rent4/chat/thread/chic102", headers=tenant).status_code, 403)
+        self.assertEqual(self.send(self.admin, "chic101", "관리인 공지", "안내").status_code, 200)
+
 if __name__ == "__main__":
     unittest.main()

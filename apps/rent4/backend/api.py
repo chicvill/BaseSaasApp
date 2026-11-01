@@ -300,7 +300,7 @@ def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(st
     acc, room, token = accounts.issue_reset_link(_scope(user, branch).branch, room_no)
     delivered = "share"
     if chat.online(acc.username):        # 임차인이 지금 접속 중이면 채팅창으로 바로 전달
-        chat.post(acc.username, user.username, f"임대인 {user.name or user.username}",
+        chat.post(acc.username, user.username, chat.label_of(user),
                   f"{room.tenant_name}님, 비밀번호가 초기화되었습니다. 아래 버튼을 눌러 새 비밀번호를 정해 주세요. "
                   f"({accounts.RESET_LINK_TTL // 3600}시간 안에, 한 번만 사용)",
                   link=f"reset.html?t={token}", link_label="🔑 새 비밀번호 정하기")
@@ -313,6 +313,23 @@ def lessor_account_reset(room_no: str, branch: str = "", user: User = Depends(st
 @router.get("/chat/inbox")
 def chat_inbox(user: User = Depends(require_user)) -> Dict[str, Any]:
     return {"success": True, "messages": chat.inbox(user.username)}
+
+
+@router.get("/chat/contacts")
+def chat_contacts(user: User = Depends(require_user)) -> Dict[str, Any]:
+    chat.touch(user.username)
+    return {"success": True, "contacts": chat.contacts(user), "categories": list(chat.CATEGORIES)}
+
+
+@router.get("/chat/thread/{other}")
+def chat_thread(other: str, user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, "messages": chat.thread(user, other)}
+
+
+@router.post("/chat/send")
+def chat_send(payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, "message": chat.send(user, str(payload.get("to", "")), str(payload.get("text", "")),
+                                                   str(payload.get("category", "")))}
 
 
 @router.post("/chat/read/{message_id}")

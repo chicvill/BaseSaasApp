@@ -325,10 +325,12 @@
     if (!dlg.open) dlg.showModal();
   }
 
-  /** 채팅창: 로그인한 화면 오른쪽 아래. 몇 초마다 받은 메시지를 확인한다 (= 서버에 '접속 중' 표시). */
+  /** 채팅창: 로그인한 화면 오른쪽 아래. 대화 상대 목록 → 대화 (분류: 고장 · 문의 · 안내).
+   *  5초마다 받은 메시지를 확인한다 (= 서버에 '접속 중' 표시). 새 메시지가 오면 창이 열린다. */
   function startChat() {
     if (document.getElementById("chatFab")) return;
     const esc = Bass.escapeHtml;
+    const CAT_TONE = { 고장: "err", 문의: "info", 안내: "ok" };
     const fab = document.createElement("button");
     fab.id = "chatFab";
     fab.className = "chat-fab";
@@ -338,22 +340,66 @@
     const panel = document.createElement("div");
     panel.id = "chatPanel";
     panel.className = "chat-panel hide";
-    panel.innerHTML = `<div class="chat-head"><b>💬 채팅</b><button type="button" class="bass-btn bass-btn--sm bass-btn--ghost" data-chat="close">닫기</button></div>
-      <div class="chat-list" id="chatList"><div class="bass-muted" style="font-size:13px">받은 메시지가 없습니다.</div></div>`;
+    panel.innerHTML = `
+      <div class="chat-head">
+        <span class="bass-row" style="gap:6px"><button type="button" class="bass-btn bass-btn--sm bass-btn--ghost hide" data-chat="back">←</button>
+          <b id="chatTitle">💬 채팅</b></span>
+        <button type="button" class="bass-btn bass-btn--sm bass-btn--ghost" data-chat="close">닫기</button>
+      </div>
+      <div class="chat-list" id="chatList"></div>
+      <form class="chat-form hide" id="chatForm">
+        <div class="chat-cats" id="chatCats"></div>
+        <div class="bass-row" style="flex-wrap:nowrap;gap:6px">
+          <textarea class="bass-input" id="chatText" rows="2" maxlength="1000" placeholder="메시지 입력 (Enter 보내기, Shift+Enter 줄바꿈)"></textarea>
+          <button class="bass-btn bass-btn--primary" type="submit">보내기</button>
+        </div>
+      </form>`;
     document.body.append(fab, panel);
+    const $c = (id) => document.getElementById(id);
+    let other = null;            // 지금 열린 대화 상대 {username, label}
+    let category = "문의";
     let seen = new Set();
     let first = true;
 
-    function render(messages) {
-      const list = document.getElementById("chatList");
-      if (!messages.length) return;
-      list.innerHTML = messages.map((m) => `
-        <div class="chat-msg ${m.read_at ? "" : "is-new"}">
-          <div class="chat-meta">${esc(m.sender_label || m.sender)} · ${esc(m.created_at.slice(5, 16).replace("T", " "))}</div>
-          <div>${esc(m.text)}</div>
-          ${m.link ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="${esc(m.link)}" data-read="${esc(m.id)}" style="margin-top:6px">${esc(m.link_label || "열기")}</a>` : ""}
-        </div>`).join("");
-      list.scrollTop = list.scrollHeight;
+    const time = (iso) => iso.slice(5, 16).replace("T", " ").replace("-", "/");
+
+    async function showContacts() {
+      other = null;
+      $c("chatTitle").textContent = "💬 채팅";
+      panel.querySelector("[data-chat=back]").classList.add("hide");
+      $c("chatForm").classList.add("hide");
+      const { contacts, categories } = await Bass.api("rent4", "/chat/contacts");
+      $c("chatCats").innerHTML = categories.map((c) =>
+        `<button type="button" class="chat-cat ${c === category ? "is-on" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("");
+      if (other) return;
+      $c("chatList").innerHTML = contacts.length ? contacts.map((p) => `
+        <button type="button" class="chat-contact" data-to="${esc(p.username)}" data-label="${esc(p.label)}">
+          <span><i class="chat-dot ${p.online ? "is-on" : ""}" title="${p.online ? "접속 중" : "접속 안 함"}"></i>${esc(p.label)}</span>
+          ${p.unread ? `<span class="bass-badge bass-badge--err">${p.unread}</span>` : ""}
+        </button>`).join("") : `<div class="bass-muted" style="font-size:13px">대화할 수 있는 상대가 없습니다.</div>`;
+    }
+
+    async function showThread(keepScroll) {
+      const list = $c("chatList");
+      const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+      const { messages } = await Bass.api("rent4", `/chat/thread/${encodeURIComponent(other.username)}`);
+      if (!other) return;
+      list.innerHTML = messages.length ? messages.map((m) => `
+        <div class="chat-msg ${m.mine ? "is-mine" : ""}">
+          <div class="chat-meta">${m.category ? `<span class="bass-badge bass-badge--${CAT_TONE[m.category] || "info"}">${esc(m.category)}</span> ` : ""}${esc(m.mine ? "나" : (m.sender_label || m.sender))} · ${esc(time(m.created_at))}${m.mine && m.read_at ? " · 읽음" : ""}</div>
+          <div style="white-space:pre-wrap">${esc(m.text)}</div>
+          ${m.link ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="${esc(m.link)}" style="margin-top:6px">${esc(m.link_label || "열기")}</a>` : ""}
+        </div>`).join("") : `<div class="bass-muted" style="font-size:13px">아직 대화가 없습니다. 분류를 고르고 메시지를 보내 보세요.</div>`;
+      if (!keepScroll || atBottom) list.scrollTop = list.scrollHeight;
+    }
+
+    function openThread(username, label) {
+      other = { username, label };
+      $c("chatTitle").textContent = label;
+      panel.querySelector("[data-chat=back]").classList.remove("hide");
+      $c("chatForm").classList.remove("hide");
+      showThread(false).then(poll).catch(Bass.showError);
+      $c("chatText").focus();
     }
 
     async function poll() {
@@ -362,20 +408,51 @@
         const unread = messages.filter((m) => !m.read_at);
         fab.textContent = unread.length ? `💬 ${unread.length}` : "💬";
         fab.classList.toggle("has-new", unread.length > 0);
-        const fresh = messages.filter((m) => !seen.has(m.id));
+        const fresh = messages.filter((m) => !seen.has(m.id) && !m.read_at);
         messages.forEach((m) => seen.add(m.id));
-        render(messages);
-        if (!first && fresh.some((m) => !m.read_at)) panel.classList.remove("hide");   // 새 메시지가 오면 바로 연다
+        if (!first && fresh.length) {           // 새 메시지가 오면 바로 연다
+          panel.classList.remove("hide");
+          if (!other) openThread(fresh[fresh.length - 1].sender, fresh[fresh.length - 1].sender_label || fresh[fresh.length - 1].sender);
+        }
         first = false;
+        if (panel.classList.contains("hide")) return;
+        if (other) await showThread(true);
+        else await showContacts();
       } catch (_) { /* 로그아웃 등 — 조용히 다음 차례 */ }
     }
 
-    fab.addEventListener("click", () => panel.classList.toggle("hide"));
+    fab.addEventListener("click", () => {
+      panel.classList.toggle("hide");
+      if (!panel.classList.contains("hide")) (other ? showThread(false) : showContacts()).catch(Bass.showError);
+    });
     panel.addEventListener("click", (e) => {
       if (e.target.closest("[data-chat=close]")) panel.classList.add("hide");
-      const a = e.target.closest("[data-read]");
-      if (a) Bass.api("rent4", `/chat/read/${a.dataset.read}`, { method: "POST" }).catch(() => {});
+      if (e.target.closest("[data-chat=back]")) showContacts().catch(Bass.showError);
+      const c = e.target.closest("[data-to]");
+      if (c) openThread(c.dataset.to, c.dataset.label);
+      const cat = e.target.closest("[data-cat]");
+      if (cat) {
+        category = cat.dataset.cat;
+        panel.querySelectorAll("[data-cat]").forEach((b) => b.classList.toggle("is-on", b === cat));
+      }
     });
+    $c("chatForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = $c("chatText").value.trim();
+      if (!text || !other) return;
+      try {
+        await Bass.api("rent4", "/chat/send", { method: "POST", body: { to: other.username, text, category } });
+        $c("chatText").value = "";
+        await showThread(false);
+      } catch (err) { Bass.showError(err); }
+    });
+    $c("chatText").addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        $c("chatForm").requestSubmit();
+      }
+    });
+    showContacts().catch(() => {});
     poll();
     setInterval(poll, 5000);
   }
