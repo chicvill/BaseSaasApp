@@ -179,7 +179,7 @@
 
 
 
-  const STATUS_TONE = { sent: "warn", signed: "info", active: "ok", cancelled: "err" };
+  const STATUS_TONE = { requested: "warn", sent: "warn", signed: "info", active: "ok", cancelled: "err" };
 
   /** 계약 목록 표 + [링크 · 납부 확인 · 취소] 버튼. apiPath 는 "/admin/contracts" 또는 "/lessor/contracts". */
   function contractTable(table, items, { call, reload, partyLabel }) {
@@ -190,12 +190,13 @@
         const target = c.kind === "membership" ? `${c.building_name} (${c.building_code})` : `${c.room}호`;
         const terms = c.kind === "membership" ? `가맹비 ${won(c.fee)}` : `보증금 ${won(c.deposit)} · 월 ${won(c.rent + c.mgmt)} · ${c.start || ""}`;
         const acts = [
+          c.status === "requested" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="accept" data-id="${esc(c.id)}" title="이 신청자와 계약을 진행합니다 (같은 호실의 다른 신청은 마감)">✅ 수락</button>` : "",
           c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
-          ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm" data-act="link" data-id="${esc(c.id)}" title="계약 시작 링크를 새로 만듭니다 (이전 링크 무효)">🔗 링크</button>` : "",
-          ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">취소</button>` : "",
+          ["sent", "signed"].includes(c.status) && !c.member ? `<button class="bass-btn bass-btn--sm" data-act="link" data-id="${esc(c.id)}" title="계약 시작 링크를 새로 만듭니다 (이전 링크 무효)">🔗 링크</button>` : "",
+          ["requested", "sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">${c.status === "requested" ? "거절" : "취소"}</button>` : "",
         ].join(" ");
-        return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
-          <td style="white-space:normal;text-align:left">${esc(terms)}</td>
+        return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}${c.member ? ` <span class="bass-badge bass-badge--info">회원 신청</span>` : ""}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
+          <td style="white-space:normal;text-align:left">${esc(terms)}${c.request_note ? `<br><small class="bass-muted">💬 ${esc(c.request_note)}</small>` : ""}</td>
           <td><span class="bass-badge bass-badge--${STATUS_TONE[c.status] || "info"}">${esc(c.status_label)}</span>${c.username ? `<br><small><code>${esc(c.username)}</code></small>` : ""}</td>
           <td style="text-align:right">${acts}</td></tr>`;
       }).join("") : `<tr><td colspan="5" class="bass-muted">아직 발행한 계약이 없습니다.</td></tr>`}</tbody>`;
@@ -210,6 +211,8 @@
       Bass.withLock(btn, async () => {
         const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
         if (btn.dataset.act === "link") { issuedNotice(res); return; }
+        if (btn.dataset.act === "accept") Bass.updateAppAlert("success", `${c.party_name}님의 신청을 받아들였습니다.`,
+          "신청자 채팅창에 안내가 갔습니다. 신청자가 계약에 동의하면 잔금 확인을 누르세요.");
         if (btn.dataset.act === "paid") Bass.updateAppAlert("success", "납부를 확인해 계약이 체결되었습니다.",
           `${c.party_name}님은 휴대폰 번호와 계약 때 정한 비밀번호로 로그인하면 바로 시작됩니다.`);
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");

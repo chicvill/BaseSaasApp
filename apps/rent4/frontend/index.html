@@ -58,6 +58,7 @@
           : `보증금 <b>${man(l.deposit)}</b> / 월 <b>${man(l.monthly)}</b>`}</div>
         <div class="bass-muted" style="font-size:13px">${l.lease_type === "전세" ? "" : `월세 ${man(l.rent)} + 관리비 ${man(l.mgmt)} · `}입주 ${esc(l.available_from || "협의")}</div>
         ${l.description ? `<p style="margin:0;font-size:13.5px;white-space:pre-wrap">${esc(l.description)}</p>` : ""}
+        <a class="bass-btn bass-btn--primary" style="justify-self:start" href="apply.html?listing=${encodeURIComponent(l.id)}">📝 계약 신청</a>
       </article>`).join("")
       : `<div class="bass-card bass-muted">지금 공개된 매물이 없습니다.</div>`;
   }

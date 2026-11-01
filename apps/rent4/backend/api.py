@@ -85,6 +85,18 @@ def public_listings() -> Dict[str, Any]:
     return {"success": True, "listings": listings.public_list()}
 
 
+@router.get("/listings/{listing_id}")
+def public_listing(listing_id: str) -> Dict[str, Any]:
+    return {"success": True, "listing": listings.public(listings.get_open(listing_id))}
+
+
+@router.post("/listings/{listing_id}/apply")
+def listing_apply(listing_id: str, payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
+    """회원의 계약 신청 → 임대인 채팅창에 안내 → contract.html 에서 진행."""
+    c = contracts.apply(user, listing_id, payload)
+    return {"success": True, "contract": contracts.public(c, for_party=True), "home": "contract.html"}
+
+
 @router.get("/lessor/listings")
 def lessor_listings(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
     return {"success": True, "listings": listings.lessor_list(_scope(user, branch).branch)}
@@ -154,7 +166,11 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
     if action == "cancel":
         return {"success": True, "contract": contracts.public(contracts.cancel(c))}
     if action == "link":
+        if c.party_username and contracts._is_member(c.party_username):
+            raise Conflict("회원이 신청한 계약은 링크 없이 로그인한 상태로 진행합니다.")
         return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
+    if action == "accept":
+        return {"success": True, "contract": contracts.public(contracts.accept(c))}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
 
 

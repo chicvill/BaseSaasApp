@@ -336,7 +336,10 @@ def whoami(user: User) -> Dict:
         return {**base, "kind": "lessor", "label": "임대인", "home": "임대인.html",
                 "must_change_password": acc.must_change,
                 "building": {"code": b.code, "name": b.name, "branch": b.branch}}
-    pending = Contract.first(party_username=user.username) if user.role == TENANT_ROLE else None
+    # 계약 진행 중: 신청 · 동의 · 납부 대기, 또는 체결됐지만 아직 최종 아이디로 넘어가지 않은 진행용 로그인(k<id>)
+    pending = next((c for c in Contract.find(party_username=user.username)
+                    if c.status in ("requested", "sent", "signed") or (c.status == "active" and c.username != user.username)),
+                   None) if user.role == TENANT_ROLE else None
     if pending is not None:
         return {**base, "kind": "party", "label": "계약 진행", "home": "contract.html", "must_change_password": False}
     from .members import MemberAccount

@@ -47,6 +47,9 @@
 
   async function goHome() {
     const info = await Rent4.me();
+    let listing = "";                              // 매물에서 [계약 신청]을 누르고 로그인하러 온 회원
+    try { listing = sessionStorage.getItem("rent4.applyListing") || ""; } catch (_) { listing = ""; }
+    if (listing && info.kind === "member") return Rent4.go(`apply.html?listing=${encodeURIComponent(listing)}`);
     Rent4.go(info.home);
   }
 

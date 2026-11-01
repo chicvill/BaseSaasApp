@@ -120,6 +120,8 @@ class Contract(PoolObj):
     verified_at: Optional[str] = None
     party_username: str = ""       # 계약 진행용 로그인 (링크에서 비밀번호를 정하면 생김, 체결 뒤 최종 아이디로 넘어감)
     reset_at: Optional[str] = None # 비밀번호 분실로 링크·임시 비밀번호를 다시 발급한 시각
+    listing_id: str = ""           # 회원이 매물에서 신청한 계약 (status requested 로 시작)
+    request_note: str = ""         # 신청할 때 남긴 말
     paper: bool = False            # 종이 계약서로 등록 (이미 체결된 계약 — 링크 · 동의 단계 없음)
 
 

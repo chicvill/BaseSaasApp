@@ -15,7 +15,7 @@ from typing import ClassVar, Dict, List, Optional
 from core.auth import User
 from core.errors import Forbidden, Mismatch
 
-from .models import Building, LessorAccount, Room, TenantAccount
+from .models import Building, Contract, LessorAccount, Room, TenantAccount
 from .pool import PoolObj, now_iso
 
 ONLINE_SECONDS = 20
@@ -96,6 +96,20 @@ def _lessors(branch: Optional[str] = None) -> List[Dict]:
     return out
 
 
+OPEN = ("requested", "sent", "signed")
+
+
+def _applicants(branch: str) -> List[Dict]:
+    """이 건물에 계약을 신청 · 진행 중인 사람 (아직 임차인 아님)."""
+    out, seen = [], set()
+    for c in Contract.find(branch=branch, kind="lease"):
+        if c.status in OPEN and c.party_username and c.party_username not in seen:
+            seen.add(c.party_username)
+            out.append({"username": c.party_username, "group": "신청자",
+                        "label": f"신청자 {c.room}호 {c.party_name}"})
+    return out
+
+
 def label_of(user: User) -> str:
     if user.role in ADMIN_ROLES:
         return f"관리인 {user.name}".strip() if user.name and user.name != user.username else "관리인"
@@ -111,10 +125,14 @@ def contacts(user: User) -> List[Dict]:
         people = _lessors() + _tenants()
     elif user.role == "branch_admin":
         people = [{"username": u.username, "label": label_of(u), "group": "관리인"}
-                  for role in ADMIN_ROLES for u in User.find(role=role)] + _tenants(user.branch)
+                  for role in ADMIN_ROLES for u in User.find(role=role)] + _tenants(user.branch) + _applicants(user.branch)
     else:
         acc = TenantAccount.first(username=user.username)
-        people = _lessors(acc.branch) if acc and acc.tenant_key else []
+        if acc and acc.tenant_key:
+            people = _lessors(acc.branch)
+        else:                                   # 계약을 신청 · 진행 중인 회원 → 그 건물 임대인
+            branches = {c.branch for c in Contract.find(party_username=user.username) if c.status in OPEN}
+            people = [p for b in sorted(branches) for p in _lessors(b)]
     unread: Dict[str, int] = {}
     last: Dict[str, str] = {}
     for m in Message.find(to_username=user.username):

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 계약 신청</title>
+  <meta name="description" content="고른 매물에 계약을 신청합니다. 임대인에게 채팅으로 안내가 갑니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container" style="max-width:520px">
+  <header class="top">
+    <div>
+      <h1>📝 계약 신청</h1>
+      <p class="sub bass-muted" id="who">확인 중...</p>
+    </div>
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="index.html">← 매물</a>
+  </header>
+  <div id="app-alert"></div>
+
+  <section id="listingCard" class="bass-card stack hide"></section>
+  <form id="applyForm" class="bass-card stack hide" style="margin-top:12px">
+    <div><label class="bass-label" for="aStart">희망 입주일</label>
+      <input class="bass-input" id="aStart" type="date"></div>
+    <div><label class="bass-label" for="aMsg">임대인에게 남길 말 (선택)</label>
+      <textarea class="bass-input" id="aMsg" maxlength="500" style="min-height:80px;font-family:var(--font)" placeholder="예: 직장인, 2년 거주 희망, 방 보러 가능한 시간"></textarea></div>
+    <button class="bass-btn bass-btn--primary" id="btnApply" type="submit">계약 신청하기</button>
+    <p class="bass-muted" style="margin:0;font-size:12.5px">신청하면 임대인 채팅창에 안내가 갑니다. 임대인이 받아들이면 계약 내용을 확인하고 동의한 뒤, 잔금 입금이 확인되면 체결됩니다.</p>
+  </form>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(async function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = Bass.escapeHtml;
+  const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+  const id = new URLSearchParams(location.search).get("listing") || "";
+  try { sessionStorage.removeItem("rent4.applyListing"); } catch (_) { /* 없음 */ }
+
+  if (!Bass.token()) {                           // 비회원 → 회원가입 (기존 회원은 거기서 바로 로그인)
+    try { sessionStorage.setItem("rent4.applyListing", id); } catch (_) { /* 없음 */ }
+    return location.replace("signup.html");
+  }
+  try {
+    const me = await Rent4.requireLogin();
+    if (me.kind === "party") return Rent4.go("contract.html");
+    if (me.kind !== "member") {
+      Bass.updateAppAlert("warning", "매물 계약 신청은 회원 계정으로 합니다.", `지금 계정(${me.label})으로는 신청할 수 없습니다.`);
+      return;
+    }
+    $("who").textContent = `${me.name || me.username}님`;
+    const { listing: l } = await Bass.api("rent4", `/listings/${encodeURIComponent(id)}`);
+    $("listingCard").innerHTML = `
+      <strong style="font-size:18px">${esc(l.building)} ${esc(l.room)}호</strong>
+      <dl class="kv">
+        <dt>구분</dt><dd>${esc(l.lease_type)} · ${esc(l.pay_timing)}</dd>
+        <dt>보증금</dt><dd>${won(l.deposit)}</dd>
+        <dt>월세 · 관리비</dt><dd>${won(l.rent)} + ${won(l.mgmt)} = <b>${won(l.monthly)}</b></dd>
+        <dt>입주 가능</dt><dd>${esc(l.available_from || "협의")}</dd>
+      </dl>
+      ${l.description ? `<p style="margin:0;font-size:13.5px;white-space:pre-wrap">${esc(l.description)}</p>` : ""}`;
+    if (l.available_from) $("aStart").value = l.available_from;
+    $("listingCard").classList.remove("hide");
+    $("applyForm").classList.remove("hide");
+  } catch (err) {
+    Bass.showError(err);
+  }
+
+  $("applyForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnApply"), async () => {
+      const r = await Bass.api("rent4", `/listings/${encodeURIComponent(id)}/apply`, { method: "POST",
+        body: { start: $("aStart").value || null, message: $("aMsg").value } });
+      location.replace(r.home);
+    }, "신청 중...");
+  });
+})();
+</script>
+</body>
+</html>

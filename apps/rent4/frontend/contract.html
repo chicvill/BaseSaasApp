@@ -97,7 +97,8 @@
     $("body").classList.remove("hide");
     $("kind").textContent = `${c.kind_label} · ${c.building_name}${c.room ? ` ${c.room}호` : ""} · ${c.status_label}`;
     const reached = c.status === "cancelled" ? 0 : c.status === "active" ? 3 : c.status === "signed" ? 2 : 1;
-    $("steps").innerHTML = STEPS.map((label, i) => `<span class="${i < reached ? "on" : ""}">${label}</span>`).join("");
+    const steps = c.member ? ["① 신청 · 임대인 확인", "② 계약 동의", "③ 잔금 확인 · 체결"] : STEPS;
+    $("steps").innerHTML = steps.map((label, i) => `<span class="${i < reached ? "on" : ""}">${label}</span>`).join("");
     const rows = c.kind === "membership"
       ? [["계약", "Rent4 가맹 계약 (건물 임대인)"], ["건물", c.building_name], ["건물 코드 / 아이디", c.building_code],
          ["임대인", c.party_name], ["가맹비", won(c.fee)], ["계약 기간", period(c)]]
@@ -115,7 +116,10 @@
     const box = $("stateCard");
     const pay = c.kind === "membership" ? "가맹비" : "잔금";
     let html = "";
-    if (c.status === "sent") {
+    if (c.status === "requested") {
+      html = `<strong>📨 계약을 신청했습니다</strong>
+        <div class="bass-muted">임대인 채팅창에 안내가 갔습니다. 임대인이 받아들이면 이 화면에서 계약 내용에 동의합니다. 궁금한 점은 오른쪽 아래 💬 채팅으로 임대인에게 물어보세요.</div>`;
+    } else if (c.status === "sent") {
       html = `<div class="bass-muted">${esc(LOGIN_HINT)}</div>`;
     } else if (c.status === "signed") {
       html = `<strong>✅ 계약에 동의했습니다 (${esc((c.signed_at || "").replace("T", " "))})</strong>
@@ -159,6 +163,7 @@
   if (Bass.token()) {
     Rent4.me().then((me) => {                     // 계약 진행 중인 사람만 — 다른 역할은 자기 화면으로
       if (me.kind !== "party") return Rent4.go(me.home);
+      Rent4.startChat();                            // 임대인과 채팅 (신청 · 문의)
       return loadMine();
     }).catch((err) => {
       if (err.status === 401 || err.status === 403) { Bass.setToken(""); return Rent4.go("login.html"); }
