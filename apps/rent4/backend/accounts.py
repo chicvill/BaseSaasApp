@@ -22,7 +22,7 @@ from typing import Dict, List, Optional, Tuple
 from core.auth import Unauthorized, User, issue_token
 from core.errors import DomainError, Forbidden, Mismatch, NotFound
 
-from .models import AdminAccount, Building, Contract, LessorAccount, Room, TenantAccount
+from .models import OPEN_STATUSES, AdminAccount, Building, Contract, LessorAccount, Room, TenantAccount
 from .pool import now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
@@ -378,7 +378,7 @@ def whoami(user: User) -> Dict:
                 "building": {"code": b.code, "name": b.name, "branch": b.branch}}
     # 계약 진행 중: 신청 · 동의 · 납부 대기, 또는 체결됐지만 아직 최종 아이디로 넘어가지 않은 진행용 로그인(k<id>)
     pending = next((c for c in Contract.find(party_username=user.username)
-                    if c.status in ("requested", "sent", "signed") or (c.status == "active" and c.username != user.username)),
+                    if c.status in OPEN_STATUSES or (c.status == "active" and c.username != user.username)),
                    None) if user.role == TENANT_ROLE else None
     if pending is not None:
         return {**base, "kind": "party", "label": "계약 진행", "home": "contract.html", "must_change_password": False}

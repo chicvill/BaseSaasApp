@@ -50,7 +50,7 @@
     if (btn.dataset.tab === "board") loadBoard().catch(Bass.showError);
     if (btn.dataset.tab === "accounts") loadAccounts().catch(Bass.showError);
     if (btn.dataset.tab === "contracts") loadLeases().catch(Bass.showError);
-    if (btn.dataset.tab === "listings") loadListings().catch(Bass.showError);
+    if (btn.dataset.tab === "listings") Promise.all([loadListings(), loadGuide()]).catch(Bass.showError);
   }));
 
   // ── 임대 계약 ──
@@ -92,6 +92,24 @@
       $("paperNote").classList.add("hide");
       await Promise.all([loadLeases(), loadBoard()]);
     }, "등록 중...");
+  });
+
+  // ── 입주 안내문 · 건물 주소 ──
+  let defaultGuide = "";
+  async function loadGuide() {
+    const g = await api("/lessor/guide");
+    defaultGuide = g.default;
+    $("gAddr").value = g.address || "";
+    $("gText").value = g.guide || g.default;
+  }
+  $("gDefault").addEventListener("click", () => { $("gText").value = defaultGuide; });
+  $("guideForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock(e.submitter, async () => {
+      const text = $("gText").value.trim() === defaultGuide.trim() ? "" : $("gText").value;   // 기본 문안이면 비워 둔다
+      await api("/lessor/guide", { method: "POST", body: { guide: text, address: $("gAddr").value } });
+      Bass.updateAppAlert("success", "입주 안내문과 주소를 저장했습니다.");
+    }, "저장 중...");
   });
 
   // ── 매물 공개 ──

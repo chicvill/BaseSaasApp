@@ -94,16 +94,23 @@
   }
 
   function render(c) {
+    current = c;
     $("body").classList.remove("hide");
     $("kind").textContent = `${c.kind_label} · ${c.building_name}${c.room ? ` ${c.room}호` : ""} · ${c.status_label}`;
-    const reached = c.status === "cancelled" ? 0 : c.status === "active" ? 3 : c.status === "signed" ? 2 : 1;
-    const steps = c.member ? ["① 신청 · 임대인 확인", "② 계약 동의", "③ 잔금 확인 · 체결"] : STEPS;
+    let reached = c.status === "cancelled" ? 0 : c.status === "active" ? 3 : c.status === "signed" ? 2 : 1;
+    let steps = STEPS;
+    if (c.member) {
+      steps = ["① 요청 · 현장 점검", "② 조건 · 정보 입력", "③ 등기 확인 · 확정", "④ 최종 승인 · 계약금", "⑤ 계약 완료", "⑥ 입주"];
+      reached = { requested: 1, offered: 2, tenant_approved: 2, registry_checked: 3, tenant_confirmed: 4,
+                  contracted: 5, active: 6 }[c.status] || 0;      // 단계 표시: 지금 머무는 단계까지 켠다
+    }
     $("steps").innerHTML = steps.map((label, i) => `<span class="${i < reached ? "on" : ""}">${label}</span>`).join("");
     const rows = c.kind === "membership"
       ? [["계약", "Rent4 가맹 계약 (건물 임대인)"], ["건물", c.building_name], ["건물 코드 / 아이디", c.building_code],
          ["임대인", c.party_name], ["가맹비", won(c.fee)], ["계약 기간", period(c)]]
-      : [["계약", "주택 임대차 계약"], ["건물 · 호실", `${c.building_name} ${c.room}호`], ["임차인", c.party_name],
-         ["구분", `${c.lease_type} · ${c.pay_timing}`], ["보증금", won(c.deposit)],
+      : [["계약", "주택 임대차 계약"], ["건물 · 호실", `${c.building_name} ${c.room}호`], ...(c.address ? [["주소", c.address]] : []),
+         ["임차인", c.party_name], ["구분", `${c.lease_type} · ${c.pay_timing}`], ["보증금", won(c.deposit)],
+         ...(c.down_payment ? [["계약금 / 잔금", `${won(c.down_payment)} / ${won(c.deposit - c.down_payment)}`]] : []),
          ["월 임차료", won(c.rent)], ["월 관리비", won(c.mgmt)], ["계약 기간", period(c)]];
     $("terms").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
 
@@ -116,9 +123,54 @@
     const box = $("stateCard");
     const pay = c.kind === "membership" ? "가맹비" : "잔금";
     let html = "";
+    const docBtn = c.finalized_at ? `<a class="bass-btn" href="contract_doc.html?id=${encodeURIComponent(c.id)}">📄 확정 계약서 보기 · 인쇄</a>` : "";
     if (c.status === "requested") {
-      html = `<strong>📨 계약을 신청했습니다</strong>
-        <div class="bass-muted">임대인 채팅창에 안내가 갔습니다. 임대인이 받아들이면 이 화면에서 계약 내용에 동의합니다. 궁금한 점은 오른쪽 아래 💬 채팅으로 임대인에게 물어보세요.</div>`;
+      html = `<strong>📨 계약을 요청했습니다 — 현장 점검이 필요합니다</strong>
+        <div class="bass-muted">임대인 채팅창에 안내가 갔습니다. 오른쪽 아래 💬 채팅이나 전화로 방을 볼 날짜를 정해 주세요. 점검 뒤 임대인이 계약 조건을 보내면 이 화면에서 이어 갑니다.</div>`;
+    } else if (c.status === "offered") {
+      const today = c.start || "";
+      html = `<strong>📝 임대인이 계약 조건을 보냈습니다</strong>
+        <div class="bass-muted">위 조건을 확인하고, 만족하면 아래 정보를 입력해 승인해 주세요. <b>주민등록번호는 입력하지 않습니다.</b></div>
+        <form id="approveForm" class="stack" style="gap:10px">
+          <div><label class="bass-label" for="fBirth">생년월일</label><input class="bass-input" id="fBirth" type="date" required></div>
+          <div><label class="bass-label" for="fAddr">현 주소</label><input class="bass-input" id="fAddr" autocomplete="street-address" required></div>
+          <div><label class="bass-label" for="fEmerg">비상 연락처 (선택, 이름 · 관계 · 번호)</label><input class="bass-input" id="fEmerg" placeholder="예: 홍부모 · 부 · 010-0000-0000"></div>
+          <div class="bass-row" style="gap:10px;flex-wrap:wrap">
+            <div style="flex:1 1 160px"><label class="bass-label" for="fStart">전입일 (입주일)</label><input class="bass-input" id="fStart" type="date" value="${esc(today)}" required></div>
+            <div style="flex:1 1 120px"><label class="bass-label" for="fPeriod">계약 기간 (개월)</label><input class="bass-input" id="fPeriod" type="number" min="1" max="60" value="${esc(c.period_months || 12)}" required></div>
+          </div>
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" id="fAgree" style="margin-top:4px"> 위 계약 조건을 확인했으며 동의합니다.</label>
+          <button class="bass-btn bass-btn--primary" type="submit">입력하고 승인</button>
+        </form>`;
+    } else if (c.status === "tenant_approved") {
+      html = `<strong>✅ 정보를 입력하고 승인했습니다</strong>
+        <div class="bass-muted">임대인이 등기부등본을 확인해 결과를 보내면, 계약 내용이 확정되고 최종 승인 단계로 넘어갑니다.</div>`;
+    } else if (c.status === "registry_checked") {
+      const r = c.registry || {};
+      const warn = [!r.owner_match && "⚠️ 등기부 소유자와 임대인이 다릅니다", r.seizure && "⚠️ 압류 · 가압류가 있습니다"].filter(Boolean);
+      html = `<strong>📑 등기부 확인 결과 · 계약 내용 확정</strong>
+        <dl class="kv">
+          <dt>열람일</dt><dd>${esc(r.viewed_on || "")}</dd>
+          <dt>소유자</dt><dd>${esc(r.owner_name || "")} ${r.owner_match ? "✅ 임대인과 일치" : "❌ 불일치"}</dd>
+          <dt>근저당 등</dt><dd>${r.mortgage ? won(r.mortgage) : "없음"}</dd>
+          <dt>압류 · 가압류</dt><dd>${r.seizure ? "있음" : "없음"}</dd>
+          ${r.note ? `<dt>메모</dt><dd style="white-space:pre-wrap">${esc(r.note)}</dd>` : ""}
+        </dl>
+        ${warn.length ? `<div style="color:var(--diff);font-weight:700">${warn.map(esc).join("<br>")}</div>` : ""}
+        <div class="bass-row">${docBtn}${c.registry_file ? `<button class="bass-btn" type="button" data-go="registry">🗂 등기부 파일 보기</button>` : ""}</div>
+        <form id="confirmForm" class="stack" style="gap:8px">
+          <label style="display:flex;gap:8px;align-items:flex-start;font-size:14px"><input type="checkbox" id="fConfirm" style="margin-top:4px"> 확정 계약서와 등기 확인 결과를 확인했으며, 계약금 ${won(c.down_payment)}을 송금하겠습니다.</label>
+          <button class="bass-btn bass-btn--primary" type="submit">최종 승인</button>
+        </form>`;
+    } else if (c.status === "tenant_confirmed") {
+      html = `<strong>✅ 최종 승인했습니다 — 계약금 ${won(c.down_payment)} 송금</strong>
+        <div class="bass-muted">임대인에게 받은 계좌로 계약금을 보내 주세요. 임대인이 입금을 확인하면 계약이 완료되고 입주 안내문이 옵니다.</div>
+        <div class="bass-row">${docBtn}</div>`;
+    } else if (c.status === "contracted") {
+      html = `<strong>🎉 계약이 완료되었습니다 (계약금 확인 ${esc((c.down_paid_at || "").slice(0, 10))})</strong>
+        <div class="bass-muted">입주일(${esc(c.start || "")})에 잔금 ${won(c.deposit - c.down_payment)} 확인 후 입주 처리되면, 내 계약 · 납입 화면이 열립니다.</div>
+        <div class="bass-row">${docBtn}</div>
+        ${c.guide_text ? `<div class="bass-card" style="white-space:pre-wrap;font-size:13.5px">${esc(c.guide_text)}</div>` : ""}`;
     } else if (c.status === "sent") {
       html = `<div class="bass-muted">${esc(LOGIN_HINT)}</div>`;
     } else if (c.status === "signed") {
@@ -135,6 +187,32 @@
     box.classList.toggle("hide", !html);
   }
 
+  let current = null;
+
+  // 회원 계약 절차: 정보 입력 · 최종 승인 · 등기부 파일
+  $("stateCard").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector("[type=submit]");
+    if (form.id === "approveForm") {
+      Bass.withLock(btn, async () => {
+        const { contract } = await Bass.api("rent4", "/contract/mine/approve", { method: "POST", body: {
+          agree: $("fAgree").checked, birth: $("fBirth").value, address: $("fAddr").value.trim(),
+          emergency: $("fEmerg").value.trim(), start: $("fStart").value, period_months: Number($("fPeriod").value || 12) } });
+        Bass.updateAppAlert("success", "정보를 입력하고 승인했습니다.", "임대인이 등기부 확인 결과를 보내면 알려 드립니다.");
+        render(contract);
+      }, "보내는 중...");
+    }
+    if (form.id === "confirmForm") {
+      Bass.withLock(btn, async () => {
+        const { contract } = await Bass.api("rent4", "/contract/mine/confirm", { method: "POST",
+          body: { agree: $("fConfirm").checked, hash: current && current.snapshot_hash } });
+        Bass.updateAppAlert("success", "최종 승인했습니다.", "계약금을 송금해 주세요. 임대인이 확인하면 계약이 완료됩니다.");
+        render(contract);
+      }, "보내는 중...");
+    }
+  });
+
   $("signForm").addEventListener("submit", (e) => {
     e.preventDefault();
     Bass.withLock($("btnSign"), async () => {
@@ -147,6 +225,10 @@
   $("stateCard").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-go]");
     if (!btn) return;
+    if (btn.dataset.go === "registry") {
+      Bass.withLock(btn, () => Rent4.openFile(`/contracts/${encodeURIComponent(current.id)}/registry-file`));
+      return;
+    }
     Bass.withLock(btn, async () => {
       const r = await Bass.api("rent4", "/contract/mine/continue", { method: "POST" });
       Bass.setToken(r.token);

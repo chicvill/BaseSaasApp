@@ -62,7 +62,7 @@ def purge_inactive(days: int = INACTIVE_DAYS) -> int:
     """오래 쓰지 않은 일반 회원(임차인 아님 · 진행 중 계약 없음)은 계정 · 구글 연결 · 개인정보를 지운다."""
     from datetime import datetime, timedelta
     from . import oauth
-    from .models import Contract, TenantAccount
+    from .models import OPEN_STATUSES, Contract, TenantAccount
     cutoff = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
     removed = 0
     for m in MemberAccount.all():
@@ -71,7 +71,7 @@ def purge_inactive(days: int = INACTIVE_DAYS) -> int:
         tenant = TenantAccount.first(username=m.username)
         if tenant and tenant.tenant_key:
             continue
-        if any(c.status in ("requested", "sent", "signed") for c in Contract.find(party_username=m.username)):
+        if any(c.status in OPEN_STATUSES for c in Contract.find(party_username=m.username)):
             continue
         for link in oauth.SocialLink.find(username=m.username):
             link.delete()

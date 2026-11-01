@@ -27,6 +27,10 @@
 
   <section id="result" class="stack hide">
     <div class="bass-card stack" id="roomCard"></div>
+    <details class="bass-card fold hide" id="guideCard">
+      <summary><strong>📋 입주 안내 · 계약서</strong></summary>
+      <div class="fold-body" id="guideBody"></div>
+    </details>
     <h2 style="margin:10px 0 0;font-size:17px">📅 월별 납입 현황</h2>
     <div class="stats" id="sumCards"></div>
     <div class="months-list" id="months"></div>
@@ -48,6 +52,14 @@
     const me = await Rent4.guard(["tenant"]);
     await Rent4.passwordGate(me, $("pwBox"));
     render(await Bass.api("rent4", "/tenant/me"));
+    // 회원으로 계약한 경우: 확정 계약서 · 입주 안내문 (예전 수납부 임차인은 계약 기록이 없을 수 있다)
+    Bass.api("rent4", "/contract/mine").then(({ contract: c }) => {
+      if (!c.finalized_at && !c.guide_text) return;
+      $("guideBody").innerHTML = `
+        ${c.finalized_at ? `<a class="bass-btn" style="justify-self:start" href="contract_doc.html?id=${encodeURIComponent(c.id)}">📄 확정 계약서 보기 · 인쇄</a>` : ""}
+        ${c.guide_text ? `<div style="white-space:pre-wrap;font-size:13.5px">${esc(c.guide_text)}</div>` : ""}`;
+      $("guideCard").classList.remove("hide");
+    }).catch(() => {});
   }
 
   function render(v) {

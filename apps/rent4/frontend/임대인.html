@@ -119,6 +119,17 @@
         <button class="bass-btn bass-btn--primary" type="submit" style="justify-self:start">🏷️ 매물 공개</button>
       </form>
       <div class="board-wrap"><table class="board" id="listingTable" style="min-width:560px"></table></div>
+
+      <form id="guideForm" class="bass-card stack">
+        <strong>📋 입주 안내문 · 건물 주소</strong>
+        <div class="bass-muted" style="font-size:13px">계약금을 확인하면 임차인 채팅창으로 이 안내문이 갑니다. <code>{building}</code> <code>{room}</code> <code>{address}</code> <code>{start}</code> <code>{report_line}</code>(임대차 신고 대상 여부) 를 쓰면 계약마다 바뀌어 들어갑니다.</div>
+        <div><label class="bass-label" for="gAddr">건물 주소 (계약서에 들어감)</label><input class="bass-input" id="gAddr" placeholder="예: 서울시 ○○구 ○○로 12"></div>
+        <textarea class="bass-input" id="gText" style="min-height:240px;font-family:var(--font)"></textarea>
+        <div class="bass-row">
+          <button class="bass-btn bass-btn--primary" type="submit">저장</button>
+          <button class="bass-btn bass-btn--ghost" type="button" id="gDefault">기본 문안으로</button>
+        </div>
+      </form>
     </section>
 
     <!-- 임차인 계정 -->

@@ -89,3 +89,11 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
 - 신청 (`contracts.apply/accept`): 회원이 매물 [계약 신청] → Contract status `requested`(party_username=회원 아이디, 가입 때 구글로 본인 확인됨) → 임대인 채팅 안내(분류 문의). 한 사람 한 번에 하나. 임대인 ✅ 수락 → sent(같은 호실 다른 신청은 cancelled + 채팅 '마감') → 동의 → 잔금 확인 → 회원 아이디로 그 호실 임차인(TenantAccount.username=회원, 이전 호실 아이디 잠금, 비밀번호 그대로). 회원 계약에는 시작 링크 없음.
 - 전출 (`accounts.move_out`, `POST /lessor/rooms/{room}/move-out`): 공실 + 전출 표기 + 임차인 자격 끝. 회원은 일반 회원으로(비밀번호 그대로, 호실 계정은 호실 아이디로 되돌림), 호실 아이디 계정은 잠금.
 - 일반 회원이 1년(INACTIVE_DAYS) 동안 로그인하지 않으면 시작 때 계정 · 구글 연결 · 개인정보 삭제 (임차인이거나 진행 중 계약이 있으면 제외).
+
+## 회원 계약 절차 (`backend/leaseflow.py`, 2026-11 — 위 '신청' 규칙의 accept 를 대체)
+- requested(요청, 채팅 · 전화로 현장 점검) → offered(임대인 조건: 주소 · 보증금 · 계약금 · 임차료 · 관리비 · 입주일 · 기간; 임차인 채팅 + 임대인 휴대폰 문자앱/카카오톡 보내기 창, 같은 호실 다른 요청 마감) → tenant_approved(임차인 생년월일 · 현 주소 · 비상 연락처 · 전입일 · 기간; **주민번호 패턴은 거부**) → registry_checked(임대인 등기 체크리스트 + PDF/사진 → `snapshot` 확정 + SHA-256 해시) → tenant_confirmed(임차인 최종 승인, 해시 일치 필요) → contracted(계약금 확인 = 계약 완료, 매물 마감, 입주 안내문 채팅) → active(입주일 잔금 확인 = 입주, contracts.confirm_paid).
+- 기간 기본 12개월, 종료일 = 시작 + N개월 - 1일. 계약금 ≤ 보증금.
+- 등기부 파일은 pool/registry/<계약id>.<ext> (git 제외), `GET /contracts/{id}/registry-file` 은 양쪽 당사자 · 같은 건물 임대인 · 관리인만. 실시간 등기 열람 API 는 없음(유료 대행) — 임대인이 열람 후 입력.
+- 계약서 `contract_doc.html?id=` (`GET /contracts/{id}/document`) 는 확정본만, 인쇄 · PDF.
+- 입주 안내문: 건물별 `Building.guide`(비면 DEFAULT_GUIDE), {building} {room} {address} {start} {report_line}. 임대차 신고 대상 = 보증금 6천만 원 초과 또는 월세 30만 원 초과 (`report_required`).
+- 서버는 문자를 보내지 않는다 — 링크 · 안내는 채팅 + 임대인 휴대폰 보내기 창.

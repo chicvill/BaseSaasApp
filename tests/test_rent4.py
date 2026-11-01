@@ -942,6 +942,32 @@ class TestApply(GoogleCase):
     def apply(self, auth, lid, **kw):
         return self.client.post(f"/api/rent4/listings/{lid}/apply", headers=auth, json={"start": "2026-12-05", "message": "직장인입니다", **kw})
 
+    def post(self, path, auth=None, **body):
+        res = self.client.post(f"/api/rent4{path}", headers=auth or self.chic, json=body)
+        self.assertEqual(res.status_code, 200, f"{path}: {res.text}")
+        return res.json()
+
+    OFFER = {"address": "서울시 테스트구 시크로 12", "deposit": 5000000, "down_payment": 500000, "rent": 350000,
+             "mgmt": 50000, "start": "2026-12-05", "period_months": 12}
+
+    def run_flow(self, member, cid, until="active"):
+        """조건 제시 → 정보 입력 · 승인 → 등기 확인 → 최종 승인 → 계약금 → 잔금 · 입주."""
+        self.post(f"/lessor/contracts/{cid}/offer", **self.OFFER)
+        if until == "offered":
+            return
+        self.post("/contract/mine/approve", member, agree=True, birth="1995-03-04", address="부산시 어딘가 1",
+                  emergency="부모 010-9999-0000", start="2026-12-05", period_months=12)
+        self.post(f"/lessor/contracts/{cid}/registry", owner_name="김임대", owner_match=True, mortgage=0, seizure=False,
+                  note="깨끗함", file="data:application/pdf;base64,JVBERi0xLjQK", mime="application/pdf")
+        if until == "registry_checked":
+            return
+        h = self.client.get("/api/rent4/contract/mine", headers=member).json()["contract"]["snapshot_hash"]
+        self.post("/contract/mine/confirm", member, agree=True, hash=h)
+        self.post(f"/lessor/contracts/{cid}/downpay")
+        if until == "contracted":
+            return
+        self.post(f"/lessor/contracts/{cid}/paid")
+
     def test_full_flow_member_becomes_tenant(self):
         from apps.rent4.backend import chat
         lid = self.listing()
@@ -956,9 +982,7 @@ class TestApply(GoogleCase):
         contacts = [c["username"] for c in self.client.get("/api/rent4/chat/contacts", headers=member).json()["contacts"]]
         self.assertEqual(contacts, ["chic"])                                  # 신청자 ↔ 임대인 채팅
         self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/link", headers=self.chic).status_code, 409)
-        self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/accept", headers=self.chic).status_code, 200)
-        self.assertEqual(self.client.post("/api/rent4/contract/mine/sign", headers=member, json={"agree": True}).status_code, 200)
-        self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=self.chic).status_code, 200)
+        self.run_flow(member, cid)
         me = self.client.get("/api/rent4/me", headers=member).json()
         self.assertEqual((me["kind"], me["username"], me["room"]), ("tenant", "hong77", "102"))
         self.assertEqual(self.client.get("/api/rent4/tenant/me", headers=member).status_code, 200)
@@ -973,7 +997,7 @@ class TestApply(GoogleCase):
         ca = self.apply(a, lid).json()["contract"]["id"]
         self.assertEqual(self.apply(a, lid).status_code, 409)                  # 하나만
         cb = self.apply(b, lid).json()["contract"]["id"]
-        self.client.post(f"/api/rent4/lessor/contracts/{ca}/accept", headers=self.chic)
+        self.post(f"/lessor/contracts/{ca}/offer", **self.OFFER)
         mine_b = self.client.get("/api/rent4/contract/mine", headers=b).json()["contract"]
         self.assertEqual((mine_b["id"], mine_b["status"]), (cb, "cancelled"))
         self.assertEqual(self.client.get("/api/rent4/me", headers=b).json()["kind"], "member")   # 다시 일반 회원
@@ -987,6 +1011,77 @@ class TestApply(GoogleCase):
         self.assertEqual(self.client.post(f"/api/rent4/listings/{lid}/apply", json={}).status_code, 401)
 
 
+class TestLeaseFlow(TestApply):
+    """회원 계약 절차의 각 단계 규칙."""
+
+    def started(self, until):
+        lid = self.listing()
+        member = self.member()
+        cid = self.apply(member, lid).json()["contract"]["id"]
+        self.run_flow(member, cid, until)
+        return member, cid
+
+    def test_offer_sends_chat_and_share_message(self):
+        lid = self.listing()
+        member = self.member()
+        cid = self.apply(member, lid).json()["contract"]["id"]
+        res = self.post(f"/lessor/contracts/{cid}/offer", **self.OFFER)
+        self.assertIn("계약금 500,000원", res["share"]["message"])
+        self.assertEqual(res["share"]["phone"], "010-2468-1357")
+        c = res["contract"]
+        self.assertEqual((c["status"], c["end"]), ("offered", "2027-12-04"))       # 12개월
+        texts = [m["text"] for m in self.client.get("/api/rent4/chat/inbox", headers=member).json()["messages"]]
+        self.assertTrue(any("계약 조건" in t for t in texts))
+        bad = self.client.post(f"/api/rent4/lessor/contracts/{cid}/offer", headers=self.chic, json={**self.OFFER, "down_payment": 9_000_000})
+        self.assertEqual(bad.status_code, 422)                                        # 계약금 > 보증금
+
+    def test_tenant_info_rules_no_resident_number(self):
+        member, cid = self.started("offered")
+        base = {"agree": True, "birth": "1995-03-04", "address": "부산", "start": "2026-12-05"}
+        bad = self.client.post("/api/rent4/contract/mine/approve", headers=member, json={**base, "emergency": "950304-1234567"})
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(self.client.post("/api/rent4/contract/mine/approve", headers=member, json={**base, "agree": False}).status_code, 422)
+        self.assertEqual(self.client.post("/api/rent4/contract/mine/approve", headers=member, json={**base, "birth": ""}).status_code, 422)
+        self.assertEqual(self.client.post(f"/api/rent4/lessor/contracts/{cid}/registry", headers=self.chic,
+                                          json={"owner_name": "김"}).status_code, 409)   # 아직 승인 전
+
+    def test_registry_finalizes_document_and_file_access(self):
+        member, cid = self.started("registry_checked")
+        doc = self.client.get(f"/api/rent4/contracts/{cid}/document", headers=member).json()
+        self.assertEqual((doc["snapshot"]["balance"], doc["snapshot"]["tenant"]["birth"]), (4500000, "1995-03-04"))
+        self.assertEqual(len(doc["hash"]), 64)
+        self.assertEqual(self.client.get(f"/api/rent4/contracts/{cid}/document", headers=self.chic).status_code, 200)
+        f = self.client.get(f"/api/rent4/contracts/{cid}/registry-file", headers=member)
+        self.assertEqual((f.status_code, f.content[:5]), (200, b"%PDF-"))
+        other = self.member("g-other", "other1", "010-5555-0000")
+        self.assertEqual(self.client.get(f"/api/rent4/contracts/{cid}/document", headers=other).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/rent4/contracts/{cid}/registry-file", headers=other).status_code, 403)
+        stale = self.client.post("/api/rent4/contract/mine/confirm", headers=member, json={"agree": True, "hash": "x" * 64})
+        self.assertEqual(stale.status_code, 409)                                    # 확인한 내용과 다르면 거부
+
+    def test_down_payment_completes_with_guide_and_report_flag(self):
+        member, cid = self.started("contracted")
+        c = self.client.get("/api/rent4/contract/mine", headers=member).json()["contract"]
+        self.assertEqual(c["status"], "contracted")
+        self.assertTrue(c["report_required"])                                       # 월세 35만 > 30만
+        self.assertIn("신고 대상입니다", c["guide_text"])
+        self.assertIn("전입신고", c["guide_text"])
+        self.assertEqual(self.client.get("/api/rent4/listings").json()["listings"], [])
+        self.assertEqual(self.client.get("/api/rent4/me", headers=member).json()["kind"], "party")   # 입주 전
+
+    def test_custom_guide_template(self):
+        self.listing()
+        self.post("/lessor/guide", guide="{building} {room}호 — 분리수거는 화요일. {report_line}", address="서울 1")
+        g = self.client.get("/api/rent4/lessor/guide", headers=self.chic).json()
+        self.assertEqual(g["address"], "서울 1")
+        member = self.member()
+        lid = self.client.get("/api/rent4/listings").json()["listings"][0]["id"]
+        cid = self.apply(member, lid).json()["contract"]["id"]
+        self.run_flow(member, cid, "contracted")
+        guide = self.client.get("/api/rent4/contract/mine", headers=member).json()["contract"]["guide_text"]
+        self.assertTrue(guide.startswith("시크빌 102호 — 분리수거는 화요일."))
+
+
 class TestMoveOut(TestApply):
     """전출: 공실 + 임차인 자격 끝. 회원은 일반 회원으로 돌아가고, 1년 안 쓰면 삭제."""
 
@@ -994,9 +1089,7 @@ class TestMoveOut(TestApply):
         lid = self.listing()
         member = self.member()
         cid = self.apply(member, lid).json()["contract"]["id"]
-        self.client.post(f"/api/rent4/lessor/contracts/{cid}/accept", headers=self.chic)
-        self.client.post("/api/rent4/contract/mine/sign", headers=member, json={"agree": True})
-        self.client.post(f"/api/rent4/lessor/contracts/{cid}/paid", headers=self.chic)
+        self.run_flow(member, cid)
         return member
 
     def test_member_moves_out_back_to_member(self):

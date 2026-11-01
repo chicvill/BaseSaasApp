@@ -15,7 +15,7 @@ from typing import ClassVar, Dict, List, Optional
 from core.auth import User
 from core.errors import Forbidden, Mismatch
 
-from .models import Building, Contract, LessorAccount, Room, TenantAccount
+from .models import OPEN_STATUSES, Building, Contract, LessorAccount, Room, TenantAccount
 from .pool import PoolObj, now_iso
 
 ONLINE_SECONDS = 20
@@ -96,7 +96,7 @@ def _lessors(branch: Optional[str] = None) -> List[Dict]:
     return out
 
 
-OPEN = ("requested", "sent", "signed")
+OPEN = OPEN_STATUSES
 
 
 def _applicants(branch: str) -> List[Dict]:

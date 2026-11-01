@@ -20,13 +20,16 @@ from core.auth import User, issue_token
 from core.errors import Conflict, Mismatch, NotFound
 
 from . import accounts, oauth
-from .models import Building, Contract, LessorAccount, Room
+from .models import OPEN_STATUSES, Building, Contract, LessorAccount, Room
 from .pool import now_iso
 
 CODE_RE = re.compile(r"^[a-z][a-z0-9]{1,15}$")
 KIND_LABEL = {"membership": "가맹 계약", "lease": "임대차 계약"}
 START_LINK_TTL = 24 * 3600
-STATUS_LABEL = {"requested": "신청 (임대인 확인 대기)", "sent": "상대방 확인 대기", "signed": "납부 확인 대기", "active": "체결 완료", "cancelled": "취소"}
+STATUS_LABEL = {"requested": "요청 (현장 점검 · 조건 대기)", "offered": "조건 제시 (임차인 정보 대기)",
+                "tenant_approved": "임차인 승인 (등기 확인 대기)", "registry_checked": "계약서 확정 (임차인 최종 승인 대기)",
+                "tenant_confirmed": "최종 승인 (계약금 대기)", "contracted": "계약 완료 (입주 · 잔금 대기)",
+                "sent": "상대방 확인 대기", "signed": "납부 확인 대기", "active": "입주 · 체결 완료", "cancelled": "취소"}
 
 
 
@@ -134,7 +137,6 @@ def cancel(c: Contract) -> Contract:
 
 
 # ── 회원의 매물 계약 신청 (index.html → apply.html) ──
-OPEN_STATUSES = ("requested", "sent", "signed")
 
 
 def _is_member(username: str) -> bool:
@@ -179,21 +181,6 @@ def apply(member: User, listing_id: str, data: Dict) -> Contract:
                         + (f"\n{note}" if note else ""), link="임대인.html", link_label="신청 보기")
         msg.category = "문의"
         msg.save()
-    return c
-
-
-def accept(c: Contract) -> Contract:
-    """임대인이 신청을 받아들임 → 신청자가 계약 내용을 확인 · 동의할 차례. 같은 호실의 다른 신청은 마감."""
-    if c.status != "requested":
-        raise Conflict("신청 상태의 계약만 받아들일 수 있습니다.")
-    for other in Contract.find(branch=c.branch, room=c.room, status="requested"):
-        if other.id != c.id:
-            other.status = "cancelled"
-            other.save()
-            _tell_party(other, "다른 분과 계약이 진행되어 신청이 마감되었습니다.")
-    c.status = "sent"
-    c.save()
-    _tell_party(c, "계약 신청이 받아들여졌습니다. 계약 내용을 확인하고 동의해 주세요.")
     return c
 
 
@@ -243,7 +230,7 @@ def start_link_set(token: str, new_password: str) -> Dict:
 def party_contract(user: User) -> Contract:
     """진행 중인 계약 우선, 없으면 가장 최근 계약."""
     mine = sorted(Contract.find(party_username=user.username), key=lambda c: c.created_at, reverse=True)
-    c = next((x for x in mine if x.status in ("requested", "sent", "signed")), None) or (mine[0] if mine else None)
+    c = next((x for x in mine if x.status in OPEN_STATUSES), None) or (mine[0] if mine else None)
     if c is None:
         raise NotFound("진행 중인 계약이 없습니다.")
     return c
@@ -272,7 +259,8 @@ def continue_as_account(user: User) -> Dict:
 
 # ── 3. 납부 확인 → 활성화 ──
 def confirm_paid(c: Contract) -> Contract:
-    if c.status != "signed":
+    """링크 계약: 동의(signed) 뒤 납부 확인. 회원 계약: 계약 완료(contracted) 뒤 입주일 잔금 확인 → 입주."""
+    if c.status not in ("signed", "contracted"):
         raise Conflict("상대방이 계약을 확인한 뒤에 납부를 확인할 수 있습니다." if c.status == "sent"
                        else f"이 계약은 '{STATUS_LABEL.get(c.status, c.status)}' 상태입니다.")
     c.paid_at = now_iso()
@@ -363,7 +351,13 @@ def public(c: Contract, for_party: bool = False) -> Dict:
             "lease_type": c.lease_type, "pay_timing": c.pay_timing, "created_at": c.created_at,
             "signed_at": c.signed_at, "paid_at": c.paid_at, "activated_at": c.activated_at, "username": c.username,
             "reset_at": c.reset_at, "paper": c.paper, "request_note": c.request_note,
-            "member": bool(c.party_username and _is_member(c.party_username))}
+            "member": bool(c.party_username and _is_member(c.party_username)),
+            "address": c.address, "down_payment": c.down_payment, "period_months": c.period_months,
+            "offered_at": c.offered_at, "tenant_approved_at": c.tenant_approved_at, "registry": c.registry,
+            "registry_file": bool(c.registry_file), "registry_at": c.registry_at, "finalized_at": c.finalized_at,
+            "snapshot_hash": c.snapshot_hash, "confirmed_at": c.confirmed_at, "down_paid_at": c.down_paid_at,
+            "report_required": c.report_required, "guide_text": c.guide_text,
+            "tenant_birth": c.tenant_birth, "tenant_address": c.tenant_address, "emergency_contact": c.emergency_contact}
     if not for_party:
         data["party_phone"] = c.party_phone
     else:

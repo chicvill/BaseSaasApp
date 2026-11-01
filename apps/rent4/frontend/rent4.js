@@ -14,6 +14,19 @@
     global.location.replace(page);
   }
 
+  /** 로그인이 필요한 파일(등기부 등)은 토큰을 붙여 받아 새 창으로 연다. */
+  async function openFile(path) {
+    const win = global.open("", "_blank");                 // 클릭 직후 열어야 팝업 차단을 피한다
+    const res = await fetch(Bass.apiBase("rent4") + path, { headers: { Authorization: `Bearer ${Bass.token()}` } });
+    if (!res.ok) {
+      if (win) win.close();
+      throw new Error("파일을 열 수 없습니다.");
+    }
+    const url = URL.createObjectURL(await res.blob());
+    if (win) win.location.href = url;
+    else global.location.href = url;
+  }
+
   async function guard(kinds) {
     if (!Bass.token()) { go("login.html"); return new Promise(() => {}); }
     let info;
@@ -179,93 +192,157 @@
 
 
 
-  const STATUS_TONE = { requested: "warn", sent: "warn", signed: "info", active: "ok", cancelled: "err" };
+  const STATUS_TONE = { requested: "warn", offered: "info", tenant_approved: "warn", registry_checked: "info",
+    tenant_confirmed: "warn", contracted: "ok", sent: "warn", signed: "info", active: "ok", cancelled: "err" };
+  const OPEN = ["requested", "offered", "tenant_approved", "registry_checked", "tenant_confirmed", "sent", "signed"];
 
-  /** 계약 목록 표 + [링크 · 납부 확인 · 취소] 버튼. apiPath 는 "/admin/contracts" 또는 "/lessor/contracts". */
+  /** 계약 목록 표 + 단계별 버튼. call(path, opts) 는 "/admin/contracts" 또는 "/lessor/contracts" 아래로 POST. */
   function contractTable(table, items, { call, reload, partyLabel }) {
     const esc = Bass.escapeHtml;
     const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+    const btn = (act, id, label, primary, title) =>
+      `<button class="bass-btn bass-btn--sm ${primary ? "bass-btn--primary" : ""}" data-act="${act}" data-id="${esc(id)}"${title ? ` title="${esc(title)}"` : ""}>${label}</button>`;
     table.innerHTML = `<thead><tr><th>대상</th><th>${esc(partyLabel)}</th><th>조건</th><th>상태</th><th></th></tr></thead>
       <tbody>${items.length ? items.map((c) => {
         const target = c.kind === "membership" ? `${c.building_name} (${c.building_code})` : `${c.room}호`;
-        const terms = c.kind === "membership" ? `가맹비 ${won(c.fee)}` : `보증금 ${won(c.deposit)} · 월 ${won(c.rent + c.mgmt)} · ${c.start || ""}`;
+        const terms = c.kind === "membership" ? `가맹비 ${won(c.fee)}`
+          : `보증금 ${won(c.deposit)}${c.down_payment ? ` (계약금 ${won(c.down_payment)})` : ""} · 월 ${won(c.rent + c.mgmt)} · ${c.start || ""}${c.end ? ` ~ ${c.end}` : ""}`;
         const acts = [
-          c.status === "requested" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="accept" data-id="${esc(c.id)}" title="이 신청자와 계약을 진행합니다 (같은 호실의 다른 신청은 마감)">✅ 수락</button>` : "",
-          c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
-          ["sent", "signed"].includes(c.status) && !c.member ? `<button class="bass-btn bass-btn--sm" data-act="link" data-id="${esc(c.id)}" title="계약 시작 링크를 새로 만듭니다 (이전 링크 무효)">🔗 링크</button>` : "",
-          ["requested", "sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">${c.status === "requested" ? "거절" : "취소"}</button>` : "",
+          c.status === "requested" ? btn("offer", c.id, "📝 조건 제시", true, "현장 점검 뒤 계약 조건을 정해 임차인에게 보냅니다 (같은 호실 다른 요청은 마감)") : "",
+          c.status === "offered" ? btn("offer", c.id, "📝 조건 수정 · 다시 보내기") : "",
+          c.status === "tenant_approved" ? btn("registry", c.id, "📑 등기 확인 결과 보내기", true) : "",
+          c.status === "tenant_confirmed" ? btn("downpay", c.id, `💰 계약금 ${won(c.down_payment)} 확인`, true, "입금을 확인하면 계약 완료 + 입주 안내문 발송") : "",
+          c.status === "contracted" ? btn("paid", c.id, `🏠 잔금 ${won(c.deposit - c.down_payment)} 확인 · 입주`, true) : "",
+          c.status === "signed" ? btn("paid", c.id, `💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인`, true) : "",
+          ["sent", "signed"].includes(c.status) && !c.member ? btn("link", c.id, "🔗 링크", false, "계약 시작 링크를 새로 만듭니다 (이전 링크 무효)") : "",
+          c.finalized_at ? `<a class="bass-btn bass-btn--sm" href="contract_doc.html?id=${encodeURIComponent(c.id)}">📄 계약서</a>` : "",
+          OPEN.includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">${c.status === "requested" ? "거절" : "취소"}</button>` : "",
         ].join(" ");
-        return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}${c.member ? ` <span class="bass-badge bass-badge--info">회원 신청</span>` : ""}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
+        const info = c.tenant_birth ? `<br><small class="bass-muted">생년월일 ${esc(c.tenant_birth)} · ${esc(c.tenant_address)}${c.emergency_contact ? ` · 비상 ${esc(c.emergency_contact)}` : ""}</small>` : "";
+        return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}${c.member ? ` <span class="bass-badge bass-badge--info">회원</span>` : ""}<br><small class="bass-muted">${esc(c.party_phone)}</small>${info}</td>
           <td style="white-space:normal;text-align:left">${esc(terms)}${c.request_note ? `<br><small class="bass-muted">💬 ${esc(c.request_note)}</small>` : ""}</td>
           <td><span class="bass-badge bass-badge--${STATUS_TONE[c.status] || "info"}">${esc(c.status_label)}</span>${c.username ? `<br><small><code>${esc(c.username)}</code></small>` : ""}</td>
           <td style="text-align:right">${acts}</td></tr>`;
-      }).join("") : `<tr><td colspan="5" class="bass-muted">아직 발행한 계약이 없습니다.</td></tr>`}</tbody>`;
+      }).join("") : `<tr><td colspan="5" class="bass-muted">아직 계약이 없습니다.</td></tr>`}</tbody>`;
 
     table._items = Object.fromEntries(items.map((c) => [c.id, c]));
     if (table.dataset.bound) return;
     table.dataset.bound = "1";
     table.addEventListener("click", (e) => {
-      const btn = e.target.closest("[data-act]");
-      if (!btn) return;
-      const c = table._items[btn.dataset.id];
-      Bass.withLock(btn, async () => {
-        const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
-        if (btn.dataset.act === "link") { issuedNotice(res); return; }
-        if (btn.dataset.act === "accept") Bass.updateAppAlert("success", `${c.party_name}님의 신청을 받아들였습니다.`,
-          "신청자 채팅창에 안내가 갔습니다. 신청자가 계약에 동의하면 잔금 확인을 누르세요.");
-        if (btn.dataset.act === "paid") Bass.updateAppAlert("success", "납부를 확인해 계약이 체결되었습니다.",
-          `${c.party_name}님은 휴대폰 번호와 계약 때 정한 비밀번호로 로그인하면 바로 시작됩니다.`);
-        if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
+      const b = e.target.closest("[data-act]");
+      if (!b) return;
+      const c = table._items[b.dataset.id];
+      const act = b.dataset.act;
+      if (act === "offer") return offerDialog(c, call, reload);
+      if (act === "registry") return registryDialog(c, call, reload);
+      if (act === "cancel" && !global.confirm(`${c.party_name}님 계약을 ${c.status === "requested" ? "거절" : "취소"}할까요?`)) return;
+      Bass.withLock(b, async () => {
+        const res = await call(`/${b.dataset.id}/${act}`);
+        if (act === "link") { issuedNotice(res); return; }
+        if (act === "downpay") Bass.updateAppAlert("success", "계약금을 확인했습니다 — 계약 완료.",
+          `${c.party_name}님에게 입주 안내문(전기 · 가스, 분리수거, 전입신고, 임대차 신고)을 채팅으로 보냈습니다. 매물은 내려갔습니다.`);
+        if (act === "paid") Bass.updateAppAlert("success", c.member ? "잔금을 확인해 입주 처리했습니다." : "납부를 확인해 계약이 체결되었습니다.",
+          c.member ? `${c.party_name}님 아이디로 내 계약 · 납입 화면이 열렸습니다.` : `${c.party_name}님은 휴대폰 번호와 계약 때 정한 비밀번호로 로그인하면 바로 시작됩니다.`);
+        if (act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", c.member ? "임차인 채팅창에 안내가 갔습니다." : "취소된 링크는 열리지 않습니다.");
         await reload();
       });
     });
   }
 
+  function dialog(html) {
+    let dlg = document.getElementById("flowDialog");
+    if (!dlg) {
+      dlg = document.createElement("dialog");
+      dlg.id = "flowDialog";
+      dlg.className = "detail";
+      dlg.style.maxWidth = "min(520px, 94vw)";
+      document.body.append(dlg);
+    }
+    dlg.innerHTML = html;
+    dlg.querySelector("[data-close]")?.addEventListener("click", () => dlg.close());
+    dlg.showModal();
+    return dlg;
+  }
 
-
-
-
-  /** 비밀번호 칸마다 [보기/숨기기] 버튼을 붙인다. 나중에 생기는 칸(비밀번호 변경 창 등)도 자동으로. */
-  function addRevealToggle(input) {
-    if (input.dataset.reveal) return;
-    input.dataset.reveal = "1";
-    const hadFocus = document.activeElement === input;     // 감싸면서 옮기면 커서가 빠지므로 되돌린다
-    const wrap = document.createElement("span");
-    wrap.className = "pw-wrap";
-    input.replaceWith(wrap);
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "pw-toggle";
-    btn.textContent = "보기";
-    btn.setAttribute("aria-label", "비밀번호 보기");
-    btn.setAttribute("aria-pressed", "false");
-    btn.addEventListener("click", () => {
-      const show = input.type === "password";
-      input.type = show ? "text" : "password";
-      btn.textContent = show ? "숨기기" : "보기";
-      btn.setAttribute("aria-label", show ? "비밀번호 숨기기" : "비밀번호 보기");
-      btn.setAttribute("aria-pressed", String(show));
-      input.focus();
+  /** 현장 점검 뒤 조건 제시 → 임차인 채팅 + 임대인 휴대폰 문자앱 · 카카오톡 보내기 창. */
+  function offerDialog(c, call, reload) {
+    const esc = Bass.escapeHtml;
+    const f = (id, label, value, type = "number", extra = "") =>
+      `<div><label class="bass-label" for="${id}">${label}</label><input class="bass-input" id="${id}" type="${type}" value="${esc(value ?? "")}" ${extra}></div>`;
+    const dlg = dialog(`
+      <form class="stack" id="offerForm" style="gap:10px">
+        <h3 style="margin:0">📝 ${esc(c.room)}호 계약 조건 — ${esc(c.party_name)}님</h3>
+        <p class="bass-muted" style="margin:0;font-size:13px">현장 점검 뒤 확정한 조건을 적어 주세요. 임차인 채팅창으로 가고, 휴대폰으로도 보낼 수 있습니다.</p>
+        ${f("oAddr", "주소", c.address, "text", "required")}
+        <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px">
+          ${f("oDeposit", "보증금 (원)", c.deposit, "number", 'min="0"')}
+          ${f("oDown", "계약금 (원)", c.down_payment || Math.round((c.deposit || 0) / 10 / 10000) * 10000, "number", 'min="0"')}
+          ${f("oRent", "월 임차료 (원)", c.rent, "number", 'min="0"')}
+          ${f("oMgmt", "월 관리비 (원)", c.mgmt, "number", 'min="0"')}
+          ${f("oStart", "입주일", c.start, "date")}
+          ${f("oPeriod", "기간 (개월)", c.period_months || 12, "number", 'min="1" max="60"')}
+        </div>
+        <div class="bass-row" style="justify-content:flex-end">
+          <button class="bass-btn bass-btn--ghost" type="button" data-close>닫기</button>
+          <button class="bass-btn bass-btn--primary" type="submit">조건 보내기</button>
+        </div>
+      </form>`);
+    dlg.querySelector("#offerForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const v = (id) => dlg.querySelector(`#${id}`).value;
+      Bass.withLock(e.submitter, async () => {
+        const res = await call(`/${c.id}/offer`, { body: {
+          address: v("oAddr").trim(), deposit: Number(v("oDeposit") || 0), down_payment: Number(v("oDown") || 0),
+          rent: Number(v("oRent") || 0), mgmt: Number(v("oMgmt") || 0), start: v("oStart") || null, period_months: Number(v("oPeriod") || 12) } });
+        dlg.close();
+        shareLink({ title: `${c.room}호 계약 조건을 보냈습니다`, name: c.party_name, phone: res.share.phone,
+          link: new URL(res.share.link, location.href).href, message: res.share.message,
+          note: "임차인 채팅창에는 이미 보냈습니다. 휴대폰 문자 · 카카오톡으로도 보내려면 아래 버튼을 쓰세요." });
+        await reload();
+      }, "보내는 중...");
     });
-    wrap.append(input, btn);
-    if (hadFocus) input.focus();
   }
 
-  function enhancePasswords(root) {
-    root.querySelectorAll?.('input[type="password"]').forEach(addRevealToggle);
+  /** 등기부 확인 결과: 체크리스트 + 파일(선택) → 서버가 계약 내용을 확정 저장. */
+  function registryDialog(c, call, reload) {
+    const esc = Bass.escapeHtml;
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    const dlg = dialog(`
+      <form class="stack" id="regForm" style="gap:10px">
+        <h3 style="margin:0">📑 ${esc(c.room)}호 등기부 확인 결과</h3>
+        <p class="bass-muted" style="margin:0;font-size:13px">인터넷등기소(iros.go.kr)에서 오늘 열람한 등기부등본을 보고 적어 주세요. 보내면 계약 내용이 확정 저장되고 임차인이 최종 승인합니다.</p>
+        <div><label class="bass-label" for="rOwner">등기부상 소유자</label><input class="bass-input" id="rOwner" required></div>
+        <label class="bass-row" style="gap:8px"><input type="checkbox" id="rMatch" checked> 소유자 = 임대인 (일치)</label>
+        <div class="bass-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div><label class="bass-label" for="rMort">근저당 등 채권최고액 합계 (원, 없으면 0)</label><input class="bass-input" id="rMort" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="rDate">열람일</label><input class="bass-input" id="rDate" type="date" value="${today}"></div>
+        </div>
+        <label class="bass-row" style="gap:8px"><input type="checkbox" id="rSeize"> 압류 · 가압류 · 경매 기입 있음</label>
+        <div><label class="bass-label" for="rNote">메모 (선택)</label><textarea class="bass-input" id="rNote" style="min-height:60px;font-family:var(--font)"></textarea></div>
+        <div><label class="bass-label" for="rFile">등기부 파일 (PDF · 사진, 선택 — 양쪽 당사자만 열람)</label><input class="bass-input" id="rFile" type="file" accept="application/pdf,image/*"></div>
+        <div class="bass-row" style="justify-content:flex-end">
+          <button class="bass-btn bass-btn--ghost" type="button" data-close>닫기</button>
+          <button class="bass-btn bass-btn--primary" type="submit">결과 보내기 · 계약 확정</button>
+        </div>
+      </form>`);
+    dlg.querySelector("#regForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      const q = (id) => dlg.querySelector(`#${id}`);
+      Bass.withLock(e.submitter, async () => {
+        const body = { owner_name: q("rOwner").value.trim(), owner_match: q("rMatch").checked, mortgage: Number(q("rMort").value || 0),
+          seizure: q("rSeize").checked, note: q("rNote").value, viewed_on: q("rDate").value };
+        const file = q("rFile").files[0];
+        if (file) {
+          body.file = await new Promise((ok, bad) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = bad; r.readAsDataURL(file); });
+          body.mime = file.type;
+        }
+        await call(`/${c.id}/registry`, { body });
+        dlg.close();
+        Bass.updateAppAlert("success", "등기 확인 결과를 보내고 계약 내용을 확정 저장했습니다.", "임차인이 최종 승인하고 계약금을 보내면 '계약금 확인'을 누르세요.");
+        await reload();
+      }, "보내는 중...");
+    });
   }
-
-  function watchPasswords() {
-    enhancePasswords(document);
-    new MutationObserver((records) => records.forEach((r) => r.addedNodes.forEach((n) => {
-      if (n.nodeType !== 1) return;
-      if (n.matches('input[type="password"]')) addRevealToggle(n);
-      else enhancePasswords(n);
-    }))).observe(document.body, { childList: true, subtree: true });
-  }
-
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchPasswords);
-  else watchPasswords();
 
   /** 계약 발행 · 링크 다시 만들기 뒤: 계약 시작 링크 보내기 창 (문자 대신 대면 · 카카오톡 등). */
   function issuedNotice(res) {
@@ -509,5 +586,5 @@
     if (!startClock.timer) startClock.timer = setInterval(tick, 1000);
   }
 
-  global.Rent4 = { me, guard, requireLogin, logout, go, passwordGate, contractTable, issuedNotice, shareLink, startChat, monthCard, startClock };
+  global.Rent4 = { me, guard, requireLogin, logout, openFile, go, passwordGate, contractTable, issuedNotice, shareLink, startChat, monthCard, startClock };
 })(window);

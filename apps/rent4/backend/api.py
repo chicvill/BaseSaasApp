@@ -39,13 +39,13 @@ from datetime import date
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, listings, members, oauth, paste
-from .models import BankMessage, Building, MonthMark, Payment, Room
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, leaseflow, listings, members, oauth, paste
+from .models import BankMessage, Building, Contract, MonthMark, Payment, Room
 
 router = APIRouter()
 staff = require_role(*accounts.ADMIN_ROLES, *accounts.LESSOR_ROLES)
@@ -169,8 +169,8 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
         if c.party_username and contracts._is_member(c.party_username):
             raise Conflict("회원이 신청한 계약은 링크 없이 로그인한 상태로 진행합니다.")
         return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
-    if action == "accept":
-        return {"success": True, "contract": contracts.public(contracts.accept(c))}
+    if action == "downpay":                       # 계약금 확인 = 계약 완료 + 안내문
+        return {"success": True, "contract": contracts.public(leaseflow.down_paid(c))}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
 
 
@@ -206,6 +206,35 @@ def contract_mine_continue(user: User = Depends(require_user)) -> Dict[str, Any]
     return {"success": True, **contracts.continue_as_account(user)}
 
 
+# ── 회원 계약 절차 (leaseflow): 임차인 ──
+@router.post("/contract/mine/approve")
+def contract_mine_approve(payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
+    """조건 확인 → 개인정보(주민번호 없음) · 전입일 · 기간 입력 후 승인."""
+    c = leaseflow.approve(contracts.party_contract(user), payload)
+    return {"success": True, "contract": contracts.public(c, for_party=True)}
+
+
+@router.post("/contract/mine/confirm")
+def contract_mine_confirm(payload: Dict[str, Any] = Body(...), user: User = Depends(require_user)) -> Dict[str, Any]:
+    """확정 계약서 최종 승인 → 계약금 송금."""
+    c = leaseflow.confirm(contracts.party_contract(user), payload)
+    return {"success": True, "contract": contracts.public(c, for_party=True)}
+
+
+@router.get("/contracts/{contract_id}/document")
+def contract_document(contract_id: str, user: User = Depends(require_user)) -> Dict[str, Any]:
+    return {"success": True, **leaseflow.document(user, contract_id)}
+
+
+@router.get("/contracts/{contract_id}/registry-file")
+def contract_registry_file(contract_id: str, user: User = Depends(require_user)) -> FileResponse:
+    c = Contract.first(id=contract_id)
+    if c is None or not leaseflow.can_view(user, c):
+        raise Forbidden("볼 수 없는 파일입니다.")
+    path, mime = leaseflow.registry_file(c)
+    return FileResponse(path, media_type=mime, headers={"Cache-Control": "no-store"})
+
+
 # ── 임대인 ──
 @router.get("/lessor/contracts")
 def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
@@ -217,6 +246,38 @@ def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = ""
                            user: User = Depends(staff)) -> Dict[str, Any]:
     c = contracts.create_lease(user, _scope(user, branch).branch, payload)
     return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
+
+
+@router.post("/lessor/contracts/{contract_id}/offer")
+def lessor_contract_offer(contract_id: str, payload: Dict[str, Any] = Body(...), branch: str = "",
+                          user: User = Depends(staff)) -> Dict[str, Any]:
+    """현장 점검 뒤 조건 제시 → 임차인 채팅 + 임대인 휴대폰으로 보낼 문구."""
+    c = leaseflow.offer(contracts.require(contract_id, "lease", _scope(user, branch).branch), payload)
+    return {"success": True, "contract": contracts.public(c), "share": leaseflow.offer_message(c)}
+
+
+@router.post("/lessor/contracts/{contract_id}/registry")
+def lessor_contract_registry(contract_id: str, payload: Dict[str, Any] = Body(...), branch: str = "",
+                             user: User = Depends(staff)) -> Dict[str, Any]:
+    """등기부 확인 결과(체크리스트 + 파일) → 계약 내용 확정 저장."""
+    c = leaseflow.registry(contracts.require(contract_id, "lease", _scope(user, branch).branch), payload)
+    return {"success": True, "contract": contracts.public(c)}
+
+
+@router.get("/lessor/guide")
+def lessor_guide(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    b = _scope(user, branch)
+    return {"success": True, "guide": b.guide, "default": leaseflow.DEFAULT_GUIDE, "address": b.address}
+
+
+@router.post("/lessor/guide")
+def lessor_guide_save(payload: Dict[str, Any] = Body(...), branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    b = _scope(user, branch)
+    b.guide = str(payload.get("guide") or "")[:5000]
+    if payload.get("address") is not None:
+        b.address = str(payload.get("address") or "").strip()[:200]
+    b.save()
+    return {"success": True}
 
 
 @router.post("/lessor/contracts/paper")

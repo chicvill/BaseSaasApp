@@ -38,6 +38,8 @@ class Building(PoolObj):
     code: str                      # 임차인 아이디 접두어 (예: chic → chic603)
     name: str
     branch: str
+    address: str = ""              # 계약서 · 안내문에 쓰는 주소
+    guide: str = ""                # 입주 안내문 (임대인이 고침, 비면 기본 문안)
 
 
 class TenantAccount(PoolObj):
@@ -123,6 +125,30 @@ class Contract(PoolObj):
     listing_id: str = ""           # 회원이 매물에서 신청한 계약 (status requested 로 시작)
     request_note: str = ""         # 신청할 때 남긴 말
     paper: bool = False            # 종이 계약서로 등록 (이미 체결된 계약 — 링크 · 동의 단계 없음)
+    # ── 회원 계약 절차 (leaseflow.py) ──
+    address: str = ""              # 주소 (조건 제시 때)
+    down_payment: int = 0          # 계약금
+    period_months: int = 12
+    offered_at: Optional[str] = None
+    tenant_birth: str = ""         # 임차인 개인정보 (주민번호는 받지 않는다)
+    tenant_address: str = ""
+    emergency_contact: str = ""
+    tenant_approved_at: Optional[str] = None
+    registry: dict = {}            # 등기 확인 체크리스트 (owner_match · owner_name · mortgage · seizure · note)
+    registry_file: str = ""        # 올린 등기부 파일 (pool/registry/ 아래, 양쪽 당사자만 열람)
+    registry_at: Optional[str] = None
+    snapshot: dict = {}            # 확정된 계약 내용 (이후 바뀌지 않음)
+    snapshot_hash: str = ""
+    finalized_at: Optional[str] = None
+    confirmed_at: Optional[str] = None      # 임차인 최종 승인
+    down_paid_at: Optional[str] = None      # 계약금 확인 = 계약 완료
+    guide_text: str = ""                    # 보낸 입주 안내문
+    report_required: bool = False           # 주택 임대차 신고 대상
+
+
+# 진행 중인 계약 (계약 진행용 로그인 · 한 사람 한 신청 · 채팅 상대 판단에 쓴다)
+OPEN_STATUSES = ("requested", "offered", "tenant_approved", "registry_checked", "tenant_confirmed", "contracted",
+                 "sent", "signed")
 
 
 class Room(PoolObj):
