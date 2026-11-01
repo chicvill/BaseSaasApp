@@ -97,8 +97,8 @@ def _hash(state: str) -> str:
 
 def start(name: str, purpose: str, redirect_uri: str, user: Optional[User], back: str = "") -> Dict:
     p = _provider(name)
-    if purpose not in ("link", "login", "find"):
-        raise DomainError("purpose 는 link, login, find 중 하나입니다.")
+    if purpose not in ("link", "login", "find", "signup"):
+        raise DomainError("purpose 는 link, login, find, signup 중 하나입니다.")
     if purpose == "link" and user is None:
         raise DomainError("로그인한 뒤 계정을 연결할 수 있습니다.")
     for old in OAuthState.all():
@@ -174,6 +174,11 @@ def callback(name: str, code: str, state: str) -> str:
         from . import finder
         return f"find.html#f={finder.open_session(name, _current_username(link.username))}"
     user = User.by_username(_current_username(link.username)) if link else None
+    if st.purpose == "signup":                      # 이미 회원이면 가입을 건너뛰고 로그인
+        if user is not None:
+            return f"signup.html#token={issue_token(user)}"
+        from . import members
+        return f"signup.html#s={members.open_session(name, prof)}"
     if user is None:
         return "login.html#oauth=unlinked"
     return f"login.html#token={issue_token(user)}"

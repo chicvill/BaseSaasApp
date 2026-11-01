@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, listings, oauth, paste
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, listings, members, oauth, paste
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -395,6 +395,18 @@ def reset_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         return {"success": True, **accounts.reset_link_set(t, new)}
     except NotFound:
         return {"success": True, **contracts.start_link_set(t, new)}
+
+
+# ── 회원가입 (로그인 전, 구글 본인 확인 뒤) ──
+@router.get("/signup/view")
+def signup_view(s: str = "") -> Dict[str, Any]:
+    return {"success": True, **members.view(s)}
+
+
+@router.post("/signup")
+def signup(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    g = lambda k: str(payload.get(k, ""))  # noqa: E731
+    return {"success": True, **members.signup(g("s"), g("username"), g("name"), g("phone"), g("password"))}
 
 
 # ── 아이디 · 비밀번호 찾기 (로그인 전, 구글 본인 확인 뒤) ──

@@ -82,6 +82,10 @@ def _facts(username: str) -> Optional[Dict[str, object]]:
         b = Building.first(branch=lessor.branch)
         if c and b:
             return {"name": c.party_name, "phone": c.party_phone, "props": {_norm(b.name), _norm(b.code)}}
+    from .members import MemberAccount
+    member = MemberAccount.first(username=username)
+    if member:                                # 계약 전 회원: 부동산 칸은 비워 둔다
+        return {"name": member.name, "phone": member.phone, "props": {""}}
     return None
 
 

@@ -855,5 +855,79 @@ class TestListings(ApiCase):
         mine = self.client.get("/api/rent4/lessor/listings", headers=self.chic).json()["listings"]
         self.assertEqual(mine[0]["closed_reason"], "contracted")
 
+
+class GoogleCase(ApiCase):
+    """구글은 가짜 응답 (code = 구글 sub)."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        from apps.rent4.backend import oauth
+        self.oauth = oauth
+        env = mock.patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "g-id", "GOOGLE_CLIENT_SECRET": "g-secret"})
+        env.start()
+        self.addCleanup(env.stop)
+        fake = mock.patch.object(oauth, "_http_json", side_effect=self._fake_http)
+        fake.start()
+        self.addCleanup(fake.stop)
+
+    def _fake_http(self, url, data=None, token=""):
+        if url == self.oauth.PROVIDERS["google"]["token"]:
+            return {"access_token": "at-" + data["code"]}
+        return {"sub": token[3:], "name": "구글이름", "email": "me@gmail.test"}
+
+    def google(self, purpose, sub, auth=None):
+        from urllib.parse import unquote
+        res = self.client.post("/api/rent4/oauth/google/start", json={"purpose": purpose}, headers=auth or {})
+        self.assertEqual(res.status_code, 200, res.text)
+        state = re.search(r"state=([^&]+)", res.json()["url"])[1]
+        loc = self.client.get(f"/api/rent4/oauth/google/callback?code={sub}&state={state}", follow_redirects=False)
+        return unquote(loc.headers["location"])
+
+    def member(self, sub="g-new", username="hong77", phone="010-2468-1357", password="member-pw-1"):
+        loc = self.google("signup", sub)
+        self.assertIn("signup.html#s=", loc)
+        res = self.client.post("/api/rent4/signup", json={"s": loc.split("#s=")[1], "username": username,
+                               "name": "홍새로", "phone": phone, "password": password})
+        self.assertEqual(res.status_code, 200, res.text)
+        return {"Authorization": f"Bearer {res.json()['token']}"}
+
+
+class TestSignup(GoogleCase):
+    def test_signup_then_member_home_and_login(self):
+        auth = self.member()
+        me = self.client.get("/api/rent4/me", headers=auth).json()
+        self.assertEqual((me["kind"], me["home"], me["username"]), ("member", "index.html", "hong77"))
+        self.assertEqual(self.client.post("/api/rent4/login", json={"username": "hong77", "password": "member-pw-1"}).status_code, 200)
+        by_phone = self.client.post("/api/rent4/login", json={"username": "010-2468-1357", "password": "member-pw-1"}).json()
+        self.assertEqual(by_phone["user"]["username"], "hong77")
+        self.assertEqual(self.client.get("/api/rent4/tenant/me", headers=auth).status_code, 403)
+        self.assertEqual(self.client.get("/api/rent4/lessor/board", headers=auth).status_code, 403)
+
+    def test_existing_member_skips_signup(self):
+        self.member()
+        loc = self.google("signup", "g-new")
+        self.assertIn("signup.html#token=", loc)
+
+    def test_signup_rules(self):
+        loc = self.google("signup", "g-x")
+        sess = loc.split("#s=")[1]
+        bad = lambda **kw: self.client.post("/api/rent4/signup", json={"s": sess, "username": "goodname", "name": "가",  # noqa: E731
+                                                                       "phone": "010-1111-9999", "password": "pass-123", **kw})
+        self.assertEqual(bad(username="Ab").status_code, 422)
+        self.assertEqual(bad(username="chic101").status_code, 409)             # 호실 아이디 모양은 못 씀
+        self.assertEqual(bad(username="admin").status_code, 409)
+        self.assertEqual(bad(phone="123").status_code, 422)
+        self.assertEqual(bad(password="111111").status_code, 422)
+        self.assertEqual(self.client.post("/api/rent4/signup", json={"s": "nope", "username": "goodname", "name": "가",
+                         "phone": "010-1111-9999", "password": "pass-123"}).status_code, 403)
+
+    def test_member_find_id_without_property(self):
+        self.member()
+        loc = self.google("find", "g-new")
+        f = loc.split("#f=")[1]
+        res = self.client.post("/api/rent4/find/id", json={"f": f, "name": "홍새로", "phone": "01024681357", "property": ""})
+        self.assertEqual(res.json().get("username"), "hong77", res.text)
+
 if __name__ == "__main__":
     unittest.main()

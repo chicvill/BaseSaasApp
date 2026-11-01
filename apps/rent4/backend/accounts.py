@@ -237,6 +237,8 @@ def _phone_candidates(digits: str) -> List[str]:
     for c in Contract.all():
         if c.party_username and c.status in ("sent", "signed") and same(c.party_phone):
             out.append(c.party_username)
+    from .members import MemberAccount
+    out += [m.username for m in MemberAccount.all() if same(m.phone) and m.username not in out]
     return out
 
 
@@ -337,6 +339,10 @@ def whoami(user: User) -> Dict:
     pending = Contract.first(party_username=user.username) if user.role == TENANT_ROLE else None
     if pending is not None:
         return {**base, "kind": "party", "label": "계약 진행", "home": "contract.html", "must_change_password": False}
+    from .members import MemberAccount
+    tenant = TenantAccount.first(username=user.username) if user.role == TENANT_ROLE else None
+    if (tenant is None or not tenant.tenant_key) and MemberAccount.first(username=user.username):
+        return {**base, "kind": "member", "label": "회원", "home": "index.html", "must_change_password": False}
     acc = tenant_account(user)
     b = building_of(acc.branch)
     return {**base, "kind": "tenant", "label": "임차인", "home": "임차인.html", "room": acc.room,
