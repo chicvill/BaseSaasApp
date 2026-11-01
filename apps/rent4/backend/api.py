@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, ledger, oauth, sms
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth, sms
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -268,7 +268,8 @@ def oauth_providers(user=Depends(current_user)) -> Dict[str, Any]:
 @router.post("/oauth/{provider}/start")
 def oauth_start(provider: str, request: Request, payload: Dict[str, Any] = Body(...), user=Depends(current_user)) -> Dict[str, Any]:
     redirect_uri = str(request.url).split("?")[0].rsplit("/", 1)[0] + "/callback"
-    return {"success": True, **oauth.start(provider, str(payload.get("purpose", "")), redirect_uri, user)}
+    return {"success": True, **oauth.start(provider, str(payload.get("purpose", "")), redirect_uri, user,
+                                           str(payload.get("back", "")))}
 
 
 @router.get("/oauth/{provider}/callback")
@@ -327,6 +328,29 @@ def reset_view(t: str = "") -> Dict[str, Any]:
 @router.post("/reset/set")
 def reset_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return {"success": True, **accounts.reset_link_set(str(payload.get("t", "")), str(payload.get("new", "")))}
+
+
+# ── 아이디 · 비밀번호 찾기 (로그인 전, 구글 본인 확인 뒤) ──
+@router.get("/find/view")
+def find_view(f: str = "") -> Dict[str, Any]:
+    return {"success": True, **finder.view(f)}
+
+
+@router.post("/find/id")
+def find_id(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    g = lambda k: str(payload.get(k, ""))  # noqa: E731
+    return {"success": True, **finder.find_id(g("f"), g("name"), g("phone"), g("property"))}
+
+
+@router.post("/find/pw/verify")
+def find_pw_verify(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    g = lambda k: str(payload.get(k, ""))  # noqa: E731
+    return {"success": True, **finder.verify_pw(g("f"), g("username"), g("name"), g("phone"), g("property"))}
+
+
+@router.post("/find/pw/set")
+def find_pw_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, **finder.set_pw(str(payload.get("f", "")), str(payload.get("new", "")))}
 
 
 # ── 휴대폰 문자 인증 (로그인 전) ──

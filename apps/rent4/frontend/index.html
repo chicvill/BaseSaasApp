@@ -24,6 +24,10 @@
       <input class="bass-input" id="username" autocomplete="username" autocapitalize="none" placeholder="예: chic603 또는 010-1234-5678" required></div>
     <div><label class="bass-label" for="password">비밀번호</label>
       <input class="bass-input" id="password" type="password" autocomplete="current-password" required></div>
+    <div class="bass-row" style="justify-content:space-between;font-size:13.5px">
+      <label><input type="checkbox" id="rememberId"> 아이디 저장</label>
+      <span><a href="find.html#mode=id">아이디 찾기</a> · <a href="find.html#mode=pw">비밀번호 찾기</a></span>
+    </div>
     <button class="bass-btn bass-btn--primary" id="btnLogin" type="submit">로그인</button>
     <div class="bass-row hide" id="socialRow" style="gap:8px"></div>
   </form>
@@ -45,6 +49,24 @@
     const info = await Rent4.me();
     Rent4.go(info.home);
   }
+
+  // 아이디 저장 (이 기기의 브라우저에만, 비밀번호는 저장하지 않음) · 아이디 찾기에서 돌아오면 찾은 아이디
+  const KEY = "rent4.savedId";
+  const store = { get() { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } },
+    set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) {} } };
+  const foundId = (location.hash.match(/id=([^&]+)/) || [])[1];
+  const saved = store.get();
+  $("rememberId").checked = !!saved;
+  const prefill = foundId ? decodeURIComponent(foundId) : saved;
+  if (prefill) {
+    $("username").value = prefill;
+    $("password").focus();
+  }
+  if (foundId) {
+    if ($("rememberId").checked) store.set(prefill);
+    Bass.updateAppAlert("success", "아이디를 찾았습니다.", "비밀번호를 입력해 로그인하세요.");
+  }
+  $("rememberId").addEventListener("change", () => { if (!$("rememberId").checked) store.set(""); });
 
   const hash = location.hash;
   const linkedToken = (hash.match(/token=([^&]+)/) || [])[1];
@@ -78,6 +100,7 @@
     Bass.withLock($("btnLogin"), async () => {
       const res = await Bass.api("rent4", "/login", { method: "POST",
         body: { username: $("username").value.trim(), password: $("password").value } });
+      store.set($("rememberId").checked ? $("username").value.trim() : "");
       Bass.setToken(res.token);
       try {
         await goHome();

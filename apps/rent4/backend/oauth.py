@@ -6,6 +6,8 @@ apps/rent4/backend/oauth.py — 카카오 · 구글 계정 연결 (계약 전 �
     2. 사용자가 카카오/구글에서 동의             → GET /oauth/{provider}/callback?code&state
     3. purpose=link  : 로그인한 사용자에게 계정 연결 + 진행 중 계약이면 '본인 확인 완료' → contract.html
        purpose=login : 연결된 계정이면 로그인 토큰 → index.html#token=...
+       purpose=find  : 연결된 계정이면 아이디·비밀번호 찾기 권한 (finder) → find.html#f=...
+    link 는 back=account 로 시작하면 계약 화면 대신 로그인한 사람의 화면(내 정보)으로 돌아간다.
 
 환경변수 (각 서비스 개발자 콘솔에서 발급)
     KAKAO_REST_API_KEY [, KAKAO_CLIENT_SECRET]   developers.kakao.com > 내 애플리케이션
@@ -68,8 +70,9 @@ class OAuthState(PoolObj):
 
     state_hash: str
     provider: str
-    purpose: str                   # link | login
+    purpose: str                   # link | login | find
     username: str = ""
+    back: str = ""                 # link 뒤 돌아갈 화면 (account → 임차인/임대인 화면)
     redirect_uri: str
     expires_at: float
 
@@ -92,10 +95,10 @@ def _hash(state: str) -> str:
     return hashlib.sha256(state.encode()).hexdigest()
 
 
-def start(name: str, purpose: str, redirect_uri: str, user: Optional[User]) -> Dict:
+def start(name: str, purpose: str, redirect_uri: str, user: Optional[User], back: str = "") -> Dict:
     p = _provider(name)
-    if purpose not in ("link", "login"):
-        raise DomainError("purpose 는 link 또는 login 입니다.")
+    if purpose not in ("link", "login", "find"):
+        raise DomainError("purpose 는 link, login, find 중 하나입니다.")
     if purpose == "link" and user is None:
         raise DomainError("로그인한 뒤 계정을 연결할 수 있습니다.")
     for old in OAuthState.all():
@@ -103,7 +106,8 @@ def start(name: str, purpose: str, redirect_uri: str, user: Optional[User]) -> D
             old.delete()
     state = secrets.token_urlsafe(24)
     OAuthState(state_hash=_hash(state), provider=name, purpose=purpose, username=user.username if user else "",
-               redirect_uri=redirect_uri, expires_at=time.time() + STATE_TTL).save()
+               back=back if back == "account" else "", redirect_uri=redirect_uri,
+               expires_at=time.time() + STATE_TTL).save()
     q = {"client_id": os.environ[p["id_env"]], "redirect_uri": redirect_uri, "response_type": "code", "state": state}
     if p["scope"]:
         q["scope"] = p["scope"]
@@ -151,9 +155,10 @@ def callback(name: str, code: str, state: str) -> str:
     st.delete()
     prof = _profile(name, code, st.redirect_uri)
     if st.purpose == "link":
+        page = _account_page(st.username) if st.back == "account" else "contract.html"
         link = SocialLink.first(provider=name, subject=prof["subject"])
         if link and link.username != st.username:
-            return "contract.html#oauth=used"           # 다른 사람이 이미 연결한 계정
+            return f"{page}#oauth=used"                 # 다른 사람이 이미 연결한 계정
         link = link or SocialLink(provider=name, subject=prof["subject"], username=st.username)
         link.name, link.email = prof["name"], prof["email"]
         link.save()
@@ -161,8 +166,13 @@ def callback(name: str, code: str, state: str) -> str:
         if c is not None:
             c.verified_provider, c.verified_name, c.verified_at = name, prof["name"] or prof["email"], now_iso()
             c.save()
-        return "contract.html#oauth=linked"
+        return f"{page}#oauth=linked"
     link = SocialLink.first(provider=name, subject=prof["subject"])
+    if st.purpose == "find":
+        if link is None or User.by_username(_current_username(link.username)) is None:
+            return "find.html#oauth=unlinked"
+        from . import finder
+        return f"find.html#f={finder.open_session(name, _current_username(link.username))}"
     user = User.by_username(_current_username(link.username)) if link else None
     if user is None:
         return "index.html#oauth=unlinked"
@@ -173,6 +183,11 @@ def _current_username(username: str) -> str:
     """계약 진행용 아이디로 연결했어도, 체결 뒤에는 최종 아이디로 로그인한다."""
     c = Contract.first(party_username=username)
     return c.username if c is not None and c.status == "active" and c.username else username
+
+
+def _account_page(username: str) -> str:
+    user = User.by_username(username)
+    return "임대인.html" if user is not None and user.role == "branch_admin" else "임차인.html"
 
 
 def linked(username: str) -> List[Dict[str, str]]:

@@ -701,6 +701,86 @@ class TestSms(unittest.TestCase):
         body = _json.loads(req.data)
         self.assertEqual(body["message"], {"to": "01022223333", "from": "01011110000", "text": "안녕"})
 
+class TestFind(ApiCase):
+    """아이디·비밀번호 찾기: 미리 연결한 구글 계정 → 이름·전화·부동산 확인 (구글은 가짜 응답)."""
+
+    def setUp(self):
+        super().setUp()                                   # 시크빌 임대인은 구글 키 없이 먼저 만든다
+        from unittest import mock
+        from apps.rent4.backend import oauth
+        self.oauth = oauth
+        env = mock.patch.dict(os.environ, {"GOOGLE_CLIENT_ID": "g-id", "GOOGLE_CLIENT_SECRET": "g-secret"})
+        env.start()
+        self.addCleanup(env.stop)
+        fake = mock.patch.object(oauth, "_http_json", side_effect=self._fake_http)
+        fake.start()
+        self.addCleanup(fake.stop)
+        self.import_sheet()
+        self.room = Room.first(branch="main", room="103")
+        self.tenant = self.tenant_login("103")
+
+    def _fake_http(self, url, data=None, token=""):
+        if url == self.oauth.PROVIDERS["google"]["token"]:
+            return {"access_token": "at-" + data["code"]}
+        return {"sub": token[3:], "name": "구글사용자", "email": "u@gmail.test"}
+
+    def google(self, purpose, sub, auth=None, back=""):
+        res = self.client.post("/api/rent4/oauth/google/start", json={"purpose": purpose, "back": back}, headers=auth or {})
+        self.assertEqual(res.status_code, 200, res.text)
+        state = re.search(r"state=([^&]+)", res.json()["url"])[1]
+        loc = self.client.get(f"/api/rent4/oauth/google/callback?code={sub}&state={state}", follow_redirects=False)
+        from urllib.parse import unquote
+        return unquote(loc.headers["location"])
+
+    def find_token(self, sub="g-103"):
+        loc = self.google("find", sub)
+        self.assertIn("/rent4/find.html#f=", loc)
+        return loc.split("#f=")[1]
+
+    def info(self, f, **kw):
+        body = {"f": f, "name": self.room.tenant_name, "phone": self.room.phone, "property": "시크빌 103호", **kw}
+        return body
+
+    def test_link_from_account_returns_to_tenant_page(self):
+        self.assertTrue(self.google("link", "g-103", self.tenant, "account").endswith("/rent4/임차인.html#oauth=linked"))
+        linked = self.client.get("/api/rent4/oauth/providers", headers=self.tenant).json()["linked"]
+        self.assertEqual(linked[0]["provider"], "google")
+
+    def test_unlinked_google_cannot_find(self):
+        self.assertTrue(self.google("find", "g-nobody").endswith("/rent4/find.html#oauth=unlinked"))
+
+    def test_find_id_with_matching_info(self):
+        self.google("link", "g-103", self.tenant, "account")
+        f = self.find_token()
+        res = self.client.post("/api/rent4/find/id", json=self.info(f, property=" 시크빌103 "))
+        self.assertEqual((res.status_code, res.json().get("username")), (200, "chic103"), res.text)
+
+    def test_wrong_info_counts_and_locks(self):
+        self.google("link", "g-103", self.tenant, "account")
+        f = self.find_token()
+        for _ in range(5):
+            bad = self.client.post("/api/rent4/find/id", json=self.info(f, property="시크빌 104호"))
+            self.assertEqual(bad.status_code, 422)
+            self.assertNotIn("부동산", bad.json()["error"]["message"] if "error" in bad.json() else bad.text)
+        locked = self.client.post("/api/rent4/find/id", json=self.info(f))
+        self.assertEqual(locked.status_code, 403)
+
+    def test_find_pw_sets_new_password_once(self):
+        self.google("link", "g-103", self.tenant, "account")
+        f = self.find_token()
+        early = self.client.post("/api/rent4/find/pw/set", json={"f": f, "new": "brand-new-pw"})
+        self.assertEqual(early.status_code, 400)
+        wrong_id = self.client.post("/api/rent4/find/pw/verify", json=self.info(f, username="chic104"))
+        self.assertEqual(wrong_id.status_code, 422)
+        ok = self.client.post("/api/rent4/find/pw/verify", json=self.info(f, username="chic103"))
+        self.assertEqual(ok.status_code, 200, ok.text)
+        res = self.client.post("/api/rent4/find/pw/set", json={"f": f, "new": "brand-new-pw"})
+        self.assertEqual((res.status_code, res.json()["home"]), (200, "임차인.html"), res.text)
+        self.assertEqual(self.client.post("/api/rent4/login", json={"username": "chic103", "password": "brand-new-pw"}).status_code, 200)
+        again = self.client.post("/api/rent4/find/pw/set", json={"f": f, "new": "another-pw"})
+        self.assertEqual(again.status_code, 403)
+
+
 
 if __name__ == "__main__":
     unittest.main()

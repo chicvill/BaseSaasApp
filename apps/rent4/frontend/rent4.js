@@ -49,6 +49,30 @@
       pw.classList.remove("hide");
       pw.addEventListener("click", () => openPasswordDialog(info));
     }
+    if (pw && ["tenant", "lessor"].includes(info.kind)) googleLink(pw);
+  }
+
+  /** 내 정보 → 구글 연결. 연결해 두면 로그인 화면의 아이디·비밀번호 찾기에 쓴다 (연결한 사람만 찾을 수 있다). */
+  async function googleLink(beforeEl) {
+    const result = (location.hash.match(/oauth=(\w+)/) || [])[1];
+    if (result) {
+      history.replaceState(null, "", location.pathname + location.search);
+      if (result === "linked") Bass.updateAppAlert("success", "구글 계정을 연결했습니다.", "아이디·비밀번호를 잊으면 로그인 화면의 '찾기'에서 이 구글 계정으로 본인 확인을 합니다.");
+      if (result === "used") Bass.updateAppAlert("error", "이미 다른 사람이 연결한 구글 계정입니다.", "본인 구글 계정으로 다시 연결해 주세요.");
+    }
+    let res;
+    try { res = await Bass.api("rent4", "/oauth/providers"); } catch (_) { return; }
+    if (!res.providers.some((p) => p.id === "google")) return;
+    const done = res.linked.find((l) => l.provider === "google");
+    const btn = document.createElement("button");
+    btn.className = "bass-btn bass-btn--sm bass-btn--ghost";
+    btn.textContent = done ? "✅ 구글 연결됨" : "🔗 구글 연결";
+    btn.title = done ? `연결된 구글 계정: ${done.name || ""} (다시 누르면 바꿉니다)` : "아이디·비밀번호 찾기에 쓸 구글 계정을 연결합니다";
+    btn.addEventListener("click", () => Bass.withLock(btn, async () => {
+      const r = await Bass.api("rent4", "/oauth/google/start", { method: "POST", body: { purpose: "link", back: "account" } });
+      location.href = r.url;
+    }, "이동 중..."));
+    beforeEl.before(btn);
   }
 
   function logout() {
@@ -184,6 +208,7 @@
   function addRevealToggle(input) {
     if (input.dataset.reveal) return;
     input.dataset.reveal = "1";
+    const hadFocus = document.activeElement === input;     // 감싸면서 옮기면 커서가 빠지므로 되돌린다
     const wrap = document.createElement("span");
     wrap.className = "pw-wrap";
     input.replaceWith(wrap);
@@ -202,6 +227,7 @@
       input.focus();
     });
     wrap.append(input, btn);
+    if (hadFocus) input.focus();
   }
 
   function enhancePasswords(root) {

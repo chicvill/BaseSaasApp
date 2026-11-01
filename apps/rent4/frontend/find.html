@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 아이디·비밀번호 찾기</title>
+  <meta name="description" content="연결해 둔 구글 계정으로 본인 확인 후 등록 정보를 맞춰 아이디를 찾거나 비밀번호를 새로 정합니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container" style="max-width:460px">
+  <header class="top">
+    <div>
+      <h1>🔎 <span class="bass-gradient-text">찾기</span></h1>
+      <p class="sub bass-muted">구글 본인 확인 → 등록 정보 확인</p>
+    </div>
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="index.html">← 로그인</a>
+  </header>
+  <div id="app-alert"></div>
+
+  <div class="tabs">
+    <button class="bass-btn" type="button" data-mode="id">아이디 찾기</button>
+    <button class="bass-btn" type="button" data-mode="pw">비밀번호 찾기</button>
+  </div>
+
+  <!-- 1. 구글 본인 확인 -->
+  <section id="stepGoogle" class="bass-card stack hide">
+    <p style="margin:0;font-size:13.5px">미리 <b>구글 계정을 연결해 둔 분</b>만 찾을 수 있습니다. 연결한 구글 계정으로 본인 확인을 해 주세요.</p>
+    <button class="bass-btn bass-btn--primary" id="btnGoogle" type="button">구글로 본인 확인</button>
+    <p class="bass-muted" style="margin:0;font-size:12.5px">구글 계정을 연결하지 않았다면 임대인에게 '🔑 비밀번호 초기화'를 요청하세요. 연결은 로그인 뒤 상단 '🔗 구글 연결'에서 합니다.</p>
+  </section>
+
+  <!-- 2. 등록 정보 확인 -->
+  <form id="stepInfo" class="bass-card stack hide">
+    <p class="bass-muted" style="margin:0;font-size:13.5px">✅ 구글 본인 확인 완료 · 10분 안에 입력해 주세요.</p>
+    <div id="idField"><label class="bass-label" for="fUser">아이디</label>
+      <input class="bass-input" id="fUser" autocomplete="username" autocapitalize="none" placeholder="예: chic203"></div>
+    <div><label class="bass-label" for="fName">이름</label>
+      <input class="bass-input" id="fName" autocomplete="name" required></div>
+    <div><label class="bass-label" for="fPhone">휴대폰 번호</label>
+      <input class="bass-input" id="fPhone" type="tel" autocomplete="tel" placeholder="010-1234-5678" required></div>
+    <div><label class="bass-label" for="fProp">계약된 부동산</label>
+      <input class="bass-input" id="fProp" placeholder="예: 시크빌 203호 (임대인은 건물 이름)" required></div>
+    <button class="bass-btn bass-btn--primary" id="btnCheck" type="submit">확인</button>
+  </form>
+
+  <!-- 3a. 찾은 아이디 -->
+  <section id="stepFound" class="bass-card stack hide">
+    <div>찾은 아이디</div>
+    <div style="font:800 26px var(--font-display)"><code id="foundId"></code></div>
+    <button class="bass-btn bass-btn--primary" id="btnUseId" type="button">이 아이디로 로그인</button>
+  </section>
+
+  <!-- 3b. 새 비밀번호 -->
+  <form id="stepNewPw" class="bass-card stack hide">
+    <h2 style="margin:0">새 비밀번호 만들기</h2>
+    <p class="bass-muted" style="margin:0;font-size:13.5px">아이디 <code id="pwUser"></code> · 6자 이상</p>
+    <div><label class="bass-label" for="newPw">새 비밀번호</label>
+      <input class="bass-input" id="newPw" type="password" autocomplete="new-password" minlength="6" required></div>
+    <div><label class="bass-label" for="newPw2">새 비밀번호 확인</label>
+      <input class="bass-input" id="newPw2" type="password" autocomplete="new-password" minlength="6" required></div>
+    <button class="bass-btn bass-btn--primary" id="btnSetPw" type="submit">새 비밀번호로 로그인</button>
+  </form>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const MODE_KEY = "rent4.findMode";
+  const ss = { get() { try { return sessionStorage.getItem(MODE_KEY); } catch (_) { return null; } },
+    set(v) { try { sessionStorage.setItem(MODE_KEY, v); } catch (_) {} } };
+
+  const hash = location.hash;
+  let token = (hash.match(/f=([^&]+)/) || [])[1] || "";
+  const oauthResult = (hash.match(/oauth=(\w+)/) || [])[1];
+  let mode = (hash.match(/mode=(id|pw)/) || [])[1] || ss.get() || "id";
+  if (hash) history.replaceState(null, "", location.pathname);
+  if (oauthResult === "unlinked") Bass.updateAppAlert("warning", "연결되지 않은 구글 계정입니다.",
+    "아이디·비밀번호 찾기는 미리 연결해 둔 구글 계정으로만 할 수 있습니다. 임대인에게 비밀번호 초기화를 요청하세요.");
+  if (oauthResult === "expired") Bass.updateAppAlert("warning", "본인 확인 시간이 지났습니다.", "다시 시도해 주세요.");
+
+  const show = (id) => ["stepGoogle", "stepInfo", "stepFound", "stepNewPw"].forEach((s) => $(s).classList.toggle("hide", s !== id));
+
+  function setMode(m) {
+    mode = m;
+    ss.set(m);
+    document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("is-active", b.dataset.mode === m));
+    $("idField").classList.toggle("hide", m !== "pw");
+    $("fUser").required = m === "pw";
+    $("btnCheck").textContent = m === "pw" ? "확인하고 새 비밀번호 만들기" : "아이디 찾기";
+    if (!$("stepFound").classList.contains("hide") || !$("stepNewPw").classList.contains("hide")) show(token ? "stepInfo" : "stepGoogle");
+  }
+  document.querySelectorAll("[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+  async function boot() {
+    setMode(mode);
+    if (token) {
+      try {
+        await Bass.api("rent4", `/find/view?f=${encodeURIComponent(token)}`);
+        show("stepInfo");
+        $(mode === "pw" ? "fUser" : "fName").focus();
+        return;
+      } catch (err) {
+        token = "";
+        Bass.showError(err);
+      }
+    }
+    show("stepGoogle");
+    const { providers } = await Bass.api("rent4", "/oauth/providers");
+    if (!providers.some((p) => p.id === "google")) {
+      $("btnGoogle").disabled = true;
+      Bass.updateAppAlert("warning", "구글 본인 확인이 아직 설정되지 않았습니다.", "임대인에게 '🔑 비밀번호 초기화'를 요청하세요.");
+    }
+  }
+
+  $("btnGoogle").addEventListener("click", () => Bass.withLock($("btnGoogle"), async () => {
+    ss.set(mode);
+    const r = await Bass.api("rent4", "/oauth/google/start", { method: "POST", body: { purpose: "find" } });
+    location.href = r.url;
+  }, "이동 중..."));
+
+  $("stepInfo").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const body = { f: token, name: $("fName").value.trim(), phone: $("fPhone").value.trim(), property: $("fProp").value.trim() };
+    Bass.withLock($("btnCheck"), async () => {
+      if (mode === "id") {
+        const r = await Bass.api("rent4", "/find/id", { method: "POST", body });
+        $("foundId").textContent = r.username;
+        show("stepFound");
+        $("btnUseId").focus();
+      } else {
+        const r = await Bass.api("rent4", "/find/pw/verify", { method: "POST", body: { ...body, username: $("fUser").value.trim() } });
+        $("pwUser").textContent = r.username;
+        show("stepNewPw");
+        $("newPw").focus();
+      }
+    }, "확인 중...");
+  });
+
+  $("btnUseId").addEventListener("click", () => {
+    location.href = `index.html#id=${encodeURIComponent($("foundId").textContent)}`;
+  });
+
+  $("stepNewPw").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if ($("newPw").value !== $("newPw2").value) {
+      Bass.updateAppAlert("error", "두 비밀번호가 다릅니다.", "같은 비밀번호를 두 번 입력해 주세요.");
+      return;
+    }
+    Bass.withLock($("btnSetPw"), async () => {
+      const r = await Bass.api("rent4", "/find/pw/set", { method: "POST", body: { f: token, new: $("newPw").value } });
+      Bass.setToken(r.token);
+      Rent4.go(r.home);
+    }, "저장 중...");
+  });
+
+  boot().catch(Bass.showError);
+})();
+</script>
+</body>
+</html>
