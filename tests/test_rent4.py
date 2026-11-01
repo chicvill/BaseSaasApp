@@ -221,7 +221,7 @@ class TestApi(ApiCase):
         self.assertEqual((t["kind"], t["room"], t["home"], t["must_change_password"]), ("tenant", "101", "임차인.html", False))
 
     def test_pages_served(self):
-        for page in ("index.html", "find.html", "admin.html", "contract.html", "임대인.html", "임차인.html"):
+        for page in ("index.html", "login.html", "find.html", "admin.html", "contract.html", "임대인.html", "임차인.html"):
             self.assertEqual(self.client.get(f"/rent4/{page}").status_code, 200, page)
         for page in ("invite.html", "password.html"):
             self.assertEqual(self.client.get(f"/rent4/{page}").status_code, 404, page)
@@ -522,7 +522,7 @@ class TestOAuth(ApiCase):
         self.assertEqual((me["kind"], me["username"]), ("tenant", "chic101"))
 
     def test_unlinked_and_reused_accounts(self):
-        self.assertTrue(self.kakao("login", "kakao-code-2").endswith("index.html#oauth=unlinked"))
+        self.assertTrue(self.kakao("login", "kakao-code-2").endswith("login.html#oauth=unlinked"))
         cid, party = self.new_lease_party()
         self.kakao("link", "kakao-code-1", party)
         other = self.tenant_login("102")
@@ -816,6 +816,44 @@ class TestPaste(ApiCase):
         from shared.ai import gemini_client
         with mock.patch.object(gemini_client.GeminiClient, "is_available", False, create=True):
             self.assertEqual(self.paste(file="aGVsbG8=", filename="a.png", mime="image/png").status_code, 400)
+
+
+class TestListings(ApiCase):
+    """매물 공개: 임대인 공개 → 누구나 목록 (임차인 정보 없음) → 체결되면 닫힘."""
+
+    def publish(self, room="102", **kw):
+        body = {"room": room, "deposit": 5000000, "rent": 350000, "mgmt": 50000, "available_from": "2026-12-01",
+                "description": "남향, 풀옵션", **kw}
+        return self.client.post("/api/rent4/lessor/listings", headers=self.chic, json=body)
+
+    def test_publish_public_list_and_close(self):
+        self.import_sheet()
+        res = self.publish()
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.publish().status_code, 409)                    # 같은 호실 두 번 공개 안 됨
+        pub = self.client.get("/api/rent4/listings").json()["listings"]      # 로그인 없이
+        self.assertEqual([(l["building"], l["room"], l["monthly"]) for l in pub], [("시크빌", "102", 400000)])
+        self.assertNotIn("김철수", str(pub))
+        self.assertNotIn("phone", str(pub))
+        lid = res.json()["listing"]["id"]
+        self.assertEqual(self.client.post(f"/api/rent4/lessor/listings/{lid}/close", headers=self.chic).status_code, 200)
+        self.assertEqual(self.client.get("/api/rent4/listings").json()["listings"], [])
+
+    def test_other_lessor_and_tenant_cannot_publish(self):
+        self.import_sheet()
+        tenant = self.tenant_login("101")
+        self.assertEqual(self.client.post("/api/rent4/lessor/listings", headers=tenant, json={"room": "102"}).status_code, 403)
+        self.assertEqual(self.publish(room="999").status_code, 404)
+
+    def test_paper_contract_closes_listing(self):
+        self.import_sheet()
+        self.publish(room="102")
+        res = self.client.post("/api/rent4/lessor/contracts/paper", headers=self.chic, json={
+            "room": "102", "party_name": "새임차", "party_phone": "010-4444-5555", "start": "2026-12-01"})
+        self.assertEqual(res.status_code, 200, res.text)
+        self.assertEqual(self.client.get("/api/rent4/listings").json()["listings"], [])
+        mine = self.client.get("/api/rent4/lessor/listings", headers=self.chic).json()["listings"]
+        self.assertEqual(mine[0]["closed_reason"], "contracted")
 
 if __name__ == "__main__":
     unittest.main()

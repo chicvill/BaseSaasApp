@@ -258,6 +258,10 @@ def _activate_lease(c: Contract) -> None:
     accounts.sync_tenant_accounts()
     acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
     c.username = acc.username if acc else ""
+    from . import listings
+    l = listings.open_listing(c.branch, c.room)
+    if l:                                     # 체결되면 공개 매물은 닫는다
+        listings.close(c.branch, l.id, "contracted")
 
 
 # ── 화면용 표현 ──

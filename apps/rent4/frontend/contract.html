@@ -161,12 +161,12 @@
       if (me.kind !== "party") return Rent4.go(me.home);
       return loadMine();
     }).catch((err) => {
-      if (err.status === 401 || err.status === 403) { Bass.setToken(""); return Rent4.go("index.html"); }
+      if (err.status === 401 || err.status === 403) { Bass.setToken(""); return Rent4.go("login.html"); }
       failed();
       Bass.showError(err);
     });
   } else {
-    Rent4.go("index.html");
+    Rent4.go("login.html");
   }
 })();
 </script>

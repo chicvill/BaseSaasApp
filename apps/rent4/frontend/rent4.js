@@ -1,6 +1,6 @@
 /* apps/rent4/frontend/rent4.js — Rent4 공통: 로그인 세션 · 역할별 페이지 가드 · 상단 사용자 표시
  *
- *   const me = await Rent4.guard(["lessor", "admin"]);   // 로그인 안 했으면 index.html, 다른 역할이면 그 역할의 첫 페이지로
+ *   const me = await Rent4.guard(["lessor", "admin"]);   // 로그인 안 했으면 login.html, 다른 역할이면 그 역할의 첫 페이지로
  *   Rent4.logout();
  */
 (function (global) {
@@ -15,14 +15,14 @@
   }
 
   async function guard(kinds) {
-    if (!Bass.token()) { go("index.html"); return new Promise(() => {}); }
+    if (!Bass.token()) { go("login.html"); return new Promise(() => {}); }
     let info;
     try {
       info = await me();
     } catch (err) {
       if (err.status === 401 || err.status === 403) {
         Bass.setToken("");
-        go("index.html");
+        go("login.html");
         return new Promise(() => {});
       }
       throw err;
@@ -39,12 +39,12 @@
 
   /** 역할과 상관없이 로그인만 확인 (설명서 등). 안 했으면 로그인 화면으로. */
   async function requireLogin() {
-    if (!Bass.token()) { go("index.html"); return new Promise(() => {}); }
+    if (!Bass.token()) { go("login.html"); return new Promise(() => {}); }
     try {
       return await me();
     } catch (err) {
       Bass.setToken("");
-      go("index.html");
+      go("login.html");
       return new Promise(() => {});
     }
   }
@@ -93,7 +93,7 @@
 
   function logout() {
     Bass.setToken("");
-    go("index.html");
+    go("login.html");
   }
 
   /** 비밀번호 변경 폼 (첫 로그인 카드와 평소 변경 창이 같이 쓴다). 바꾸고 나면 onDone 을 부른다. */

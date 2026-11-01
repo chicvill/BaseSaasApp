@@ -5,7 +5,7 @@ apps/rent4/backend/oauth.py — 카카오 · 구글 계정 연결 (계약 전 �
     1. POST /oauth/{provider}/start {purpose}   → 카카오/구글 로그인 주소 (state 는 해시로 pool 에 10분 저장)
     2. 사용자가 카카오/구글에서 동의             → GET /oauth/{provider}/callback?code&state
     3. purpose=link  : 로그인한 사용자에게 계정 연결 + 진행 중 계약이면 '본인 확인 완료' → contract.html
-       purpose=login : 연결된 계정이면 로그인 토큰 → index.html#token=...
+       purpose=login : 연결된 계정이면 로그인 토큰 → login.html#token=...
        purpose=find  : 연결된 계정이면 아이디·비밀번호 찾기 권한 (finder) → find.html#f=...
     link 는 back=account 로 시작하면 계약 화면 대신 로그인한 사람의 화면(내 정보)으로 돌아간다.
 
@@ -151,7 +151,7 @@ def callback(name: str, code: str, state: str) -> str:
     _provider(name)
     st = OAuthState.first(state_hash=_hash(state or ""))
     if st is None or st.provider != name or st.expires_at < time.time():
-        return "index.html#oauth=expired"
+        return "login.html#oauth=expired"
     st.delete()
     prof = _profile(name, code, st.redirect_uri)
     if st.purpose == "link":
@@ -175,8 +175,8 @@ def callback(name: str, code: str, state: str) -> str:
         return f"find.html#f={finder.open_session(name, _current_username(link.username))}"
     user = User.by_username(_current_username(link.username)) if link else None
     if user is None:
-        return "index.html#oauth=unlinked"
-    return f"index.html#token={issue_token(user)}"
+        return "login.html#oauth=unlinked"
+    return f"login.html#token={issue_token(user)}"
 
 
 def _current_username(username: str) -> str:

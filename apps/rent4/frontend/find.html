@@ -15,7 +15,7 @@
       <h1>🔎 <span class="bass-gradient-text">찾기</span></h1>
       <p class="sub bass-muted">구글 본인 확인 → 등록 정보 확인</p>
     </div>
-    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="index.html">← 로그인</a>
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="login.html">← 로그인</a>
   </header>
   <div id="app-alert"></div>
 
@@ -141,7 +141,7 @@
   });
 
   $("btnUseId").addEventListener("click", () => {
-    location.href = `index.html#id=${encodeURIComponent($("foundId").textContent)}`;
+    location.href = `login.html#id=${encodeURIComponent($("foundId").textContent)}`;
   });
 
   $("stepNewPw").addEventListener("submit", (e) => {

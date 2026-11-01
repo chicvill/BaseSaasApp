@@ -127,3 +127,8 @@ dl.kv dd { margin: 0; }
 
 /* 만능 붙여 넣기 */
 .paste-box.is-drop { border-color: var(--primary); box-shadow: 0 0 0 2px hsl(232 60% 60% / .4); }
+
+/* 공개 매물 목록 (index.html) */
+.listing-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+.listing-price { font-size: 15px; }
+.listing-price b { font: 800 20px var(--font-display); }

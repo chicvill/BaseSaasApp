@@ -53,6 +53,7 @@
     <nav class="tabs" role="tablist">
       <button class="bass-btn" data-tab="contracts" role="tab">📝 신규 계약</button>
       <button class="bass-btn" data-tab="board" role="tab">📅 월별 수납현황</button>
+      <button class="bass-btn" data-tab="listings" role="tab">🏷️ 매물</button>
       <button class="bass-btn" data-tab="accounts" role="tab">🔑 임차인 계정</button>
       <button class="bass-btn" data-tab="import" role="tab">📥 Excel 가져오기</button>
     </nav>
@@ -98,6 +99,26 @@
         <div class="bass-muted hide" id="paperNote" style="font-size:12.5px">📷 사진에서 읽은 내용입니다. 틀린 곳을 고친 뒤 '종이 계약서로 등록'을 누르세요. 주민번호는 읽지도 저장하지도 않습니다.</div>
       </form>
       <div class="board-wrap"><table class="board" id="leases" style="min-width:640px"></table></div>
+    </section>
+
+    <!-- 매물 공개 -->
+    <section class="panel stack" data-panel="listings" hidden>
+      <form id="listingForm" class="bass-card stack">
+        <div class="bass-muted" style="font-size:13.5px">공개한 매물은 로그인 없이 누구나 보는 첫 화면(매물 목록)에 나옵니다. 건물 · 호실 · 조건만 보이고 임차인 정보는 나가지 않습니다. 계약이 체결되면 자동으로 내려갑니다.</div>
+        <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px">
+          <div><label class="bass-label" for="mlRoom">호실</label><select class="bass-select bass-input" id="mlRoom" required></select></div>
+          <div><label class="bass-label" for="mlType">구분</label><select class="bass-select bass-input" id="mlType"><option>월세</option><option>전세</option></select></div>
+          <div><label class="bass-label" for="mlTiming">납부</label><select class="bass-select bass-input" id="mlTiming"><option>후불</option><option>선불</option><option>반선불</option></select></div>
+          <div><label class="bass-label" for="mlDeposit">보증금 (원)</label><input class="bass-input" id="mlDeposit" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlRent">월세 (원)</label><input class="bass-input" id="mlRent" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlMgmt">관리비 (원)</label><input class="bass-input" id="mlMgmt" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlFrom">입주 가능일</label><input class="bass-input" id="mlFrom" type="date"></div>
+        </div>
+        <div><label class="bass-label" for="mlDesc">설명 (선택)</label>
+          <textarea class="bass-input" id="mlDesc" maxlength="1000" style="min-height:70px;font-family:var(--font)" placeholder="예: 남향, 풀옵션, 주차 1대"></textarea></div>
+        <button class="bass-btn bass-btn--primary" type="submit" style="justify-self:start">🏷️ 매물 공개</button>
+      </form>
+      <div class="board-wrap"><table class="board" id="listingTable" style="min-width:560px"></table></div>
     </section>
 
     <!-- 임차인 계정 -->

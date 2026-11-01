@@ -50,6 +50,7 @@
     if (btn.dataset.tab === "board") loadBoard().catch(Bass.showError);
     if (btn.dataset.tab === "accounts") loadAccounts().catch(Bass.showError);
     if (btn.dataset.tab === "contracts") loadLeases().catch(Bass.showError);
+    if (btn.dataset.tab === "listings") loadListings().catch(Bass.showError);
   }));
 
   // ── 임대 계약 ──
@@ -91,6 +92,52 @@
       $("paperNote").classList.add("hide");
       await Promise.all([loadLeases(), loadBoard()]);
     }, "등록 중...");
+  });
+
+  // ── 매물 공개 ──
+  const allRooms = () => (boardData ? boardData.rooms.map((r) => r.room).filter((r) => r.status !== "owner") : []);
+  async function loadListings() {
+    const { listings } = await api("/lessor/listings");
+    const open = new Set(listings.filter((l) => !l.closed_at).map((l) => l.room));
+    $("mlRoom").innerHTML = allRooms().map((r) =>
+      `<option value="${esc(r.room)}" ${open.has(r.room) ? "disabled" : ""}>${esc(r.room)}호 ${r.status === "occupied" ? "(거주 중)" : "(공실)"}${open.has(r.room) ? " · 공개 중" : ""}</option>`).join("");
+    const man = (n) => `${(Number(n || 0) / 10000).toLocaleString("ko-KR")}만`;
+    $("listingTable").innerHTML = `<thead><tr><th>호실</th><th>조건</th><th>입주</th><th>상태</th><th></th></tr></thead>
+      <tbody>${listings.length ? listings.map((l) => `<tr>
+        <td><b>${esc(l.room)}</b></td>
+        <td style="white-space:normal;text-align:left">${esc(l.lease_type)} · 보증금 ${man(l.deposit)} · 월 ${man(l.monthly)}</td>
+        <td>${esc(l.available_from || "협의")}</td>
+        <td>${l.closed_at ? `<span class="bass-badge bass-badge--info">${l.closed_reason === "contracted" ? "계약 완료" : "내림"}</span>` : `<span class="bass-badge bass-badge--ok">공개 중</span>`}</td>
+        <td style="text-align:right">${l.closed_at ? "" : `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-close="${esc(l.id)}">내리기</button>`}</td>
+      </tr>`).join("") : `<tr><td colspan="5" class="bass-muted">공개한 매물이 없습니다.</td></tr>`}</tbody>`;
+  }
+
+  $("mlRoom").addEventListener("change", () => {
+    const r = allRooms().find((x) => x.room === $("mlRoom").value);
+    if (r) { $("mlDeposit").value = r.deposit || 0; $("mlRent").value = r.rent || 0; $("mlMgmt").value = r.mgmt || 0; }
+  });
+
+  $("listingForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock(e.submitter || $("listingForm").querySelector("[type=submit]"), async () => {
+      const num = (id) => Number($(id).value || 0);
+      await api("/lessor/listings", { method: "POST", body: {
+        room: $("mlRoom").value, lease_type: $("mlType").value, pay_timing: $("mlTiming").value,
+        deposit: num("mlDeposit"), rent: num("mlRent"), mgmt: num("mlMgmt"),
+        available_from: $("mlFrom").value || null, description: $("mlDesc").value } });
+      Bass.updateAppAlert("success", `${$("mlRoom").value}호를 매물로 공개했습니다.`, "누구나 보는 매물 목록(첫 화면)에 나옵니다.");
+      $("listingForm").reset();
+      await loadListings();
+    }, "공개 중...");
+  });
+
+  $("listingTable").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-close]");
+    if (!b) return;
+    Bass.withLock(b, async () => {
+      await api(`/lessor/listings/${b.dataset.close}/close`, { method: "POST" });
+      await loadListings();
+    });
   });
 
   // ── 임차인 계정 ──

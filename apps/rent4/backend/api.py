@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth, paste
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, listings, oauth, paste
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -77,6 +77,30 @@ def _scope(user: User, branch: str = "") -> Building:
 @router.get("/summary")
 def summary() -> Dict[str, Any]:
     return {"success": True, "buildings": len(Building.all()), "rooms": len(Room.all())}
+
+
+# ── 매물 (공개 목록은 로그인 없이) ──
+@router.get("/listings")
+def public_listings() -> Dict[str, Any]:
+    return {"success": True, "listings": listings.public_list()}
+
+
+@router.get("/lessor/listings")
+def lessor_listings(branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    return {"success": True, "listings": listings.lessor_list(_scope(user, branch).branch)}
+
+
+@router.post("/lessor/listings")
+def lessor_listing_publish(payload: Dict[str, Any] = Body(...), branch: str = "",
+                           user: User = Depends(staff)) -> Dict[str, Any]:
+    l = listings.publish(_scope(user, branch).branch, user.username, payload)
+    return {"success": True, "listing": listings.public(l)}
+
+
+@router.post("/lessor/listings/{listing_id}/close")
+def lessor_listing_close(listing_id: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
+    listings.close(_scope(user, branch).branch, listing_id)
+    return {"success": True}
 
 
 @router.post("/login")
