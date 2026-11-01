@@ -1,5 +1,5 @@
 """
-apps/rent4/backend/accounts.py — 건물 목록 · 계정 · 로그인 · 휴대폰 문자 인증.
+apps/rent4/backend/accounts.py — 건물 목록 · 계정 · 로그인 · 비밀번호 재설정 링크.
 
 역할 (core.auth 토큰 하나로 통일)
     관리인  : superadmin / admin           → admin.html  (모든 건물)
@@ -8,23 +8,21 @@ apps/rent4/backend/accounts.py — 건물 목록 · 계정 · 로그인 · 휴�
     계약 진행 중 : user + Contract.party_username → contract.html
 
 로그인 = 아이디 또는 휴대폰 번호 + 비밀번호.
-비밀번호 설정·찾기 = 휴대폰 번호 → 문자 인증번호(6자리, 5분, 5회) → 새 비밀번호. 링크·임시 비밀번호를 사용자에게 보여 주지 않는다.
-그 번호에 묶인 모든 계정(임대인·임차인·계약 진행 중)에 같은 비밀번호가 걸린다.
+처음 비밀번호 = 계약 시작 링크(contracts) · 비밀번호 분실 = 구글 찾기(finder) 또는 임대인의 재설정 링크.
+문자 발송은 쓰지 않는다 — 링크는 대면·채팅(카카오톡 등)으로 전달한다.
 """
 from __future__ import annotations
 
 import hashlib
-import hmac
 import re
 import secrets
 import time
 from typing import Dict, List, Optional, Tuple
 
 from core.auth import Unauthorized, User, issue_token
-from core.errors import Conflict, DomainError, Forbidden, Mismatch, NotFound
+from core.errors import DomainError, Forbidden, Mismatch, NotFound
 
-from . import sms
-from .models import AdminAccount, Building, Contract, LessorAccount, OtpCode, Room, TenantAccount
+from .models import AdminAccount, Building, Contract, LessorAccount, Room, TenantAccount
 from .pool import now_iso
 
 BUILDINGS = (            # code, name, core.auth branch
@@ -255,80 +253,6 @@ def login(identifier: str, password: str) -> Dict:
                        hint="계약 링크에서 정한 비밀번호를 입력하세요. 잊었다면 계약을 보낸 분에게 문의하세요.")
 
 
-# ── 휴대폰 문자 인증: 처음 비밀번호 설정 · 비밀번호 찾기 (같은 화면, 같은 과정) ──
-OTP_TTL, OTP_MAX_TRIES, OTP_RESEND_GAP = 300, 5, 60
-
-
-def _code_hash(phone: str, code: str) -> str:
-    return hashlib.sha256(f"{phone}:{code}".encode()).hexdigest()
-
-
-def _pending_contracts(phone: str) -> List[Contract]:
-    return [c for c in Contract.all() if c.status in ("sent", "signed") and sms.digits(c.party_phone) == phone]
-
-
-def request_code(phone: str) -> Dict:
-    """등록된(계약 또는 수납부에 있는) 번호로만 6자리 인증번호를 보낸다."""
-    d = sms.digits(phone)
-    if len(d) < 10:
-        raise Mismatch("휴대폰 번호를 정확히 입력해 주세요.")
-    if not _phone_candidates(d) and not _pending_contracts(d):
-        raise NotFound("이 번호로 등록된 계약이 없습니다.", hint="계약할 때 알려 준 휴대폰 번호인지 확인하거나, 임대인·관리인에게 문의하세요.")
-    now = time.time()
-    last = max((o for o in OtpCode.find(phone=d)), key=lambda o: o.expires_at, default=None)
-    if last and last.expires_at - OTP_TTL > now - OTP_RESEND_GAP:
-        raise Conflict("인증번호를 방금 보냈습니다.", hint="1분 뒤에 다시 요청할 수 있습니다.")
-    for o in OtpCode.find(phone=d):
-        o.delete()
-    code = f"{secrets.randbelow(10 ** 6):06d}"
-    result = sms.send(d, f"[Rent4] 인증번호 {code} — 5분 안에 입력해 주세요.")   # 못 보내면 저장하지 않는다
-    OtpCode(phone=d, code_hash=_code_hash(d, code), expires_at=now + OTP_TTL).save()
-    return {"sent": True, "mode": result["mode"], "dev_mode": result["mode"] == "dev"}
-
-
-def set_password_by_code(phone: str, code: str, new_password: str) -> Dict:
-    """인증번호 확인 → 이 번호의 모든 계정(임대인·임차인·계약 진행 중)에 같은 비밀번호 → 바로 로그인."""
-    d = sms.digits(phone)
-    otp = next(iter(OtpCode.find(phone=d)), None)
-    if otp is None or otp.expires_at < time.time() or otp.tries >= OTP_MAX_TRIES:
-        raise Mismatch("인증번호가 만료되었거나 없습니다.", hint="인증번호를 다시 받아 주세요.")
-    if not hmac.compare_digest(otp.code_hash, _code_hash(d, str(code).strip())):
-        otp.tries += 1
-        otp.save()
-        raise Mismatch("인증번호가 맞지 않습니다.", hint=f"{OTP_MAX_TRIES - otp.tries}번 더 시도할 수 있습니다.")
-    validate_new_password(new_password)
-    otp.delete()
-    for c in _pending_contracts(d):          # 체결 전 계약은 계약 진행용 로그인을 만든다
-        if not c.party_username:
-            c.party_username = f"k{c.id}"
-            User(username=c.party_username, role=TENANT_ROLE, name=c.party_name).save("rent4_contract_party")
-            c.save()
-    names = _phone_candidates(d)
-    for name in names:
-        user = User.by_username(name)
-        if user is None:
-            continue
-        user.set_password(new_password).save("rent4_password_set_by_sms")
-        for cls in (TenantAccount, LessorAccount):
-            acc = cls.first(username=name)
-            if acc is not None:
-                acc.initial_code, acc.must_change = "", False
-                acc.activated_at = acc.activated_at or now_iso()
-                acc.save()
-        expire_links(name)
-    user = User.by_username(names[0])
-    return {"token": issue_token(user), "home": whoami(user)["home"], "accounts": len(names)}
-
-
-def notify_tenant(branch: str, room_no: str) -> Dict:
-    """기존 임차인에게 안내 문자 (접속 주소 + 휴대폰 번호로 비밀번호 설정)."""
-    room = Room.first(branch=branch, room=room_no)
-    if not room or room.status != "occupied" or not room.phone:
-        raise NotFound(f"{room_no}호에 연락할 임차인이 없습니다.")
-    b = building_of(branch)
-    sms.send(room.phone, f"[Rent4] {room.tenant_name}님, {b.name} {room_no}호 월세·관리비 입금 내역을 온라인으로 확인할 수 있습니다. "
-                         f"{sms.public_url()} 에서 '비밀번호 설정'을 눌러 이 휴대폰 번호로 시작하세요.")
-    return {"room": room_no, "tenant_name": room.tenant_name, "phone": room.phone}
 
 
 # ── 임대인이 만드는 비밀번호 재설정 링크 (대면 계약 마무리 · 비밀번호 분실) ──
@@ -364,8 +288,9 @@ def _reset_target(token: str) -> Tuple[TenantAccount, Room]:
 
 def reset_link_view(token: str) -> Dict:
     acc, room = _reset_target(token)
-    return {"building": building_of(acc.branch).name, "room": acc.room, "tenant_name": room.tenant_name,
-            "username": acc.username}
+    b = building_of(acc.branch).name
+    return {"building": b, "room": acc.room, "tenant_name": room.tenant_name, "username": acc.username,
+            "title": f"{b} {acc.room}호", "name": room.tenant_name, "login": f"아이디 {acc.username}"}
 
 
 def reset_link_set(token: str, new_password: str) -> Dict:

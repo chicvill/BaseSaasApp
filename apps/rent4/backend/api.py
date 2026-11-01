@@ -44,7 +44,7 @@ from fastapi.responses import RedirectResponse
 from core.auth import User, current_user, require_role, require_user
 from core.errors import Conflict, DomainError, Forbidden, NotFound
 
-from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth, sms
+from . import accounts, bank_parser, chat, contracts, excel_import, finder, ledger, oauth
 from .models import BankMessage, Building, MonthMark, Payment, Room
 
 router = APIRouter()
@@ -106,7 +106,7 @@ def admin_contracts(user: User = Depends(admin_only)) -> Dict[str, Any]:
 @router.post("/admin/contracts")
 def admin_contract_create(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
     c = contracts.create_membership(user, payload)
-    return {"success": True, "contract": contracts.public(c), "sms": sms.provider()}
+    return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
 
 
 @router.post("/admin/contracts/{contract_id}/{action}")
@@ -119,7 +119,13 @@ def _contract_action(c, action: str) -> Dict[str, Any]:
         return {"success": True, "contract": contracts.public(contracts.confirm_paid(c))}
     if action == "cancel":
         return {"success": True, "contract": contracts.public(contracts.cancel(c))}
+    if action == "link":
+        return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
     raise NotFound(f"알 수 없는 작업 '{action}' 입니다.")
+
+
+def _start_link(c, token: str) -> Dict[str, Any]:
+    return {"link": f"reset.html?t={token}", "expires_hours": contracts.START_LINK_TTL // 3600}
 
 
 # ── 관리인 설정 링크 (로그인 전, 서버 콘솔 scripts/admin_link.py 가 발급) ──
@@ -160,7 +166,7 @@ def lessor_contracts(branch: str = "", user: User = Depends(staff)) -> Dict[str,
 def lessor_contract_create(payload: Dict[str, Any] = Body(...), branch: str = "",
                            user: User = Depends(staff)) -> Dict[str, Any]:
     c = contracts.create_lease(user, _scope(user, branch).branch, payload)
-    return {"success": True, "contract": contracts.public(c), "sms": sms.provider()}
+    return {"success": True, "contract": contracts.public(c), **_start_link(c, contracts.issue_start_link(c))}
 
 
 @router.post("/lessor/contracts/{contract_id}/{action}")
@@ -253,13 +259,6 @@ def lessor_accounts(branch: str = "", user: User = Depends(staff)) -> Dict[str, 
     return {"success": True, "building": b.name, "accounts": accounts.list_accounts(b.branch)}
 
 
-@router.post("/lessor/accounts/{room_no}/notify")
-def lessor_account_notify(room_no: str, branch: str = "", user: User = Depends(staff)) -> Dict[str, Any]:
-    """기존 임차인에게 안내 문자 (접속 주소 + 휴대폰 번호로 비밀번호 설정)."""
-    return {"success": True, **accounts.notify_tenant(_scope(user, branch).branch, room_no)}
-
-
-# ── 카카오 · 구글 (계약 전 본인 확인 · 소셜 로그인) ──
 @router.get("/oauth/providers")
 def oauth_providers(user=Depends(current_user)) -> Dict[str, Any]:
     return {"success": True, "providers": oauth.configured(), "linked": oauth.linked(user.username) if user else []}
@@ -278,18 +277,6 @@ def oauth_callback(provider: str, request: Request, code: str = "", state: str =
     api_base = str(request.url).split("?")[0].rsplit("/oauth/", 1)[0]                 # …/api/rent4 또는 …/api
     site = api_base.replace("/api/rent4", "/rent4/") if api_base.endswith("/api/rent4") else api_base[: -len("/api")] + "/"
     return RedirectResponse(site + page, status_code=302)
-
-
-# ── 문자 발송 방식 ──
-@router.get("/sms/info")
-def sms_info() -> Dict[str, Any]:
-    return {"success": True, **sms.info()}
-
-
-@router.post("/admin/sms")
-def admin_sms(payload: Dict[str, Any] = Body(...), user: User = Depends(admin_only)) -> Dict[str, Any]:
-    sms.set_provider(str(payload.get("provider", "")))
-    return {"success": True, **sms.info()}
 
 
 @router.post("/lessor/accounts/{room_no}/reset")
@@ -322,12 +309,20 @@ def chat_read(message_id: str, user: User = Depends(require_user)) -> Dict[str, 
 # ── 비밀번호 재설정 링크 (로그인 전) ──
 @router.get("/reset/view")
 def reset_view(t: str = "") -> Dict[str, Any]:
-    return {"success": True, **accounts.reset_link_view(t)}
+    """임차인 재설정 링크와 계약 시작 링크가 같은 화면(reset.html)을 쓴다."""
+    try:
+        return {"success": True, **accounts.reset_link_view(t)}
+    except NotFound:
+        return {"success": True, **contracts.start_link_view(t)}
 
 
 @router.post("/reset/set")
 def reset_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **accounts.reset_link_set(str(payload.get("t", "")), str(payload.get("new", "")))}
+    t, new = str(payload.get("t", "")), str(payload.get("new", ""))
+    try:
+        return {"success": True, **accounts.reset_link_set(t, new)}
+    except NotFound:
+        return {"success": True, **contracts.start_link_set(t, new)}
 
 
 # ── 아이디 · 비밀번호 찾기 (로그인 전, 구글 본인 확인 뒤) ──
@@ -353,20 +348,6 @@ def find_pw_set(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return {"success": True, **finder.set_pw(str(payload.get("f", "")), str(payload.get("new", "")))}
 
 
-# ── 휴대폰 문자 인증 (로그인 전) ──
-@router.post("/otp/request")
-def otp_request(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **accounts.request_code(str(payload.get("phone", "")))}
-
-
-@router.post("/otp/set-password")
-def otp_set_password(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, **accounts.set_password_by_code(
-        str(payload.get("phone", "")), str(payload.get("code", "")), str(payload.get("new", "")))}
-
-
-
-# ── 임차인 안내 링크 (로그인 전) ──
 # ── 임차인 ──
 @router.get("/tenant/me")
 def tenant_me(user: User = Depends(tenant_only)) -> Dict[str, Any]:

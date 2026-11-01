@@ -175,6 +175,7 @@
         const terms = c.kind === "membership" ? `가맹비 ${won(c.fee)}` : `보증금 ${won(c.deposit)} · 월 ${won(c.rent + c.mgmt)} · ${c.start || ""}`;
         const acts = [
           c.status === "signed" ? `<button class="bass-btn bass-btn--sm bass-btn--primary" data-act="paid" data-id="${esc(c.id)}">💰 ${c.kind === "membership" ? "가맹비" : "잔금"} 확인</button>` : "",
+          ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm" data-act="link" data-id="${esc(c.id)}" title="계약 시작 링크를 새로 만듭니다 (이전 링크 무효)">🔗 링크</button>` : "",
           ["sent", "signed"].includes(c.status) ? `<button class="bass-btn bass-btn--sm bass-btn--ghost" data-act="cancel" data-id="${esc(c.id)}">취소</button>` : "",
         ].join(" ");
         return `<tr><td><b>${esc(target)}</b></td><td>${esc(c.party_name)}<br><small class="bass-muted">${esc(c.party_phone)}</small></td>
@@ -192,8 +193,9 @@
       const c = table._items[btn.dataset.id];
       Bass.withLock(btn, async () => {
         const res = await call(`/${btn.dataset.id}/${btn.dataset.act}`);
+        if (btn.dataset.act === "link") { issuedNotice(res); return; }
         if (btn.dataset.act === "paid") Bass.updateAppAlert("success", "납부를 확인해 계약이 체결되었습니다.",
-          `${c.party_name}님에게 체결 문자를 보냈습니다. 휴대폰 번호와 비밀번호로 로그인하면 바로 시작됩니다.`);
+          `${c.party_name}님은 휴대폰 번호와 계약 때 정한 비밀번호로 로그인하면 바로 시작됩니다.`);
         if (btn.dataset.act === "cancel") Bass.updateAppAlert("warning", "계약을 취소했습니다.", "취소된 링크는 열리지 않습니다.");
         await reload();
       });
@@ -246,11 +248,16 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", watchPasswords);
   else watchPasswords();
 
-  /** 계약 발행 뒤 안내 (상대방에게는 서버가 문자를 보냈다). */
-  function issuedNotice(c, smsMode) {
-    Bass.updateAppAlert("success", `${c.party_name}님에게 계약 안내 문자를 보냈습니다.`,
-      smsMode === "dev" ? "개발 모드: 실제 문자 대신 서버 로그에 남았습니다."
-        : "상대방은 '비밀번호 설정'에서 휴대폰 번호로 인증한 뒤 계약을 확인하고 동의합니다.");
+  /** 계약 발행 · 링크 다시 만들기 뒤: 계약 시작 링크 보내기 창 (문자 대신 대면 · 카카오톡 등). */
+  function issuedNotice(res) {
+    const c = res.contract;
+    const what = c.kind === "membership" ? `${c.building_name} 가맹 계약` : `${c.building_name} ${c.room}호 임대차 계약`;
+    shareLink({
+      title: `${what} 시작 링크`, name: c.party_name, phone: c.party_phone,
+      link: new URL(res.link, location.href).href,
+      message: `[Rent4] ${c.party_name}님, ${what}서입니다. 아래 링크에서 비밀번호를 정한 뒤 계약 내용을 확인하고 동의해 주세요. 다음부터는 휴대폰 번호와 그 비밀번호로 로그인합니다. (${res.expires_hours}시간 안에, 한 번만 사용)`,
+      note: "링크는 비밀번호를 정하는 순간 만료됩니다. 잃어버리면 계약 목록의 '🔗 링크'로 다시 만드세요 (이전 링크는 무효).",
+    });
   }
 
   /** 클립보드 복사: 클릭 직후 동기 방식 먼저, 안 되면 클립보드 API. */

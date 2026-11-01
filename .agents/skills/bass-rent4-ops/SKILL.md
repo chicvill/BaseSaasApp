@@ -63,14 +63,11 @@ paid · unpaid(지난달까지 기록 없음) · due(이번 달) · move_in(입�
   - 호실의 임차인(이름+전화 해시)이 바뀌면 계정 초기화, 퇴거·공실이면 잠금(무작위 비밀번호).
 - 임차인 화면에는 입주월 이전 기록과 전화번호를 보여 주지 않는다.
 
-## 휴대폰 문자 · 카카오/구글 (현재 방식 — 위의 링크 관련 규칙보다 우선)
-- 링크·임시 비밀번호는 사용자에게 보내지 않는다. 계약 발행·체결은 솔라피 문자로 접속 주소만 안내(`backend/sms.py`, 키 없으면 개발 모드 = 로그).
-- 비밀번호 설정·찾기 = `POST /otp/request` → `POST /otp/set-password` (6자리, 해시 저장, 5분, 5회, 재요청 1분). 그 번호의 모든 계정(임대인·임차인·계약 진행 `k<id>`)에 같은 비밀번호.
-- 계약 동의 전 본인 확인: 카카오/구글 OAuth(`backend/oauth.py`, state 해시 10분). 키가 하나라도 설정되면 `verified_at` 없이는 동의 불가. 연결한 계정은 소셜 로그인에도 쓴다(체결 뒤에는 최종 아이디로).
-- 계약 relink/reset, 임차인 invite, contract join/start/view?t 엔드포인트는 없앴다. 관리인 설정 링크(setup)만 남음.
-- 문자 발송 방식은 관리인 화면에서 고른다 (`SmsSetting`): dev(로그) · telegram(봇, `TELEGRAM_BOT_TOKEN`, 테스트용) · solapi(운영). 키가 있는 것만 고를 수 있고, 선택이 없으면 solapi > telegram > dev.
-- 텔레그램: 봇에서 /start → 전화번호 공유 버튼, 본인 연락처(contact.user_id == from.id)만 번호 연결(`TelegramLink`). getUpdates 롱 폴링 데몬 스레드(`RENT4_TELEGRAM_POLLING=0` 이면 끔) + 보낼 때 한 번 더 확인.
-- 인증번호는 발송에 성공했을 때만 저장한다 (실패 뒤 재요청이 1분 제한에 걸리지 않게).
+## 링크 · 카카오/구글 (현재 방식 — 위의 링크 관련 규칙보다 우선)
+- **문자 발송은 쓰지 않는다** (sms.py · /otp · password.html · 텔레그램 · 계약 안내 문자 모두 삭제). 링크는 대면 · 카카오톡 등 · 채팅창으로 전달한다.
+- 계약 시작 링크: 계약 발행(`POST /admin|lessor/contracts`) 응답의 `link`(reset.html?t=, 해시 `token_hash`, 24시간 `link_expires`). 다시 만들기 = 계약 action `link`(이전 링크 무효). 링크에서 비밀번호를 정하면(`POST /reset/set`) 계약 진행용 로그인 `k<id>` + 링크 만료 → contract.html. 이후 휴대폰 번호 + 비밀번호로 로그인.
+- `/reset/view`·`/reset/set` 은 임차인 재설정 링크를 먼저, 아니면 계약 시작 링크를 본다 (같은 화면).
+- 계약 동의 전 본인 확인: 카카오/구글 OAuth(`backend/oauth.py`, state 해시 10분). 키가 하나라도 설정되면 `verified_at` 없이는 동의 불가.
 - 임차인 비밀번호 초기화 (대면 계약 마무리 · 분실): 임대인 '🔑 비밀번호 초기화' → `POST /lessor/accounts/{room}/reset` 이 이전 비밀번호를 즉시 막고 한 번만 쓰는 재설정 링크(`reset.html?t=`, 해시 저장 `invite_hash`, 24시간 `invite_expires`)를 만든다. 임대인은 링크를 채팅(카카오톡 등)으로 보내고, 임차인은 `POST /reset/set` 으로 새 비밀번호(해시 저장)를 정하면 바로 로그인 + 링크 만료. 자기 건물 호실만, 임차인이 바뀌면 링크 무효.
 - 채팅창 (`backend/chat.py`): 로그인한 화면은 5초마다 `GET /chat/inbox` (= 접속 중 표시, 20초). 비밀번호 초기화 때 임차인이 접속 중이면 재설정 링크를 채팅 메시지(`messages`)로 보내고(`delivered: "chat"`), 아니면 보내기 창(카카오·문자 등)으로 대신한다. 새 메시지는 채팅창이 자동으로 열린다. 비밀번호 초기화는 로그인 토큰을 끊지 않으므로 접속 중인 임차인은 채팅을 계속 받는다.
 - 아이디·비밀번호 찾기 (`backend/finder.py`, `find.html`): 구글 본인 확인(oauth purpose=find) → **미리 연결해 둔 구글 계정의 사람으로 고정** → 10분 찾기 권한(토큰 해시, 5회 틀리면 잠금, 틀린 칸은 알려 주지 않음). 아이디 찾기 = 이름·전화·부동산(임차인 '건물+호실', 임대인 '건물') → 아이디 → `index.html#id=` 로 채우고 비밀번호 칸에 커서. 비밀번호 찾기 = 아이디까지 확인 → 새 비밀번호 → 바로 로그인, 권한·링크 만료. 구글 연결은 로그인 뒤 상단 '🔗 구글 연결'(link, back=account).

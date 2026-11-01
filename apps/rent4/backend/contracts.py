@@ -1,27 +1,31 @@
 """
-apps/rent4/backend/contracts.py — 계약 → 계정. 링크 없이 휴대폰 번호와 문자로 진행한다.
+apps/rent4/backend/contracts.py — 계약 → 계정. 문자 없이 대면 · 채팅으로 전달하는 링크 하나로 진행한다.
 
-    1. 발행        관리인이 가맹 계약, 임대인이 임대차 계약을 작성 → 상대방에게 안내 문자 (접속 주소만)
-    2. 비밀번호    상대방은 '비밀번호 설정'에서 휴대폰 번호 → 문자 인증번호 → 비밀번호 (accounts.set_password_by_code)
-    3. 동의        로그인한 상태로 계약 내용 확인 · 동의
-    4. 납부 확인    발행자가 가맹비 / 잔금 확인 → 최종 계정(건물 코드 / 코드+호실)에 같은 비밀번호 + 체결 문자
+    1. 발행        관리인이 가맹 계약, 임대인이 임대차 계약을 작성 → 한 번만 쓰는 계약 시작 링크(24시간)
+                   발행자가 그 자리에서 카카오톡 등으로 보낸다. 잃어버리면 '링크 다시 만들기'(이전 링크 무효)
+    2. 비밀번호    상대방이 링크(reset.html?t=)에서 비밀번호를 정함 → 계약 진행용 로그인 k<id> + 링크 만료
+    3. 동의        로그인한 상태로 계약 내용 확인 · 동의 (휴대폰 번호 + 비밀번호로 다시 들어올 수 있다)
+    4. 납부 확인    발행자가 가맹비 / 잔금 확인 → 최종 계정(건물 코드 / 코드+호실)에 같은 비밀번호
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
+import time
 from datetime import date
 from typing import Dict, List, Optional, Tuple
 
-from core.auth import User
+from core.auth import User, issue_token
 from core.errors import Conflict, Mismatch, NotFound
 
-from . import accounts, oauth, sms
+from . import accounts, oauth
 from .models import Building, Contract, LessorAccount, Room
 from .pool import now_iso
 
 CODE_RE = re.compile(r"^[a-z][a-z0-9]{1,15}$")
 KIND_LABEL = {"membership": "가맹 계약", "lease": "임대차 계약"}
+START_LINK_TTL = 24 * 3600
 STATUS_LABEL = {"sent": "상대방 확인 대기", "signed": "납부 확인 대기", "active": "체결 완료", "cancelled": "취소"}
 
 
@@ -81,7 +85,6 @@ def create_membership(issuer: User, data: Dict) -> Contract:
                  start=_date(data.get("start"), "계약 시작일"), end=_date(data.get("end"), "계약 종료일"),
                  issued_by=issuer.username)
     c.save()
-    _notify(c, "issued")
     return c
 
 
@@ -104,7 +107,6 @@ def create_lease(issuer: User, branch: str, data: Dict) -> Contract:
                  lease_type=str(data.get("lease_type") or "월세"), pay_timing=str(data.get("pay_timing") or "후불"),
                  issued_by=issuer.username)
     c.save()
-    _notify(c, "issued")
     return c
 
 
@@ -115,6 +117,47 @@ def cancel(c: Contract) -> Contract:
     c.status, c.token_hash = "cancelled", ""
     return c.save()
 
+
+
+# ── 계약 시작 링크 (로그인 전) ──
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def issue_start_link(c: Contract) -> str:
+    """한 번만 쓰는 계약 시작 링크. 다시 만들면 이전 링크는 무효."""
+    if c.status not in ("sent", "signed"):
+        raise Conflict("진행 중인 계약에만 링크를 만들 수 있습니다.")
+    token = secrets.token_urlsafe(24)
+    c.token_hash, c.link_expires = _hash(token), time.time() + START_LINK_TTL
+    c.save()
+    return token
+
+
+def _start_target(token: str) -> Contract:
+    c = Contract.first(token_hash=_hash(token or "")) if token else None
+    if c is None or c.status not in ("sent", "signed") or c.link_expires < time.time():
+        raise NotFound("링크가 올바르지 않거나 만료되었습니다.",
+                       hint="이미 비밀번호를 정했다면 휴대폰 번호로 로그인하세요. 다시 필요하면 계약을 보낸 분에게 새 링크를 요청하세요.")
+    return c
+
+
+def start_link_view(token: str) -> Dict:
+    c = _start_target(token)
+    return {"title": title(c), "name": c.party_name, "login": f"휴대폰 번호 {c.party_phone}"}
+
+
+def start_link_set(token: str, new_password: str) -> Dict:
+    """비밀번호를 정하면 계약 진행용 로그인이 생기고 링크는 만료된다 → 바로 계약 화면."""
+    c = _start_target(token)
+    accounts.validate_new_password(new_password)
+    if not c.party_username:
+        c.party_username = f"k{c.id}"
+    user = User.by_username(c.party_username) or User(username=c.party_username, role=accounts.TENANT_ROLE, name=c.party_name)
+    user.set_password(new_password).save("rent4_contract_party")
+    c.token_hash, c.link_expires = "", 0
+    c.save()
+    return {"token": issue_token(user), "home": "contract.html"}
 
 
 # ── 로그인한 계약 상대방 (비밀번호를 정한 뒤) ──
@@ -156,24 +199,11 @@ def confirm_paid(c: Contract) -> Contract:
     _carry_password(c)
     c.status, c.activated_at = "active", now_iso()
     c.save()
-    _notify(c, "concluded")
     return c
 
 
 def title(c: Contract) -> str:
     return f"{c.building_name} 가맹 계약" if c.kind == "membership" else f"{c.building_name} {c.room}호 임대차 계약"
-
-
-def _notify(c: Contract, event: str) -> None:
-    """계약 발행·체결을 상대방 휴대폰으로 알린다. 링크 없이, 접속 주소와 휴대폰 번호 로그인만 안내."""
-    url = sms.public_url()
-    if event == "issued":
-        text = (f"[Rent4] {c.party_name}님, {title(c)}서가 도착했습니다. {url} 에서 '비밀번호 설정'을 눌러 "
-                f"이 휴대폰 번호로 비밀번호를 정한 뒤, 계약 내용을 확인하고 동의해 주세요.")
-    else:
-        text = (f"[Rent4] {c.party_name}님, {title(c)}이 체결되었습니다. {url} 에서 휴대폰 번호와 비밀번호로 "
-                f"로그인하면 바로 시작됩니다.")
-    sms.send(c.party_phone, text)
 
 
 def _carry_password(c: Contract) -> None:

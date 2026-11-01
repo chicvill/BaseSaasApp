@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Rent4 새 비밀번호</title>
-  <meta name="description" content="임대인이 보낸 재설정 링크에서 새 비밀번호를 정하고 바로 시작합니다.">
+  <meta name="description" content="계약 시작 링크 또는 임대인이 보낸 재설정 링크에서 비밀번호를 정하고 바로 시작합니다.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="rent4.css">
 </head>
@@ -25,7 +25,7 @@
     <div><label class="bass-label" for="pw2">새 비밀번호 확인</label>
       <input class="bass-input" id="pw2" type="password" autocomplete="new-password" minlength="6" required></div>
     <button class="bass-btn bass-btn--primary" id="btnSet" type="submit">비밀번호 정하고 시작</button>
-    <p class="bass-muted" style="margin:0;font-size:12.5px">비밀번호는 암호화(해시)되어 저장되고, 임대인을 포함해 누구도 볼 수 없습니다. 이 링크는 정하는 즉시 만료됩니다.</p>
+    <p class="bass-muted" style="margin:0;font-size:12.5px">비밀번호는 암호화(해시)되어 저장되고, 임대인·관리인을 포함해 누구도 볼 수 없습니다. 이 링크는 정하는 즉시 만료됩니다.</p>
   </form>
 
   <p style="margin-top:14px"><a class="bass-muted" href="index.html">← 로그인으로</a></p>
@@ -43,8 +43,8 @@
 
   async function load() {
     const v = await Bass.api("rent4", `/reset/view?t=${encodeURIComponent(token)}`);
-    $("sub").textContent = `${v.building} ${v.room}호`;
-    $("greeting").innerHTML = `<b>${esc(v.tenant_name)}</b>님, 앞으로 쓸 비밀번호를 정해 주세요. 아이디는 <code>${esc(v.username)}</code> 입니다.`;
+    $("sub").textContent = v.title;
+    $("greeting").innerHTML = `<b>${esc(v.name)}</b>님, 앞으로 쓸 비밀번호를 정해 주세요. 로그인할 때는 <code>${esc(v.login)}</code> 와 이 비밀번호를 씁니다.`;
     $("setForm").classList.remove("hide");
     $("pw1").focus();
   }

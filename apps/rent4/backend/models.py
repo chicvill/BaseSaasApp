@@ -69,16 +69,6 @@ class AdminAccount(PoolObj):
     activated_at: Optional[str] = None
 
 
-class OtpCode(PoolObj):
-    """문자 인증번호 (원문은 저장하지 않고 해시만). 5분 유효, 5번 틀리면 무효."""
-    collection: ClassVar[str] = "otp_codes"
-
-    phone: str                     # 숫자만
-    code_hash: str
-    expires_at: float
-    tries: int = 0
-
-
 class LessorAccount(PoolObj):
     """가맹 계약으로 만들어진 임대인 계정. 비밀번호는 core.auth User 에 해시로 저장된다."""
     collection: ClassVar[str] = "lessor_accounts"
@@ -118,7 +108,8 @@ class Contract(PoolObj):
     lease_type: str = "월세"
     pay_timing: str = "후불"
     status: str = "sent"
-    token_hash: str = ""
+    token_hash: str = ""            # 계약 시작 링크 (한 번만, 비밀번호를 정하면 지움)
+    link_expires: float = 0
     issued_by: str = ""
     signed_at: Optional[str] = None
     paid_at: Optional[str] = None

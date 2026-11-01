@@ -5,7 +5,7 @@ from fastapi import APIRouter
 
 from core import BaseSaaSApp
 
-from .backend import api, sms
+from .backend import api
 from .backend.pool import pool
 
 
@@ -25,7 +25,6 @@ class Rent4App(BaseSaaSApp):
 
     def on_startup(self) -> None:
         api.startup()      # 건물 목록 보장 + 거주 호실마다 임차인 계정 맞추기
-        sms.start_polling()  # 텔레그램 봇을 쓰면 봇 메시지 받기
 
     def health_check(self):
         return {"pool_dir": pool().directory, **api.stats()}

@@ -66,7 +66,7 @@
         lease_type: $("lType").value, pay_timing: $("lTiming").value,
         deposit: num("lDeposit"), rent: num("lRent"), mgmt: num("lMgmt"),
         start: $("lStart").value || null, end: $("lEnd").value || null } });
-      Rent4.issuedNotice(res.contract, res.sms);
+      Rent4.issuedNotice(res);
       $("leaseForm").reset();
       await loadLeases();
     }, "발행 중...");
@@ -83,7 +83,6 @@
               : a.link_sent ? `<span class="bass-badge bass-badge--info">링크 보냄</span>`
               : `<span class="bass-badge bass-badge--warn">안내 전</span>`}</td>
         <td style="text-align:right">
-          ${a.activated ? "" : `<button class="bass-btn bass-btn--sm" data-act="notify" data-room="${esc(a.room)}">📱 안내 문자</button>`}
           <button class="bass-btn bass-btn--sm bass-btn--primary" data-act="reset" data-room="${esc(a.room)}"
             title="지금 비밀번호를 막고, 한 번만 쓰는 재설정 링크를 만들어 채팅으로 보냅니다">🔑 비밀번호 초기화</button>
         </td>
@@ -94,8 +93,7 @@
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
     const room = encodeURIComponent(btn.dataset.room);
-    if (btn.dataset.act === "reset") {
-      Bass.withLock(btn, async () => {
+    if (btn.dataset.act === "reset") Bass.withLock(btn, async () => {
         const r = await api(`/lessor/accounts/${room}/reset`, { method: "POST" });
         if (r.delivered === "chat") {
           Bass.updateAppAlert("success", `${r.room}호 ${r.tenant_name}님 화면의 채팅창으로 링크를 보냈습니다.`,
@@ -111,13 +109,6 @@
         });
         await loadAccounts();
       }, "초기화 중...");
-      return;
-    }
-    Bass.withLock(btn, async () => {
-      const r = await api(`/lessor/accounts/${room}/notify`, { method: "POST" });
-      Bass.updateAppAlert("success", `${r.room}호 ${r.tenant_name}님에게 안내 문자를 보냈습니다.`,
-        "임차인은 '비밀번호 설정'에서 휴대폰 번호로 인증하고 바로 시작합니다.");
-    }, "보내는 중...");
   });
 
   // ── 수납 현황 ──
@@ -290,7 +281,7 @@
     const r = await api("/lessor/import/commit", { method: "POST", body: { text: $("excelText").value } });
     renderImport(r, true);
     Bass.updateAppAlert("success", `${r.year}년 수납부를 Knowledge Pool 에 반영했습니다.`,
-      `임차인 계정: 새로 만듦 ${r.accounts.created} · 초기화 ${r.accounts.reset} · 잠금 ${r.accounts.locked}. 임차인 계정 탭에서 📱 안내 문자를 보내세요.`);
+      `임차인 계정: 새로 만듦 ${r.accounts.created} · 초기화 ${r.accounts.reset} · 잠금 ${r.accounts.locked}. 임차인 계정 탭의 🔑 비밀번호 초기화로 시작 링크를 보내세요.`);
     year = r.year;
     await loadBoard();
   }, "반영 중... ⏳"));
