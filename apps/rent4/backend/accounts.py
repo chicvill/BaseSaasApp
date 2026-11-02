@@ -103,7 +103,8 @@ def building_of(branch: Optional[str]) -> Building:
 
 
 def _tenant_key(room: Room) -> str:
-    raw = f"{room.tenant_name}|{re.sub(r'\D', '', room.phone)}"
+    clean_phone = re.sub(r"\D", "", room.phone)
+    raw = f"{room.tenant_name}|{clean_phone}"
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
