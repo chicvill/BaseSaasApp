@@ -24,6 +24,25 @@
   <div id="app-alert"></div>
   <div id="pwBox" class="hide"></div>
   <section id="adminBody" class="hide">
+  <!-- 임대 건물 및 가맹비 납입 현황 KPI 요약 대시보드 -->
+  <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:12px 0 20px">
+    <div class="bass-card stack" style="gap:4px">
+      <span class="bass-muted" style="font-size:13px">🏢 총 가맹 건물</span>
+      <strong style="font-size:24px" id="kpiBuildings">-</strong>
+    </div>
+    <div class="bass-card stack" style="gap:4px">
+      <span class="bass-muted" style="font-size:13px">🚪 총 관리 호실</span>
+      <strong style="font-size:24px" id="kpiRooms">-</strong>
+    </div>
+    <div class="bass-card stack" style="gap:4px">
+      <span class="bass-muted" style="font-size:13px">💰 가맹비 수납 누계</span>
+      <strong style="font-size:24px;color:var(--bass-primary,#3b82f6)" id="kpiFeePaid">-</strong>
+    </div>
+    <div class="bass-card stack" style="gap:4px">
+      <span class="bass-muted" style="font-size:13px">⏳ 가맹비 미납/대기</span>
+      <strong style="font-size:24px;color:var(--bass-warn,#f59e0b)" id="kpiFeePending">-</strong>
+    </div>
+  </div>
   <h2 style="margin:10px 0 12px;font-size:17px">🏢 가맹점 목록 <small class="bass-muted" style="font-weight:400;font-size:13px">눌러서 계약 · 월별 수납 펼쳐보기</small></h2>
   <div class="stack" id="buildings"></div>
 
@@ -66,13 +85,35 @@
   const $ = (id) => document.getElementById(id);
   const call = (path, opts) => Bass.api("rent4", `/admin/contracts${path}`, { method: "POST", ...opts });
 
+  function updateKpiSummary(buildings, contracts) {
+    const totalRooms = buildings.reduce((acc, b) => acc + (b.rooms || 0), 0);
+    const feePaid = contracts.filter(c => c.status === 'active').reduce((acc, c) => acc + (c.fee || 0), 0);
+    const feePending = contracts.filter(c => c.status !== 'active' && c.status !== 'cancelled').reduce((acc, c) => acc + (c.fee || 0), 0);
+
+    const elB = document.getElementById('kpiBuildings');
+    const elR = document.getElementById('kpiRooms');
+    const elP = document.getElementById('kpiFeePaid');
+    const elPend = document.getElementById('kpiFeePending');
+
+    if (elB) elB.textContent = `${buildings.length}개 동`;
+    if (elR) elR.textContent = `${totalRooms}실`;
+    if (elP) elP.textContent = `${feePaid.toLocaleString('ko-KR')}원`;
+    if (elPend) elPend.textContent = `${feePending.toLocaleString('ko-KR')}원`;
+  }
+
   async function loadContracts() {
     const { contracts } = await Bass.api("rent4", "/admin/contracts");
     Rent4.contractTable($("memberships"), contracts, { call, reload: reloadAll, partyLabel: "임대인" });
   }
 
   async function reloadAll() {
-    await Promise.all([loadBuildings(), loadContracts()]);
+    const [bRes, cRes] = await Promise.all([
+      Bass.api("rent4", "/admin/buildings"),
+      Bass.api("rent4", "/admin/contracts")
+    ]);
+    renderBuildings(bRes.buildings);
+    Rent4.contractTable($("memberships"), cRes.contracts, { call, reload: reloadAll, partyLabel: "임대인" });
+    updateKpiSummary(bRes.buildings, cRes.contracts);
   }
 
   $("memberForm").addEventListener("submit", (e) => {
@@ -122,8 +163,7 @@
     location.href = `임대인.html?branch=${encodeURIComponent($("pBranch").value)}`;
   });
 
-  async function loadBuildings() {
-    const { buildings } = await Bass.api("rent4", "/admin/buildings");
+  function renderBuildings(buildings) {
     $("pBranch").innerHTML = buildings.map((b) => `<option value="${esc(b.branch)}">${esc(b.name)}</option>`).join("");
     $("buildings").innerHTML = buildings.map((b) => `
       <details class="bass-card fold" data-branch="${esc(b.branch)}">

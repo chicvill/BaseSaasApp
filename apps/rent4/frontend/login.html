@@ -49,8 +49,12 @@
     const info = await Rent4.me();
     let listing = "";                              // 매물에서 [계약 신청]을 누르고 로그인하러 온 회원
     try { listing = sessionStorage.getItem("rent4.applyListing") || ""; } catch (_) { listing = ""; }
-    if (listing && info.kind === "member") return Rent4.go(`apply.html?listing=${encodeURIComponent(listing)}`);
-    Rent4.go(info.home);
+    const target = (listing && info.kind === "member") ? `apply.html?listing=${encodeURIComponent(listing)}` : info.home;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: "rent4_login_success", home: target }, "*");
+    } else {
+      Rent4.go(target);
+    }
   }
 
   // 아이디 저장 (이 기기의 브라우저에만, 비밀번호는 저장하지 않음) · 아이디 찾기에서 돌아오면 찾은 아이디
