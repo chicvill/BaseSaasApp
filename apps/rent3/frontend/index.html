@@ -333,17 +333,6 @@
       </div>
     </div>
     <div class="header-actions">
-      <!-- Role Switcher Gateway -->
-      <div style="display:flex; align-items:center; gap:6px; background:#1e293b; padding:4px 10px; border-radius:8px; border:1px solid var(--card-border);">
-        <span style="font-size:12px; color:var(--text-muted); font-weight:700;">🔀 역할 전환:</span>
-        <select id="userRoleSelect" style="background:transparent; border:none; color:var(--primary); font-size:12.5px; font-weight:800; outline:none; cursor:pointer;" onchange="switchUserRole(this.value)">
-          <option value="admin">👑 Admin (건물별 사용료)</option>
-          <option value="landlord">🏢 임대인 (임대료 수납)</option>
-          <option value="tenant">🔑 임차인 (납입/만기일)</option>
-          <option value="public">📢 누구나 (공개 매물)</option>
-        </select>
-      </div>
-
       <select id="branchSelect" class="branch-select" onchange="loadDashboard()">
         <option value="main">시크빌 (본점 29개실)</option>
         <option value="sunho">선호아트빌 (15개실)</option>
