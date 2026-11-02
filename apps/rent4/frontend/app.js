@@ -163,6 +163,37 @@
     $("authModal").classList.add("is-open");
   }
 
+  /** 임대인 보호: 로그인 + 구글 본인 확인을 마친 회원만 임대인과 연결한다. */
+  function requireVerified(targetHint) {
+    const u = getSession();
+    if (!u || !u.name || !Bass.token()) {
+      openAuthModal({ tab: "register", targetHint });
+      $("authModalSub").textContent =
+        "🛡️ 임대인 보호를 위해 구글 본인 확인을 마친 회원만 방문 문의 · 계약 신청을 할 수 있습니다. 가입했다면 로그인 탭을 눌러 주세요.";
+      return false;
+    }
+    if (!u.verified) {
+      Bass.updateAppAlert(
+        "warning",
+        "본인 확인(구글)이 필요합니다.",
+        "임대인 보호를 위해 구글 계정을 연결한 회원만 임대인에게 연락할 수 있습니다. 회원가입 화면에서 구글로 본인 확인을 진행해 주세요."
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /** 구글 로그인 · 회원가입 직후처럼 토큰만 있는 경우 포털 세션(역할 · 본인 확인)을 다시 받아 온다. */
+  async function syncSession() {
+    if (!Bass.token()) { clearSession(); return; }
+    try {
+      const res = await Bass.api(APP_ID, "/pool/auth/session");
+      saveSession(res.user);
+    } catch (err) {
+      if (err.status === 401 || err.status === 403) clearSession();
+    }
+  }
+
   function closeAuthModal() {
     $("authModal").classList.remove("is-open");
   }
@@ -289,6 +320,7 @@
 
     grid.querySelectorAll(".js-open-inquiry").forEach((btn) => {
       btn.addEventListener("click", () => {
+        if (!requireVerified(`inquiry:${btn.dataset.branch}:${btn.dataset.room}`)) return;
         $("inqBranch").value = btn.dataset.branch;
         $("inqRoomNo").value = btn.dataset.room;
         $("inqModalTitle").textContent = `💬 [${btn.dataset.bldg} ${btn.dataset.room}호] 집주인 1:1 방문문의`;
@@ -301,16 +333,8 @@
 
     grid.querySelectorAll(".js-open-rentnow").forEach((btn) => {
       btn.addEventListener("click", () => {
+        if (!requireVerified(`contract:${btn.dataset.branch}:${btn.dataset.room}`)) return;
         const u = getSession();
-        if (!u || !u.name) {
-          // 비로그인 시: 본인인증 로그인 후 해당 매물 호출 화면으로 즉시 이동!
-          openAuthModal({
-            tab: "login",
-            preset: "cosign",
-            targetHint: `contract:${btn.dataset.branch}:${btn.dataset.room}`,
-          });
-          return;
-        }
         $("rnBranch").value = btn.dataset.branch;
         $("rnRoomNo").value = btn.dataset.room;
         const isLessor = u.role === "lessor" || u.role === "admin";
@@ -415,7 +439,7 @@
   $("btnNavAddListing").addEventListener("click", () => {
     const user = getSession();
     if (user && user.role === "lessor" && user.branch) {
-      window.location.href = `/rent4_lessor/?branch=${encodeURIComponent(user.branch)}&tab=rooms`;
+      window.location.href = "/rent4/임대인.html#listings";
       return;
     }
     openAuthModal({ tab: "login", preset: "lessor", targetHint: "add_listing" });
@@ -424,7 +448,7 @@
   $("btnPillarBroker").addEventListener("click", () => {
     const user = getSession();
     if (user && user.role === "lessor" && user.branch) {
-      window.location.href = `/rent4_lessor/?branch=${encodeURIComponent(user.branch)}&tab=broker`;
+      window.location.href = "/rent4/임대인.html#listings";
       return;
     }
     openAuthModal({ tab: "login", preset: "lessor", targetHint: "broker" });
@@ -488,6 +512,11 @@
   // 간편 본인인증 회원가입 -> Data Pool 등록 후 역할/공동계약 페이지로 자동 이동
   $("formRegister").addEventListener("submit", (e) => {
     e.preventDefault();
+    const hint = $("loginTargetHint").value || "";
+    if (hint) window.sessionStorage.setItem("rent4_after_login", hint);
+    window.location.href = "signup.html";
+  });
+  function _legacyRegister(e) {
     Bass.withLock($("btnSubmitRegister"), async () => {
       const res = await Bass.api(APP_ID, "/pool/auth/register", {
         method: "POST",
@@ -507,7 +536,8 @@
       Bass.updateAppAlert("success", res.message);
       window.location.href = res.redirect_url;
     }, "본인인증 가입 및 이동 중... ⏳");
-  });
+  }
+  void _legacyRegister;
 
   // 검색 & 필터 바인딩
   $("heroSearchForm").addEventListener("submit", (e) => {
@@ -575,7 +605,7 @@
       });
       $("inquiryModal").classList.remove("is-open");
       $("inqMessage").value = "";
-      Bass.updateAppAlert("success", res.message, "임대인 콘솔(rent3_lessor) 1:1 채팅함에 즉시 기록되었습니다.");
+      Bass.updateAppAlert("success", res.message, "임대인이 본인 확인 정보를 보고 방문 일정을 채팅으로 안내합니다.");
     }, "전송 중... ⏳");
   });
 
@@ -617,7 +647,7 @@
     Bass.updateAppAlert("success", "로그아웃되어 OpenRent 직거래 포털 홈으로 이동했습니다.");
   }
 
-  renderSessionUI();
+  syncSession().then(renderSessionUI);
   loadPortalData()
     .then(() => {
       if (urlParams.get("login") === "1") {

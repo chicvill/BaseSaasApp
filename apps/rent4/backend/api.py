@@ -254,49 +254,101 @@ def portal_landing() -> Dict[str, Any]:
     }
 
 
-@router.post("/pool/auth/login")
-def portal_login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    """포털 데모 및 일반 사용자 로그인."""
-    ident = str(payload.get("identifier", "")).strip()
-    pw = str(payload.get("password", "")).strip()
-    hint = str(payload.get("target_hint", "")).strip()
+def _verification(user: User) -> Dict[str, Any]:
+    """임대인 보호: 예비 임차인은 구글(또는 카카오) 본인 확인을 마친 회원만 임대인과 만날 수 있다."""
+    from .members import MemberAccount
+    links = oauth.linked(user.username)
+    google = next((l for l in links if l["provider"] == "google"), None)
+    member = MemberAccount.first(username=user.username)
+    staff_role = user.role in accounts.ADMIN_ROLES or user.role in accounts.LESSOR_ROLES
+    return {
+        "verified": bool(staff_role or links),
+        "provider": (google or (links[0] if links else {})).get("label", ""),
+        "name": (member.name if member else "") or user.name,
+        "phone": member.phone if member else "",
+    }
 
-    res = accounts.login(ident, pw)
-    tok = res["token"]
-    user = accounts.whoami(User.by_username(res["username"]))
-    redirect_url = user.get("home", "/rent4/")
-    if hint == "pool":
-        redirect_url = "/rent4/관리인.html"
+
+def _require_verified(user: Optional[User]) -> Dict[str, Any]:
+    if user is None:
+        raise Forbidden("임대인 보호를 위해 로그인 후 이용할 수 있습니다.",
+                        hint="회원가입(구글 본인 확인) 또는 로그인한 뒤 다시 시도해 주세요.")
+    v = _verification(user)
+    if not v["verified"]:
+        raise Forbidden("임대인 보호를 위해 본인 확인(구글)을 마친 회원만 방문 문의 · 계약 신청을 할 수 있습니다.",
+                        hint="내 정보에서 구글 계정을 연결하거나 회원가입(구글 본인 확인)을 진행해 주세요.")
+    return v
+
+
+def _session_payload(user: User, token: str, hint: str = "") -> Dict[str, Any]:
+    info = accounts.whoami(user)
+    v = _verification(user)
+    home = info.get("home", "index.html")
+    if info.get("kind") == "lessor" and hint in ("add_listing", "broker"):
+        home = "임대인.html#listings"
+    redirect_url = "/rent4/" + home
     return {
         "success": True,
-        "message": f"{user.get('name', ident)}님 환영합니다.",
-        "token": tok,
+        "message": f"{info.get('name') or user.username}님, 로그인되었습니다.",
+        "token": token,
         "user": {
-            "id": res["username"],
-            "name": user.get("name", ident),
-            "role": user.get("kind", "user"),
-            "role_label": user.get("kind", "user"),
-            "branch": user.get("branch", ""),
+            "id": user.username,
+            "name": info.get("name") or user.username,
+            "role": info.get("kind", "member"),
+            "role_label": info.get("label", ""),
+            "branch": (info.get("building") or {}).get("branch", ""),
+            "phone": v["phone"],
+            "verified": v["verified"],
+            "verified_by": v["provider"],
             "redirect_url": redirect_url,
         },
         "redirect_url": redirect_url,
     }
 
 
+@router.post("/pool/auth/login")
+def portal_login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """포털 로그인 → 역할(관리인 · 임대인 · 임차인 · 회원)에 맞는 페이지 주소와 본인 확인 상태를 돌려준다."""
+    res = accounts.login(str(payload.get("identifier", "")), str(payload.get("password", "")))
+    user = User.by_username(res["user"]["username"])
+    return _session_payload(user, res["token"], str(payload.get("target_hint", "")))
+
+
+@router.get("/pool/auth/session")
+def portal_session(request: Request, user=Depends(current_user)) -> Dict[str, Any]:
+    """이미 로그인한 토큰(구글 로그인 · 가입 직후 포함)으로 포털 세션 정보를 다시 받는다."""
+    if user is None:
+        raise Forbidden("로그인이 필요합니다.")
+    token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    return _session_payload(user, token)
+
+
 @router.post("/pool/inquiries")
-def portal_inquiry(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    sender = str(payload.get("sender_name", "")).strip() or "방문객"
-    msg = str(payload.get("message", "")).strip()
+def portal_inquiry(payload: Dict[str, Any] = Body(...), user=Depends(current_user)) -> Dict[str, Any]:
+    """본인 확인된 회원의 방문 문의 → 그 건물 임대인 채팅창으로 (검증된 실명 · 연락처 · 인증 수단 포함)."""
+    v = _require_verified(user)
     branch = str(payload.get("branch", "")).strip()
     room_no = str(payload.get("room_no", "")).strip()
-    target = branch or "chic"
-    chat.post(target, sender, f"{sender} (문의)", f"[{room_no}호 방문/직거래 문의] {msg}")
-    return {"success": True, "message": "임대인에게 문의가 안전하게 전달되었습니다."}
+    msg = str(payload.get("message", "")).strip()
+    visit = str(payload.get("visit_date", "")).strip()
+    if not msg:
+        raise DomainError("문의 내용을 입력해 주세요.")
+    from .models import LessorAccount
+    lessor = LessorAccount.first(branch=branch)
+    if lessor is None:
+        raise NotFound("이 매물의 임대인 계정을 찾을 수 없습니다.", hint="잠시 뒤 다시 시도하거나 관리인에게 문의해 주세요.")
+    phone = v["phone"] or str(payload.get("sender_phone", "")).strip()
+    text = (f"[{room_no}호 방문 문의 · 🛡️ {v['provider'] or '본인'} 확인 회원]\n"
+            f"이름: {v['name']} · 연락처: {phone or '-'}\n"
+            + (f"희망 일시: {visit}\n" if visit else "") + msg)
+    chat.post(lessor.username, user.username, f"{v['name']} (본인 확인 회원)", text)
+    return {"success": True, "message": "본인 확인된 회원 정보와 함께 임대인에게 문의를 보냈습니다."}
 
 
 @router.post("/pool/cosign-open")
-def portal_cosign_open(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-    return {"success": True, "message": "공동계약 화면으로 이동합니다.", "redirect_url": "/rent4/contract.html"}
+def portal_cosign_open(payload: Dict[str, Any] = Body(...), user=Depends(current_user)) -> Dict[str, Any]:
+    _require_verified(user)
+    return {"success": True, "message": "계약 신청 화면으로 이동합니다.", "redirect_url": "/rent4/contract.html"}
 
 
 # ── 매물 (공개 목록은 로그인 없이) ──

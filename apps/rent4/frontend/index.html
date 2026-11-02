@@ -352,47 +352,20 @@
         </div>
       </form>
 
-      <!-- TAB 2: 간편 본인인증 회원가입 -->
+      <!-- TAB 2: 구글 본인 확인 회원가입 -->
       <form id="formRegister" style="display:none;">
-        <div style="font-size:12px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🛡️ 실명·휴대폰 본인인증 가입 즉시 임대인 또는 임차인 전용 워크스페이스 및 공동계약 호출 기능을 이용할 수 있습니다.
-        </div>
-        <div class="or-field">
-          <label for="regRole">가입 유형 선택</label>
-          <select id="regRole" class="or-select">
-            <option value="prospect">🔑 예비임차인 (복비 0원 공실 탐색 & 공동계약 호출)</option>
-            <option value="lessor">🏢 신규 임대인 (무료 매물 등록 & 공동계약 호출)</option>
-          </select>
-        </div>
-        <div class="or-field">
-          <label for="regName">실명 (신분증 기재 성명)</label>
-          <input id="regName" class="or-input" placeholder="홍길동" required>
-        </div>
-        <div class="or-field">
-          <label for="regPhone">본인 명의 휴대폰 번호</label>
-          <input id="regPhone" class="or-input" placeholder="010-1234-5678" required>
-        </div>
-        <div id="regLessorFields" style="display:none;">
-          <div class="or-field">
-            <label for="regUsername">임대인 로그인 아이디 (지점 코드 겸용)</label>
-            <input id="regUsername" class="or-input" placeholder="예: gangnam">
-          </div>
-          <div class="or-field">
-            <label for="regBuildingName">건물명</label>
-            <input id="regBuildingName" class="or-input" placeholder="예: 강남오픈하우스">
-          </div>
-          <div class="or-field">
-            <label for="regAddress">건물 소재지 주소</label>
-            <input id="regAddress" class="or-input" placeholder="서울특별시 강남구 ...">
-          </div>
-        </div>
-        <div class="or-field">
-          <label for="regPassword">비밀번호 설정</label>
-          <input id="regPassword" type="password" class="or-input" value="1212" required>
+        <div style="font-size:12.5px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:8px; padding:10px 12px; margin-bottom:12px; line-height:1.6;">
+          🛡️ <strong>임대인 보호 원칙</strong> — 방문 문의 · 계약 신청은 <strong>구글 이메일로 본인 확인</strong>을 마친 회원만 할 수 있습니다.<br>
+          ① 구글 계정으로 이메일 확인 → ② 이름 · 휴대폰 · 아이디 · 비밀번호 입력 → ③ 로그인 상태로 매물 문의
         </div>
         <button type="submit" id="btnSubmitRegister" class="or-btn or-btn--green" style="width:100%; padding:12px;">
-          ✨ 본인인증 가입 완료 및 이동 →
+          🔐 구글로 본인 확인하고 회원가입 →
         </button>
+        <div style="font-size:12px; color:var(--or-muted); margin-top:10px; line-height:1.6;">
+          · 이미 가입한 구글 계정이면 가입 없이 바로 로그인됩니다.<br>
+          · 주민등록번호는 받지 않습니다. 비밀번호는 암호화(해시)되어 저장됩니다.<br>
+          · 임대인 계정은 관리인과의 가맹 계약으로만 만들어집니다.
+        </div>
       </form>
     </div>
   </div>

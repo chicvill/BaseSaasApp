@@ -39,6 +39,10 @@
     takeHandoff();
     $("buildingName").textContent = `${boardData.building} 임대인`;
     document.title = `Rent4 · ${boardData.building}`;
+    // 포털 [매물 등록]에서 들어오면 해당 탭을 바로 연다 (예: 임대인.html#listings)
+    const tab = (location.hash || "").replace("#", "");
+    const tabBtn = tab && document.querySelector(`.tabs button[data-tab="${tab}"]`);
+    if (tabBtn && !tabBtn.classList.contains("is-active")) tabBtn.click();
   }
 
   // ── 버튼: 누르면 그 화면을 열고, 다시 누르면 닫는다 ──
