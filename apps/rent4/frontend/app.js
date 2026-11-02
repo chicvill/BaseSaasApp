@@ -133,6 +133,7 @@
   }
 
   function openAuthModal({ tab = "login", preset = "", targetHint = "" } = {}) {
+    clearModalError();
     switchAuthTab(tab === "register" ? "register" : "login");
     $("loginTargetHint").value = targetHint || "";
     $("chkAdminPoolHub").checked = targetHint === "pool";
@@ -192,6 +193,20 @@
     } catch (err) {
       if (err.status === 401 || err.status === 403) clearSession();
     }
+  }
+
+  /** 모달이 페이지 알림을 가리므로 로그인 오류는 모달 안에 보여 준다. */
+  function showModalError(err) {
+    const box = $("authModalAlert");
+    if (!box) return Bass.showError(err);
+    const msg = (err && err.message) || "로그인에 실패했습니다.";
+    const hint = (err && err.hint) || "";
+    box.innerHTML = `❌ <strong>${esc(msg)}</strong>${hint ? `<br><span style="font-size:12px;">${esc(hint)}</span>` : ""}`;
+    box.style.display = "block";
+  }
+  function clearModalError() {
+    const box = $("authModalAlert");
+    if (box) { box.style.display = "none"; box.innerHTML = ""; }
   }
 
   function closeAuthModal() {
@@ -489,7 +504,11 @@
   $("formAccountLogin").addEventListener("submit", (e) => {
     e.preventDefault();
     const btn = $("btnSubmitLogin");
-    Bass.withLock(btn, async () => {
+    clearModalError();
+    const label = btn.innerHTML;
+    btn.disabled = true;
+    btn.textContent = "본인인증 확인 및 이동 중... ⏳";
+    (async () => {
       let hint = $("loginTargetHint").value || "";
       if ($("chkAdminPoolHub").checked && !hint) hint = "pool";
 
@@ -506,7 +525,11 @@
       closeAuthModal();
       Bass.updateAppAlert("success", res.message, `자동 이동: ${res.redirect_url}`);
       window.location.href = res.redirect_url;
-    }, "본인인증 확인 및 이동 중... ⏳");
+    })().catch((err) => {
+      showModalError(err);
+      btn.disabled = false;
+      btn.innerHTML = label;
+    });
   });
 
   // 간편 본인인증 회원가입 -> Data Pool 등록 후 역할/공동계약 페이지로 자동 이동
