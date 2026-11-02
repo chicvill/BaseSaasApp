@@ -101,7 +101,7 @@ async function submitAdminRtmsOne(roomId, btn) {
 }
 
 function viewAdminRtmsReceipt(roomId) {
-  window.open(`public.html?view=tenant&room=${roomId}`, '_blank');
+  window.open(`index.html?view=tenant&room=${roomId}`, '_blank');
 }
 
 

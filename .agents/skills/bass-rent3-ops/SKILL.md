@@ -57,7 +57,7 @@ description: Operational business rules, domain invariants, and verification ins
    - 공개 매물 카드에 `[📞 전화걸기](tel:...)` 직통 링크 및 `[💬 1:1 방문약속]` 모달 제공.
 2. **카카오톡·문자 대체 앱내 1:1 실시간 직통 메신저 & 방문투어 조율 (In-App Messenger)**:
    - **외부 발송 비용 0원 인앱 완결**: 유료 카카오 알림톡이나 SMS 문자 발송 없이, 앱 내부 1:1 메신저를 통해 임대인과 예비/입주 세입자가 실시간으로 대화 소통.
-   - **양방향 실시간 폴링 동기화**: 임차인 포털(`public.html`) 및 임대인 관제 대시보드(`index.html`) 간 2.5초 주기 자동 갱신 및 메시지 수신/읽음 상태(`is_read`) 실시간 추적.
+   - **양방향 실시간 폴링 동기화**: 임차인 포털(`index.html`) 및 임대인 관제 대시보드(`public.html`) 간 2.5초 주기 자동 갱신 및 메시지 수신/읽음 상태(`is_read`) 실시간 추적.
    - **원클릭 퀵 액션 템플릿 연계**:
      - `투어 일정 수락`: 일시 자동 확인 및 1층 대면 투어 확정 안내.
      - `전자계약서 발송`: 현장 동행 5단계 Co-Signing 룸 링크(`quick_action_url`) 원클릭 전달.
@@ -145,16 +145,21 @@ description: Operational business rules, domain invariants, and verification ins
     - **국세청 현금영수증 승인번호 (CASH-2026-XXXX) 실시간 연동**:
       - 조세특례제한법 제126조의2에 따른 현금영수증 자진발급 승인번호를 월별 납입 내역에 1:1 표기하여 국세청 전산 검증 통과.
     - **임대인 공식 직인 날인 및 원클릭 인쇄/PDF 저장**:
-      - 세입자 라운지(public.html) 및 관리자 관제 센터(index.html)에서 즉시 1-Click 발급·인쇄 가능.
+      - 세입자 라운지(index.html) 및 관리자 관제 센터(public.html)에서 즉시 1-Click 발급·인쇄 가능.
       - 1:1 직통 인앱 메신저를 통해 세입자 대화방으로 발급 안내 알림 자동 발송.
 
-13. **역할별 맞춤형 첫 페이지 랜딩 및 권한 라우팅 거버넌스 (Role-Based Landing & Routing)**:
+13. **역할별 맞춤형 첫 페이지 랜딩 및 스마트폰 모바일 뷰포트 통합 거버넌스 (Mobile Viewport Unified & Role-Based Landing)**:
+    - **스마트폰 단일 뷰포트 반응형 통합 (Mobile-First Shell)**:
+      - 별도의 이원화된 PC 전용 모드를 두지 않고, 화면 크기 상관없이 **스마트폰 너비(360~480px) 모바일 앱 쉘 및 반응형 그리드**로 UI를 일원화.
+      - 11대 전체 관제 메뉴는 슬라이드 아웃 햄버거 드로어(`☰ 전체 메뉴`)와 **하단 고정 모바일 탭바(신청심사, 문의채팅, 호실장부, 세무수익, 11대메뉴)**를 통해 한 손으로 조작 가능.
+      - 40개 모달은 스마트폰 바텀시트(`align-items: flex-end`, 88vh 스크롤) 규격으로 100% 모바일 최적화.
+      - 모든 서브 페이지(`home.html`, `tenant.html`, `lessor.html`, `admin.html`)의 불필요한 'PC모드' 딱지를 제거하고 통일된 `[⚙️ 전체관제]` 링크로 연결.
     - **모든 사용자가 동일한 관제 대시보드에서 시작하지 않음**: 로그인 목적, 역할, 권한에 따라 가장 빈번하게 사용하는 업무 화면이 로그인 즉시 첫 페이지(First-Page)로 오픈되어야 한다.
     - **4대 역할별 첫 페이지 표준 (Landing Standard)**:
-      - 📢 **누구나 (일반 방문자 / 예비임차인)**: `public.html` ➔ 복비 0원 즉시 입주 매물 광고 쇼케이스 & 사진/옵션 확인 & 1:1 방문투어 예약이 1순위로 열림.
-      - 🔑 **임차인 (입주 세입자)**: `public.html?view=tenant&room=201` ➔ 월별 납입현황(미납 0원/영수증) & 계약 만기일 D-Day & 도어락 비번 보기 & 17% 세액공제 증명서 발급 & 1:1 채팅방이 첫 페이지로 최상단 전면 배열.
-      - 🏢 **임대인 (건물주/지점장)**: `index.html?role=landlord` ➔ 호실별 임대료 수납 장부(`tabRooms`)가 첫 페이지로 즉시 열리며 가짜 체납 방지 FIFO 수납, 온라인 입주신청 심사, 만기 재계약 관리 진행.
-      - 👑 **총괄 관리자 (Admin)**: `index.html?role=admin` ➔ 건물별 사용료 현황 & 3대 지점 통합 세무·수익률 분석(`tabTaxRoi`)이 첫 페이지로 즉시 열려 포트폴리오 NOI 및 연간 수익률 관제.
+      - 📢 **누구나 (일반 방문자 / 예비임차인)**: `index.html` ➔ 복비 0원 즉시 입주 매물 광고 쇼케이스 & 사진/옵션 확인 & 1:1 방문투어 예약이 1순위로 열림.
+      - 🔑 **임차인 (입주 세입자)**: `index.html?view=tenant&room=201` (또는 `tenant.html`) ➔ 월별 납입현황(미납 0원/영수증) & 계약 만기일 D-Day & 도어락 비번 보기 & 17% 세액공제 증명서 발급 & 1:1 채팅방이 첫 페이지로 최상단 전면 배열.
+      - 🏢 **임대인 (건물주/지점장)**: `public.html?role=landlord` (또는 `lessor.html`) ➔ 호실별 임대료 수납 장부(`tabRooms`)가 첫 페이지로 즉시 열리며 가짜 체납 방지 FIFO 수납, 온라인 입주신청 심사, 만기 재계약 관리 진행.
+      - 👑 **총괄 관리자 (Admin)**: `public.html?role=admin` (또는 `admin.html`) ➔ 건물별 사용료 현황 & 3대 지점 통합 세무·수익률 분석(`tabTaxRoi`)이 첫 페이지로 즉시 열려 포트폴리오 NOI 및 연간 수익률 관제.
     - **접속 게이트웨이 및 원클릭 역할 전환 (Role Switcher)**:
       - `login.html`: 4개 역할 카드로 구성된 공식 접속 게이트웨이 제공.
       - 모든 화면 상단 헤더에 통일된 `[🔀 역할 전환: Admin ↔ 임대인 ↔ 임차인 ↔ 누구나]` 드롭다운 및 게이트웨이 바로가기 바 탑재.
@@ -168,8 +173,8 @@ description: Operational business rules, domain invariants, and verification ins
       - 주택임대차보호법 제3조의6에 따라 **대법원 확정일자 고유번호(`FIX-20261027-XXXX`) 즉시 부여** 및 익일 0시 우선변제권 효력 개시 통보.
       - 임대인-임차인 1:1 직통 채팅방에 확정일자 부여 완료 공지 메시지 자동 전송.
     - **법정 신고필증 뷰어 & 임대인 30일 안심 관제 대장**:
-      - 세입자 마이홈(`public.html`): 조세특례법 및 부동산거래신고법 별지 제1호의2서식 공식 신고필증 확인 및 원클릭 인쇄/PDF 저장.
-      - 임대인 대시보드(`index.html`): 지점별 전체 호실의 신고 상태(부여완료/D-Day 대기) 관제 및 1-Click 대리 전자신고 모달 제공.
+      - 세입자 마이홈(`index.html`): 조세특례법 및 부동산거래신고법 별지 제1호의2서식 공식 신고필증 확인 및 원클릭 인쇄/PDF 저장.
+      - 임대인 대시보드(`public.html`): 지점별 전체 호실의 신고 상태(부여완료/D-Day 대기) 관제 및 1-Click 대리 전자신고 모달 제공.
 
 15. **지점별 공용 운영비(승강기·청소·공용전기수도 등) 전산 등록 & 월별 실지출 결산부 (`BuildingOperatingExpense`)**:
     - **8대 표준 공용 운영비 분류 체계**:
@@ -222,6 +227,61 @@ description: Operational business rules, domain invariants, and verification ins
       - ① 앱 게시 (접속 링크) ➔ ② 임대인 회원가입 (id_lessor) ➔ ③ 임대 매물 게시 (id_room) ➔ ④ 매물 검색 및 임대인 접속 ➔ ⑤ 임차인 회원가입 (id_tenant) ➔ ⑥ 계약 시작 ➔ ⑦ 등기부등본 열람 ➔ ⑧ 등기부등본 크로스체크 DB 등록 ➔ ⑨ 계약 체결 (id_contract) ➔ ⑩ 계약금 송금 & 전자영수증 ➔ ⑪ 전입(임대인 안내) ➔ ⑫ 전입(임차인 입주) ➔ ⑬ 1개월 후 임차료 송금 & 수납 등록 (id_pay) ➔ ⑭ 가맹비/앱사용료 정산 ➔ ⑮ 경비 지출 등록 (id_outlay) ➔ ⑯ 부가세/종부세/소득세 결산 자료 자동 생성.
     - **관리자 웹 UI 대시보드 (`tabEntities`)**:
       - 8개 엔티티 실시간 수량 뱃지, 서브탭 전환, 실시간 키워드 검색, 신규 등록/편집 동적 모달(`#entityModal`), 16단계 인터랙티브 실행기(`#workflowModal`).
+
+---
+
+18. **공동 실시간 JSON Data Pool (`data/rent3_pool/*.json`) & 5대 목적별 앱 객체 분리 거버넌스 (`AGENT.md` 헌법 구현)**:
+    - **불변의 BaseSaasApp 코어 원칙**: `core/` 및 `run.py` 코드는 단 1줄도 수정하지 않으며, `apps/_rent3_core/`(언더스코어 접두사로 로더 스킵)에 공유 OOP 도메인 엔진과 `JsonDataPool`을 둔다.
+    - **전 구성 요소 객체화 & 실시간 원자적 JSON 갱신 (`PoolObj`)**:
+      - `Admin`, `Lessor`, `Tenant`(`users.json`), `Building`(`buildings.json`), `Room`(`rooms.json`), `CoSignSession`(`cosign_sessions.json`), `Contract`(`contracts.json`), `Pay`(`payments.json`), `Outlay`(`outlays.json`), `DirectChat`/`MaintenanceTicket`/`CheckOutSettlement`/`RtmsReport`(`ops.json`) 등 모든 비즈니스 구성 요소가 독립 객체로 동작한다.
+      - 객체의 `.save()` / `.delete()` 호출 즉시 임시 파일 작성 후 `os.replace()` 원자적 교체로 해당 JSON 파일과 `_pool_meta.json`, `_events.jsonl`이 실시간 업데이트되며, `mtime` 감지를 통해 모든 분리 앱과 멀티 프로세스가 최신 상태를 즉시 공유한다.
+    - **기능·용도별 분리된 5대 독립 앱 객체 (`BaseSaaSApp`)**:
+      - 🌐 **`rent3` (통합관리용 허브 앱)**: 공동 JSON Data Pool 실시간 원문/상태 관제(`pool.html`, `/api/rent3/pool/*`) 및 전체 앱 전환 허브.
+      - 👑 **`rent3_admin` (관리인용 앱)**: 임대인 가맹 심사/승인, 월 SaaS 앱 사용료 과금/정산, 전사 건물·호실 포트폴리오 KPI, RTMS 30일 신고 마감 감시, 전체 객체 탐색기.
+      - 🏢 **`rent3_lessor` (임대인용 앱)**: 건물·호실·옵션 관리, 공실 게시 토글, `rent2` 계승 은행문자 파싱 & FIFO 순차 상계 & 후불 가짜 체납 차단, 공동 계약방 원클릭 개설, 도어락/주차/A/S 배정, 퇴실 정산 및 공실 자동 복귀, 8대 공용경비·NOI·5월 종소세 CSV 출력.
+      - 🔑 **`rent3_tenant` (임차인용 앱)**: 복비 0원 공실 매물 탐색 & 1:1 채팅/투어 신청, 공동 계약방 입장, 마이홈 청구/납부 내역 실시간 확인 & 온라인 납부, 도어락 비번 열람 & 차량 등록, A/S 사진 접수, 연말정산 17% 세액공제 납입증명서 A4 인쇄, 퇴실 정산 동의.
+      - 🤝 **`rent3_contract` (공동 임대계약 전용 앱)**: 임대인과 임차인이 각각 본인인증 로그인을 거친 뒤, 둘 중 어느 한쪽이 먼저 공동계약 화면에서 매물(호실)을 선택해 상대방을 호출(`CALLING`)하고 상대방이 응답(`CONNECTED`)함으로써 계약이 개시되는 중립 전자계약 앱. ① 각자 로그인 본인인증 증표 연동, ② 서로 상대방 신분증을 대조하여 본인 확인이 되었음을 상호 체크(`lessor_checked_tenant_id`, `tenant_checked_lessor_id`), ③ 대법원 등기부등본 열람·확인 체크(`step1_lessor_confirmed`, `step1_tenant_locked`), ④ 시설 점검 및 조건 합의(`Revision Lock`)가 모두 완료된 뒤에만 자필 전자서명(`sign_step4`) 및 SHA-256 해시 봉인이 허용된다.
+
+19. **공인중개사 개입 외부 지면계약서 사진 첨부 및 Data Pool 원장 즉시 적용 (`BROKER_PAPER` Contract Onboarding)**:
+    - **현실 정합성 지원**: 당사자 직거래(`DIRECT`) 외에 외부 개업공인중개사 사무소를 통해 체결된 지면 계약(`BROKER_PAPER`)도 임대인 앱(`rent3_lessor`)에서 계약서 사진 첨부로 즉시 전산화하여 동일한 수납·세무·마이홈 생태계로 편입한다.
+    - **원본 계약서 사진 영속 보관 (`data/rent3_pool/uploads/contracts/`)**:
+      - 촬영·스캔한 계약서 이미지 파일을 공동 Data Pool 하위 `uploads/contracts/{contract_id}.{ext}`에 원자적으로 저장하고, `contracts.json`에는 경량 상대경로(`contract_photo_file`)와 중개사무소 메타정보(`broker_info`: 상호, 대표 공인중개사, 등록번호, 연락처)를 기록한다.
+      - 임대인(`rent3_lessor`)과 해당 호실 입주 임차인(`rent3_tenant` 마이홈) 모두 첨부된 원본 계약서 사본 이미지를 언제든 열람할 수 있다.
+    - **스마트폰 카메라 OCR(라이브 텍스트) 자동 추출 보조 (`BrokerContractTextParser`)**:
+      - 스마트폰 기본 카메라로 계약서 사진을 찍어 복사한 문구를 붙여넣으면 보증금·월세·관리비·임차인 연락처·입주일·중개사무소명을 자동 파싱해 입력 폼을 채워준다.
+    - **원클릭 Data Pool 5종 동기화 적용**:
+      - 등록 즉시 ① `users.json` 임차인 활성화, ② `contracts.json` 계약 생성(`rent2` 선불/후불·부가세·가짜체납 차단 규칙 동일 적용), ③ `rooms.json` 입주 배정(직거래 공실 광고 자동 마감), ④ 계약금 수령 시 `payments.json` 기록, ⑤ `ops.json` 국토부 RTMS 신고 상태 반영(중개사 거래신고 완료 시 `FILED`, 미신고 시 30일 마감 `PENDING` D-Day 추적)을 원자적으로 수행한다.
+
+20. **만기 6~2개월 전 전출계획 확인 및 연장 재계약 예고 거버넌스 (`ExpiryRenewalCheck` — 주택임대차보호법 제6조·제7조 준수)**:
+    - **법정 통지 구간 자동 판별 (`Contract.expiry_window_status`)**:
+      - 만기일 기준 `60 <= 남은일수 <= 180`(만기 6개월 전 ~ 2개월 전) 계약을 **`NOTICE_WINDOW`(법정 전출확인·갱신예고 구간)**로 자동 감지하여 임대인 대시보드와 임차인 마이홈 최상단에 통지 마감일(`만기일 - 60일`)과 함께 강조 표시한다 (`< 60일` 진입 시 `TACIT_LOCKED` 묵시적 갱신 구간 안내).
+    - **전출계획 확인 및 분기 처리 (`ops.json` 내 `ExpiryRenewalCheck` 객체)**:
+      1. **확인 요청 (`AWAITING_TENANT`)**: 임대인이 전출계획 확인을 요청하면 `ops.json`에 상태가 기록되고 세입자에게 인앱 안내 채팅이 자동 발송된다.
+      2. **전출 예정 회신 (`MOVEOUT_PLANNED`)**: 임차인이 퇴실(전출) 의사와 퇴실 희망일을 회신하면, 호실 객체(`Room`)를 **퇴실예정 사전공개 매물(`pre_moveout_notice=True`, `is_published=True`, `available_from="{퇴실예정일} 입주예정"`)**로 연동해 공실 기간을 최소화한다.
+      3. **전출의사 없음 회신 (`STAY_CONFIRMED`)**: 임차인이 전출 의사가 없음(계속 거주 희망)을 회신하면 임대인에게 **연장 재계약 예고** 패널이 활성화된다.
+      4. **연장 재계약 예고 및 동의 (`RENEWAL_PREVIEWED` ➔ `RENEWAL_ACKNOWLEDGED`)**: 전출의사가 없는 세입자에게 임대인이 **동일조건 연장(`SAME_TERMS`)** 또는 **법정 5% 상한(`Contract.validate_renewal_cap`) 이내 조정 조건(`ADJUSTED_WITHIN_5PCT`)**으로 연장 재계약 예고장을 발송하며, 옵션에 따라 실시간 공동 재계약방(`CoSignSession(mode="RENEWAL")`)을 즉시 함께 개설해 원스톱 전자서명으로 연결한다.
+
+21. **매월 임대료 납입일(=입주일) 3일 전 사전 통보 및 납입일 1일 후 미납 통보 거버넌스 (`RentBillingNotice`)**:
+    - **약정 납입일(`Contract.payment_day`) 단일 기준**: 별도 약정이 없는 한 계약의 `move_in_date`(입주일) 일자(`1~31일`)를 매월 임대료 납입일로 삼으며, 단월(28·29·30일 월)에는 `calendar.monthrange`를 통해 해당 월 말일로 자동 클램핑한다.
+    - **납입일 3일 전 사전 안내 (`PRE_DUE_3D`, `납입일 - 3일`)**:
+      - 차기 납입 예정일 `due_date`로부터 정확히 3일 전(`(due_date - as_of).days == 3`)에 해당 귀속년월(`YYYY-MM`)의 실청구 예정액이 `0원`보다 크고 선수금으로 이미 완납되지 않은 경우, 납입기한·청구액·입금계좌를 담은 사전 안내(`RentBillingNotice`, `ops.json`) 및 1:1 인앱 메시지(`DirectChat`)를 발송한다.
+      - 후불 입주 당월 비과세(`POSTPAID_MOVE_IN_EXEMPT`) 및 전세(`due == 0`)는 원천 제외한다.
+    - **납입일 1일 후 미납 통보 (`OVERDUE_1D`, `납입일 + 1일` 이후 미납 시)**:
+      - 납입기한일 다음날(`as_of == due_date + 1일`, 또는 미통보 경과분 포함 시 `as_of >= due_date + 1일`) 도래 시점에 해당 납입기한 귀속년월까지의 실시간 FIFO 원장(`Contract.ledger(up_to_ym=past_ym)`)을 검증하여 **실제 미납액(`total_unpaid > 0`)이 존재할 때만** 미납 통보를 발송한다.
+      - **완납자 오발송 차단 및 자동 해소**: 납입일 당일 또는 통보 전 수납이 완료되어 `total_unpaid == 0`인 호실은 자동/수동 미납 통보가 원천 차단(`DomainError` 400)되며, 미납 통보 발송 후 입금(`FifoPaymentEngine.collect`)이 이루어지면 해당 통보 객체 상태가 즉시 `RESOLVED_PAID`로 자동 전환된다.
+      - **중복 발송 차단 (Idempotency)**: 동일 `(id_contract, billing_ym, notice_type)` 키로 이미 발송된 통보는 중복 발송되지 않는다(`Conflict` 409).
+
+22. **OpenRent(`openrent.co.uk`) 벤치마킹 직거래 포털(`apps/rent3/frontend/index.html`) 및 로그인 후 역할별 자동 페이지 이동 거버넌스**:
+    - **OpenRent 스타일 직거래 포털 구성 (`/rent3/index.html`)**:
+      - **상단 Dual-Audience 네비게이션**: 임차인 메뉴(For Tenants), 임대인 메뉴(For Landlords), 실시간 Data Pool 허브 링크, 그린 CTA `[+ 매물 등록 (Add Listing)]`, `[로그인 / 회원가입 (Sign In)]` 및 로그인 상태 배지·로그아웃 제공.
+      - **히어로 검색 & 특화 도구**: 키워드·지점·매물유형 통합 검색바, 즉시입주·만기전출 사전공개·등기클린 퀵 필터, OpenRent 시그니처 **월세 적정 예산 계산기(Affordability Calculator)** 내장.
+      - **`No Dead Listings` 실시간 공실 연동**: 공동 Data Pool(`rooms.json`)의 공개 공실 및 만기전출 예정 사전공개 매물을 실시간 표출하고, `ops.json`(`DirectChat`) 기반 1:1 방문투어 예약 및 *Rent Now* 5단계 공동계약 입장을 지원한다.
+    - **통합 인증(`POST /api/rent3/pool/auth/login`) 및 역할별 자동 라우팅 규칙**:
+      - 👑 **총괄 관리인 (`superadmin` / `admin`)**: `admin` / `0202`(및 플랫폼 기본 `1212` 호환) 로그인 시 관리인 전용 앱인 **`/rent3_admin/`**(`apps/rent3_admin`, 플랫폼 총괄 관리인 거버넌스 센터)로 즉시 이동한다 (옵션 선택 시 `/rent3/pool.html` 이동).
+      - 🏢 **임대인 / 건물주 (`lessor` / `branch_admin`)**: `chic`(`main`), `sunho`(`sunho`), `sinbi`(`sinbi`) 및 `users.json` 등재 가맹 임대인 로그인 시 보유 지점에 맞춰 `/rent3_lessor/?branch={branch}`로 자동 이동한다 (`+ 매물 등록` 진입 시 `&tab=rooms`, `중개 계약서 등록` 진입 시 `&tab=broker`).
+      - 🔑 **입주 임차인 (`tenant`)**: `users.json`의 입주 세입자(성명·연락처·이메일·ID) 로그인 시 본인 계약 호실 마이홈 `/rent3_tenant/?tenant={tenant_id}`로 자동 이동한다.
+      - 📢 **예비임차인 (`prospect`)**: 미배정 예비임차인 또는 신규 간편가입자 로그인 시 `/rent3_tenant/?view=listings`(공실 탐색 화면)로 자동 이동한다.
+      - 🤝 **실시간 공동계약 (`rent3_contract` 호출·응답 개시 원칙)**: 비로그인 코드 입장 없이 임대인과 임차인이 각각 로그인(본인인증 완료) 후 `/rent3_contract/`로 진입하며, 둘 중 한쪽이 먼저 매물을 선택해 상대를 호출(`call_counterparty`)하고 상대가 응답(`respond_to_call`)하면 계약이 시작된다. 서명 전 반드시 **상호 신분증 확인 체크**와 **등기부등본 확인 체크**를 모두 완료해야 한다.
 
 ---
 

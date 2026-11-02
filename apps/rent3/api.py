@@ -30,6 +30,9 @@ from .routers.tax_expenses import (
 from .routers.entities import (
     router as entities_router
 )
+from .routers.pool_hub import (
+    router as pool_hub_router
+)
 
 # 메인 라우터 생성 및 도메인 서브 라우터 통합 (기존 API 엔드포인트 100% 하위 호환성 유지)
 router = APIRouter(tags=["rent3"])
@@ -38,6 +41,7 @@ router.include_router(public_router)
 router.include_router(operations_router)
 router.include_router(tax_expenses_router)
 router.include_router(entities_router)
+router.include_router(pool_hub_router)
 
 __all__ = [
     "router",

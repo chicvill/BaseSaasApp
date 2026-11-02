@@ -273,7 +273,7 @@ class Rent3EntityManager:
         return ENTITY_CLS_MAP[key]
 
     @classmethod
-    def create(cls, entity_type: str, data: Dict[str, Any]) -> Obj:
+    def create(cls, entity_type: str, data: Dict[str, Any]) -> Any:
         """신규 객체 생성 및 인덱스 등록."""
         key = entity_type.lower()
         model_cls = cls.get_class(key)
@@ -290,7 +290,7 @@ class Rent3EntityManager:
         return obj
 
     @classmethod
-    def find_by_custom_id(cls, entity_type: str, custom_id: str) -> Optional[Obj]:
+    def find_by_custom_id(cls, entity_type: str, custom_id: str) -> Optional[Any]:
         """고유 ID(예: id_lessor, id_room) 또는 시스템 id 로 단일 객체 초고속 조회 (O(1) 캐시)."""
         key = entity_type.lower()
         model_cls = cls.get_class(key)
@@ -327,7 +327,7 @@ class Rent3EntityManager:
         return None
 
     @classmethod
-    def update(cls, entity_type: str, custom_id: str, updates: Dict[str, Any]) -> Obj:
+    def update(cls, entity_type: str, custom_id: str, updates: Dict[str, Any]) -> Any:
         """기존 객체 필드 편집 및 인덱스 갱신."""
         key = entity_type.lower()
         item = cls.find_by_custom_id(key, custom_id)
@@ -368,7 +368,7 @@ class Rent3EntityManager:
         return True
 
     @classmethod
-    def search(cls, entity_type: str, query: str = "", filters: Optional[Dict[str, Any]] = None) -> List[Obj]:
+    def search(cls, entity_type: str, query: str = "", filters: Optional[Dict[str, Any]] = None) -> List[Any]:
         """객체 검색 (키워드 매칭 및 필드 필터)."""
         model_cls = cls.get_class(entity_type)
         all_items = model_cls.all()
@@ -415,8 +415,8 @@ class Rent3WorkflowEngine:
         return {
             "app_name": "Smart Rent3 (차세대 비대면 직거래 & 올인원 건물관리)",
             "google_play_link": "https://play.google.com/store/apps/details?id=com.basesaas.rent3",
-            "home_url": "http://localhost:8000/rent3/public.html",
-            "admin_url": "http://localhost:8000/rent3/index.html?role=admin",
+            "home_url": "http://localhost:8000/rent3/index.html",
+            "admin_url": "http://localhost:8000/rent3/public.html?role=admin",
             "status": "PUBLISHED_ACTIVE"
         }
 

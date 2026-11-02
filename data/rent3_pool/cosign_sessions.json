@@ -1,0 +1,107 @@
+{
+  "pool": "rent3_pool",
+  "collection": "cosign_sessions",
+  "revision": 2,
+  "updated_at": "2026-10-29T19:17:02",
+  "count": 1,
+  "items": [
+    {
+      "id": "cs_2e289e9e",
+      "created_at": "2026-10-29T19:17:02",
+      "updated_at": "2026-10-29T19:17:02",
+      "session_code": "408188",
+      "mode": "NEW",
+      "prev_contract_id": "",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "시크빌 본점",
+      "building_address": "서울특별시 관악구 남부순환로 1820-12",
+      "id_room": "room_main_203",
+      "room_no": "203",
+      "id_lessor": "lessor_chic",
+      "lessor_name": "김임대 (시크빌 대표)",
+      "lessor_phone": "010-2222-1111",
+      "lessor_account": "신한 110-482-998877",
+      "id_tenant": "",
+      "current_step": 1,
+      "status": "IN_PROGRESS",
+      "revision": 1,
+      "registry_data": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대 (시크빌 대표)",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "checked_date": "2026-10-29"
+      },
+      "step1_lessor_confirmed": true,
+      "step1_tenant_locked": false,
+      "option_checks": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)",
+          "checked": true
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)",
+          "checked": true
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)",
+          "checked": true
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상",
+          "checked": true
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체",
+          "checked": true
+        }
+      ],
+      "facility_notes": "도배·장판·수압·배수·도어락 현장 동반 확인 이상 없음",
+      "step2_lessor_confirmed": false,
+      "step2_tenant_locked": false,
+      "terms": {
+        "tenant_name": "김예비",
+        "tenant_phone": "010-9999-2030",
+        "tenant_email": "",
+        "tenant_car_number": "",
+        "lease_type": "월세",
+        "pay_timing": "후불",
+        "vat_target": false,
+        "vat_separate": true,
+        "contract_deposit": 300000,
+        "deposit": 5000000,
+        "monthly_rent": 500000,
+        "maintenance_fee": 50000,
+        "move_in_date": "2026-10-29",
+        "lease_term_months": 12,
+        "special_terms": "1. 본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.\n2. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n3. 월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함."
+      },
+      "step3_lessor_agreed": false,
+      "step3_tenant_agreed": false,
+      "lessor_verified": true,
+      "tenant_verified": false,
+      "lessor_signature": "",
+      "lessor_signed_at": "",
+      "tenant_signature": "",
+      "tenant_signed_at": "",
+      "integrity_hash": "",
+      "deposit_paid_confirmed": false,
+      "payment_method": "TRANSFER",
+      "created_contract_id": "",
+      "fixed_date_no": "",
+      "completed_at": "",
+      "_kind": "cosignsession"
+    }
+  ]
+}

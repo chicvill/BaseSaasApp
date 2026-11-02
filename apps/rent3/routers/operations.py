@@ -242,12 +242,12 @@ def send_quick_reply(branch: str, room_id: str, template: str = Query(...)):
         "access_info": {
             "message": "🔑 입주를 환영합니다! 세대 디지털 도어락 비밀번호 및 차량 주차 등록은 세입자 전용 라운지에서 확인하실 수 있습니다.",
             "msg_type": "action_link",
-            "quick_action_url": f"/rent3/public.html?room={room_id}#lounge"
+            "quick_action_url": f"/rent3/index.html?room={room_id}#lounge"
         },
         "payment_reminder": {
             "message": "💳 이번 달 정기 임대료 및 관리비 청구서가 발행되었습니다. 세입자 라운지에서 간편결제(신용카드/카카오페이)로 납부하실 수 있습니다.",
             "msg_type": "action_link",
-            "quick_action_url": f"/rent3/public.html?room={room_id}#lounge"
+            "quick_action_url": f"/rent3/index.html?room={room_id}#lounge"
         }
     }
     tpl = templates.get(template, {
@@ -914,7 +914,7 @@ def inspect_checkout(branch: str, room_id: str, req: CheckOutInspectReq):
                 f"세입자 라운지에서 세부 명세를 확인하시고 동의 서명해 주시기 바랍니다."
             ),
             msg_type="checkout_settlement",
-            quick_action_url=f"/rent3/public.html?branch={branch}&room={room_id}#tenantCheckoutCard",
+            quick_action_url=f"/rent3/index.html?branch={branch}&room={room_id}#tenantCheckoutCard",
             is_read=False
         )
         chat_msg.save(f"chat_checkout_inspect_{room_id}")
@@ -1120,7 +1120,7 @@ def submit_rtms_report(target_id: str, branch: str = Query("main")):
             sender_name="김임대 (임대인)",
             message=f"🏛️ [국토교통부] 주택임대차 계약신고가 정상 접수되어 대법원 확정일자가 부여되었습니다.\n• 확정일자 번호: {report.fixed_date_number}\n• 부여일시: {report.fixed_date_granted_at}\n• 우선변제권 효력: {report.legal_effect_date}\n세입자 라운지에서 공식 신고필증을 언제든 인쇄·열람하실 수 있습니다.",
             msg_type="system_notice",
-            quick_action_url=f"public.html?view=tenant&room={report.room_id}"
+            quick_action_url=f"index.html?view=tenant&room={report.room_id}"
         )
         msg.save("rtms_chat_notice")
     except Exception as e:
@@ -1346,7 +1346,7 @@ def propose_renewal(req: RenewalProposeReq):
         sender_name="임대인(관제센터)",
         message=msg_text,
         quick_action_label="📝 재계약 조건 확인 & 서명",
-        quick_action_url=f"/rent3/public.html?room={req.room_id}#renewal"
+        quick_action_url=f"/rent3/index.html?room={req.room_id}#renewal"
     )
     chat.save("bot_sent_renewal_proposal")
 

@@ -1,0 +1,737 @@
+/* apps/rent3/frontend/openrent.css — OpenRent(openrent.co.uk) 벤치마킹 직거래 포털 스타일시트 */
+:root {
+  --or-navy: #1d2d3d;
+  --or-navy-deep: #13202d;
+  --or-blue: #3276b1;
+  --or-blue-hover: #275d8b;
+  --or-sky: #ebf4fb;
+  --or-green: #2eb85c;
+  --or-green-hover: #24964a;
+  --or-green-soft: #eafaf0;
+  --or-amber: #d97706;
+  --or-amber-soft: #fef3c7;
+  --or-bg: #f5f7fa;
+  --or-surface: #ffffff;
+  --or-border: #dce3ec;
+  --or-text: #1e293b;
+  --or-muted: #5b6b7f;
+  --or-radius: 12px;
+  --or-shadow: 0 8px 24px rgba(19, 32, 45, 0.07);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body.or-body {
+  margin: 0;
+  background: var(--or-bg);
+  color: var(--or-text);
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.55;
+}
+
+.or-container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+
+/* ── Top Navigation Bar (OpenRent Style) ── */
+.or-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 120;
+  background: #ffffff;
+  border-bottom: 1px solid var(--or-border);
+  box-shadow: 0 2px 10px rgba(19, 32, 45, 0.04);
+}
+
+.or-navbar__inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.or-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--or-navy);
+}
+
+.or-brand__logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--or-blue), #1e5688);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgba(50, 118, 177, 0.25);
+}
+
+.or-brand__title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--or-navy);
+}
+
+.or-brand__title span {
+  color: var(--or-blue);
+}
+
+.or-brand__tag {
+  background: var(--or-green-soft);
+  color: #157347;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid #b7ebc6;
+}
+
+.or-navlinks {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.or-navlink {
+  color: var(--or-navy);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 6px 4px;
+  cursor: pointer;
+  background: none;
+  border: none;
+}
+
+.or-navlink:hover {
+  color: var(--or-blue);
+}
+
+.or-nav-cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Buttons ── */
+.or-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: all 0.16s ease;
+  font-family: inherit;
+}
+
+.or-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.or-btn--green {
+  background: var(--or-green);
+  color: #fff;
+}
+
+.or-btn--green:hover:not(:disabled) {
+  background: var(--or-green-hover);
+}
+
+.or-btn--blue {
+  background: var(--or-blue);
+  color: #fff;
+}
+
+.or-btn--blue:hover:not(:disabled) {
+  background: var(--or-blue-hover);
+}
+
+.or-btn--outline {
+  background: #fff;
+  color: var(--or-navy);
+  border-color: #cbd5e1;
+}
+
+.or-btn--outline:hover:not(:disabled) {
+  border-color: var(--or-blue);
+  color: var(--or-blue);
+  background: var(--or-sky);
+}
+
+.or-btn--ghost {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.or-btn--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.or-btn--sm {
+  padding: 6px 12px;
+  font-size: 12.5px;
+}
+
+.or-user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--or-sky);
+  border: 1px solid #bfd9f2;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--or-navy);
+}
+
+/* ── Active Session Banner ── */
+.or-session-strip {
+  background: #eef6ff;
+  border-bottom: 1px solid #cfe2f7;
+  padding: 10px 20px;
+}
+
+.or-session-strip__inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  color: var(--or-navy);
+}
+
+/* ── Hero Section & Search Box ── */
+.or-hero {
+  background: linear-gradient(135deg, var(--or-navy-deep) 0%, #1f3c5a 55%, #2b5c8a 100%);
+  color: #fff;
+  padding: 52px 0 46px;
+  position: relative;
+  overflow: hidden;
+}
+
+.or-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(46, 184, 92, 0.2);
+  border: 1px solid rgba(46, 184, 92, 0.5);
+  color: #a7f3d0;
+  padding: 5px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.or-hero h1 {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1.28;
+  margin: 0 0 12px;
+  letter-spacing: -0.02em;
+}
+
+.or-hero__sub {
+  font-size: 16px;
+  color: #dbeafe;
+  max-width: 760px;
+  margin: 0 auto 28px;
+}
+
+.or-search-card {
+  background: #ffffff;
+  color: var(--or-text);
+  border-radius: 14px;
+  padding: 14px;
+  max-width: 940px;
+  margin: 0 auto;
+  box-shadow: 0 18px 40px rgba(9, 18, 28, 0.28);
+}
+
+.or-search-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.1fr 1.1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.or-input,
+.or-select,
+.or-textarea {
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.or-input:focus,
+.or-select:focus,
+.or-textarea:focus {
+  border-color: var(--or-blue);
+  box-shadow: 0 0 0 3px rgba(50, 118, 177, 0.15);
+}
+
+.or-filter-bar {
+  max-width: 940px;
+  margin: 14px auto 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.or-chip {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f1f5f9;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 6px 13px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.or-chip:hover,
+.or-chip.is-active {
+  background: #ffffff;
+  color: var(--or-navy);
+  border-color: #ffffff;
+}
+
+/* ── Affordability Calculator Drawer ── */
+.or-calc-panel {
+  max-width: 940px;
+  margin: 14px auto 0;
+  background: #ffffff;
+  color: var(--or-text);
+  border-radius: 12px;
+  padding: 18px 20px;
+  text-align: left;
+  box-shadow: var(--or-shadow);
+}
+
+/* ── Trust Strip ── */
+.or-trust-strip {
+  background: #ffffff;
+  border-bottom: 1px solid var(--or-border);
+  padding: 18px 0;
+}
+
+.or-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  text-align: center;
+}
+
+.or-trust-item strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--or-navy);
+}
+
+.or-trust-item span {
+  font-size: 12.5px;
+  color: var(--or-muted);
+}
+
+/* ── Role Gateway Cards ── */
+.or-section {
+  padding: 40px 0;
+}
+
+.or-section__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.or-section__title {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--or-navy);
+  margin: 0;
+}
+
+.or-section__sub {
+  font-size: 14px;
+  color: var(--or-muted);
+  margin: 4px 0 0;
+}
+
+.or-role-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+}
+
+.or-role-card {
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: var(--or-radius);
+  padding: 18px;
+  box-shadow: var(--or-shadow);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.16s ease, border-color 0.16s ease;
+}
+
+.or-role-card:hover {
+  transform: translateY(-3px);
+  border-color: var(--or-blue);
+}
+
+.or-role-card h3 {
+  margin: 8px 0 6px;
+  font-size: 16.5px;
+  color: var(--or-navy);
+}
+
+.or-role-card p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--or-muted);
+}
+
+/* ── Property Listing Cards ── */
+.or-listings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 20px;
+}
+
+.or-prop-card {
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: var(--or-shadow);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.or-prop-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--or-blue);
+}
+
+.or-prop-media {
+  position: relative;
+  height: 196px;
+  background: #e2e8f0;
+}
+
+.or-prop-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.or-prop-badges {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.or-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 6px;
+}
+
+.or-pill--green {
+  background: #16a34a;
+  color: #fff;
+}
+
+.or-pill--amber {
+  background: #d97706;
+  color: #fff;
+}
+
+.or-pill--navy {
+  background: rgba(19, 32, 45, 0.86);
+  color: #fff;
+}
+
+.or-prop-body {
+  padding: 18px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.or-prop-price {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--or-blue);
+  margin: 4px 0 6px;
+}
+
+.or-prop-meta {
+  font-size: 12.5px;
+  color: var(--or-muted);
+  margin-bottom: 10px;
+}
+
+.or-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 14px;
+}
+
+.or-tag {
+  font-size: 11.5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── Dual Audience Pillars (Tenants vs Landlords) ── */
+.or-dual-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+
+.or-pillar {
+  background: var(--or-surface);
+  border: 1px solid var(--or-border);
+  border-radius: 16px;
+  padding: 28px;
+  box-shadow: var(--or-shadow);
+}
+
+.or-pillar ul {
+  padding-left: 18px;
+  margin: 14px 0 20px;
+  color: #334155;
+  font-size: 14px;
+}
+
+.or-pillar li {
+  margin-bottom: 8px;
+}
+
+/* ── Rent Now Co-Sign Banner ── */
+.or-cosign-banner {
+  background: linear-gradient(135deg, #1d2d3d, #284b6e);
+  color: #fff;
+  border-radius: 16px;
+  padding: 28px;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 22px;
+  align-items: center;
+}
+
+.or-step-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.or-step-badge {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Modals ── */
+.or-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(4px);
+  z-index: 250;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.or-modal-backdrop.is-open {
+  display: flex;
+}
+
+.or-modal {
+  background: #ffffff;
+  color: var(--or-text);
+  width: 100%;
+  max-width: 540px;
+  max-height: 92vh;
+  overflow-y: auto;
+  border-radius: 16px;
+  padding: 24px;
+  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.3);
+}
+
+.or-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  background: #f1f5f9;
+  padding: 5px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+
+.or-tab {
+  border: none;
+  background: transparent;
+  padding: 9px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--or-muted);
+  cursor: pointer;
+}
+
+.or-tab.is-active {
+  background: #ffffff;
+  color: var(--or-navy);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.or-field {
+  margin-bottom: 12px;
+}
+
+.or-field label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 5px;
+}
+
+.or-demo-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.or-demo-btn {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--or-border);
+  background: #f8fafc;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--or-navy);
+  transition: all 0.14s;
+}
+
+.or-demo-btn:hover {
+  border-color: var(--or-blue);
+  background: var(--or-sky);
+}
+
+.or-footer {
+  background: var(--or-navy-deep);
+  color: #94a3b8;
+  padding: 32px 0;
+  font-size: 13px;
+  margin-top: 30px;
+}
+
+.or-footer a {
+  color: #cbd5e1;
+  text-decoration: none;
+}
+
+.or-footer a:hover {
+  color: #ffffff;
+}
+
+/* Override Bass alert stack width cleanly on light portal */
+#app-alert.bass-alert-stack {
+  max-width: 1120px;
+  margin: 12px auto 0;
+  padding: 0 20px;
+}
+
+@media (max-width: 900px) {
+  .or-search-grid {
+    grid-template-columns: 1fr;
+  }
+  .or-trust-grid,
+  .or-role-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .or-dual-grid,
+  .or-cosign-banner {
+    grid-template-columns: 1fr;
+  }
+  .or-hero h1 {
+    font-size: 25px;
+  }
+}
+
+@media (max-width: 560px) {
+  .or-trust-grid,
+  .or-role-grid,
+  .or-demo-grid {
+    grid-template-columns: 1fr;
+  }
+  .or-tabs {
+    grid-template-columns: 1fr;
+  }
+}
+
