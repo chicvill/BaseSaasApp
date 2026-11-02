@@ -3,6 +3,15 @@
   "python.analysis.extraPaths": [
     "${workspaceFolder}",
     "${workspaceFolder}/apps",
+    "${workspaceFolder}/apps/rent_dist",
     "C:/Users/USER/AppData/Local/Programs/Python/Python314/Lib/site-packages"
-  ]
+  ],
+  "files.exclude": {
+    "apps/rent3": true,
+    "apps/rent3_admin": true,
+    "apps/rent3_contract": true,
+    "apps/rent3_lessor": true,
+    "apps/rent3_tenant": true,
+    "apps/_rent3_core": true
+  }
 }
