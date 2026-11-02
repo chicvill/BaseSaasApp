@@ -1,0 +1,27 @@
+name: Deploy to Coolify
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Trigger Coolify Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Webhook via Coolify REST API
+        run: |
+          response=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "http://34.31.10.12:8000/api/v1/deploy?uuid=lwjq82pql2xqiio0frshtddp" \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN || '1|ZHl4IPrs1IfSSOdDFJIdjTP0J9XZaltcI4XrYsKE2b453b4a' }}")
+          
+          echo "$response"
+          status=$(echo "$response" | grep "HTTP_STATUS" | cut -d':' -f2)
+          
+          if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+            echo "Successfully triggered Coolify deployment!"
+          else
+            echo "Deployment trigger failed with HTTP status: $status"
+            exit 1
+          fi
+

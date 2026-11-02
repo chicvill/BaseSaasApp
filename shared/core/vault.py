@@ -15,8 +15,14 @@ from typing import Optional
 
 logger = logging.getLogger("mqnet.vault")
 
-# 기본 마스터 시크릿 (코드베이스 내부 고정 마스터 키)
-DEFAULT_MASTER_KEY = "Fz8vH6_Y_9V7lDZb9uJc7mR2nL1pT4aQ5sX3k6M1z4Y="
+def _get_master_key(master_key: Optional[str] = None) -> str:
+    key = master_key or os.getenv("MASTER_CRYPTO_KEY")
+    if not key:
+        raise ValueError(
+            "마스터 암호화 키(MASTER_CRYPTO_KEY)가 설정되지 않았습니다. "
+            "OS 환경변수 또는 Coolify 환경변수로 MASTER_CRYPTO_KEY를 제공해 주세요."
+        )
+    return key
 
 
 def _get_derived_key(master_key: str) -> bytes:
@@ -24,12 +30,13 @@ def _get_derived_key(master_key: str) -> bytes:
     return hashlib.sha256(master_key.encode("utf-8")).digest()
 
 
-def encrypt_text(plaintext: str, master_key: str = DEFAULT_MASTER_KEY) -> str:
+def encrypt_text(plaintext: str, master_key: Optional[str] = None) -> str:
     """
     텍스트를 AES-GCM(또는 ChaCha20/HMAC-CTR)로 암호화하여 Base64 문자열 반환.
     cryptography 라이브러리가 있으면 AES-GCM 사용, 없으면 표준 라이브러리 HMAC-CTR 사용.
     """
-    key = _get_derived_key(master_key)
+    valid_key = _get_master_key(master_key)
+    key = _get_derived_key(valid_key)
     raw_bytes = plaintext.encode("utf-8")
 
     try:
@@ -59,9 +66,10 @@ def encrypt_text(plaintext: str, master_key: str = DEFAULT_MASTER_KEY) -> str:
         return base64.b64encode(payload).decode("ascii")
 
 
-def decrypt_text(encrypted_b64: str, master_key: str = DEFAULT_MASTER_KEY) -> str:
+def decrypt_text(encrypted_b64: str, master_key: Optional[str] = None) -> str:
     """Base64 암호화 문자열을 복호화하여 평문 텍스트 반환"""
-    key = _get_derived_key(master_key)
+    valid_key = _get_master_key(master_key)
+    key = _get_derived_key(valid_key)
     try:
         payload = base64.b64decode(encrypted_b64.encode("ascii"))
     except Exception as e:
@@ -111,7 +119,10 @@ def load_encrypted_env(file_path: Optional[str] = None, master_key: Optional[str
     if not os.path.exists(file_path):
         return False
 
-    key = master_key or os.getenv("MASTER_CRYPTO_KEY", DEFAULT_MASTER_KEY)
+    key = master_key or os.getenv("MASTER_CRYPTO_KEY")
+    if not key:
+        logger.debug("ℹ️ Vault: MASTER_CRYPTO_KEY 미설정 - .env.encrypted 복호화 건너뜀")
+        return False
 
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -166,7 +177,7 @@ def auto_sync_vault(base_dir: Optional[str] = None, force: bool = False) -> bool
         try:
             with open(src_file, "r", encoding="utf-8") as f:
                 src_data = f.read()
-            encrypted = encrypt_text(src_data, DEFAULT_MASTER_KEY)
+            encrypted = encrypt_text(src_data, os.getenv("MASTER_CRYPTO_KEY", ""))
             with open(enc_file, "w", encoding="utf-8") as f:
                 f.write(encrypted)
             logger.info(f"🔄 Vault: .env.shared 변경 감지 -> .env.encrypted 자동 암호화 갱신 완료 ({len(encrypted)} bytes)")
@@ -224,7 +235,7 @@ if __name__ == "__main__":
             sys.exit(1)
         with open(enc_file, "r", encoding="utf-8") as f:
             enc_data = f.read().strip()
-        dec = decrypt_text(enc_data, DEFAULT_MASTER_KEY)
+        dec = decrypt_text(enc_data, os.getenv("MASTER_CRYPTO_KEY", ""))
         print("Decrypted Content:\n" + dec)
     elif mode == "sync":
         synced = auto_sync_vault(base_dir)
@@ -244,7 +255,7 @@ if __name__ == "__main__":
             sys.exit(1)
         with open(src_file, "r", encoding="utf-8") as f:
             src_data = f.read()
-        encrypted = encrypt_text(src_data, DEFAULT_MASTER_KEY)
+        encrypted = encrypt_text(src_data, os.getenv("MASTER_CRYPTO_KEY", ""))
         with open(enc_file, "w", encoding="utf-8") as f:
             f.write(encrypted)
         ensure_git_hook(base_dir)
