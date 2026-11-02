@@ -2,8 +2,8 @@
 (function () {
   "use strict";
 
-  const APP_ID = "rent3";
-  const SESSION_KEY = "rent3_session";
+  const APP_ID = "rent4";
+  const SESSION_KEY = "rent4_session";
 
   const state = {
     listings: [],

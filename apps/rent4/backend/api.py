@@ -80,6 +80,226 @@ def summary() -> Dict[str, Any]:
 
 
 # ── 매물 (공개 목록은 로그인 없이) ──
+SEED_LISTINGS = [
+    {
+        "id": "room_main_203",
+        "branch": "main",
+        "building_name": "시크빌 본점",
+        "address": "서울특별시 관악구 남부순환로 1820-12",
+        "room_no": "203",
+        "name": "203호 (채광 최상 남향 즉시입주)",
+        "room_category": "주거용 원룸",
+        "floor": 2,
+        "area_sqm": 23.8,
+        "lease_type": "월세",
+        "pay_timing": "후불",
+        "deposit": 5000000,
+        "monthly_rent": 500000,
+        "maintenance_fee": 50000,
+        "vat_applicable": False,
+        "available_from": "즉시입주",
+        "pre_moveout_notice": False,
+        "clean_title": True,
+        "status_description": "신규 천장형 에어컨·빌트인 냉장고 완비, 복비 0원 직거래 즉시입주",
+        "options": [
+            "시스템 에어컨",
+            "드럼 세탁기",
+            "빌트인 냉장고",
+            "인덕션 쿡탑",
+            "디지털 도어락"
+        ],
+        "image": "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&q=80",
+        "lessor_name": "김임대 (시크빌 대표)",
+        "lessor_phone": "010-2222-1111"
+    },
+    {
+        "id": "room_sinbi_202",
+        "branch": "sinbi",
+        "building_name": "신비주택 & 상가",
+        "address": "서울특별시 마포구 월드컵북로 64-5",
+        "room_no": "202",
+        "name": "202호 (복층형 오피스텔 즉시입주)",
+        "room_category": "오피스텔",
+        "floor": 2,
+        "area_sqm": 29.0,
+        "lease_type": "월세",
+        "pay_timing": "후불",
+        "deposit": 10000000,
+        "monthly_rent": 620000,
+        "maintenance_fee": 60000,
+        "vat_applicable": False,
+        "available_from": "즉시입주",
+        "pre_moveout_notice": False,
+        "clean_title": True,
+        "status_description": "홍대입구 인접 층고 높은 복층 구조, 채광 우수",
+        "options": [
+            "시스템 에어컨",
+            "드럼 세탁기",
+            "빌트인 냉장고",
+            "인덕션 쿡탑",
+            "디지털 도어락"
+        ],
+        "image": "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80",
+        "lessor_name": "최신비 (신비주택 대표)",
+        "lessor_phone": "010-4444-3333"
+    },
+    {
+        "id": "room_sunho_302",
+        "branch": "sunho",
+        "building_name": "선호아트빌",
+        "address": "서울특별시 동작구 상도로 245-8",
+        "room_no": "302",
+        "name": "302호 (조용한 주택가 풀옵션 공실)",
+        "room_category": "주거용 원룸",
+        "floor": 3,
+        "area_sqm": 20.4,
+        "lease_type": "월세",
+        "pay_timing": "후불",
+        "deposit": 3000000,
+        "monthly_rent": 450000,
+        "maintenance_fee": 40000,
+        "vat_applicable": False,
+        "available_from": "즉시입주",
+        "pre_moveout_notice": False,
+        "clean_title": True,
+        "status_description": "도배·장판 신규 시공 완료, 지하철 도보 4분",
+        "options": [
+            "시스템 에어컨",
+            "드럼 세탁기",
+            "빌트인 냉장고",
+            "인덕션 쿡탑",
+            "디지털 도어락"
+        ],
+        "image": "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&q=80",
+        "lessor_name": "박선호 (선호아트빌 대표)",
+        "lessor_phone": "010-3333-2222"
+    }
+]
+
+
+@router.get("/pool/landing")
+def portal_landing() -> Dict[str, Any]:
+    """OpenRent 직거래 포털 랜딩 페이지용 실시간 매물 및 통계 반환."""
+    bldgs = Building.all()
+    rooms = Room.all()
+    user_listings = listings.public_list()
+    portal_listings = list(SEED_LISTINGS)
+    if user_listings:
+        portal_listings = user_listings + portal_listings
+
+    branches_info = [
+        {"branch": "main", "building_name": "시크빌 본점", "address": "서울특별시 관악구 남부순환로 1820-12", "manager_phone": "010-2222-1111"},
+        {"branch": "sunho", "building_name": "선호아트빌", "address": "서울특별시 동작구 상도로 245-8", "manager_phone": "010-3333-2222"},
+        {"branch": "sinbi", "building_name": "신비주택 & 상가", "address": "서울특별시 마포구 월드컵북로 64-5", "manager_phone": "010-4444-3333"},
+    ]
+
+    demo_accounts = [
+        {
+            "group": "관리인",
+            "badge": "👑 총괄 관리인 전용 앱",
+            "label": "본사 총괄 관리인 (admin / 0202)",
+            "identifier": "admin",
+            "password": "0202",
+            "target_desc": "/rent4/관리인.html"
+        },
+        {
+            "group": "임대인",
+            "badge": "🏢 임대인(main)",
+            "label": "김임대 (시크빌 대표)",
+            "identifier": "chic",
+            "password": "1212",
+            "target_desc": "/rent4/임대인.html?branch=main"
+        },
+        {
+            "group": "임대인",
+            "badge": "🏢 임대인(sunho)",
+            "label": "박선호 (선호아트빌 대표)",
+            "identifier": "sunho",
+            "password": "1212",
+            "target_desc": "/rent4/임대인.html?branch=sunho"
+        },
+        {
+            "group": "임대인",
+            "badge": "🏢 임대인(sinbi)",
+            "label": "최신비 (신비주택 대표)",
+            "identifier": "sinbi",
+            "password": "1212",
+            "target_desc": "/rent4/임대인.html?branch=sinbi"
+        },
+        {
+            "group": "임차인",
+            "badge": "🔑 임차인(201호)",
+            "label": "이민수 (010-8888-2010)",
+            "identifier": "010-8888-2010",
+            "password": "1212",
+            "target_desc": "/rent4/임차인.html"
+        }
+    ]
+
+    return {
+        "success": True,
+        "stats": {
+            "total_buildings": len(bldgs) or 3,
+            "total_rooms": len(rooms) or 7,
+            "occupied_rooms": sum(1 for r in rooms if r.status == "occupied"),
+            "vacant_published_count": len(portal_listings),
+            "active_contracts": len([c for c in Contract.all() if c.status == "active"]),
+            "open_cosign_count": 0,
+            "pool_revision": 1,
+        },
+        "branches": branches_info,
+        "listings": portal_listings,
+        "open_sessions": [],
+        "demo_accounts": demo_accounts,
+    }
+
+
+@router.post("/pool/auth/login")
+def portal_login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """포털 데모 및 일반 사용자 로그인."""
+    ident = str(payload.get("identifier", "")).strip()
+    pw = str(payload.get("password", "")).strip()
+    hint = str(payload.get("target_hint", "")).strip()
+
+    res = accounts.login(ident, pw)
+    tok = res["token"]
+    user = accounts.whoami(User.by_username(res["username"]))
+    redirect_url = user.get("home", "/rent4/")
+    if hint == "pool":
+        redirect_url = "/rent4/관리인.html"
+    return {
+        "success": True,
+        "message": f"{user.get('name', ident)}님 환영합니다.",
+        "token": tok,
+        "user": {
+            "id": res["username"],
+            "name": user.get("name", ident),
+            "role": user.get("kind", "user"),
+            "role_label": user.get("kind", "user"),
+            "branch": user.get("branch", ""),
+            "redirect_url": redirect_url,
+        },
+        "redirect_url": redirect_url,
+    }
+
+
+@router.post("/pool/inquiries")
+def portal_inquiry(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    sender = str(payload.get("sender_name", "")).strip() or "방문객"
+    msg = str(payload.get("message", "")).strip()
+    branch = str(payload.get("branch", "")).strip()
+    room_no = str(payload.get("room_no", "")).strip()
+    target = branch or "chic"
+    chat.post(target, sender, f"{sender} (문의)", f"[{room_no}호 방문/직거래 문의] {msg}")
+    return {"success": True, "message": "임대인에게 문의가 안전하게 전달되었습니다."}
+
+
+@router.post("/pool/cosign-open")
+def portal_cosign_open(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return {"success": True, "message": "공동계약 화면으로 이동합니다.", "redirect_url": "/rent4/contract.html"}
+
+
+# ── 매물 (공개 목록은 로그인 없이) ──
 @router.get("/listings")
 def public_listings() -> Dict[str, Any]:
     return {"success": True, "listings": listings.public_list()}
