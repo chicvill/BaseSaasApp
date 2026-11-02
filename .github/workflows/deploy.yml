@@ -24,3 +24,4 @@ jobs:
             echo "Deployment trigger failed with HTTP status: $status"
             exit 1
           fi
+
