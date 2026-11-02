@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 매물</title>
+  <meta name="description" content="지금 계약할 수 있는 방. 매물을 고르면 회원가입 · 로그인 후 바로 계약을 신청합니다.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container" style="max-width:820px">
+  <header class="top">
+    <div>
+      <h1>🏠 <span class="bass-gradient-text">Rent4</span> 매물</h1>
+      <p class="sub bass-muted">지금 계약할 수 있는 방</p>
+    </div>
+    <div class="bass-row" id="topActions">
+      <a class="bass-btn bass-btn--sm" href="signup.html">회원가입</a>
+      <a class="bass-btn bass-btn--sm bass-btn--primary" href="login.html">로그인</a>
+    </div>
+  </header>
+  <div id="app-alert"></div>
+
+  <div class="bass-row" style="gap:8px;margin:6px 0 14px" id="filters"></div>
+  <section class="listing-grid" id="listings"><div class="bass-muted">불러오는 중...</div></section>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = Bass.escapeHtml;
+  const man = (n) => {
+    const v = Number(n || 0) / 10000;
+    return `${v.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}만`;
+  };
+  let all = [];
+  let building = "";
+
+  // 로그인한 사람에게는 [내 화면]
+  if (Bass.token()) {
+    Rent4.me().then((me) => {
+      $("topActions").innerHTML = `<a class="bass-btn bass-btn--sm bass-btn--primary" href="${esc(me.home)}">내 화면 →</a>`;
+    }).catch(() => Bass.setToken(""));
+  }
+
+  function render() {
+    const items = all.filter((l) => !building || l.building === building);
+    $("listings").innerHTML = items.length ? items.map((l) => `
+      <article class="bass-card stack listing" style="gap:8px">
+        <div class="bass-row" style="justify-content:space-between">
+          <strong style="font-size:17px">${esc(l.building)} ${esc(l.room)}호</strong>
+          <span class="bass-badge bass-badge--info">${esc(l.lease_type)} · ${esc(l.pay_timing)}</span>
+        </div>
+        <div class="listing-price">${l.lease_type === "전세" ? `전세 <b>${man(l.deposit)}</b>`
+          : `보증금 <b>${man(l.deposit)}</b> / 월 <b>${man(l.monthly)}</b>`}</div>
+        <div class="bass-muted" style="font-size:13px">${l.lease_type === "전세" ? "" : `월세 ${man(l.rent)} + 관리비 ${man(l.mgmt)} · `}입주 ${esc(l.available_from || "협의")}</div>
+        ${l.description ? `<p style="margin:0;font-size:13.5px;white-space:pre-wrap">${esc(l.description)}</p>` : ""}
+        <a class="bass-btn bass-btn--primary" style="justify-self:start" href="apply.html?listing=${encodeURIComponent(l.id)}">📝 계약 신청</a>
+      </article>`).join("")
+      : `<div class="bass-card bass-muted">지금 공개된 매물이 없습니다.</div>`;
+  }
+
+  Bass.api("rent4", "/listings").then(({ listings }) => {
+    all = listings;
+    const names = [...new Set(listings.map((l) => l.building))];
+    if (names.length > 1) {
+      $("filters").innerHTML = ["", ...names].map((n) =>
+        `<button class="bass-btn bass-btn--sm ${n === building ? "bass-btn--primary" : ""}" data-b="${esc(n)}">${esc(n || "전체")}</button>`).join("");
+      $("filters").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-b]");
+        if (!b) return;
+        building = b.dataset.b;
+        $("filters").querySelectorAll("[data-b]").forEach((x) => x.classList.toggle("bass-btn--primary", x === b));
+        render();
+      });
+    }
+    render();
+  }).catch(Bass.showError);
+})();
+</script>
+</body>
+</html>

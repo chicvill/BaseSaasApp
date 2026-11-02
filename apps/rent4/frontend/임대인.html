@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 임대인</title>
+  <meta name="description" content="당월 수납현황, 입금 문자 붙여 넣기, 신규 계약, 월별 수납현황."> 
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container">
+  <header class="top">
+    <div>
+      <h1>🏢 <span id="buildingName">Rent4 임대인</span></h1>
+      <p class="sub bass-muted" id="who">확인 중...</p>
+    </div>
+    <div class="bass-row">
+      <a class="bass-btn bass-btn--sm bass-btn--ghost hide" id="backAdmin" href="admin.html">← 건물 목록</a>
+      <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnPassword">🔒 비밀번호</button>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnLogout">로그아웃</button>
+    </div>
+  </header>
+  <div id="app-alert"></div>
+  <div id="pwBox" class="hide"></div>
+
+  <section id="workspace" class="hide stack">
+    <!-- 당월 수납현황 -->
+    <div class="bass-card stack dash" id="monthDash"><span class="bass-muted">불러오는 중...</span></div>
+
+    <!-- 붙여 넣기 -->
+    <section class="stack">
+      <div class="bass-card stack paste-box" id="pasteBox">
+        <label class="bass-label" for="bankText">📋 만능 붙여 넣기 — 은행 입금 문자 · 엑셀 표 · 구글 시트 주소 · 사진(입금 캡처 · 종이 계약서) · 엑셀 파일</label>
+        <textarea class="bass-input" id="bankText" placeholder="여기에 붙여 넣거나, 사진 · 엑셀 파일을 끌어다 놓으세요&#10;&#10;[Web발신]&#10;신한 10/25 14:32&#10;입금 440,000&#10;김수현"></textarea>
+        <div class="bass-row hide" id="pasteFile"></div>
+        <div class="bass-row">
+          <button class="bass-btn bass-btn--primary" id="btnPreview">🔍 분석하기</button>
+          <label class="bass-btn">📎 파일 · 사진<input type="file" id="pasteInput" accept=".xlsx,.txt,.tsv,image/*" hidden></label>
+          <span class="bass-muted" style="font-size:12.5px">무엇인지 알아서 나눠 보여 줍니다. 확인하고 반영 · 등록하기 전에는 저장하지 않습니다.</span>
+        </div>
+      </div>
+      <div id="previewBox" class="stack hide">
+        <div class="bass-row" style="justify-content:space-between">
+          <strong id="previewCount"></strong>
+          <button class="bass-btn bass-btn--primary" id="btnCommit">✅ 체크한 입금 반영</button>
+        </div>
+        <div id="previewList" class="stack"></div>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist">
+      <button class="bass-btn" data-tab="contracts" role="tab">📝 신규 계약</button>
+      <button class="bass-btn" data-tab="board" role="tab">📅 월별 수납현황</button>
+      <button class="bass-btn" data-tab="listings" role="tab">🏷️ 매물</button>
+      <button class="bass-btn" data-tab="accounts" role="tab">🔑 임차인 계정</button>
+      <button class="bass-btn" data-tab="import" role="tab">📥 Excel 가져오기</button>
+    </nav>
+
+    <!-- 수납 현황 -->
+    <section class="panel stack" data-panel="board" hidden>
+      <div class="bass-row">
+        <button class="bass-btn bass-btn--sm" id="prevYear">◀</button>
+        <strong id="yearLabel" style="font-size:18px"></strong>
+        <button class="bass-btn bass-btn--sm" id="nextYear">▶</button>
+      </div>
+      <div class="stats" id="boardStats"></div>
+      <div class="board-wrap"><table class="board" id="board"></table></div>
+      <div class="legend">
+        <span><i style="background:hsl(152 65% 40% / .5)"></i>입금 (금액 만원)</span>
+        <span><i style="background:hsl(356 85% 55% / .5)"></i>미납</span>
+        <span><i style="background:hsl(44 96% 50% / .4)"></i>이번 달 대기</span>
+        <span><i style="border:1px solid hsl(152 65% 50%)"></i>입금 문자로 반영</span>
+        <span>흐린 칸: 현 임차인 입주 전 · <b style="color:var(--diff)">!</b> 확인 필요</span>
+      </div>
+    </section>
+
+    <!-- 임대 계약 -->
+    <section class="panel stack" data-panel="contracts" hidden>
+      <form id="leaseForm" class="bass-card stack">
+        <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 한 번만 쓰는 계약 시작 링크가 만들어집니다. 그 자리에서 임차인에게 카카오톡 등으로 보내 주세요. 임차인은 링크에서 비밀번호를 정하고 계약에 동의합니다. 잔금 입금을 확인하면 호실에 입주 처리되고 임차인 계정(아이디 = 건물 코드 + 호실, 같은 비밀번호)이 열립니다.</div>
+        <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:10px">
+          <div><label class="bass-label" for="lRoom">호실</label><input class="bass-input" id="lRoom" required inputmode="numeric" placeholder="예: 303"></div>
+          <div><label class="bass-label" for="lName">임차인 이름</label><input class="bass-input" id="lName" required></div>
+          <div><label class="bass-label" for="lPhone">임차인 휴대폰</label><input class="bass-input" id="lPhone" required inputmode="tel" placeholder="010-0000-0000"></div>
+          <div><label class="bass-label" for="lType">구분</label><select class="bass-select bass-input" id="lType"><option>월세</option><option>전세</option></select></div>
+          <div><label class="bass-label" for="lTiming">납부</label><select class="bass-select bass-input" id="lTiming"><option>후불</option><option>선불</option><option>반선불</option></select></div>
+          <div><label class="bass-label" for="lDeposit">보증금 (원)</label><input class="bass-input" id="lDeposit" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lRent">월 임차료 (원)</label><input class="bass-input" id="lRent" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lMgmt">월 관리비 (원)</label><input class="bass-input" id="lMgmt" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="lStart">입주일</label><input class="bass-input" id="lStart" type="date" required></div>
+          <div><label class="bass-label" for="lEnd">만기일</label><input class="bass-input" id="lEnd" type="date"></div>
+        </div>
+        <div class="bass-row">
+          <button class="bass-btn bass-btn--primary" id="btnLease" type="submit">계약 발행하고 시작 링크 만들기</button>
+          <button class="bass-btn" id="btnPaper" type="button" title="이미 대면으로 체결한 계약: 바로 입주 처리하고 임차인 계정을 엽니다">📄 종이 계약서로 등록 (체결 완료)</button>
+        </div>
+        <div class="bass-muted hide" id="paperNote" style="font-size:12.5px">📷 사진에서 읽은 내용입니다. 틀린 곳을 고친 뒤 '종이 계약서로 등록'을 누르세요. 주민번호는 읽지도 저장하지도 않습니다.</div>
+      </form>
+      <div class="board-wrap"><table class="board" id="leases" style="min-width:640px"></table></div>
+    </section>
+
+    <!-- 매물 공개 -->
+    <section class="panel stack" data-panel="listings" hidden>
+      <form id="listingForm" class="bass-card stack">
+        <div class="bass-muted" style="font-size:13.5px">공개한 매물은 로그인 없이 누구나 보는 첫 화면(매물 목록)에 나옵니다. 건물 · 호실 · 조건만 보이고 임차인 정보는 나가지 않습니다. 계약이 체결되면 자동으로 내려갑니다.</div>
+        <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px">
+          <div><label class="bass-label" for="mlRoom">호실</label><select class="bass-select bass-input" id="mlRoom" required></select></div>
+          <div><label class="bass-label" for="mlType">구분</label><select class="bass-select bass-input" id="mlType"><option>월세</option><option>전세</option></select></div>
+          <div><label class="bass-label" for="mlTiming">납부</label><select class="bass-select bass-input" id="mlTiming"><option>후불</option><option>선불</option><option>반선불</option></select></div>
+          <div><label class="bass-label" for="mlDeposit">보증금 (원)</label><input class="bass-input" id="mlDeposit" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlRent">월세 (원)</label><input class="bass-input" id="mlRent" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlMgmt">관리비 (원)</label><input class="bass-input" id="mlMgmt" type="number" min="0" value="0"></div>
+          <div><label class="bass-label" for="mlFrom">입주 가능일</label><input class="bass-input" id="mlFrom" type="date"></div>
+        </div>
+        <div><label class="bass-label" for="mlDesc">설명 (선택)</label>
+          <textarea class="bass-input" id="mlDesc" maxlength="1000" style="min-height:70px;font-family:var(--font)" placeholder="예: 남향, 풀옵션, 주차 1대"></textarea></div>
+        <button class="bass-btn bass-btn--primary" type="submit" style="justify-self:start">🏷️ 매물 공개</button>
+      </form>
+      <div class="board-wrap"><table class="board" id="listingTable" style="min-width:560px"></table></div>
+
+      <form id="guideForm" class="bass-card stack">
+        <strong>📋 입주 안내문 · 건물 주소</strong>
+        <div class="bass-muted" style="font-size:13px">계약금을 확인하면 임차인 채팅창으로 이 안내문이 갑니다. <code>{building}</code> <code>{room}</code> <code>{address}</code> <code>{start}</code> <code>{report_line}</code>(임대차 신고 대상 여부) 를 쓰면 계약마다 바뀌어 들어갑니다.</div>
+        <div><label class="bass-label" for="gAddr">건물 주소 (계약서에 들어감)</label><input class="bass-input" id="gAddr" placeholder="예: 서울시 ○○구 ○○로 12"></div>
+        <textarea class="bass-input" id="gText" style="min-height:240px;font-family:var(--font)"></textarea>
+        <div class="bass-row">
+          <button class="bass-btn bass-btn--primary" type="submit">저장</button>
+          <button class="bass-btn bass-btn--ghost" type="button" id="gDefault">기본 문안으로</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- 임차인 계정 -->
+    <section class="panel stack" data-panel="accounts" hidden>
+      <div class="bass-card stack" style="font-size:13.5px">
+        <div>거주 중인 호실마다 임차인 계정이 자동으로 만들어집니다. 처음 시작하거나 비밀번호를 잊은 임차인은 <b>🔑 비밀번호 초기화</b>로 한 번만 쓰는 링크를 만들어 보냅니다(접속 중이면 채팅창으로). 구글을 연결한 임차인은 로그인 화면의 '비밀번호 찾기'로 스스로 다시 정합니다.</div>
+        <div class="bass-muted">임차인(이름·전화)이 바뀐 호실은 Excel 을 다시 가져올 때 계정이 초기화되어 이전 임차인은 더 들어올 수 없습니다.</div>
+      </div>
+      <div class="board-wrap"><table class="board" id="accounts" style="min-width:520px"></table></div>
+    </section>
+
+    <!-- Excel 가져오기 -->
+    <section class="panel stack" data-panel="import" hidden>
+      <div class="bass-card stack">
+        <label class="bass-label" for="excelText">연간 수납부 Excel 에서 제목 행("2026년도")부터 합계 행까지 선택해 복사한 뒤 붙여 넣으세요</label>
+        <textarea class="bass-input" id="excelText" placeholder="2026년도&#10;호실	세입자명	주민번호	전화번호 ..."></textarea>
+        <p class="bass-muted" style="margin:0;font-size:12.5px">🔒 주민번호 칸은 읽지 않으며 저장하지 않습니다. 같은 연도를 다시 가져오면 Excel 출처 기록만 교체되고, 입금 문자로 반영한 기록은 그대로 둡니다.</p>
+        <div class="bass-row">
+          <button class="bass-btn" id="btnImportPreview">🔍 분석하기</button>
+          <button class="bass-btn bass-btn--primary" id="btnImportCommit" disabled>📥 Knowledge Pool 에 반영</button>
+        </div>
+      </div>
+      <div id="importResult" class="bass-card stack hide"></div>
+    </section>
+  </section>
+
+  <dialog class="detail" id="detail"></dialog>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script src="lessor.js"></script>
+</body>
+</html>

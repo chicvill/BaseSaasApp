@@ -23,6 +23,14 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
+# 암호화된 키(.env.encrypted)를 환경변수로 — 마스터 키는 서버 MASTER_CRYPTO_KEY 또는 내 PC .env.key (없으면 건너뜀)
+try:
+    from shared.core.vault import auto_sync_vault, load_encrypted_env
+    auto_sync_vault()
+    load_encrypted_env()
+except Exception as e:  # 키 파일이 없어도 서버는 뜬다
+    print(f"⚠️ Vault: {type(e).__name__}")
+
 from core.gateway import create_gateway
 
 

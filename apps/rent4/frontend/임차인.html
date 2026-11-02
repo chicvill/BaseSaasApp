@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 내 계약 · 입금</title>
+  <meta name="description" content="로그인한 임차인의 계약 정보와 월별 납입 현황."> 
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container" style="max-width:640px">
+  <header class="top">
+    <div>
+      <h1>🔑 내 계약 · 납입</h1>
+      <p class="sub bass-muted" id="who">확인 중...</p>
+    </div>
+    <div class="bass-row">
+      <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnPassword">🔒 비밀번호</button>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnLogout">로그아웃</button>
+    </div>
+  </header>
+  <div id="app-alert"></div>
+
+  <div id="pwBox" class="hide"></div>
+
+  <section id="result" class="stack hide">
+    <div class="bass-card stack" id="roomCard"></div>
+    <details class="bass-card fold hide" id="guideCard">
+      <summary><strong>📋 입주 안내 · 계약서</strong></summary>
+      <div class="fold-body" id="guideBody"></div>
+    </details>
+    <h2 style="margin:10px 0 0;font-size:17px">📅 월별 납입 현황</h2>
+    <div class="stats" id="sumCards"></div>
+    <div class="months-list" id="months"></div>
+    <p class="bass-muted" style="font-size:12.5px">입금 후 임대인이 은행 문자를 반영하면 이곳에 표시됩니다. 반영이 늦거나 다르면 임대인에게 문의해 주세요.</p>
+  </section>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = Bass.escapeHtml;
+  const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+  const LABEL = { paid: ["ok", "입금 확인"], unpaid: ["err", "미납"], due: ["warn", "이번 달 납부 대기"],
+    move_in: ["info", "입주월"], move_out: ["info", "전출"], vacant: ["info", "공실"] };
+
+  async function boot() {
+    const me = await Rent4.guard(["tenant"]);
+    await Rent4.passwordGate(me, $("pwBox"));
+    render(await Bass.api("rent4", "/tenant/me"));
+    // 회원으로 계약한 경우: 확정 계약서 · 입주 안내문 (예전 수납부 임차인은 계약 기록이 없을 수 있다)
+    Bass.api("rent4", "/contract/mine").then(({ contract: c }) => {
+      if (!c.finalized_at && !c.guide_text) return;
+      $("guideBody").innerHTML = `
+        ${c.finalized_at ? `<a class="bass-btn" style="justify-self:start" href="contract_doc.html?id=${encodeURIComponent(c.id)}">📄 확정 계약서 보기 · 인쇄</a>` : ""}
+        ${c.guide_text ? `<div style="white-space:pre-wrap;font-size:13.5px">${esc(c.guide_text)}</div>` : ""}`;
+      $("guideCard").classList.remove("hide");
+    }).catch(() => {});
+  }
+
+  function render(v) {
+    const r = v.room, s = v.summary;
+    $("result").classList.remove("hide");
+    $("roomCard").innerHTML = `
+      <div class="bass-row" style="justify-content:space-between">
+        <strong style="font-size:18px">📄 계약 정보</strong>
+        <span class="bass-badge bass-badge--info">${esc(r.lease_type)} · ${esc(r.pay_timing)}</span>
+      </div>
+      <dl class="kv">
+        <dt>건물 · 호실</dt><dd>${esc(v.building)} ${esc(r.room)}호</dd>
+        <dt>임차인</dt><dd>${esc(r.tenant_name)}님</dd>
+        <dt>보증금</dt><dd>${won(r.deposit)}</dd>
+        <dt>월 납부액</dt><dd><b>${won(r.monthly_due)}</b> (임차료 ${won(r.rent)} + 관리비 ${won(r.mgmt)})</dd>
+        <dt>납부 방식</dt><dd>${esc(r.pay_timing)}</dd>
+        <dt>계약 기간</dt><dd>${esc(r.move_in || "-")} ~ ${esc(r.expire || "")}</dd>
+      </dl>`;
+    $("sumCards").innerHTML = [
+      ["입금 확인", `${s.paid_months}개월`], ["미납", `${s.unpaid_months}개월`],
+      ["미납 금액", won(s.unpaid_amount)], ["최근 입금", s.last_paid || "-"],
+    ].map(([k, val]) => `<div class="bass-card stat"><b>${esc(val)}</b><span>${esc(k)}</span></div>`).join("");
+    $("months").innerHTML = v.months.map((m) => {
+      const [tone, label] = LABEL[m.status] || ["info", m.status];
+      const detail = m.status === "paid"
+        ? `${m.payments.map((p) => esc(p.paid_date || "입금일 미상")).join(", ")} 입금`
+        : (m.mark ? esc(m.mark) : "");
+      return `<div class="mrow">
+        <b>${esc(m.ym.replace("-", "."))}</b>
+        <div>${m.amount ? `<b>${won(m.amount)}</b>` : ""}<small>${detail}</small></div>
+        <span class="bass-badge bass-badge--${tone}">${label}</span>
+      </div>`;
+    }).join("");
+  }
+
+  boot().catch(Bass.showError);
+})();
+</script>
+</body>
+</html>

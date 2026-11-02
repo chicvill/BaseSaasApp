@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 계약서</title>
+  <meta name="description" content="확정 저장된 임대차 계약서 (양쪽 당사자 · 관리인만 열람). 인쇄 · PDF 저장.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+  <style>
+    .doc { max-width: 760px; line-height: 1.7; }
+    .doc h1 { text-align: center; font-size: 24px; margin: 8px 0 18px; }
+    .doc table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 14px; }
+    .doc th, .doc td { border: 1px solid var(--border-strong); padding: 7px 10px; text-align: left; vertical-align: top; }
+    .doc th { width: 30%; background: var(--surface); font-weight: 600; }
+    .doc .hash { font: 11px ui-monospace, Consolas, monospace; color: var(--muted); word-break: break-all; }
+    @media print {
+      body { background: #fff !important; color: #000 !important; }
+      .noprint, .chat-fab, .chat-panel, #app-alert { display: none !important; }
+      .doc th, .doc td { border-color: #888; }
+      .doc th { background: #f2f2f2; }
+    }
+  </style>
+</head>
+<body>
+<main class="bass-container doc">
+  <div class="bass-row noprint" style="justify-content:space-between;margin:16px 0">
+    <a class="bass-btn bass-btn--sm bass-btn--ghost" href="javascript:history.back()">← 돌아가기</a>
+    <button class="bass-btn bass-btn--sm bass-btn--primary" type="button" onclick="window.print()">🖨 인쇄 · PDF 저장</button>
+  </div>
+  <div id="app-alert"></div>
+  <article id="doc"><p class="bass-muted">불러오는 중...</p></article>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(async function () {
+  "use strict";
+  const esc = Bass.escapeHtml;
+  const won = (n) => `${Number(n || 0).toLocaleString("ko-KR")}원`;
+  const day = (s) => esc((s || "").replace("T", " ").slice(0, 16));
+  const id = new URLSearchParams(location.search).get("id") || "";
+  try {
+    await Rent4.requireLogin();
+    const d = await Bass.api("rent4", `/contracts/${encodeURIComponent(id)}/document`);
+    const s = d.snapshot, t = s.tenant || {}, r = s.registry || {};
+    const row = (k, v) => `<tr><th>${esc(k)}</th><td>${v}</td></tr>`;
+    document.getElementById("doc").innerHTML = `
+      <h1>주택 임대차 계약서</h1>
+      <table>
+        ${row("소재지", `${esc(s.address)} · ${esc(s.building)} ${esc(s.room)}호`)}
+        ${row("구분", `${esc(s.lease_type)} · ${esc(s.pay_timing)}`)}
+        ${row("보증금", `${won(s.deposit)} (계약금 ${won(s.down_payment)} · 잔금 ${won(s.balance)})`)}
+        ${row("월 임차료 · 관리비", `${won(s.rent)} · ${won(s.mgmt)}`)}
+        ${row("계약 기간", `${esc(s.start || "")} ~ ${esc(s.end || "")} (${esc(s.period_months)}개월)`)}
+      </table>
+      <table>
+        ${row("임대인", esc(s.lessor && s.lessor.username))}
+        ${row("임차인", `${esc(t.name)} · ${esc(t.phone)}<br>생년월일 ${esc(t.birth)} · ${esc(t.address)}${t.emergency ? `<br>비상 연락처 ${esc(t.emergency)}` : ""}`)}
+      </table>
+      <table>
+        ${row("등기부 확인", `열람일 ${esc(r.viewed_on || "")} · 소유자 ${esc(r.owner_name || "")} ${r.owner_match ? "(임대인과 일치)" : "(<b>불일치</b>)"}<br>
+          근저당 등 ${r.mortgage ? won(r.mortgage) : "없음"} · 압류 · 가압류 ${r.seizure ? "<b>있음</b>" : "없음"}${r.note ? `<br>${esc(r.note)}` : ""}`)}
+        ${row("임대차 신고", s.report_required ? "<b>신고 대상</b> — 계약일로부터 30일 이내 (보증금 6천만 원 초과 또는 월세 30만 원 초과)" : "금액 기준 신고 대상 아님")}
+      </table>
+      <table>
+        ${row("조건 제시", day(s.offered_at))}
+        ${row("임차인 정보 · 승인", day(s.tenant_approved_at))}
+        ${row("등기 확인 · 확정", day(s.finalized_at))}
+        ${row("임차인 최종 승인", day(d.confirmed_at) || "대기")}
+        ${row("계약금 확인 (계약 완료)", day(d.down_paid_at) || "대기")}
+        ${row("잔금 확인 (입주)", day(d.paid_at) || "대기")}
+      </table>
+      <p class="hash">확정본 확인값(SHA-256): ${esc(d.hash)}<br>이 값이 같으면 확정 뒤 내용이 바뀌지 않은 것입니다. 주민등록번호는 기록하지 않습니다.</p>`;
+    document.title = `계약서 · ${s.building} ${s.room}호`;
+  } catch (err) {
+    document.getElementById("doc").innerHTML = "";
+    Bass.showError(err);
+  }
+})();
+</script>
+</body>
+</html>

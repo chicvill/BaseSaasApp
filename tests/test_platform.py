@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+os.environ.setdefault("BASS_SEED_PASSWORD", "seed-test-pw")
+SEED_PW = os.environ["BASS_SEED_PASSWORD"]
 
 from fastapi.testclient import TestClient
 from core.kernel import Obj, use_store, store
@@ -192,7 +194,7 @@ class TestRent2Migration(unittest.TestCase):
         self.assertEqual(unauth_res.status_code, 401)
 
         # 3. 플랫폼 관리자 로그인 후 정상 200 반환 (전체 3개 건물 합계 64개실)
-        login_res = client.post("/auth/login", json={"username": "admin", "password": "1212"}).json()
+        login_res = client.post("/auth/login", json={"username": "admin", "password": SEED_PW}).json()
         token = login_res["token"]
         auth_res = client.get("/api/rent2/status", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(auth_res.status_code, 200)
@@ -200,7 +202,7 @@ class TestRent2Migration(unittest.TestCase):
         self.assertEqual(auth_res.json()["total_rooms"], 64)
 
         # 4. 시크빌 점주(chic) 로그인 시 시크빌 29개실 전용 격리 검증
-        chic_login = client.post("/auth/login", json={"username": "chic", "password": "1212"}).json()
+        chic_login = client.post("/auth/login", json={"username": "chic", "password": SEED_PW}).json()
         chic_res = client.get("/api/rent2/status", headers={"Authorization": f"Bearer {chic_login['token']}"})
         self.assertEqual(chic_res.status_code, 200)
         self.assertEqual(chic_res.json()["total_rooms"], 29)

@@ -1,0 +1,393 @@
+"""
+apps/rent4/backend/contracts.py — 계약 → 계정. 문자 없이 대면 · 채팅으로 전달하는 링크 하나로 진행한다.
+
+    1. 발행        관리인이 가맹 계약, 임대인이 임대차 계약을 작성 → 한 번만 쓰는 계약 시작 링크(24시간)
+                   발행자가 그 자리에서 카카오톡 등으로 보낸다. 잃어버리면 '링크 다시 만들기'(이전 링크 무효)
+    2. 비밀번호    상대방이 링크(reset.html?t=)에서 비밀번호를 정함 → 계약 진행용 로그인 k<id> + 링크 만료
+    3. 동의        로그인한 상태로 계약 내용 확인 · 동의 (휴대폰 번호 + 비밀번호로 다시 들어올 수 있다)
+    4. 납부 확인    발행자가 가맹비 / 잔금 확인 → 최종 계정(건물 코드 / 코드+호실)에 같은 비밀번호
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+import secrets
+import time
+from datetime import date
+from typing import Dict, List, Optional, Tuple
+
+from core.auth import User, issue_token
+from core.errors import Conflict, Mismatch, NotFound
+
+from . import accounts, oauth
+from .models import OPEN_STATUSES, Building, Contract, LessorAccount, Room
+from .pool import now_iso
+
+CODE_RE = re.compile(r"^[a-z][a-z0-9]{1,15}$")
+KIND_LABEL = {"membership": "가맹 계약", "lease": "임대차 계약"}
+START_LINK_TTL = 24 * 3600
+STATUS_LABEL = {"requested": "요청 (현장 점검 · 조건 대기)", "offered": "조건 제시 (임차인 정보 대기)",
+                "tenant_approved": "임차인 승인 (등기 확인 대기)", "registry_checked": "계약서 확정 (임차인 최종 승인 대기)",
+                "tenant_confirmed": "최종 승인 (계약금 대기)", "contracted": "계약 완료 (입주 · 잔금 대기)",
+                "sent": "상대방 확인 대기", "signed": "납부 확인 대기", "active": "입주 · 체결 완료", "cancelled": "취소"}
+
+
+
+def _digits(phone: str) -> str:
+    return re.sub(r"\D", "", phone or "")
+
+
+def _date(text: Optional[str], label: str) -> Optional[str]:
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(str(text)).isoformat()
+    except ValueError:
+        raise Mismatch(f"{label} 형식이 올바르지 않습니다.", hint="YYYY-MM-DD 로 입력해 주세요.")
+
+
+def _party(data: Dict) -> Tuple[str, str]:
+    name, phone = str(data.get("party_name", "")).strip(), str(data.get("party_phone", "")).strip()
+    if not name:
+        raise Mismatch("계약 상대방 이름을 입력해 주세요.")
+    if len(_digits(phone)) < 10:
+        raise Mismatch("계약 상대방 휴대폰 번호를 정확히 입력해 주세요.", hint="본인 확인에 이 번호의 뒤 4자리를 씁니다.")
+    return name, phone
+
+
+def _money(data: Dict, key: str) -> int:
+    try:
+        value = int(str(data.get(key) or 0).replace(",", ""))
+    except ValueError:
+        raise Mismatch(f"{key} 금액이 숫자가 아닙니다.")
+    if value < 0:
+        raise Mismatch("금액은 0 이상이어야 합니다.")
+    return value
+
+
+# ── 1. 발행 ──
+def create_membership(issuer: User, data: Dict) -> Contract:
+    name = str(data.get("building_name", "")).strip()
+    code = str(data.get("building_code", "")).strip().lower()
+    if not name:
+        raise Mismatch("건물 이름을 입력해 주세요.")
+    if not CODE_RE.match(code):
+        raise Mismatch("건물 코드는 영문 소문자로 시작하는 영문·숫자 2~16자입니다.", hint="임대인 아이디와 임차인 아이디(코드+호실)에 쓰입니다.")
+    existing = Building.first(code=code)
+    branch = existing.branch if existing else code
+    if existing and existing.name != name:
+        raise Conflict(f"건물 코드 '{code}' 는 이미 '{existing.name}' 이 쓰고 있습니다.")
+    if any(c.kind == "membership" and c.branch == branch and c.status in ("sent", "signed", "active") for c in Contract.all()):
+        raise Conflict(f"'{name}' 에는 이미 진행 중이거나 체결된 가맹 계약이 있습니다.")
+    other = User.by_username(code)
+    if other and not (other.role == "branch_admin" and other.branch == branch):
+        raise Conflict(f"아이디 '{code}' 가 이미 다른 계정으로 쓰이고 있습니다.", hint="다른 건물 코드를 정해 주세요.")
+    party_name, party_phone = _party(data)
+    c = Contract(kind="membership", branch=branch, building_name=name, building_code=code,
+                 party_name=party_name, party_phone=party_phone, fee=_money(data, "fee"),
+                 start=_date(data.get("start"), "계약 시작일"), end=_date(data.get("end"), "계약 종료일"),
+                 issued_by=issuer.username)
+    c.save()
+    return c
+
+
+def create_lease(issuer: User, branch: str, data: Dict) -> Contract:
+    room_no = str(data.get("room", "")).strip().removesuffix("호")
+    room = Room.first(branch=branch, room=room_no)
+    if not room or room.status == "owner":
+        raise NotFound(f"{room_no}호를 찾을 수 없습니다.", hint="Excel 수납부로 호실을 먼저 등록해 주세요.")
+    if any(c.kind == "lease" and c.branch == branch and c.room == room_no and c.status in ("sent", "signed")
+           for c in Contract.all()):
+        raise Conflict(f"{room_no}호에는 이미 진행 중인 계약이 있습니다.", hint="기존 계약을 취소한 뒤 다시 작성하세요.")
+    party_name, party_phone = _party(data)
+    start = _date(data.get("start"), "입주일")
+    if not start:
+        raise Mismatch("입주일(계약 시작일)을 입력해 주세요.")
+    c = Contract(kind="lease", branch=branch, building_name=accounts.building_of(branch).name, room=room_no,
+                 party_name=party_name, party_phone=party_phone,
+                 deposit=_money(data, "deposit"), rent=_money(data, "rent"), mgmt=_money(data, "mgmt"),
+                 start=start, end=_date(data.get("end"), "만기일"),
+                 lease_type=str(data.get("lease_type") or "월세"), pay_timing=str(data.get("pay_timing") or "후불"),
+                 issued_by=issuer.username)
+    c.save()
+    return c
+
+
+
+def register_paper(issuer: User, branch: str, data: Dict) -> Contract:
+    """종이 계약서 등록: 이미 대면으로 체결한 임대차 계약 → 바로 체결 완료 + 호실 입주 + 임차인 계정.
+    임차인은 임대인의 '🔑 비밀번호 초기화' 링크(또는 채팅)로 시작한다."""
+    c = create_lease(issuer, branch, data)
+    now = now_iso()
+    c.paper, c.signed_at, c.paid_at = True, now, now
+    _activate_lease(c)
+    c.status, c.activated_at = "active", now
+    return c.save()
+
+
+def cancel(c: Contract) -> Contract:
+    if c.status == "active":
+        raise Conflict("이미 체결된 계약은 취소할 수 없습니다.")
+    was_request = c.status == "requested"
+    c.status, c.token_hash = "cancelled", ""
+    c.save()
+    if c.party_username and _is_member(c.party_username):
+        _tell_party(c, "신청하신 계약이 진행되지 않게 되었습니다." if was_request else "계약이 취소되었습니다.")
+    return c
+
+
+# ── 회원의 매물 계약 신청 (index.html → apply.html) ──
+
+
+def _is_member(username: str) -> bool:
+    from .members import MemberAccount
+    return MemberAccount.first(username=username) is not None
+
+
+def _lessor_username(branch: str) -> Optional[str]:
+    acc = next(iter(LessorAccount.find(branch=branch)), None)
+    return acc.username if acc else None
+
+
+def _tell_party(c: Contract, text: str) -> None:
+    from . import chat
+    sender = _lessor_username(c.branch) or c.issued_by or "admin"
+    chat.post(c.party_username, sender, f"임대인 {c.building_name}", f"[{c.building_name} {c.room}호] {text}",
+              link="contract.html", link_label="계약 보기")
+
+
+def apply(member: User, listing_id: str, data: Dict) -> Contract:
+    """회원이 공개 매물에 계약을 신청한다 → 임대인 채팅창에 안내. 한 사람은 한 번에 하나만 신청."""
+    from . import chat, listings
+    from .members import MemberAccount
+    m = MemberAccount.first(username=member.username)
+    if m is None:
+        raise Conflict("회원만 계약을 신청할 수 있습니다.", hint="회원가입 후 신청해 주세요.")
+    if any(c.status in OPEN_STATUSES for c in Contract.find(party_username=member.username)):
+        raise Conflict("이미 진행 중인 계약 신청이 있습니다.", hint="계약 화면에서 진행 상황을 확인해 주세요.")
+    l = listings.get_open(listing_id)
+    start = _date(data.get("start"), "희망 입주일") or l.available_from
+    note = str(data.get("message") or "").strip()[:500]
+    c = Contract(kind="lease", branch=l.branch, building_name=accounts.building_of(l.branch).name, room=l.room,
+                 party_name=m.name, party_phone=m.phone, deposit=l.deposit, rent=l.rent, mgmt=l.mgmt,
+                 start=start, lease_type=l.lease_type, pay_timing=l.pay_timing, status="requested",
+                 party_username=m.username, listing_id=l.id, request_note=note,
+                 verified_provider=m.provider, verified_name=m.name, verified_at=now_iso())   # 가입 때 구글 본인 확인
+    c.save()
+    lessor = _lessor_username(l.branch)
+    if lessor:
+        msg = chat.post(lessor, m.username, f"신청자 {m.name}",
+                        f"[{c.building_name} {c.room}호 계약 신청] {m.name} ({m.phone}) · 희망 입주 {start or '협의'}"
+                        + (f"\n{note}" if note else ""), link="임대인.html", link_label="신청 보기")
+        msg.category = "문의"
+        msg.save()
+    return c
+
+
+
+# ── 계약 시작 링크 (로그인 전) ──
+def _hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def issue_start_link(c: Contract) -> str:
+    """한 번만 쓰는 계약 시작 링크. 다시 만들면 이전 링크는 무효."""
+    if c.status not in ("sent", "signed"):
+        raise Conflict("진행 중인 계약에만 링크를 만들 수 있습니다.")
+    token = secrets.token_urlsafe(24)
+    c.token_hash, c.link_expires = _hash(token), time.time() + START_LINK_TTL
+    c.save()
+    return token
+
+
+def _start_target(token: str) -> Contract:
+    c = Contract.first(token_hash=_hash(token or "")) if token else None
+    if c is None or c.status not in ("sent", "signed") or c.link_expires < time.time():
+        raise NotFound("링크가 올바르지 않거나 만료되었습니다.",
+                       hint="이미 비밀번호를 정했다면 휴대폰 번호로 로그인하세요. 다시 필요하면 계약을 보낸 분에게 새 링크를 요청하세요.")
+    return c
+
+
+def start_link_view(token: str) -> Dict:
+    c = _start_target(token)
+    return {"title": title(c), "name": c.party_name, "login": f"휴대폰 번호 {c.party_phone}"}
+
+
+def start_link_set(token: str, new_password: str) -> Dict:
+    """비밀번호를 정하면 계약 진행용 로그인이 생기고 링크는 만료된다 → 바로 계약 화면."""
+    c = _start_target(token)
+    accounts.validate_new_password(new_password)
+    if not c.party_username:
+        c.party_username = f"k{c.id}"
+    user = User.by_username(c.party_username) or User(username=c.party_username, role=accounts.TENANT_ROLE, name=c.party_name)
+    user.set_password(new_password).save("rent4_contract_party")
+    c.token_hash, c.link_expires = "", 0
+    c.save()
+    return {"token": issue_token(user), "home": "contract.html"}
+
+
+# ── 로그인한 계약 상대방 (비밀번호를 정한 뒤) ──
+def party_contract(user: User) -> Contract:
+    """진행 중인 계약 우선, 없으면 가장 최근 계약."""
+    mine = sorted(Contract.find(party_username=user.username), key=lambda c: c.created_at, reverse=True)
+    c = next((x for x in mine if x.status in OPEN_STATUSES), None) or (mine[0] if mine else None)
+    if c is None:
+        raise NotFound("진행 중인 계약이 없습니다.")
+    return c
+
+
+def sign(user: User, agree: bool) -> Contract:
+    """2단계: 계약 내용 동의 (로그인한 상태)."""
+    c = party_contract(user)
+    if c.status != "sent":
+        raise Conflict("이미 동의한 계약입니다." if c.status != "cancelled" else "취소된 계약입니다.")
+    if oauth.configured() and not c.verified_at:
+        raise Mismatch("계약 전에 본인 확인이 필요합니다.", hint="카카오 또는 구글 계정으로 본인 확인을 먼저 해 주세요.")
+    if not agree:
+        raise Mismatch("계약 내용에 동의해야 확인이 완료됩니다.")
+    c.status, c.signed_at = "signed", now_iso()
+    return c.save()
+
+
+def continue_as_account(user: User) -> Dict:
+    """체결 뒤: 계약 진행용 로그인을 최종 계정 로그인으로 바꾼다 (비밀번호는 이미 넘어가 있다)."""
+    c = party_contract(user)
+    if c.status != "active":
+        raise Conflict("아직 체결되지 않았습니다.", hint="납부가 확인되면 다시 눌러 주세요.")
+    return accounts.link_session(c.username, "임대인.html" if c.kind == "membership" else "임차인.html")
+
+
+# ── 3. 납부 확인 → 활성화 ──
+def confirm_paid(c: Contract) -> Contract:
+    """링크 계약: 동의(signed) 뒤 납부 확인. 회원 계약: 계약 완료(contracted) 뒤 입주일 잔금 확인 → 입주."""
+    if c.status not in ("signed", "contracted"):
+        raise Conflict("상대방이 계약을 확인한 뒤에 납부를 확인할 수 있습니다." if c.status == "sent"
+                       else f"이 계약은 '{STATUS_LABEL.get(c.status, c.status)}' 상태입니다.")
+    c.paid_at = now_iso()
+    (_activate_membership if c.kind == "membership" else _activate_lease)(c)
+    _carry_password(c)
+    c.status, c.activated_at = "active", now_iso()
+    c.save()
+    return c
+
+
+def title(c: Contract) -> str:
+    return f"{c.building_name} 가맹 계약" if c.kind == "membership" else f"{c.building_name} {c.room}호 임대차 계약"
+
+
+def _carry_password(c: Contract) -> None:
+    """계약 링크에서 정한 비밀번호를 최종 아이디로 옮기고, 계약 진행용 로그인은 막는다."""
+    party = User.by_username(c.party_username) if c.party_username else None
+    final = User.by_username(c.username)
+    if party is None or final is None or party.username == final.username:   # 회원은 자기 아이디 그대로
+        return
+    final.salt, final.password_hash = party.salt, party.password_hash
+    final.save("rent4_password_carried")
+    acc = _account(c)
+    if acc is not None:
+        acc.initial_code, acc.must_change = "", False
+        acc.activated_at = acc.activated_at or now_iso()
+        acc.save()
+    party.set_password(secrets.token_hex(16)).save("rent4_contract_party_closed")
+
+
+def _activate_membership(c: Contract) -> None:
+    if not Building.first(code=c.building_code):
+        Building(code=c.building_code, name=c.building_name, branch=c.branch).save()
+    temp = accounts.temp_password()
+    user = User.by_username(c.building_code) or User(username=c.building_code, role="branch_admin", branch=c.branch)
+    user.name, user.role, user.branch = c.party_name, "branch_admin", c.branch
+    user.set_password(temp).save("rent4_membership_activated")
+    acc = LessorAccount.first(username=c.building_code) or LessorAccount(username=c.building_code, branch=c.branch)
+    acc.branch, acc.contract_id, acc.initial_code, acc.must_change, acc.activated_at = c.branch, c.id, temp, True, None
+    acc.save()
+    c.username = acc.username
+
+
+
+def _activate_lease(c: Contract) -> None:
+    room = Room.first(branch=c.branch, room=c.room)
+    if not room:
+        raise NotFound(f"{c.room}호를 찾을 수 없습니다.")
+    room.status, room.tenant_name, room.phone = "occupied", c.party_name, c.party_phone
+    room.move_in, room.expire, room.deposit = c.start, c.end, c.deposit
+    room.rent, room.mgmt, room.lease_type, room.pay_timing = c.rent, c.mgmt, c.lease_type, c.pay_timing
+    room.save()
+    if c.party_username and _is_member(c.party_username):
+        _member_moves_in(c, room)             # 회원은 자기 아이디로 그 호실의 임차인이 된다
+    accounts.sync_tenant_accounts()
+    acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
+    c.username = acc.username if acc else ""
+    from . import listings
+    l = listings.open_listing(c.branch, c.room)
+    if l:                                     # 체결되면 공개 매물은 닫는다
+        listings.close(c.branch, l.id, "contracted")
+
+
+def _member_moves_in(c: Contract, room: Room) -> None:
+    """호실 계정을 회원 아이디로 돌린다. 이전 호실 아이디(예: chic102)는 잠근다. 비밀번호는 회원 것 그대로."""
+    acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
+    if acc and acc.username != c.party_username:
+        old = User.by_username(acc.username)
+        if old is not None and old.role == accounts.TENANT_ROLE:
+            old.set_password(secrets.token_hex(16)).save("rent4_room_account_replaced")
+    acc = acc or accounts.TenantAccount(username=c.party_username, branch=c.branch, room=c.room)
+    acc.username, acc.tenant_key = c.party_username, accounts._tenant_key(room)
+    acc.initial_code, acc.must_change, acc.invite_hash = "", False, ""
+    acc.activated_at = now_iso()
+    acc.save()
+    user = User.by_username(c.party_username)
+    if user is not None:
+        user.branch = c.branch
+        user.save("rent4_member_moved_in")
+
+
+# ── 화면용 표현 ──
+def public(c: Contract, for_party: bool = False) -> Dict:
+    data = {"id": c.id, "kind": c.kind, "kind_label": KIND_LABEL[c.kind], "status": c.status,
+            "status_label": STATUS_LABEL.get(c.status, c.status), "building_name": c.building_name,
+            "building_code": c.building_code, "room": c.room, "party_name": c.party_name,
+            "deposit": c.deposit, "rent": c.rent, "mgmt": c.mgmt, "fee": c.fee, "start": c.start, "end": c.end,
+            "lease_type": c.lease_type, "pay_timing": c.pay_timing, "created_at": c.created_at,
+            "signed_at": c.signed_at, "paid_at": c.paid_at, "activated_at": c.activated_at, "username": c.username,
+            "reset_at": c.reset_at, "paper": c.paper, "request_note": c.request_note,
+            "member": bool(c.party_username and _is_member(c.party_username)),
+            "address": c.address, "down_payment": c.down_payment, "period_months": c.period_months,
+            "offered_at": c.offered_at, "tenant_approved_at": c.tenant_approved_at, "registry": c.registry,
+            "registry_file": bool(c.registry_file), "registry_at": c.registry_at, "finalized_at": c.finalized_at,
+            "snapshot_hash": c.snapshot_hash, "confirmed_at": c.confirmed_at, "down_paid_at": c.down_paid_at,
+            "report_required": c.report_required, "guide_text": c.guide_text,
+            "tenant_birth": c.tenant_birth, "tenant_address": c.tenant_address, "emergency_contact": c.emergency_contact}
+    if not for_party:
+        data["party_phone"] = c.party_phone
+    else:
+        data["party_phone_masked"] = f"***-****-{_digits(c.party_phone)[-4:]}"
+        data["final_username"] = c.username or (c.party_username if data["member"] else
+                                                c.building_code if c.kind == "membership"
+                                                else f"{accounts.building_of(c.branch).code}{c.room}")
+        data["password_set"] = bool(c.party_username)
+        data["verified"] = {"provider": c.verified_provider, "name": c.verified_name, "at": c.verified_at} if c.verified_at else None
+        data["verify_required"] = bool(oauth.configured())
+    return data
+
+
+def _account(c: Contract):
+    if c.kind == "membership":
+        return LessorAccount.first(username=c.username)
+    acc = accounts.TenantAccount.first(branch=c.branch, room=c.room)
+    return acc if acc and acc.username == c.username else None
+
+
+
+
+def listing(kind: str, branch: Optional[str] = None) -> List[Dict]:
+    items = [c for c in Contract.find(kind=kind) if branch is None or c.branch == branch]
+    return [public(c) for c in sorted(items, key=lambda c: c.created_at, reverse=True)]
+
+
+def require(contract_id: str, kind: str, branch: Optional[str] = None) -> Contract:
+    c = Contract.first(id=contract_id, kind=kind)
+    if not c or (branch is not None and c.branch != branch):
+        raise NotFound("계약을 찾을 수 없습니다.")
+    return c
+

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent4 관리인</title>
+  <meta name="description" content="관리인 전용: 가맹점 목록(계약 · 월별 수납 펼쳐보기)과 신규 빌딩 개설.">
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="rent4.css">
+</head>
+<body>
+<main class="bass-container">
+  <header class="top">
+    <div>
+      <h1>👑 Rent4 관리인</h1>
+      <p class="sub bass-muted" id="who">확인 중...</p>
+    </div>
+    <div class="bass-row">
+      <a class="bass-btn bass-btn--sm bass-btn--ghost" href="manual.html">📘 설명서</a>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnPassword">🔒 비밀번호</button>
+      <button class="bass-btn bass-btn--sm bass-btn--ghost hide" id="btnLogout">로그아웃</button>
+    </div>
+  </header>
+  <div id="app-alert"></div>
+  <div id="pwBox" class="hide"></div>
+  <section id="adminBody" class="hide">
+  <h2 style="margin:10px 0 12px;font-size:17px">🏢 가맹점 목록 <small class="bass-muted" style="font-weight:400;font-size:13px">눌러서 계약 · 월별 수납 펼쳐보기</small></h2>
+  <div class="stack" id="buildings"></div>
+
+  <h2 style="margin:28px 0 12px;font-size:17px">📋 만능 붙여 넣기 <small class="bass-muted" style="font-weight:400;font-size:13px">은행 입금 문자 · 엑셀 표 · 구글 시트 주소 · 사진 · 엑셀 파일</small></h2>
+  <form id="adminPaste" class="bass-card stack">
+    <div><label class="bass-label" for="pBranch">어느 건물 자료인가요?</label>
+      <select class="bass-select bass-input" id="pBranch" required style="max-width:280px"></select></div>
+    <textarea class="bass-input" id="pText" placeholder="여기에 붙여 넣으세요 (사진은 붙여 넣거나 아래 📎 로)"></textarea>
+    <div class="bass-row">
+      <button class="bass-btn bass-btn--primary" type="submit">🔍 그 건물 화면에서 분석하기</button>
+      <label class="bass-btn">📎 파일 · 사진<input type="file" id="pFile" accept=".xlsx,.txt,.tsv,image/*" hidden></label>
+      <span class="bass-muted" id="pFileName" style="font-size:12.5px"></span>
+    </div>
+  </form>
+
+  <h2 style="margin:28px 0 12px;font-size:17px">🏗️ 신규 빌딩 개설 <small class="bass-muted" style="font-weight:400;font-size:13px">건물 등록 + 임대인 가맹 계약</small></h2>
+  <form id="memberForm" class="bass-card stack">
+    <div class="bass-muted" style="font-size:13.5px">계약을 발행하면 한 번만 쓰는 계약 시작 링크가 만들어집니다. 그 자리에서 임대인에게 카카오톡 등으로 보내 주세요. 임대인은 링크에서 비밀번호를 정하고 계약에 동의합니다. 가맹비 입금을 확인하면 임대인 계정(아이디 = 건물 코드, 같은 비밀번호)이 열립니다.</div>
+    <div class="bass-grid" style="grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));gap:10px">
+      <div><label class="bass-label" for="mBuilding">건물 이름</label><input class="bass-input" id="mBuilding" required placeholder="예: 시크빌"></div>
+      <div><label class="bass-label" for="mCode">건물 코드 (임대인 아이디)</label><input class="bass-input" id="mCode" required placeholder="예: chic" autocapitalize="none"></div>
+      <div><label class="bass-label" for="mName">임대인 이름</label><input class="bass-input" id="mName" required></div>
+      <div><label class="bass-label" for="mPhone">임대인 휴대폰</label><input class="bass-input" id="mPhone" required inputmode="tel" placeholder="010-0000-0000"></div>
+      <div><label class="bass-label" for="mFee">가맹비 (원)</label><input class="bass-input" id="mFee" type="number" min="0" value="0"></div>
+      <div><label class="bass-label" for="mStart">계약 시작일</label><input class="bass-input" id="mStart" type="date"></div>
+      <div><label class="bass-label" for="mEnd">계약 종료일</label><input class="bass-input" id="mEnd" type="date"></div>
+    </div>
+    <button class="bass-btn bass-btn--primary" id="btnMember" type="submit" style="justify-self:start">계약 발행하고 시작 링크 만들기</button>
+  </form>
+  <div class="board-wrap" style="margin-top:12px"><table class="board" id="memberships" style="min-width:640px"></table></div>
+  </section>
+</main>
+<script src="/shared/ui/bass.js"></script>
+<script src="rent4.js"></script>
+<script>
+(async function () {
+  "use strict";
+  const esc = Bass.escapeHtml;
+  const man = (n) => `${Math.round(n / 10000).toLocaleString("ko-KR")}만원`;
+  const $ = (id) => document.getElementById(id);
+  const call = (path, opts) => Bass.api("rent4", `/admin/contracts${path}`, { method: "POST", ...opts });
+
+  async function loadContracts() {
+    const { contracts } = await Bass.api("rent4", "/admin/contracts");
+    Rent4.contractTable($("memberships"), contracts, { call, reload: reloadAll, partyLabel: "임대인" });
+  }
+
+  async function reloadAll() {
+    await Promise.all([loadBuildings(), loadContracts()]);
+  }
+
+  $("memberForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    Bass.withLock($("btnMember"), async () => {
+      const res = await call("", { body: {
+        building_name: $("mBuilding").value.trim(), building_code: $("mCode").value.trim(),
+        party_name: $("mName").value.trim(), party_phone: $("mPhone").value.trim(),
+        fee: Number($("mFee").value || 0), start: $("mStart").value || null, end: $("mEnd").value || null } });
+      Rent4.issuedNotice(res);
+      $("memberForm").reset();
+      await loadContracts();
+    }, "발행 중...");
+  });
+
+  try {
+    const me = await Rent4.guard(["admin"]);
+    await Rent4.passwordGate(me, $("pwBox"));
+    $("adminBody").classList.remove("hide");
+    await reloadAll();
+  } catch (err) {
+    Bass.showError(err);
+  }
+
+  // 만능 붙여 넣기: 고른 건물의 임대인 화면으로 넘겨 거기서 바로 분석한다 (이 브라우저 탭 안에서만 잠깐 보관)
+  let pFile = null;
+  const takeFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => { pFile = { name: file.name || "붙여 넣은 사진.png", type: file.type, data: reader.result }; $("pFileName").textContent = `📎 ${pFile.name}`; };
+    reader.readAsDataURL(file);
+  };
+  $("pFile").addEventListener("change", () => takeFile($("pFile").files[0]));
+  $("pText").addEventListener("paste", (e) => {
+    const file = [...(e.clipboardData?.files || [])][0];
+    if (file) { e.preventDefault(); takeFile(file); }
+  });
+  $("adminPaste").addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!pFile && !$("pText").value.trim()) { Bass.updateAppAlert("warning", "붙여 넣은 내용이 없습니다."); return; }
+    try {
+      sessionStorage.setItem("rent4.paste", JSON.stringify({ text: $("pText").value, file: pFile }));
+    } catch (_) {
+      Bass.updateAppAlert("error", "내용이 너무 커서 넘기지 못했습니다.", "건물 화면에서 직접 붙여 넣어 주세요.");
+      return;
+    }
+    location.href = `임대인.html?branch=${encodeURIComponent($("pBranch").value)}`;
+  });
+
+  async function loadBuildings() {
+    const { buildings } = await Bass.api("rent4", "/admin/buildings");
+    $("pBranch").innerHTML = buildings.map((b) => `<option value="${esc(b.branch)}">${esc(b.name)}</option>`).join("");
+    $("buildings").innerHTML = buildings.map((b) => `
+      <details class="bass-card fold" data-branch="${esc(b.branch)}">
+        <summary>
+          <strong style="font-size:17px">🏢 ${esc(b.name)} <small class="bass-muted">${esc(b.code)}</small></strong>
+          <span class="bass-row" style="gap:6px">
+            <span class="bass-muted" style="font-size:13px">${b.rooms ? `호실 ${b.rooms} · 거주 ${b.occupied} · 이번 달 입금 ${b.paid_this_month}/${b.occupied}` : "데이터 없음"}</span>
+            <span class="bass-badge ${b.rooms ? (b.unpaid_rooms ? "bass-badge--err" : "bass-badge--ok") : "bass-badge--info"}">
+              ${b.rooms ? (b.unpaid_rooms ? `미납 ${b.unpaid_rooms}실` : "미납 없음") : "준비 중"}</span>
+          </span>
+        </summary>
+        <div class="fold-body"><span class="bass-muted">불러오는 중...</span></div>
+      </details>`).join("") || `<div class="bass-card bass-muted">아직 가맹점이 없습니다. 아래 '신규 빌딩 개설'로 시작하세요.</div>`;
+  }
+
+  // 펼칠 때 가맹 계약 · 이번 달 수납현황 · 월별 수납 합계를 불러온다
+  $("buildings").addEventListener("toggle", async (e) => {
+    const d = e.target;
+    if (!d.open || d.dataset.loaded) return;
+    const body = d.querySelector(".fold-body");
+    try {
+      const r = await Bass.api("rent4", `/admin/buildings/${encodeURIComponent(d.dataset.branch)}`);
+      d.dataset.loaded = "1";
+      const c = r.contracts.find((x) => x.status === "active") || r.contracts[0];
+      const max = Math.max(1, ...r.totals.map((t) => t.amount));
+      body.innerHTML = `
+        <div class="bass-card stack dash">${Rent4.monthCard(r.month)}</div>
+        <div>
+          <strong style="font-size:14px">📄 가맹 계약</strong>
+          ${c ? `<dl class="kv" style="margin-top:8px">
+            <dt>임대인</dt><dd>${esc(c.party_name)} · ${esc(c.party_phone || "")}</dd>
+            <dt>상태</dt><dd>${esc(c.status_label)}${c.username ? ` · 아이디 <code>${esc(c.username)}</code>` : ""}</dd>
+            <dt>가맹비</dt><dd>${Number(c.fee || 0).toLocaleString("ko-KR")}원</dd>
+            <dt>기간</dt><dd>${esc(c.start || "-")} ~ ${esc(c.end || "")}</dd>
+            <dt>체결일</dt><dd>${esc((c.activated_at || "-").slice(0, 10))}</dd>
+          </dl>` : `<p class="bass-muted" style="margin:6px 0 0">가맹 계약 기록이 없습니다 (기본 건물).</p>`}
+        </div>
+        <div>
+          <strong style="font-size:14px">📅 ${r.year}년 월별 수납</strong>
+          <div class="month-bars" style="margin-top:8px">${r.totals.map((t) => `
+            <div title="${esc(t.ym)} · ${t.amount.toLocaleString("ko-KR")}원">
+              <i style="height:${Math.round(t.amount / max * 70)}px"></i>${Number(t.ym.slice(5))}</div>`).join("")}</div>
+          <div class="bass-muted" style="font-size:12px;margin-top:4px">합계 ${man(r.totals.reduce((s, t) => s + t.amount, 0))}</div>
+        </div>
+        <a class="bass-btn bass-btn--sm" style="justify-self:start" href="임대인.html?branch=${encodeURIComponent(r.building.branch)}">임대인 화면으로 →</a>`;
+      Rent4.startClock(body);
+    } catch (err) {
+      body.textContent = "불러오지 못했습니다.";
+      Bass.showError(err);
+    }
+  }, true);
+})();
+</script>
+</body>
+</html>
