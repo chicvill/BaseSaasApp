@@ -164,21 +164,13 @@
     $("authModal").classList.add("is-open");
   }
 
-  /** 임대인 보호: 로그인 + 구글 본인 확인을 마친 회원만 임대인과 연결한다. */
+  /** 임대인 및 회원 보호: 로그인한 회원에게 방문 문의 및 계약 권한 허용 */
   function requireVerified(targetHint) {
     const u = getSession();
     if (!u || !u.name || !Bass.token()) {
-      openAuthModal({ tab: "register", targetHint });
-      $("authModalSub").textContent =
-        "🛡️ 임대인 보호를 위해 구글 본인 확인을 마친 회원만 방문 문의 · 계약 신청을 할 수 있습니다. 가입했다면 로그인 탭을 눌러 주세요.";
-      return false;
-    }
-    if (!u.verified) {
-      Bass.updateAppAlert(
-        "warning",
-        "본인 확인(구글)이 필요합니다.",
-        "임대인 보호를 위해 구글 계정을 연결한 회원만 임대인에게 연락할 수 있습니다. 회원가입 화면에서 구글로 본인 확인을 진행해 주세요."
-      );
+      openAuthModal({ tab: "login", targetHint });
+      const sub = $("authModalSub");
+      if (sub) sub.textContent = "로그인하면 집주인에게 방문 문의 및 계약 신청을 바로 진행할 수 있습니다.";
       return false;
     }
     return true;
@@ -490,15 +482,22 @@
     navigateToCoSignOrLogin();
   });
 
-  $("authModalTabs").addEventListener("click", (e) => {
-    const tabBtn = e.target.closest("[data-auth-tab]");
-    if (!tabBtn) return;
-    switchAuthTab(tabBtn.dataset.authTab);
-  });
+  const authTabs = $("authModalTabs");
+  if (authTabs) {
+    authTabs.addEventListener("click", (e) => {
+      const tabBtn = e.target.closest("[data-auth-tab]");
+      if (!tabBtn) return;
+      switchAuthTab(tabBtn.dataset.authTab);
+    });
+  }
 
-  $("regRole").addEventListener("change", () => {
-    $("regLessorFields").style.display = $("regRole").value === "lessor" ? "block" : "none";
-  });
+  const regRole = $("regRole");
+  if (regRole) {
+    regRole.addEventListener("change", () => {
+      const lFields = $("regLessorFields");
+      if (lFields) lFields.style.display = regRole.value === "lessor" ? "block" : "none";
+    });
+  }
 
   // 통합 계정 본인인증 로그인 제출 -> 역할 판별 후 자동 리다이렉트
   $("formAccountLogin").addEventListener("submit", (e) => {

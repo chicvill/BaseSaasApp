@@ -312,21 +312,41 @@ def portal_login(payload: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     from core.auth import issue_token
     ident = str(payload.get("identifier", "")).strip()
     pw = str(payload.get("password", "")).strip()
-    if "@" in ident:                                  # 구글 본인 확인 때 연결한 이메일 → 아이디
+    if "@" in ident:
         link = next((l for l in oauth.SocialLink.all() if (l.email or "").lower() == ident.lower()), None)
-        if link is None:
-            raise Unauthorized("이 이메일로 가입한 회원이 없습니다.",
-                               hint="회원가입 탭에서 구글로 본인 확인 후 가입하거나, 아이디 · 휴대폰 번호로 로그인해 주세요.")
-        ident = link.username
+        if link is not None:
+            ident = link.username
 
-    demo_passwords = {"admin": "0202", "chic": "1212", "sunho": "1212", "sinbi": "1212"}
+    # 가장 보편적이고 친숙한 로그인 처리:
+    # 1) admin, chic, sunho, sinbi 등 시스템 계정은 입력한 비밀번호(0202, 1212 또는 시드/설정PW)로 즉시 로그인
     u = User.by_username(ident)
-    if u and ident in demo_passwords and pw == demo_passwords[ident]:
+    demo_pw_map = {"admin": "0202", "chic": "1212", "sunho": "1212", "sinbi": "1212"}
+    if u and (ident in demo_pw_map and pw == demo_pw_map[ident]):
         from .members import touch
         touch(u.username)
         res = {"token": issue_token(u), "user": u.public()}
     else:
-        res = accounts.login(ident, pw)
+        # 일반 사용자/회원/임차인: 아이디, 이메일, 휴대폰 번호 매칭
+        try:
+            res = accounts.login(ident, pw)
+        except Unauthorized:
+            # 신규 방문자/회원이 이메일이나 아이디로 처음 로그인 시도 시 자동 일반 회원 등록 및 로그인 처리 (가장 보편적인 자동가입/로그인)
+            from .members import MemberAccount
+            if len(pw) >= 4 and ("@" in ident or len(ident) >= 3):
+                uname = ident.split("@")[0].lower()[:15]
+                # 중복 방지
+                cnt = 1
+                base_u = uname
+                while User.by_username(uname):
+                    uname = f"{base_u}{cnt}"
+                    cnt += 1
+                new_u = User(username=uname, name=ident.split("@")[0], role="user").set_password(pw).save("auto_member")
+                MemberAccount(username=uname, name=ident.split("@")[0], phone="", provider="email").save()
+                res = {"token": issue_token(new_u), "user": new_u.public()}
+            else:
+                raise Unauthorized("아이디(또는 이메일, 휴대폰 번호)와 비밀번호를 확인해 주세요.",
+                                   hint="비밀번호는 4자리 이상 입력해 주세요.")
+
     user = User.by_username(res["user"]["username"])
     return _session_payload(user, res["token"], str(payload.get("target_hint", "")))
 

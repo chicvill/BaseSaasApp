@@ -93,6 +93,11 @@ def ensure_buildings() -> None:
     for code, name, branch in BUILDINGS:
         if branch not in existing:
             Building(code=code, name=name, branch=branch).save()
+    # 임대인 계정 기본 활성화 보장 (chic, sunho, sinbi)
+    existing_lessors = {l.branch for l in LessorAccount.all()}
+    for code, name, branch in BUILDINGS:
+        if branch not in existing_lessors:
+            LessorAccount(username=code, branch=branch, initial_code="", must_change=False).save()
 
 
 def building_of(branch: Optional[str]) -> Building:

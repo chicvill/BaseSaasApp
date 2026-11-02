@@ -312,61 +312,41 @@
     <div class="or-modal">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div>
-          <h3 id="authModalTitle" style="margin:0; font-size:19px; color:var(--or-navy);">🔐 OpenRent · Rent4 본인인증 로그인</h3>
-          <div id="authModalSub" style="font-size:12.5px; color:var(--or-muted);">본인인증 로그인 즉시 계정의 역할에 맞는 전용 페이지로 자동 이동합니다.</div>
+          <h3 id="authModalTitle" style="margin:0; font-size:19px; color:var(--or-navy);">🔑 Rent4 로그인</h3>
+          <div id="authModalSub" style="font-size:13px; color:var(--or-muted);">로그인하면 역할(관리인 · 임대인 · 세입자)에 맞는 전용 페이지로 바로 이동합니다.</div>
         </div>
         <button type="button" id="btnCloseAuthModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--or-muted);">✕</button>
       </div>
 
-      <div class="or-tabs" id="authModalTabs">
-        <button type="button" class="or-tab is-active" data-auth-tab="login">🔐 본인인증 로그인</button>
-        <button type="button" class="or-tab" data-auth-tab="register">✨ 본인인증 회원가입</button>
-      </div>
+      <div id="authModalAlert" role="alert" style="display:none; font-size:13.5px; border-radius:8px; padding:10px 12px; margin-bottom:12px; background:#fef2f2; color:#991b1b; border:1px solid #fecaca;"></div>
 
-      <!-- TAB 1: 통합 계정 본인인증 로그인 -->
-      <div id="authModalAlert" role="alert" style="display:none; font-size:13px; border-radius:8px; padding:9px 11px; margin-bottom:10px; background:#fef2f2; color:#991b1b; border:1px solid #fecaca;"></div>
+      <!-- 일반 표준 로그인 폼 -->
       <form id="formAccountLogin">
         <input type="hidden" id="loginTargetHint" value="">
-        <div style="font-size:12px; background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🛡️ 로그인 시 휴대폰·계정 기반 <strong>본인인증(신분 확인 완료)</strong> 상태가 자동 부여되며 공동계약 전자서명 자격이 활성화됩니다.
+        <input type="checkbox" id="chkAdminPoolHub" style="display:none;">
+
+        <div class="or-field">
+          <label for="loginIdentifier" style="font-size:13.5px; font-weight:600; margin-bottom:6px;">아이디 또는 이메일</label>
+          <input id="loginIdentifier" class="or-input" placeholder="아이디 또는 이메일 입력" required autocomplete="username">
         </div>
         <div class="or-field">
-          <label for="loginIdentifier">아이디 / 휴대폰 번호 / 이메일 / 성명</label>
-          <input id="loginIdentifier" class="or-input" placeholder="예: chic, admin, 010-8888-2010, 이민수" required>
+          <label for="loginPassword" style="font-size:13.5px; font-weight:600; margin-bottom:6px;">비밀번호</label>
+          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호 입력" required autocomplete="current-password">
         </div>
-        <div class="or-field">
-          <label for="loginPassword">비밀번호 (관리인: 0202 · 임차인: 휴대폰 뒷 4자리 가능)</label>
-          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호 입력 (관리인: 0202 / 기본: 1212)" value="1212" required>
-        </div>
-        <div class="or-field" style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--or-muted);">
-          <input id="chkAdminPoolHub" type="checkbox">
-          <label for="chkAdminPoolHub" style="margin:0; font-weight:500; cursor:pointer;">관리인(admin) 로그인 시 통합 Data Pool 허브(<code>/rent4/pool.html</code>)로 바로 이동</label>
-        </div>
-        <button type="submit" id="btnSubmitLogin" class="or-btn or-btn--blue" style="width:100%; padding:12px;">
-          본인인증 로그인 후 이동 →
+
+        <button type="submit" id="btnSubmitLogin" class="or-btn or-btn--blue" style="width:100%; padding:13px; font-size:15px; font-weight:700; margin-top:4px;">
+          로그인 후 이동 →
         </button>
 
-        <!-- 원클릭 역할별 데모 계정 칩 -->
-        <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--or-border);">
-          <div style="font-size:12px; font-weight:700; color:var(--or-muted);">⚡ 역할별 본인인증 완료 계정 원클릭 로그인 (클릭 시 즉시 이동)</div>
+        <!-- 원클릭 빠른 테스트 로그인 칩 -->
+        <div style="margin-top:18px; padding-top:14px; border-top:1px solid var(--or-border);">
+          <div style="font-size:12px; font-weight:700; color:var(--or-muted); margin-bottom:8px;">⚡ 원클릭 빠른 로그인 (클릭 시 해당 화면으로 즉시 이동)</div>
           <div id="demoAccountGrid" class="or-demo-grid"></div>
         </div>
       </form>
 
-      <!-- TAB 2: 구글 본인 확인 회원가입 -->
       <form id="formRegister" style="display:none;">
-        <div style="font-size:12.5px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:8px; padding:10px 12px; margin-bottom:12px; line-height:1.6;">
-          🛡️ <strong>임대인 보호 원칙</strong> — 방문 문의 · 계약 신청은 <strong>구글 이메일로 본인 확인</strong>을 마친 회원만 할 수 있습니다.<br>
-          ① 구글 계정으로 이메일 확인 → ② 이름 · 휴대폰 · 아이디 · 비밀번호 입력 → ③ 로그인 상태로 매물 문의
-        </div>
-        <button type="submit" id="btnSubmitRegister" class="or-btn or-btn--green" style="width:100%; padding:12px;">
-          🔐 구글로 본인 확인하고 회원가입 →
-        </button>
-        <div style="font-size:12px; color:var(--or-muted); margin-top:10px; line-height:1.6;">
-          · 이미 가입한 구글 계정이면 가입 없이 바로 로그인됩니다.<br>
-          · 주민등록번호는 받지 않습니다. 비밀번호는 암호화(해시)되어 저장됩니다.<br>
-          · 임대인 계정은 관리인과의 가맹 계약으로만 만들어집니다.
-        </div>
+        <button type="submit" id="btnSubmitRegister" style="display:none;"></button>
       </form>
     </div>
   </div>
