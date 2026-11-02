@@ -835,6 +835,49 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(snap["lessor_checked_tenant_id"])
         self.assertTrue(snap["tenant_checked_lessor_id"])
 
+    def test_10_individual_room_files_partition_by_move_in_date(self):
+        """10. room 객체가 건물/호실/전입일자별 독립 json 파일(시크빌-201-20250101.json)로 분리 저장 및 O(1) 직접 접근 검증."""
+        from apps._rent3_core import pool, Room
+
+        p = pool()
+        # [A] rooms/ 디렉터리가 생성되었는지 검증
+        self.assertTrue(os.path.exists(p.rooms_dir))
+
+        # [B] 사용자 명시 예시: 시크빌 / 101호 / 배종봉 2025.1.1~ 거주 객체 등록
+        r_custom = Room(
+            id="room_test_101",
+            branch="main",
+            building_name="시크빌",
+            room_no="101",
+            move_in_date="2025.1.1",
+            deposit=5000000,
+            monthly_rent=480000,
+        )
+        fn = p.format_room_filename(r_custom.model_dump())
+        self.assertEqual(fn, "시크빌-101-20250101.json")
+
+        r_custom.save("created")
+        expected_path = os.path.join(p.rooms_dir, "시크빌-101-20250101.json")
+        self.assertTrue(os.path.exists(expected_path))
+
+        # [C] 개별 파일 원본 내용 검증 (단일 대형 파일이 아닌 개별 호실 파일로 O(1) 분리 보관)
+        with open(expected_path, "r", encoding="utf-8") as fp:
+            saved_doc = json.load(fp)
+        self.assertEqual(saved_doc["file_name"], "시크빌-101-20250101.json")
+        self.assertEqual(saved_doc["building_name"], "시크빌")
+        self.assertEqual(saved_doc["room_no"], "101")
+        self.assertEqual(saved_doc["data"]["deposit"], 5000000)
+
+        # [D] API 엔드포인트 /api/rent3/pool/rooms/files 로 분리 파일 목록 및 단건 파일 직접 조회 검증
+        res_list = self.client.get("/api/rent3/pool/rooms/files")
+        self.assertEqual(res_list.status_code, 200)
+        file_names = [f["file_name"] for f in res_list.json()["files"]]
+        self.assertIn("시크빌-101-20250101.json", file_names)
+
+        res_single = self.client.get("/api/rent3/pool/rooms/files/시크빌-101-20250101.json")
+        self.assertEqual(res_single.status_code, 200)
+        self.assertEqual(res_single.json()["data"]["room_no"], "101")
+
 
 if __name__ == "__main__":
     unittest.main()
