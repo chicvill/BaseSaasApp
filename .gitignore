@@ -30,5 +30,6 @@ integrat.db
 Thumbs.db
 .pytest_cache/
 tests/scratch_apps/
+rent_dist/
 
 
