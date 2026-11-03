@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent5 계약</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <a class="brand" href="./">🏠 Rent5</a>
+    <nav class="nav" id="nav"></nav>
+  </header>
+  <div id="alert"></div>
+
+  <div class="row between">
+    <h1 id="title">계약</h1>
+    <span class="badge" id="roleBadge"></span>
+  </div>
+  <p class="muted" id="statusLine" role="status">불러오는 중...</p>
+  <ol class="progress" id="progress"></ol>
+
+  <section class="card stack" id="parties" hidden></section>
+  <section class="card stack" id="terms" hidden></section>
+  <section class="stack" id="actions"></section>
+  <section class="card stack" id="history" hidden></section>
+  <p><a href="my.html">← 내 화면</a></p>
+</main>
+<script src="app.js"></script>
+<script src="contract.js"></script>
+</body>
+</html>

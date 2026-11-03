@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent5 직거래 임대 — 중개사 없이 집주인과 직접 계약</title>
+  <meta name="description" content="중개사 없이 임대인과 임차인이 직접 계약합니다. 매물을 찾고, 통화로 확인한 뒤, 온라인으로 계약하세요.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <a class="brand" href="./">🏠 Rent5</a>
+    <nav class="nav" id="nav"></nav>
+  </header>
+  <div id="alert"></div>
+
+  <section class="hero">
+    <h1>중개사 없이, 집주인과 직접 계약</h1>
+    <p class="muted">매물을 고르고 임대인과 통화로 확인한 뒤, 마음에 들면 계약을 신청하세요.</p>
+    <ol class="steps-guide">
+      <li>매물 찾기</li>
+      <li>임대인과 통화</li>
+      <li>계약 신청 (회원가입)</li>
+      <li>온라인 서명</li>
+      <li>계약금 · 잔금 직접 송금</li>
+    </ol>
+  </section>
+
+  <form class="row" id="searchForm" autocomplete="off">
+    <input id="keyword" type="search" placeholder="주소로 찾기 (예: 시크로, 관악구)" aria-label="주소 검색">
+    <select id="leaseType" aria-label="구분">
+      <option value="">월세 · 전세</option>
+      <option value="월세">월세</option>
+      <option value="전세">전세</option>
+    </select>
+  </form>
+  <p class="small muted" id="count" role="status"></p>
+
+  <section class="grid cards" id="listings"><div class="card muted">불러오는 중...</div></section>
+</main>
+<script src="app.js"></script>
+<script src="index.js"></script>
+</body>
+</html>

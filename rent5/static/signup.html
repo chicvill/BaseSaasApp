@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rent5 회원가입</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="wrap narrow">
+  <header class="top">
+    <a class="brand" href="./">🏠 Rent5</a>
+  </header>
+  <div id="alert"></div>
+
+  <form class="card stack" id="signupForm">
+    <h1>회원가입</h1>
+    <p class="small muted">회원이면 누구나 매물을 올리고(임대인), 다른 사람의 매물에 신청할 수 있습니다(임차인).</p>
+    <div><label for="name">이름</label>
+      <input id="name" autocomplete="name" maxlength="30" required></div>
+    <div><label for="phone">휴대폰 번호</label>
+      <input id="phone" type="tel" autocomplete="tel" placeholder="010-1234-5678" required></div>
+    <div><label for="username">아이디 (영문 소문자 · 숫자 · _ 4~20자)</label>
+      <input id="username" autocomplete="username" autocapitalize="none" pattern="[a-z][a-z0-9_]{3,19}" required></div>
+    <div><label for="password">비밀번호 (8자 이상)</label>
+      <input id="password" type="password" autocomplete="new-password" minlength="8" required></div>
+    <div><label for="password2">비밀번호 확인</label>
+      <input id="password2" type="password" autocomplete="new-password" minlength="8" required></div>
+    <button class="btn primary" id="btnSignup" type="submit">가입하고 계속</button>
+    <p class="small muted">비밀번호는 암호화되어 저장되며 누구도 볼 수 없습니다. 주민등록번호는 받지 않습니다.</p>
+    <p class="small muted center">이미 회원이신가요? <a id="loginLink" href="login.html">로그인</a></p>
+  </form>
+</main>
+<script src="app.js"></script>
+<script src="auth.js"></script>
+</body>
+</html>
