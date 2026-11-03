@@ -123,6 +123,10 @@ def build_router(store: Store, secret: bytes) -> APIRouter:
             raise ApiError(404, "마감되었거나 없는 매물입니다.")
         return {"success": True, "listing": listings.public(l)}
 
+    @router.get("/catalog")
+    def catalog(user: Dict[str, Any] = Depends(current_user)) -> Dict[str, Any]:
+        return {"success": True, "catalog": listings.catalog_list(store)}
+
     @router.post("/listings")
     def create_listing(payload: Dict[str, Any] = Payload, user: Dict[str, Any] = Depends(current_user)) -> Dict[str, Any]:
         return {"success": True, "listing": listings.public(listings.create(store, user["username"], payload))}

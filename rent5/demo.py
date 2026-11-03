@@ -1,5 +1,5 @@
 """
-rent5/demo.py — 예제 계정 · 예제 매물. 서버를 다시 시작하거나 다시 배포해도 없으면 다시 만든다.
+rent5/demo.py — 예제 계정 · 예제 매물 · 매물 올리기에서 고르는 예제 목록. 서버를 다시 시작하거나 다시 배포해도 없으면 다시 만든다.
 
     임대인  아이디 aaaa / 비밀번호 a123456 / 김임대 / 01033336666
     임차인  아이디 bbbb / 비밀번호 a123456 / 김임차 / 0101112222
@@ -28,6 +28,21 @@ DEMO_LISTING = {
 }
 
 
+# 매물 올리기 화면에서 고르는 예제 (key 로 중복 없이 채운다). 첫 번째가 예제 매물(아트빌 202호)과 같다.
+CATALOG: List[Dict] = [
+    {"key": "artvill-202", "address": "아트빌", "room": "202호", "lease_type": "월세", "deposit": 5_000_000, "rent": 500_000, "mgmt": 0,
+     "available_from": "2026-12-01", "description": "원룸, 남향, 풀옵션"},
+    {"key": "chicvill-303", "address": "인천 서해구 시크빌", "room": "303호", "lease_type": "월세", "deposit": 10_000_000, "rent": 600_000, "mgmt": 50_000,
+     "available_from": "2026-12-10", "description": "투룸, 주차 1대, 엘리베이터"},
+    {"key": "seohae-101", "address": "서해 오션뷰", "room": "101호", "lease_type": "전세", "deposit": 80_000_000, "rent": 0, "mgmt": 70_000,
+     "available_from": "2027-01-05", "description": "바다 조망, 신축"},
+    {"key": "hanbit-1203", "address": "한빛아파트", "room": "1203호", "lease_type": "전세", "deposit": 150_000_000, "rent": 0, "mgmt": 120_000,
+     "available_from": "2027-02-01", "description": "방 3개, 역세권"},
+    {"key": "byeolbit-b01", "address": "별빛주택", "room": "B01호", "lease_type": "월세", "deposit": 3_000_000, "rent": 400_000, "mgmt": 30_000,
+     "available_from": "2026-12-20", "description": "반지하 아님, 채광 좋음"},
+]
+
+
 def enabled() -> bool:
     return os.getenv("RENT5_DEMO", "1").strip().lower() not in ("0", "false", "no", "off")
 
@@ -41,6 +56,10 @@ def ensure_demo(store: Store) -> None:
             salt, hashed = hash_password(u["password"])      # 회원가입 화면의 8자 규칙은 거치지 않는다 (예제 전용)
             store.insert("users", {"username": u["username"], "name": u["name"], "phone": u["phone"],
                                    "salt": salt, "pw_hash": hashed, "pw_ver": 1})
+        for item in CATALOG:
+            if not store.first("catalog", key=item["key"]):
+                store.insert("catalog", dict(item))
         live = [l for l in store.find("listings", owner=DEMO_LISTING["owner"], demo=True) if l["status"] in ("open", "reserved")]
         if not live:
-            store.insert("listings", dict(DEMO_LISTING))
+            first = store.first("catalog", key=CATALOG[0]["key"])
+            store.insert("listings", dict(DEMO_LISTING, catalog_id=first["id"] if first else ""))   # 같은 예제를 중복으로 올리지 못하게 연결

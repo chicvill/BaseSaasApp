@@ -38,8 +38,36 @@ def iso_date(value: Any, label: str, required: bool = False) -> str:
         raise ApiError(422, f"{label} 형식이 올바르지 않습니다.", hint="YYYY-MM-DD")
 
 
+CATALOG_FIELDS = ("id", "address", "room", "lease_type", "deposit", "rent", "mgmt", "available_from", "description")
+
+
+def catalog_list(store: Store) -> List[Dict[str, Any]]:
+    """DB 에 등록해 둔 예제 매물 — 매물 올리기 화면에서 하나를 골라 입주 가능일 · 보증금 · 월세만 고쳐 공개한다."""
+    return [{k: c.get(k) for k in CATALOG_FIELDS} for c in sorted(store.all("catalog"), key=lambda c: c["created_at"])]
+
+
+def _from_catalog(store: Store, owner: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """고른 예제 매물이 주소 · 호실 · 구분 · 관리비 · 설명을 정하고, 입주 가능일 · 보증금 · 월세는 보낸 값(없으면 예제 값)을 쓴다."""
+    base = store.first("catalog", id=str(data.get("catalog_id")))
+    if not base:
+        raise ApiError(404, "고른 예제 매물을 찾을 수 없습니다.")
+    if any(l["status"] in ("open", "reserved") for l in store.find("listings", owner=owner, catalog_id=base["id"])):
+        raise ApiError(409, "이미 공개 중인 매물입니다.", hint="내 매물에서 내린 뒤 다시 올릴 수 있습니다.")
+    merged = dict(data)
+    for k in ("address", "room", "lease_type", "mgmt", "description"):
+        merged[k] = base.get(k)
+    for k in ("deposit", "rent", "available_from"):
+        if data.get(k) in (None, ""):
+            merged[k] = base.get(k)
+    return merged
+
+
 def create(store: Store, owner: str, data: Dict[str, Any]) -> Dict[str, Any]:
     with store.lock:
+        catalog_id = ""
+        if data.get("catalog_id"):
+            data = _from_catalog(store, owner, data)
+            catalog_id = str(data["catalog_id"])
         mine = [l for l in store.find("listings", owner=owner) if l["status"] != "closed"]
         if len(mine) >= MAX_OPEN_LISTINGS:
             raise ApiError(409, f"올려 둘 수 있는 매물은 {MAX_OPEN_LISTINGS}개까지입니다.", hint="내려도 되는 매물은 먼저 내려 주세요.")
@@ -60,6 +88,7 @@ def create(store: Store, owner: str, data: Dict[str, Any]) -> Dict[str, Any]:
             "contact_phone": valid_phone(data.get("contact_phone"), "문의 번호", required=False),
             "status": "open",
             "reserved_by": "",
+            "catalog_id": catalog_id,
         })
 
 
@@ -83,7 +112,7 @@ def mine(store: Store, owner: str) -> List[Dict[str, Any]]:
     out = []
     for l in sorted(store.find("listings", owner=owner), key=lambda l: l["created_at"], reverse=True):
         n = sum(1 for c in contracts if c["listing_id"] == l["id"] and c["status"] in open_states)
-        out.append(public(l) | {"status": l["status"], "applications": n})
+        out.append(public(l) | {"status": l["status"], "applications": n, "catalog_id": l.get("catalog_id", "")})
     return out
 
 

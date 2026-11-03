@@ -201,6 +201,64 @@ class TestListings(Rent5Case):
         self.assertEqual((mine[0]["status"], mine[0]["applications"]), ("reserved", 1))
 
 
+class TestCatalog(Rent5Case):
+    def setUp(self):
+        super().setUp()
+        from rent5.demo import ensure_demo
+        from rent5.store import Store
+        ensure_demo(Store(self.tmp))
+        self.auth = self.login_demo("bbbb")
+
+    def login_demo(self, username):
+        res = self.client.post("/api/login", json={"username": username, "password": "a123456"})
+        return {"Authorization": f"Bearer {res.json()['token']}"}
+
+    def sample(self, room="202호"):
+        return next(c for c in self.get("catalog", self.auth)["catalog"] if c["room"] == room)
+
+    def test_catalog_lists_registered_samples_for_members_only(self):
+        self.get("catalog", status=401)
+        items = self.get("catalog", self.auth)["catalog"]
+        self.assertGreaterEqual(len(items), 3)
+        first = items[0]
+        self.assertEqual((first["address"], first["room"], first["deposit"], first["rent"]), ("아트빌", "202호", 5_000_000, 500_000))
+        self.assertNotIn("key", first)
+
+    def test_listing_from_catalog_edits_only_date_deposit_and_rent(self):
+        c = self.sample()
+        lid = self.post("listings", self.auth, catalog_id=c["id"], deposit=7_000_000, rent=450_000, available_from="2027-03-01",
+                        address="바꾸려는 주소", room="999호", mgmt=999_999, lease_type="전세", description="바꾸려는 설명")["listing"]
+        self.assertEqual((lid["deposit"], lid["rent"], lid["available_from"]), (7_000_000, 450_000, "2027-03-01"))   # 고칠 수 있는 것
+        self.assertEqual((lid["address"], lid["room"], lid["mgmt"], lid["lease_type"], lid["description"]),
+                         (c["address"], c["room"], c["mgmt"], c["lease_type"], c["description"]))                     # 고정된 것
+        shown = [l for l in self.get("listings")["listings"] if l["id"] == lid["id"]][0]
+        self.assertEqual(shown["deposit"], 7_000_000)
+
+    def test_blank_values_fall_back_to_the_sample_and_jeonse_has_no_rent(self):
+        c = self.sample()
+        got = self.post("listings", self.auth, catalog_id=c["id"], deposit="", rent="", available_from="")["listing"]
+        self.assertEqual((got["deposit"], got["rent"], got["available_from"]), (c["deposit"], c["rent"], c["available_from"]))
+        jeonse = next(x for x in self.get("catalog", self.auth)["catalog"] if x["lease_type"] == "전세")
+        got = self.post("listings", self.auth, catalog_id=jeonse["id"], rent=123_456)["listing"]
+        self.assertEqual(got["rent"], 0)
+
+    def test_same_sample_cannot_be_listed_twice_and_unknown_is_404(self):
+        c = self.sample()
+        lid = self.post("listings", self.auth, catalog_id=c["id"])["listing"]["id"]
+        self.post("listings", self.auth, catalog_id=c["id"], status=409)
+        self.post("listings", self.auth, catalog_id="nope", status=404)
+        self.assertEqual(self.get("my/listings", self.auth)["listings"][0]["catalog_id"], c["id"])
+        self.post(f"listings/{lid}/withdraw", self.auth)                                    # 내리면 다시 올릴 수 있다
+        self.post("listings", self.auth, catalog_id=c["id"])
+
+    def test_sample_values_are_still_validated_and_free_input_still_works(self):
+        c = self.sample()
+        self.post("listings", self.auth, status=422, catalog_id=c["id"], deposit="abc")
+        self.post("listings", self.auth, status=422, catalog_id=c["id"], available_from="내일")
+        self.post("listings", self.auth, status=422, catalog_id=c["id"], contact_phone="12")
+        self.post("listings", self.auth, address="직접 입력한 집", deposit=1)                  # 예제 없이 직접 입력
+
+
 class TestContractFlow(Rent5Case):
     def reserve(self, landlord, tenant, **kw):
         return self.post(f"listings/{self.listing(landlord, **kw)}/reserve", tenant)["contract_id"]
