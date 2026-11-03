@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from . import demo as demo_mod
 from . import flow, listings
 from .security import (ApiError, Lockout, check_password, clean_text, hash_password, load_secret, make_token,
                        read_token, valid_phone, validate_password, validate_username)
@@ -176,11 +177,13 @@ def build_router(store: Store, secret: bytes) -> APIRouter:
     return router
 
 
-def create_app(data_dir: Optional[str] = None) -> FastAPI:
-    """단독 실행용 앱: /api 아래에 API, 나머지는 static/ 화면."""
+def create_app(data_dir: Optional[str] = None, demo: bool = False) -> FastAPI:
+    """단독 실행용 앱: /api 아래에 API, 나머지는 static/ 화면. demo=True 면 예제 계정 · 매물을 채운다(demo.py)."""
     data_dir = str(data_dir or data_dir_from_env())
     app = FastAPI(title="Rent5 직거래 계약", docs_url=None, redoc_url=None, openapi_url=None)
     store = Store(data_dir)
+    if demo and demo_mod.enabled():
+        demo_mod.ensure_demo(store)
     app.state.store = store
 
     @app.exception_handler(ApiError)
@@ -202,3 +205,8 @@ def create_app(data_dir: Optional[str] = None) -> FastAPI:
     app.include_router(build_router(store, load_secret(data_dir)), prefix="/api")
     app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
     return app
+
+
+def create_app_with_demo() -> FastAPI:
+    """uvicorn --factory 용: 예제 계정 · 매물이 늘 있도록 시작할 때 채운다 (RENT5_DEMO=0 이면 끔)."""
+    return create_app(demo=True)

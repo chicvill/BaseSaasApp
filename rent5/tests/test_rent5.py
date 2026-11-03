@@ -392,6 +392,52 @@ class TestChat(Rent5Case):
         self.assertEqual(len(c["chat"]), 1)
 
 
+class TestDemo(Rent5Case):
+    def start(self):
+        return TestClient(create_app(self.tmp, demo=True))
+
+    def login(self, client, username, password="a123456"):
+        res = client.post("/api/login", json={"username": username, "password": password})
+        self.assertEqual(res.status_code, 200, res.text)
+        return {"Authorization": f"Bearer {res.json()['token']}"}
+
+    def test_demo_accounts_and_listing_exist_after_every_start(self):
+        for _ in range(3):                                              # 다시 시작해도 같은 상태 (중복 없음)
+            client = self.start()
+            listings = client.get("/api/listings").json()["listings"]
+            self.assertEqual(len(listings), 1)
+            self.assertEqual((listings[0]["address"], listings[0]["room"], listings[0]["deposit"], listings[0]["rent"]),
+                             ("아트빌", "202호", 5_000_000, 500_000))
+        landlord, tenant = self.login(client, "aaaa"), self.login(client, "bbbb")
+        self.assertEqual(client.get("/api/me", headers=landlord).json()["user"]["name"], "김임대")
+        me = client.get("/api/me", headers=tenant).json()["user"]
+        self.assertEqual((me["name"], me["phone"]), ("김임차", "0101112222"))
+
+    def test_demo_flow_works_and_a_new_demo_listing_returns_after_completion(self):
+        client = self.start()
+        landlord, tenant = self.login(client, "aaaa"), self.login(client, "bbbb")
+        lid = client.get("/api/listings").json()["listings"][0]["id"]
+        cid = client.post(f"/api/listings/{lid}/reserve", headers=tenant).json()["contract_id"]
+        self.assertEqual(client.get("/api/listings").json()["listings"][0]["reserved"], True)
+        client.post(f"/api/contracts/{cid}/cancel", headers=tenant, json={})
+        self.assertEqual(client.get("/api/listings").json()["listings"][0]["reserved"], False)
+        self.assertEqual(len(self.start().get("/api/listings").json()["listings"]), 1)        # 다시 시작해도 하나
+
+    def test_changed_demo_password_is_kept_and_demo_can_be_turned_off(self):
+        client = self.start()
+        auth = self.login(client, "bbbb")
+        client.post("/api/me/password", headers=auth, json={"current": "a123456", "new": "new-pass-9999"})
+        client = self.start()
+        self.assertEqual(client.post("/api/login", json={"username": "bbbb", "password": "a123456"}).status_code, 401)
+        self.login(client, "bbbb", "new-pass-9999")                                           # 바꾼 비밀번호를 덮어쓰지 않는다
+        import tempfile
+        from unittest import mock
+        other = tempfile.mkdtemp(prefix="rent5_off_")
+        self.addCleanup(shutil.rmtree, other, True)
+        with mock.patch.dict(os.environ, {"RENT5_DEMO": "0"}):
+            self.assertEqual(TestClient(create_app(other, demo=True)).get("/api/listings").json()["listings"], [])
+
+
 class TestWeb(Rent5Case):
     def test_security_headers_and_static_pages(self):
         res = self.client.get("/")

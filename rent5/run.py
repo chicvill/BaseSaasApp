@@ -13,4 +13,4 @@ if __name__ == "__main__":
     parser.add_argument("--host", default=os.getenv("HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8050")))
     args = parser.parse_args()
-    uvicorn.run("rent5.app:create_app", factory=True, host=args.host, port=args.port)
+    uvicorn.run("rent5.app:create_app_with_demo", factory=True, host=args.host, port=args.port)

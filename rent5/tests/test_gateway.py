@@ -27,7 +27,7 @@ API = "/api/rent5"
 class GatewayCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="rent5_gw_")
-        env = mock.patch.dict(os.environ, {"RENT5_DATA_DIR": self.tmp})
+        env = mock.patch.dict(os.environ, {"RENT5_DATA_DIR": self.tmp, "RENT5_DEMO": "0"})
         env.start()
         self.addCleanup(env.stop)
         self.addCleanup(shutil.rmtree, self.tmp, True)

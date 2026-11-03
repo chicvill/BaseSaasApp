@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter
 
 from core import BaseSaaSApp
+from rent5 import demo
 from rent5.app import STATIC_DIR, build_router, data_dir_from_env
 from rent5.security import load_secret
 from rent5.store import Store
@@ -26,10 +27,9 @@ class Rent5App(BaseSaaSApp):
     app_name = "Rent5 직거래 계약"
     icon = "🤝"
     category = "business"
-    description = "중개사 없이 임대인과 임차인이 직접 계약합니다. 매물 → 신청 → 조건 제시 → 양쪽 서명 → 계약금 · 잔금."
+    description = "중개사 없이 임대인과 임차인이 직접 계약합니다. 매물 → 계약 신청(전화) → 예약 → 공동 대화창에서 정보 확인 · 등기부 · 계약금 송금."
     version = "0.1.0"
-    features = ["회원 누구나 임대인 · 임차인", "매물 공개 · 계약 신청", "등기 확인 + 조건 제시", "SHA-256 지문 양쪽 서명",
-                "계약서 인쇄 · PDF"]
+    features = ["회원 누구나 임대인 · 임차인", "매물 공개 · 계약 신청 · 예약", "카카오톡식 공동 대화창", "등기부 열람 · 계약금 계좌 · 송금 확인서"]
     order = 45
 
     def __init__(self, base_dir: Optional[str] = None):
@@ -39,6 +39,8 @@ class Rent5App(BaseSaaSApp):
     def get_router(self) -> APIRouter:
         data_dir = data_dir_from_env(DEFAULT_POOL)
         self.store = Store(data_dir)
+        if demo.enabled():                       # 예제 계정 · 매물 (RENT5_DEMO=0 이면 끔) — 다시 배포해도 없으면 다시 만든다
+            demo.ensure_demo(self.store)
         return build_router(self.store, load_secret(data_dir))
 
     def get_static_dir(self) -> Optional[str]:
