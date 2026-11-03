@@ -100,6 +100,32 @@ table.list th, table.list td { text-align: left; padding: 8px 6px; border-bottom
 .doc .sign div { border: 1px solid #999; padding: 12px; min-height: 90px; font-size: 13px; }
 .doc .hash { color: #444; }
 
+/* 계약 화면: 번역 앱처럼 위(상대방) · 아래(나)로 나눈다. 임대인=주황, 임차인=파랑으로 역할이 색으로 구분된다. */
+.pane { --accent: var(--brand); --tint: var(--info-bg); background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; }
+.pane.landlord { --accent: var(--warn); --tint: var(--warn-bg); }
+.pane.tenant { --accent: var(--brand); --tint: var(--info-bg); }
+.pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
+.pane-head h2 { margin: 0; color: var(--accent); }
+.pane-head .who-tag { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--tint); color: var(--accent); }
+.split-bar { text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; padding: 6px 0; }
+.chat { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
+.bubble { max-width: 92%; background: var(--tint); border: 1px solid var(--accent); border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 14px; align-self: flex-start; }
+.pane.mine .bubble { align-self: flex-end; border-radius: 14px 14px 4px 14px; }
+.bubble time { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.bubble.empty { background: transparent; border-style: dashed; color: var(--muted); }
+.pending { border: 1px dashed var(--accent); color: var(--accent); border-radius: 10px; padding: 8px 12px; font-weight: 700; font-size: 14px; margin: 0 0 12px; }
+.pending.me { background: var(--tint); border-style: solid; }
+.pane details { margin: 0 0 12px; }
+.pane summary { cursor: pointer; font-weight: 700; font-size: 14px; }
+.pane .card { border-color: var(--accent); }
+.pane.flash { animation: flash 1.6s ease-out 1; }
+@keyframes flash { from { box-shadow: 0 0 0 4px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
+@media (min-width: 760px) {
+  .split { display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1.4fr); height: calc(100vh - 250px); min-height: 520px; }
+  .pane { overflow-y: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .pane.flash { animation: none; } }
+
 @media (max-width: 560px) {
   .progress { grid-template-columns: repeat(3, 1fr); row-gap: 10px; }
   dl.kv { grid-template-columns: 96px 1fr; }

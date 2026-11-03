@@ -18,7 +18,54 @@
   const dl = (rows) => `<dl class="kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
   const field = (fid, label, attrs = "", value = "") => `<div><label for="${fid}">${esc(label)}</label><input id="${fid}" value="${esc(value)}" ${attrs}></div>`;
 
-  // ── 정보 영역 ──
+  // ── 위(상대방) · 아래(나) 두 화면 ──
+  const SAY = { apply: "계약을 신청했습니다.", offer: "계약 조건을 제시했습니다.", tenant_sign: "내용을 확인하고 서명했습니다.",
+    landlord_sign: "서명했습니다 — 계약이 성립했습니다.", deposit: "계약금 입금을 확인했습니다.", balance: "잔금 입금을 확인했습니다 — 입주 처리.", cancel: "계약을 취소했습니다." };
+  const ROLE_LABEL = { landlord: "임대인", tenant: "임차인" };
+  const TURN = { requested: "landlord", offered: "tenant", tenant_signed: "landlord", signed: "landlord", deposit_paid: "landlord" };
+  const LANDLORD_EVENTS = ["offer", "landlord_sign", "deposit", "balance"];
+  const other = () => (c.role === "landlord" ? "tenant" : "landlord");
+
+  const partyOf = (e) => e.what === "cancel" ? (e.by === user.username ? c.role : other())
+    : LANDLORD_EVENTS.includes(e.what) ? "landlord" : "tenant";
+
+  function bubbles(role) {
+    const items = c.events.filter((e) => partyOf(e) === role).map((e) => {
+      let text = esc(SAY[e.what] || e.what);
+      if (e.what === "apply" && c.message) text += `<br>“${esc(c.message)}”`;
+      if (e.what === "cancel" && c.cancel_reason) text += `<br>사유: ${esc(c.cancel_reason)}`;
+      return `<div class="bubble">${text}<time>${esc(when(e.at))}</time></div>`;
+    });
+    return `<div class="chat">${items.join("") || `<div class="bubble empty">${role === c.role ? "아직 한 일이 없습니다." : "아직 응답이 없습니다."}</div>`}</div>`;
+  }
+
+  function details(role) {
+    const t = c.terms, r = c.registry, i = c.tenant_info;
+    if (role === "landlord" && t) {
+      return `<details open><summary>제시한 조건 · 등기부 확인</summary>` + dl([
+        ["주소", esc(t.address)], ["구분", esc(t.lease_type)], ["보증금", won(t.deposit)], ["계약금", won(t.down_payment)],
+        t.lease_type === "전세" ? null : ["월세 · 관리비", `${won(t.rent)} + ${won(t.mgmt)}`],
+        ["기간", `${esc(t.start)} ~ ${esc(t.end)} (${t.months}개월)`],
+        ["소유자", "등기부상 소유자가 임대인 본인"], ["압류 · 가압류", "없음"], ["근저당 채권최고액", won(r.mortgage)],
+        r.note ? ["메모", esc(r.note)] : null, ["확인일", esc(r.checked_on)],
+      ]) + `<p class="small muted">임차인도 서명 전에 인터넷등기소(iros.go.kr)에서 등기부등본을 직접 확인하세요.</p>`
+        + (c.report_required ? `<div class="alert warn">${esc(REPORT_NOTE)}</div>` : "") + `</details>`;
+    }
+    if (role === "tenant" && i) {
+      return `<details open><summary>임차인 정보</summary>` + dl([["생년월일", esc(i.birth)], ["현재 주소", esc(i.address)], ["비상 연락처", esc(i.emergency)]]) + `</details>`;
+    }
+    return "";
+  }
+
+  function paneHtml(role) {
+    const party = c[role], mine = role === c.role;
+    const turn = TURN[c.status] === role;
+    const pending = turn ? (mine ? `<div class="pending me">내 차례입니다</div>` : `<div class="pending">⏳ ${ROLE_LABEL[role]}의 응답을 기다리는 중</div>`) : "";
+    return `<div class="pane-head"><h2>${ROLE_LABEL[role]} · ${esc(party.name)} ${tel(party.phone)}</h2><span class="who-tag">${mine ? "나" : "상대방"}</span></div>`
+      + bubbles(role) + pending + details(role);
+  }
+
+  let flashed = false;
   function renderInfo() {
     $("title").textContent = c.terms ? c.terms.address : `${c.listing.address} ${c.listing.room || ""}`.trim();
     $("roleBadge").textContent = c.role === "landlord" ? "나는 임대인" : "나는 임차인";
@@ -27,30 +74,12 @@
     $("progress").innerHTML = c.status === "cancelled" ? "" : STEP_LABEL.map((label, i) =>
       `<li class="${i < idx || c.status === "active" ? "done" : i === idx ? "now" : ""}">${esc(label)}</li>`).join("");
 
-    $("parties").innerHTML = `<h2>당사자</h2>` + dl([
-      ["임대인", `${esc(c.landlord.name)} ${tel(c.landlord.phone)}`],
-      ["임차인", `${esc(c.tenant.name)} ${tel(c.tenant.phone)}`],
-      c.message ? ["신청 메시지", esc(c.message)] : null,
-      c.status === "cancelled" ? ["취소 사유", esc(c.cancel_reason || "")] : null,
-    ]);
-    $("parties").hidden = false;
-
-    const t = c.terms, r = c.registry, i = c.tenant_info;
-    $("terms").innerHTML = t ? `<h2>계약 조건</h2>` + dl([
-      ["주소", esc(t.address)], ["구분", esc(t.lease_type)], ["보증금", won(t.deposit)], ["계약금", won(t.down_payment)],
-      t.lease_type === "전세" ? null : ["월세 · 관리비", `${won(t.rent)} + ${won(t.mgmt)}`],
-      ["기간", `${esc(t.start)} ~ ${esc(t.end)} (${t.months}개월)`],
-    ]) + `<h3>등기부 확인 (임대인이 입력)</h3>` + dl([
-      ["소유자", "등기부상 소유자가 임대인 본인임을 확인"], ["압류 · 가압류", "없음"], ["근저당 채권최고액", won(r.mortgage)],
-      r.note ? ["메모", esc(r.note)] : null, ["확인일", esc(r.checked_on)],
-    ]) + `<p class="small muted">임차인도 서명 전에 인터넷등기소(iros.go.kr)에서 등기부등본을 직접 확인하세요.</p>`
-      + (i ? `<h3>임차인 정보</h3>` + dl([["생년월일", esc(i.birth)], ["현재 주소", esc(i.address)], ["비상 연락처", esc(i.emergency)]]) : "")
-      + (c.report_required ? `<div class="alert warn">${esc(REPORT_NOTE)}</div>` : "") : "";
-    $("terms").hidden = !t;
-
-    $("history").innerHTML = `<h3>진행 기록</h3><ul class="timeline">${c.events.map((e) =>
-      `<li>${esc(when(e.at))} · ${esc(EVENT_LABEL[e.what] || e.what)} (${esc(e.by === user.username ? "나" : "상대")})</li>`).join("")}</ul>`;
-    $("history").hidden = false;
+    $("paneOther").className = `pane ${other()} other${flashed ? " flash" : ""}`;
+    $("paneMine").className = `pane ${c.role} mine`;
+    flashed = false;
+    $("paneOther").innerHTML = paneHtml(other());
+    $("mineInfo").innerHTML = paneHtml(c.role);
+    $("split").hidden = false;
   }
 
   // ── 지금 할 일 ──
@@ -160,9 +189,27 @@
   });
 
   function render() { renderInfo(); renderActions(); }
+
+  // 상대방이 응답하면 몇 초 안에 화면이 바뀐다 (이 화면을 열어 둔 동안만 확인한다).
+  const stamp = (x) => `${x.status}|${x.events.length}|${x.offer_hash || ""}`;
+  async function poll() {
+    if (document.hidden || !c || c.status === "cancelled" || c.status === "active") return;
+    try {
+      const next = (await R5.api(`/contracts/${encodeURIComponent(id)}`)).contract;
+      if (stamp(next) === stamp(c)) return;
+      const stepChanged = next.status !== c.status || next.offer_hash !== c.offer_hash;
+      c = next;
+      flashed = true;
+      renderInfo();
+      if (stepChanged) renderActions();
+      R5.notify("ok", "상대방이 응답했습니다.", c.status_label);
+    } catch (err) { /* 일시적인 오류는 다음 확인 때 다시 시도 */ }
+  }
+
   try {
     c = (await R5.api(`/contracts/${encodeURIComponent(id)}`)).contract;
     render();
+    setInterval(poll, 4000);
   } catch (err) {
     $("statusLine").textContent = "";
     R5.fail(err);

@@ -22,10 +22,14 @@
   <p class="muted" id="statusLine" role="status">불러오는 중...</p>
   <ol class="progress" id="progress"></ol>
 
-  <section class="card stack" id="parties" hidden></section>
-  <section class="card stack" id="terms" hidden></section>
-  <section class="stack" id="actions"></section>
-  <section class="card stack" id="history" hidden></section>
+  <div class="split" id="split">
+    <section class="pane" id="paneOther" aria-label="상대방 화면"></section>
+    <div class="split-bar" id="splitBar" aria-hidden="true">▲ 상대방 &nbsp;·&nbsp; 나 ▼</div>
+    <section class="pane" id="paneMine" aria-label="내 화면">
+      <div id="mineInfo"></div>
+      <div class="stack" id="actions"></div>
+    </section>
+  </div>
   <p><a href="my.html">← 내 화면</a></p>
 </main>
 <script src="app.js"></script>
