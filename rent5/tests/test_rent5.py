@@ -14,11 +14,11 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..")))     # 저장소 루트 → rent5 패키지
 
 from fastapi.testclient import TestClient
 
-from app import create_app
+from rent5.app import create_app
 
 TERMS = {"address": "서울시 테스트구 시크로 12, 302호", "deposit": 10_000_000, "down_payment": 1_000_000,
          "rent": 500_000, "mgmt": 50_000, "start": "2026-12-01", "months": 12}
@@ -122,7 +122,7 @@ class TestMembers(Rent5Case):
     def test_operator_reset_script_sets_new_password_and_ends_old_logins(self):
         sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "scripts")))
         import set_password
-        from security import ApiError
+        from rent5.security import ApiError
         old = self.signup("owner1")
         set_password.reset(self.tmp, "owner1", "operator-set-pw-9")
         self.get("me", old, status=401)                                          # 이미 로그인한 기기는 끝

@@ -3,6 +3,8 @@
   "use strict";
 
   const KEY = "rent5.token";
+  // 단독 실행은 /api, 게이트웨이(/rent5/ 아래)에서는 /api/rent5
+  const API = location.pathname.startsWith("/rent5/") ? "/api/rent5" : "/api";
   const store = {
     get() { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } },
     set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) { /* 저장 못 해도 이번 화면은 동작 */ } },
@@ -20,7 +22,7 @@
     if (store.get()) headers.Authorization = `Bearer ${store.get()}`;
     let res;
     try {
-      res = await fetch(`/api${path}`, { method: opts.method || "GET", headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+      res = await fetch(`${API}${path}`, { method: opts.method || "GET", headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
     } catch (_) {
       throw Object.assign(new Error("서버에 연결할 수 없습니다."), { status: 0, hint: "네트워크를 확인하고 다시 시도해 주세요." });
     }

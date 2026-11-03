@@ -28,11 +28,22 @@ USERNAME_RE = re.compile(r"^[a-z][a-z0-9_]{3,19}$")
 RRN_RE = re.compile(r"\d{6}\s*[-–]?\s*[1-4]\d{6}")
 
 
-class ApiError(Exception):
+try:    # 게이트웨이 안에서는 플랫폼의 오류 처리(DomainError → JSON)를 그대로 쓴다. 없으면 일반 예외.
+    from core.errors import DomainError as _Base
+except ImportError:
+    _Base = Exception
+
+_LEVEL = {409: "warning", 429: "warning", 422: "diff"}      # 화면 안내 색 (플랫폼 규격)
+
+
+class ApiError(_Base):
     """화면에 그대로 보여 줄 수 있는 오류."""
 
     def __init__(self, status: int, message: str, hint: str = ""):
-        super().__init__(message)
+        if _Base is Exception:
+            super().__init__(message)
+        else:
+            super().__init__(message, hint=hint, status_code=status, level=_LEVEL.get(status, "error"))
         self.status, self.message, self.hint = status, message, hint
 
 

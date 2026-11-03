@@ -12,10 +12,10 @@ import os
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..")))
+sys.path.insert(0, os.path.abspath(os.path.join(HERE, "..", "..")))     # 저장소 루트 → rent5 패키지
 
-from security import ApiError, hash_password, validate_password  # noqa: E402
-from store import Store  # noqa: E402
+from rent5.security import ApiError, hash_password, validate_password  # noqa: E402
+from rent5.store import Store  # noqa: E402
 
 
 def reset(data_dir: str, username: str, new_password: str) -> None:

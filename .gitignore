@@ -35,6 +35,7 @@ tests/scratch_apps/
 
 # Rent4 Knowledge Pool (임차인 이름·전화번호 포함 — 저장소에 올리지 않음)
 data/rent4_pool/
+data/rent5_pool/
 
 # 플랫폼 공통 DB (계정 비밀번호 해시·변경 이력) — 런타임 데이터, 없으면 서버가 새로 만든다
 data/platform.db

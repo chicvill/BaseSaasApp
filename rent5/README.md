@@ -1,21 +1,29 @@
 # Rent5 — 중개사 없이 임대인 ↔ 임차인이 직접 계약
 
 rent3 · rent4 를 참고해 **가장 단순하게** 다시 만든 직거래 계약 시스템입니다.
-BaseSaasApp 의 다른 앱과 섞이지 않는 **독립 폴더**이고, 파이썬 파일 몇 개와 정적 화면만 있습니다.
+파이썬 파일 몇 개와 정적 화면만 있고, 본체는 이 **독립 폴더**(`rent5/`)에 있습니다.
+같은 코드를 두 가지로 씁니다: ① 혼자 실행(`py rent5/run.py`) ② 서버의 게이트웨이에 얹기(`apps/rent5/app.py` 어댑터가 `/rent5/` 로 연결).
 
 ## 실행
 
 ```bash
 pip install -r rent5/requirements.txt
-py rent5/run.py                 # http://127.0.0.1:8050  (--port, --host 로 바꿈)
-py -m unittest discover -s rent5/tests   # 저장소 루트에서 — 테스트 30개
+py rent5/run.py                 # 혼자 실행: http://127.0.0.1:8050  (--port, --host 로 바꿈)
+py run.py                       # 플랫폼 전체(게이트웨이): http://localhost:8080/rent5/
+py -m unittest discover -s rent5/tests   # 저장소 루트에서 — 테스트 37개
 ```
+
+| | 혼자 실행 (`rent5/run.py`) | 게이트웨이 (`run.py`, 서버) |
+|---|---|---|
+| 화면 | `/` | `/rent5/` |
+| API | `/api/...` | `/api/rent5/...` |
+| 데이터 기본 위치 | `rent5/data/` | `data/rent5_pool/` |
 
 | 환경변수 | 뜻 |
 |---|---|
-| `RENT5_DATA_DIR` | 데이터 폴더 (기본 `rent5/data`) |
-| `RENT5_SECRET` | 로그인 서명 비밀키. 없으면 `data/secret.key` 를 처음 한 번 무작위로 만든다 |
-| `PORT`, `HOST` | `run.py` 기본값 |
+| `RENT5_DATA_DIR` | 데이터 폴더 (위 기본값을 바꿈) |
+| `RENT5_SECRET` | 로그인 서명 비밀키. 없으면 데이터 폴더의 `secret.key` 를 처음 한 번 무작위로 만든다 |
+| `PORT`, `HOST` | 혼자 실행(`rent5/run.py`) 기본값 |
 
 ## 사람의 흐름
 
@@ -46,15 +54,16 @@ py -m unittest discover -s rent5/tests   # 저장소 루트에서 — 테스트 
 
 ```
 rent5/
-├─ app.py          FastAPI 앱 (create_app) · /api/... 와 static/ 화면
+├─ app.py          build_router(API, 경로에 /api 없음) · create_app(혼자 실행용: /api + static/ 화면)
 ├─ flow.py         계약 단계 규칙 · 지문 · 화면용 변환
 ├─ listings.py     매물 올리기 · 공개 목록 · 내리기
 ├─ security.py     비밀번호 해시 · 토큰 · 로그인 잠금 · 입력 검사
 ├─ store.py        data/<이름>.json 저장 (원자적 쓰기, 밖에서 바뀌면 다시 읽기)
-├─ run.py          실행
+├─ run.py          혼자 실행
 ├─ scripts/set_password.py   운영자가 회원 비밀번호 재설정
 ├─ static/         index · login · signup · apply · my · contract · doc (.html + .js) , app.js , style.css
-└─ tests/test_rent5.py
+└─ tests/          test_rent5.py (본체) · test_gateway.py (게이트웨이로 올려서 끝까지)
+apps/rent5/app.py  게이트웨이 어댑터 — rent5 를 /rent5/ · /api/rent5 에 자동 마운트 (핵심 로직 없음)
 ```
 
 ## 보안 설계
@@ -66,13 +75,18 @@ rent5/
 - 공개 매물에는 회원 이름 · 아이디 · 가입 번호가 나가지 않고, 임대인이 직접 적은 문의 번호만 나갑니다.
 - 주민등록번호 모양은 모든 입력 칸에서 거부합니다. 생년월일만 받습니다.
 - CSP `script-src 'self'; style-src 'self'` — 화면에 인라인 스크립트 · 스타일이 없습니다. 화면에 넣는 모든 값은 이스케이프합니다.
+  혼자 실행할 때는 응답 헤더로, 게이트웨이에서는 각 페이지의 `<meta>` 로 적용합니다 (게이트웨이는 앱별 헤더를 붙일 수 없어서). 그래서 게이트웨이에서는 `X-Frame-Options`(다른 사이트에 끼워 넣기 방지)는 빠집니다.
 - `data/` 는 `.gitignore` 로 제외됩니다 (회원 정보 · 계약 · 비밀키).
 
 ## 운영
 
 - **비밀번호를 잊은 회원**: `py rent5/scripts/set_password.py <아이디>` (서버에서, 새 비밀번호를 두 번 입력). 그 회원의 기존 로그인은 모두 끝납니다. 이메일 · 문자 재설정은 두지 않았습니다.
 - **백업**: `data/` 폴더를 통째로 복사하면 됩니다 (사람이 읽을 수 있는 JSON).
-- **배포**: `uvicorn app:create_app --factory --app-dir rent5 --host 0.0.0.0 --port 8050`. 반드시 HTTPS 뒤에 두고, `RENT5_SECRET` 과 데이터 폴더(영구 저장소)를 지정하세요.
+- **서버(게이트웨이) 배포**: `main` 에 합치면 기존 Coolify 빌드(`python run.py`)가 `apps/rent5` 를 찾아 `/rent5/` 로 띄웁니다. 별도 설정은 필요 없지만 **운영에서는 꼭**:
+  - `data/rent5_pool/` 을 컨테이너 밖 **영구 저장소(볼륨)** 에 연결하세요. 안 하면 재배포할 때마다 회원 · 매물 · 계약이 사라집니다. 이 폴더는 이미지에서 제외돼 있습니다.
+  - `RENT5_SECRET` 환경변수를 지정하세요 (없으면 데이터 폴더에 만든 `secret.key` 를 쓰는데, 폴더가 영구가 아니면 재배포 때마다 모두 로그아웃됩니다).
+  - Coolify 가 HTTPS 를 붙이는지 확인하세요 (로그인 토큰이 오가므로 필수).
+- **혼자 서버로 띄우기**: `uvicorn rent5.app:create_app --factory --host 0.0.0.0 --port 8050` (저장소 루트에서).
 
 ## 일부러 뺀 것 (단순함을 위해)
 

@@ -17,6 +17,9 @@ data/*.db-wal
 .env
 data/platform.db
 data/rent4_pool/
+data/rent5_pool/
+rent5/data/
+rent5/tests/
 
 # 대용량 바이너리 / 개발 에셋 제외 (Docker 빌드 용량 최적화)
 apps/clock/Assets/
