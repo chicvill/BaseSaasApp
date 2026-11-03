@@ -22,19 +22,17 @@
   <p class="muted" id="statusLine" role="status">불러오는 중...</p>
   <ol class="progress" id="progress"></ol>
 
-  <div class="split" id="split">
-    <section class="chatroom" id="chatroom" aria-label="대화">
+  <div class="split" id="split" hidden>
+    <section class="chatroom" id="chatroom" aria-label="계약방 대화">
       <div class="pane-head" id="chatHead"></div>
-      <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+      <div class="chat-scroll" id="chatScroll">
+        <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+        <div class="stack inline-actions" id="actions"></div>
+      </div>
       <form class="chat-form" id="chatForm">
         <input id="chatText" maxlength="500" autocomplete="off" placeholder="메시지를 입력하세요">
         <button class="btn primary" id="chatSend" type="submit">보내기</button>
       </form>
-    </section>
-    <div class="split-bar" id="splitBar" aria-hidden="true">▲ 대화 &nbsp;·&nbsp; 내 할 일 ▼</div>
-    <section class="pane" id="paneMine" aria-label="내 화면">
-      <div id="mineInfo"></div>
-      <div class="stack" id="actions"></div>
     </section>
   </div>
   <p><a href="my.html">← 내 화면</a></p>

@@ -110,12 +110,17 @@ table.list th, table.list td { text-align: left; padding: 8px 6px; border-bottom
 .pane-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .pane-head h2 { margin: 0; color: var(--accent); }
 .pane-head .who-tag { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--tint); color: var(--accent); }
-.split-bar { text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; padding: 6px 0; }
 .chatroom { --accent: var(--brand); --tint: var(--info-bg); display: flex; flex-direction: column; min-height: 0; background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; }
 .chatroom.landlord { --accent: var(--warn); --tint: var(--warn-bg); }
 .chatroom.tenant { --accent: var(--brand); --tint: var(--info-bg); }
 .chatroom .pane-head h2 { color: var(--accent); }
-.chat-log { flex: 1; min-height: 160px; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+.chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 2px 8px; }
+.chat-log { display: flex; flex-direction: column; gap: 6px; }
+.inline-actions { margin-top: 12px; }
+.inline-actions.landlord { --accent: var(--warn); --tint: var(--warn-bg); }
+.inline-actions.tenant { --accent: var(--brand); --tint: var(--info-bg); }
+.inline-actions .card { border-color: var(--accent); border-left-width: 5px; }
+.inline-actions details { margin: 0; }
 .chat-log .day { align-self: center; font-size: 11px; color: var(--muted); margin: 6px 0 2px; }
 .chat-log .notice { align-self: center; text-align: center; font-size: 12px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; }
 .msg { --c: var(--brand); --ct: var(--info-bg); display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 6px; max-width: 86%; }
@@ -135,12 +140,8 @@ table.list th, table.list td { text-align: left; padding: 8px 6px; border-bottom
 .pane summary { cursor: pointer; font-weight: 700; font-size: 14px; }
 .pane .card { border-color: var(--accent); }
 @keyframes flash { from { box-shadow: 0 0 0 4px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
-@media (min-width: 760px) {
-  .split { display: grid; grid-template-rows: minmax(0, 1.2fr) auto minmax(0, 1fr); height: calc(100vh - 250px); min-height: 520px; }
-  .pane { overflow-y: auto; }
-  .chat-log { max-height: none; }
-  .chatroom { overflow: hidden; }
-}
+.split { height: calc(100vh - 230px); height: calc(100dvh - 230px); min-height: 460px; }
+.chatroom { height: 100%; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) { .chatroom.flash { animation: none; } }
 
 @media (max-width: 560px) {

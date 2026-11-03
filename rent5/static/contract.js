@@ -71,12 +71,12 @@
   }
 
   function renderChat() {
-    const log = $("chatLog");
-    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    const box = $("chatScroll"), log = $("chatLog");
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
     const first = !log.dataset.ready;
     log.innerHTML = chatHtml();
     log.dataset.ready = "1";
-    if (first || nearBottom) log.scrollTop = log.scrollHeight;
+    if (first || nearBottom) box.scrollTop = box.scrollHeight;
   }
 
   let flashed = false;
@@ -90,14 +90,11 @@
 
     const o = other();
     $("chatroom").className = `chatroom ${o}${flashed ? " flash" : ""}`;
-    $("paneMine").className = `pane ${c.role} mine`;
+    $("actions").className = `stack inline-actions ${c.role}`;
     flashed = false;
     $("chatHead").innerHTML = `<h2>${ROLE_LABEL[o]} · ${esc(c[o].name)} ${tel(c[o].phone)}</h2>`
-      + `<span class="who-tag">${live() && !myTurn() ? "⏳ 응답 대기" : "상대방"}</span>`;
+      + `<span class="who-tag">${myTurn() ? "내 차례" : live() ? "⏳ 응답 대기" : "상대방"}</span>`;
     renderChat();
-    $("mineInfo").innerHTML = `<div class="pane-head"><h2>${ROLE_LABEL[c.role]} · ${esc(c[c.role].name)}</h2>`
-      + `<span class="who-tag">${myTurn() ? "내 차례" : "나"}</span></div>`
-      + (c.report_required && c.status === "completed" ? `<div class="alert warn">${esc(REPORT_NOTE)}</div>` : "");
     $("split").hidden = false;
   }
 
@@ -151,7 +148,7 @@
     }
     const wait = waitText();
     if (wait) out.push(`<div class="alert">${esc(wait)}</div>`);
-    if (c.status === "completed") out.push(`<div class="alert ok">계약금 송금까지 끝났습니다. 계약이 종료되었습니다.</div>`);
+    if (c.status === "completed") out.push(`<div class="alert ok">계약금 송금까지 끝났습니다. 계약이 종료되었습니다.</div>${c.report_required ? `<div class="alert warn">${esc(REPORT_NOTE)}</div>` : ""}`);
     if (a.includes("document")) out.push(`<a class="btn primary" href="doc.html?id=${encodeURIComponent(c.id)}">📄 계약 확인서 보기 · 인쇄</a>`);
     if (a.includes("cancel")) {
       out.push(`<details class="card"><summary>예약 취소</summary><div class="stack">
@@ -174,7 +171,7 @@
       c = (await R5.api(`/contracts/${encodeURIComponent(id)}/${PATH[name]}`, { method: "POST", body: (bodies[name] || (() => ({})))() })).contract;
       R5.notify("ok", "처리했습니다.", c.status_label);
       render();
-      $("chatLog").scrollTop = $("chatLog").scrollHeight;
+      $("chatScroll").scrollTop = $("chatScroll").scrollHeight;
     }, "처리 중...");
   }
 
@@ -195,7 +192,8 @@
     act(btn.dataset.action, btn);
   });
 
-  function render() { renderInfo(); renderActions(); }
+  const toBottom = () => { $("chatScroll").scrollTop = $("chatScroll").scrollHeight; };
+  function render() { renderInfo(); renderActions(); toBottom(); }
 
   // 상대방의 응답 · 메시지는 몇 초 안에 반영된다 (이 화면을 열어 둔 동안만 확인한다).
   const stamp = (x) => `${x.status}|${x.events.length}|${(x.chat || []).length}|${x.landlord_info_ok_at}|${x.tenant_info_ok_at}`;
@@ -209,8 +207,8 @@
       c = next;
       flashed = stepChanged;
       renderInfo();
-      if (stepChanged) { renderActions(); R5.notify("ok", "상대방이 응답했습니다.", c.status_label); }
-      else if (newChat) $("chatLog").scrollTop = $("chatLog").scrollHeight;
+      if (stepChanged) { renderActions(); toBottom(); R5.notify("ok", "상대방이 응답했습니다.", c.status_label); }
+      else if (newChat) $("chatScroll").scrollTop = $("chatScroll").scrollHeight;
     } catch (err) { /* 일시적인 오류는 다음 확인 때 다시 시도 */ }
   }
 
@@ -222,7 +220,7 @@
       c = (await R5.api(`/contracts/${encodeURIComponent(id)}/messages`, { method: "POST", body: { text } })).contract;
       $("chatText").value = "";
       renderInfo();
-      $("chatLog").scrollTop = $("chatLog").scrollHeight;
+      $("chatScroll").scrollTop = $("chatScroll").scrollHeight;
       $("chatText").focus();
     }, "...");
   });
