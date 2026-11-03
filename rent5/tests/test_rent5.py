@@ -20,10 +20,8 @@ from fastapi.testclient import TestClient
 
 from rent5.app import create_app
 
-TERMS = {"address": "서울시 테스트구 시크로 12, 302호", "deposit": 10_000_000, "down_payment": 1_000_000,
-         "rent": 500_000, "mgmt": 50_000, "start": "2026-12-01", "months": 12}
 REGISTRY = {"owner_match": True, "seizure": False, "mortgage": 0, "note": "깨끗함"}
-INFO = {"birth": "1995-03-04", "address": "부산시 어딘가 1", "emergency": "부모 010-9999-0000", "agree": True}
+ACCOUNT = {"bank": "국민은행", "number": "123-456-789012", "holder": "김임대"}
 
 
 class Rent5Case(unittest.TestCase):
@@ -58,13 +56,14 @@ class Rent5Case(unittest.TestCase):
         landlord, tenant = self.signup("owner1", "김임대", "010-1111-2222"), self.signup("tenant1", "이임차", "010-3333-4444")
         return landlord, tenant
 
-    def to_signed(self, landlord, tenant, lid):
-        cid = self.post(f"listings/{lid}/apply", tenant, message="직장인입니다")["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
-        c = self.get(f"contracts/{cid}", tenant)["contract"]
-        self.post(f"contracts/{cid}/tenant-sign", tenant, offer_hash=c["offer_hash"], **INFO)
-        c = self.get(f"contracts/{cid}", landlord)["contract"]
-        self.post(f"contracts/{cid}/landlord-sign", landlord, final_hash=c["final_hash"])
+    def to_completed(self, landlord, tenant, lid):
+        cid = self.post(f"listings/{lid}/reserve", tenant)["contract_id"]
+        self.post(f"contracts/{cid}/confirm-landlord-info", tenant)
+        self.post(f"contracts/{cid}/confirm-tenant-info", landlord)
+        self.post(f"contracts/{cid}/registry", landlord, **REGISTRY)
+        self.post(f"contracts/{cid}/confirm-registry", tenant)
+        self.post(f"contracts/{cid}/account", landlord, **ACCOUNT)
+        self.post(f"contracts/{cid}/pay", tenant)
         return cid
 
 
@@ -166,201 +165,217 @@ class TestListings(Rent5Case):
         self.post("listings", owner, status=422, address="주소", deposit=1, description="900101-1234567 입니다")
         self.post("listings", status=401, address="주소", deposit=1)
 
-    def test_cannot_apply_to_own_or_without_login(self):
+    def test_cannot_reserve_own_or_without_login(self):
         owner = self.signup("owner1")
         lid = self.listing(owner)
-        self.post(f"listings/{lid}/apply", owner, status=409)
-        self.post(f"listings/{lid}/apply", status=401)
+        self.post(f"listings/{lid}/reserve", owner, status=409)
+        self.post(f"listings/{lid}/reserve", status=401)
 
-    def test_apply_twice_blocked_and_limit(self):
+    def test_reserved_listing_stays_visible_but_cannot_be_picked(self):
+        owner, tenant = self.parties()
+        lid = self.listing(owner, contact_phone="010-7777-8888")
+        self.post(f"listings/{lid}/reserve", tenant)
+        shown = self.get("listings")["listings"][0]
+        self.assertEqual((shown["reserved"], shown["contact_phone"]), (True, ""))        # 예약됨 표시, 번호는 가림
+        self.post(f"listings/{lid}/reserve", self.signup("tenant2"), status=409)         # 다른 사람은 못 고른다
+        self.post(f"listings/{lid}/reserve", tenant, status=409)
+
+    def test_reservation_limit(self):
+        owner, tenant = self.parties()
+        for _ in range(3):
+            self.post(f"listings/{self.listing(owner)}/reserve", tenant)
+        self.post(f"listings/{self.listing(owner)}/reserve", tenant, status=409)
+
+    def test_withdraw_blocked_while_reserved(self):
         owner, tenant = self.parties()
         lid = self.listing(owner)
-        self.post(f"listings/{lid}/apply", tenant)
-        self.post(f"listings/{lid}/apply", tenant, status=409)
-
-    def test_withdraw_closes_listing_and_pending_requests(self):
-        owner, tenant = self.parties()
-        lid = self.listing(owner)
-        cid = self.post(f"listings/{lid}/apply", tenant)["contract_id"]
         self.post(f"listings/{lid}/withdraw", self.signup("other1"), status=404)
-        self.post(f"listings/{lid}/withdraw", owner)
-        self.assertEqual(self.get("listings")["listings"], [])
-        self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["status"], "cancelled")
+        self.post(f"listings/{lid}/reserve", tenant)
+        self.post(f"listings/{lid}/withdraw", owner, status=409)
 
-    def test_my_listings_show_application_count(self):
+    def test_my_listings_show_reservation_count(self):
         owner, tenant = self.parties()
         lid = self.listing(owner)
-        self.post(f"listings/{lid}/apply", tenant)
+        self.post(f"listings/{lid}/reserve", tenant)
         mine = self.get("my/listings", owner)["listings"]
-        self.assertEqual((mine[0]["status"], mine[0]["applications"]), ("open", 1))
+        self.assertEqual((mine[0]["status"], mine[0]["applications"]), ("reserved", 1))
 
 
 class TestContractFlow(Rent5Case):
-    def test_full_flow_to_move_in(self):
+    def reserve(self, landlord, tenant, **kw):
+        return self.post(f"listings/{self.listing(landlord, **kw)}/reserve", tenant)["contract_id"]
+
+    def to_info_ok(self, landlord, tenant, cid):
+        self.post(f"contracts/{cid}/confirm-landlord-info", tenant)
+        self.post(f"contracts/{cid}/confirm-tenant-info", landlord)
+
+    def test_full_flow_to_completed(self):
         landlord, tenant = self.parties()
         lid = self.listing(landlord)
-        cid = self.post(f"listings/{lid}/apply", tenant, message="직장인입니다")["contract_id"]
-        self.assertEqual(self.get("contracts", landlord)["contracts"][0]["other_name"], "이임차")      # 임대인은 신청자를 본다
-        self.assertEqual(self.get("contracts", tenant)["contracts"][0]["other_name"], "김임대")
+        cid = self.post(f"listings/{lid}/reserve", tenant)["contract_id"]
         c = self.get(f"contracts/{cid}", landlord)["contract"]
-        self.assertEqual((c["status"], c["role"], c["actions"]), ("requested", "landlord", ["offer", "cancel"]))
+        self.assertEqual((c["status"], c["role"], c["terms"]["down_payment"]), ("reserved", "landlord", 1_000_000))   # 보증금의 10%
+        self.assertEqual(c["actions"], ["confirm_tenant_info", "cancel"])
+        self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["actions"], ["confirm_landlord_info", "cancel"])
+        self.assertEqual(self.get("contracts", landlord)["contracts"][0]["other_name"], "이임차")
+        self.assertEqual(self.get("contracts", tenant)["contracts"][0]["other_name"], "김임대")
 
-        c = self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)["contract"]
-        self.assertEqual(c["status"], "offered")
-        self.assertEqual(c["terms"]["end"], "2027-11-30")                       # 2026-12-01 + 12개월 - 1일
-        self.assertEqual(self.get("listings")["listings"], [])                  # 진행 중이라 공개 목록에서 빠짐
-        t = self.get(f"contracts/{cid}", tenant)["contract"]
-        self.assertEqual(t["actions"], ["tenant_sign", "cancel"])
+        c = self.post(f"contracts/{cid}/confirm-landlord-info", tenant)["contract"]       # 임차인이 임대인 정보 확인
+        self.assertEqual(c["status"], "reserved")
+        c = self.post(f"contracts/{cid}/confirm-tenant-info", landlord)["contract"]       # 임대인이 임차인 정보 확인
+        self.assertEqual(c["status"], "info_ok")
+        self.assertEqual(self.get(f"contracts/{cid}", landlord)["contract"]["actions"], ["show_registry", "cancel"])
 
-        self.get(f"contracts/{cid}/document", landlord, status=409)             # 서명 전엔 계약서 없음
-        c = self.post(f"contracts/{cid}/tenant-sign", tenant, offer_hash=t["offer_hash"], **INFO)["contract"]
-        self.assertEqual(c["status"], "tenant_signed")
+        c = self.post(f"contracts/{cid}/registry", landlord, **REGISTRY)["contract"]
+        self.assertEqual(c["status"], "registry_shown")
+        self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["actions"], ["confirm_registry", "cancel"])
+        c = self.post(f"contracts/{cid}/confirm-registry", tenant)["contract"]
+        self.assertEqual(c["status"], "registry_ok")
+
+        c = self.post(f"contracts/{cid}/account", landlord, **ACCOUNT)["contract"]
+        self.assertEqual((c["status"], c["account"]["amount"], c["account"]["holder_match"]), ("account_sent", 1_000_000, True))
+        self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["actions"], ["pay", "cancel"])
+        c = self.post(f"contracts/{cid}/pay", tenant)["contract"]
+        self.assertEqual(c["status"], "completed")
+        self.assertEqual(c["actions"], ["document"])                                        # 끝난 계약은 취소 불가
         self.assertEqual(len(c["final_hash"]), 64)
-        c = self.post(f"contracts/{cid}/landlord-sign", landlord, final_hash=c["final_hash"])["contract"]
-        self.assertEqual(c["status"], "signed")
-        self.assertIn("document", c["actions"])
-        self.assertEqual(self.get("listings")["listings"], [])                  # 마감
+        self.assertEqual(self.get("listings")["listings"], [])                              # 매물 마감
 
-        c = self.post(f"contracts/{cid}/deposit", landlord)["contract"]
-        self.assertEqual(c["status"], "deposit_paid")
-        c = self.post(f"contracts/{cid}/balance", landlord)["contract"]
-        self.assertEqual(c["status"], "active")
-        self.assertIsNotNone(c["moved_in_at"])
-
-        doc = self.get(f"contracts/{cid}/document", tenant)["document"]
+        doc = self.get(f"contracts/{cid}/document", landlord)["document"]
+        self.assertEqual(doc["snapshot"]["version"], 2)
+        self.assertEqual(doc["snapshot"]["account"]["number"], "123-456-789012")
         self.assertEqual(doc["snapshot"]["terms"]["deposit"], 10_000_000)
-        self.assertEqual(doc["snapshot"]["landlord"]["name"], "김임대")
-        self.assertEqual(doc["final_hash"], c["final_hash"])
-        self.assertTrue(doc["report_required"])                                  # 월세 30만 원 초과 → 임대차 신고 대상
+        self.assertEqual([e["what"] for e in c["events"]], ["reserve", "landlord_info_ok", "tenant_info_ok", "registry_shown", "registry_ok", "account_sent", "pay"])
+        self.assertTrue(all(e["text"] for e in c["events"]))                                # 단계마다 말풍선 문장이 있다
+        self.assertNotIn("by", c["events"][0])
 
-    def test_report_not_required_for_small_contract(self):
+    def test_each_check_belongs_to_one_side_only(self):
         landlord, tenant = self.parties()
-        lid = self.listing(landlord, rent=200_000, deposit=5_000_000)
-        cid = self.post(f"listings/{lid}/apply", tenant)["contract_id"]
-        c = self.post(f"contracts/{cid}/offer", landlord, **{**TERMS, "deposit": 5_000_000, "rent": 200_000, "down_payment": 500_000}, **REGISTRY)["contract"]
-        self.assertFalse(c["report_required"])
+        cid = self.reserve(landlord, tenant)
+        self.post(f"contracts/{cid}/confirm-landlord-info", landlord, status=403)           # 임대인 정보는 임차인만 확인
+        self.post(f"contracts/{cid}/confirm-tenant-info", tenant, status=403)               # 임차인 정보는 임대인만 확인
+        self.post(f"contracts/{cid}/confirm-landlord-info", tenant)
+        self.post(f"contracts/{cid}/confirm-landlord-info", tenant, status=409)             # 두 번 확인할 수 없다
+        self.post(f"contracts/{cid}/confirm-tenant-info", landlord)
+        self.post(f"contracts/{cid}/registry", tenant, status=403, **REGISTRY)              # 등기부 열람은 임대인
+        self.post(f"contracts/{cid}/registry", landlord, **REGISTRY)
+        self.post(f"contracts/{cid}/confirm-registry", landlord, status=403)                # 등기부 확인은 임차인만
+        self.post(f"contracts/{cid}/confirm-registry", tenant)
+        self.post(f"contracts/{cid}/account", tenant, status=403, **ACCOUNT)
+        self.post(f"contracts/{cid}/account", landlord, **ACCOUNT)
+        self.post(f"contracts/{cid}/pay", landlord, status=403)                             # 송금은 임차인만
+
+    def test_order_is_enforced(self):
+        landlord, tenant = self.parties()
+        cid = self.reserve(landlord, tenant)
+        self.post(f"contracts/{cid}/registry", landlord, status=409, **REGISTRY)            # 서로 확인하기 전엔 등기부 못 보임
+        self.post(f"contracts/{cid}/confirm-registry", tenant, status=409)
+        self.post(f"contracts/{cid}/account", landlord, status=409, **ACCOUNT)
+        self.post(f"contracts/{cid}/pay", tenant, status=409)
+        self.to_info_ok(landlord, tenant, cid)
+        self.post(f"contracts/{cid}/account", landlord, status=409, **ACCOUNT)              # 등기부 확인 전엔 계좌 못 알림
+        self.get(f"contracts/{cid}/document", tenant, status=409)
+
+    def test_registry_needs_clean_conditions(self):
+        landlord, tenant = self.parties()
+        cid = self.reserve(landlord, tenant)
+        self.to_info_ok(landlord, tenant, cid)
+        self.post(f"contracts/{cid}/registry", landlord, status=422, **{**REGISTRY, "owner_match": False})
+        self.post(f"contracts/{cid}/registry", landlord, status=422, **{**REGISTRY, "seizure": True})
+        self.post(f"contracts/{cid}/registry", landlord, status=422, **{**REGISTRY, "mortgage": "abc"})
+        self.post(f"contracts/{cid}/registry", landlord, status=422, **{**REGISTRY, "note": "900101-1234567"})
+
+    def test_account_is_validated_and_name_mismatch_is_warned(self):
+        landlord, tenant = self.parties()
+        cid = self.reserve(landlord, tenant)
+        self.to_info_ok(landlord, tenant, cid)
+        self.post(f"contracts/{cid}/registry", landlord, **REGISTRY)
+        self.post(f"contracts/{cid}/confirm-registry", tenant)
+        self.post(f"contracts/{cid}/account", landlord, status=422, **{**ACCOUNT, "number": "abc"})
+        self.post(f"contracts/{cid}/account", landlord, status=422, **{**ACCOUNT, "bank": ""})
+        self.post(f"contracts/{cid}/account", landlord, status=422, **{**ACCOUNT, "holder": ""})
+        c = self.post(f"contracts/{cid}/account", landlord, **{**ACCOUNT, "holder": "박사기"})["contract"]
+        self.assertFalse(c["account"]["holder_match"])
+        self.assertIn("예금주가 임대인 이름과 다릅니다", c["events"][-1]["text"])
+
+    def test_report_required_only_for_big_contracts(self):
+        landlord, tenant = self.parties()
+        small = self.reserve(landlord, tenant, rent=200_000, deposit=5_000_000)
+        self.assertFalse(self.get(f"contracts/{small}", tenant)["contract"]["report_required"])
+        big = self.reserve(landlord, tenant)
+        self.assertTrue(self.get(f"contracts/{big}", tenant)["contract"]["report_required"])
 
     def test_only_parties_can_see_or_act(self):
         landlord, tenant = self.parties()
-        stranger = self.signup("stranger1")
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
+        cid = self.reserve(landlord, tenant)
+        stranger = self.signup("stranger1", "제삼자", "010-5555-6666")
         self.get(f"contracts/{cid}", stranger, status=404)
-        self.post(f"contracts/{cid}/offer", stranger, status=404, **TERMS, **REGISTRY)
+        self.post(f"contracts/{cid}/confirm-tenant-info", stranger, status=404)
         self.post(f"contracts/{cid}/cancel", stranger, status=404)
         self.get(f"contracts/{cid}", status=401)
-        self.assertEqual(self.get("contracts", stranger)["contracts"], [])
 
-    def test_roles_and_order_are_enforced(self):
-        landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", tenant, status=403, **TERMS, **REGISTRY)         # 임차인은 조건 못 냄
-        self.post(f"contracts/{cid}/tenant-sign", tenant, status=409, offer_hash="x", **INFO)  # 조건 전엔 서명 못 함
-        self.post(f"contracts/{cid}/deposit", landlord, status=409)
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
-        h = self.get(f"contracts/{cid}", tenant)["contract"]["offer_hash"]
-        self.post(f"contracts/{cid}/tenant-sign", landlord, status=403, offer_hash=h, **INFO)  # 임대인은 임차인 서명 못 함
-        self.post(f"contracts/{cid}/landlord-sign", landlord, status=409, final_hash="x")      # 임차인 서명 전엔 못 함
-
-    def test_offer_needs_clean_registry_and_sane_terms(self):
-        landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **TERMS, **{**REGISTRY, "owner_match": False})
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **TERMS, **{**REGISTRY, "seizure": True})
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **{**TERMS, "down_payment": 20_000_000}, **REGISTRY)
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **{**TERMS, "start": "내일"}, **REGISTRY)
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **{**TERMS, "months": 0}, **REGISTRY)
-        self.post(f"contracts/{cid}/offer", landlord, status=422, **TERMS, **{**REGISTRY, "note": "900101-1234567"})
-
-    def test_stale_offer_cannot_be_signed(self):
-        landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
-        seen = self.get(f"contracts/{cid}", tenant)["contract"]["offer_hash"]
-        self.post(f"contracts/{cid}/offer", landlord, **{**TERMS, "rent": 900_000}, **REGISTRY)    # 보는 사이 임대인이 월세를 바꿈
-        self.post(f"contracts/{cid}/tenant-sign", tenant, status=409, offer_hash=seen, **INFO)
-        fresh = self.get(f"contracts/{cid}", tenant)["contract"]["offer_hash"]
-        self.assertNotEqual(seen, fresh)
-        self.post(f"contracts/{cid}/tenant-sign", tenant, offer_hash=fresh, **INFO)
-
-    def test_tenant_sign_validation(self):
-        landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
-        h = self.get(f"contracts/{cid}", tenant)["contract"]["offer_hash"]
-        sign = lambda status, **kw: self.post(f"contracts/{cid}/tenant-sign", tenant, status=status,  # noqa: E731
-                                              **{"offer_hash": h, **INFO, **kw})
-        sign(422, agree=False)
-        sign(422, birth="2999-01-01")
-        sign(422, birth="abc")
-        sign(422, address="")
-        sign(422, emergency="900101-1234567")
-        sign(200)
-
-    def test_changed_tenant_info_changes_hash_and_landlord_must_match(self):
-        landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
-        h = self.get(f"contracts/{cid}", tenant)["contract"]["offer_hash"]
-        self.post(f"contracts/{cid}/tenant-sign", tenant, offer_hash=h, **INFO)
-        self.post(f"contracts/{cid}/landlord-sign", landlord, status=409, final_hash="0" * 64)
-
-    def test_second_applicant_is_closed_when_offer_goes_to_first(self):
-        landlord, first = self.parties()
-        second = self.signup("tenant2", "박임차", "010-5555-6666")
-        lid = self.listing(landlord)
-        c1 = self.post(f"listings/{lid}/apply", first)["contract_id"]
-        c2 = self.post(f"listings/{lid}/apply", second)["contract_id"]
-        self.post(f"contracts/{c1}/offer", landlord, **TERMS, **REGISTRY)
-        self.assertEqual(self.get(f"contracts/{c2}", second)["contract"]["status"], "cancelled")
-        self.post(f"listings/{lid}/apply", self.signup("tenant3"), status=404)            # 진행 중이라 새 신청 불가
-        self.post(f"listings/{lid}/withdraw", landlord, status=409)                         # 진행 중이면 내릴 수 없음
-
-    def test_cancel_reopens_listing_and_blocks_after_signed(self):
+    def test_either_side_can_cancel_and_listing_reopens(self):
         landlord, tenant = self.parties()
         lid = self.listing(landlord)
-        cid = self.post(f"listings/{lid}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/offer", landlord, **TERMS, **REGISTRY)
+        cid = self.post(f"listings/{lid}/reserve", tenant)["contract_id"]
+        self.assertEqual(self.get("listings")["listings"][0]["reserved"], True)
+        c = self.post(f"contracts/{cid}/cancel", landlord, reason="오지 않았어요")["contract"]
+        self.assertEqual((c["status"], c["actions"]), ("cancelled", []))
+        self.assertIn("오지 않았어요", c["events"][-1]["text"])
+        self.assertEqual(self.get("listings")["listings"][0]["reserved"], False)            # 다시 고를 수 있다
+        cid2 = self.post(f"listings/{lid}/reserve", tenant)["contract_id"]
+        self.post(f"contracts/{cid2}/cancel", tenant)
+        self.post(f"contracts/{cid2}/cancel", tenant, status=409)
+
+    def test_cancel_works_midway_but_not_after_completed(self):
+        landlord, tenant = self.parties()
+        cid = self.reserve(landlord, tenant)
+        self.to_info_ok(landlord, tenant, cid)
+        self.post(f"contracts/{cid}/registry", landlord, **REGISTRY)
+        self.post(f"contracts/{cid}/cancel", tenant)                                        # 등기부 열람 뒤에도 취소 가능
+        done = self.to_completed(landlord, tenant, self.listing(landlord))
+        self.post(f"contracts/{done}/cancel", landlord, status=409)
+
+    def test_completed_listing_is_closed_for_good(self):
+        landlord, tenant = self.parties()
+        lid = self.listing(landlord)
+        self.to_completed(landlord, tenant, lid)
         self.assertEqual(self.get("listings")["listings"], [])
-        c = self.post(f"contracts/{cid}/cancel", tenant, reason="마음이 바뀜")["contract"]
-        self.assertEqual((c["status"], c["cancel_reason"]), ("cancelled", "마음이 바뀜"))
-        self.assertEqual(len(self.get("listings")["listings"]), 1)                          # 다시 신청 받음
-        self.post(f"contracts/{cid}/cancel", landlord, status=409)                          # 이미 취소
+        self.post(f"listings/{lid}/reserve", self.signup("tenant2"), status=404)
 
-        lid2 = self.listing(landlord, address="다른 주소 7")
-        cid2 = self.to_signed(landlord, tenant, lid2)
-        self.post(f"contracts/{cid2}/cancel", tenant, status=409)                           # 성립 뒤엔 취소 불가
-        self.post(f"contracts/{cid2}/cancel", landlord, status=409)
-
-    def test_signed_listing_is_closed_for_good(self):
+    def test_old_style_contracts_are_kept_and_only_cancellable(self):
         landlord, tenant = self.parties()
         lid = self.listing(landlord)
-        self.to_signed(landlord, tenant, lid)
-        self.get(f"listings/{lid}", status=404)
-        self.post(f"listings/{lid}/apply", self.signup("tenant2"), status=404)
-
-    def test_event_log_records_each_step(self):
-        landlord, tenant = self.parties()
-        cid = self.to_signed(landlord, tenant, self.listing(landlord))
-        events = self.get(f"contracts/{cid}", tenant)["contract"]["events"]
-        self.assertEqual([e["what"] for e in events], ["apply", "offer", "tenant_sign", "landlord_sign"])
-        self.assertEqual([e["by"] for e in events], ["tenant1", "owner1", "tenant1", "owner1"])
+        from rent5.store import Store
+        old = Store(self.tmp).insert("contracts", {
+            "listing_id": lid, "landlord": "owner1", "tenant": "tenant1", "status": "offered", "message": "예전 신청",
+            "terms": {"address": "예전 주소", "lease_type": "월세", "deposit": 1, "down_payment": 0, "rent": 1, "mgmt": 0,
+                      "start": "2026-12-01", "months": 12, "end": "2027-11-30"},
+            "registry": {"mortgage": 0, "note": "", "checked_on": "2026-11-01"}, "tenant_info": None,
+            "offer_hash": "x", "final_hash": "", "snapshot": None,
+            "events": [{"at": "2026-11-01T00:00:00", "by": "tenant1", "what": "apply"}]})
+        c = self.get(f"contracts/{old['id']}", tenant)["contract"]
+        self.assertEqual(c["steps"][0], "requested")
+        self.assertEqual(c["actions"], ["cancel"])
+        self.assertEqual(c["events"][0]["text"], "")
+        self.post(f"contracts/{old['id']}/confirm-landlord-info", tenant, status=409)
 
 
 class TestChat(Rent5Case):
     def test_two_parties_talk_and_each_sees_it_from_their_side(self):
         landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
-        self.post(f"contracts/{cid}/messages", tenant, text="  안녕하세요, 내일 방을 볼 수 있을까요?  ")
-        c = self.post(f"contracts/{cid}/messages", landlord, text="네, 오후 3시에 오세요.")["contract"]
+        cid = self.post(f"listings/{self.listing(landlord)}/reserve", tenant)["contract_id"]
+        self.post(f"contracts/{cid}/messages", tenant, text="  안녕하세요, 방 잘 봤습니다.  ")
+        c = self.post(f"contracts/{cid}/messages", landlord, text="네, 감사합니다.")["contract"]
         self.assertEqual([(m["mine"], m["role"], m["text"]) for m in c["chat"]],
-                         [(False, "tenant", "안녕하세요, 내일 방을 볼 수 있을까요?"), (True, "landlord", "네, 오후 3시에 오세요.")])
+                         [(False, "tenant", "안녕하세요, 방 잘 봤습니다."), (True, "landlord", "네, 감사합니다.")])
         seen = self.get(f"contracts/{cid}", tenant)["contract"]["chat"]
         self.assertEqual([m["mine"] for m in seen], [True, False])               # 같은 대화를 상대 쪽에서 본다
         self.assertNotIn("by", seen[0])                                           # 아이디는 내려보내지 않는다
 
     def test_only_the_two_parties_can_talk_and_text_is_checked(self):
         landlord, tenant = self.parties()
-        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
+        cid = self.post(f"listings/{self.listing(landlord)}/reserve", tenant)["contract_id"]
         stranger = self.signup("stranger1", "제삼자", "010-5555-6666")
         self.post(f"contracts/{cid}/messages", stranger, status=404, text="끼어들기")
         self.post(f"contracts/{cid}/messages", tenant, status=422, text="   ")
@@ -369,11 +384,11 @@ class TestChat(Rent5Case):
         self.post(f"contracts/{cid}/messages", status=401, text="로그인 없이")
         self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["chat"], [])
 
-    def test_can_still_talk_after_signing_and_cancel(self):
+    def test_can_still_talk_after_completed_and_chat_does_not_move_the_flow(self):
         landlord, tenant = self.parties()
-        cid = self.to_signed(landlord, tenant, self.listing(landlord))
-        c = self.post(f"contracts/{cid}/messages", tenant, text="계약금 보냈어요")["contract"]
-        self.assertEqual(c["status"], "signed")                                   # 대화는 계약 진행 상태를 바꾸지 않는다
+        cid = self.to_completed(landlord, tenant, self.listing(landlord))
+        c = self.post(f"contracts/{cid}/messages", tenant, text="입주일에 뵐게요")["contract"]
+        self.assertEqual(c["status"], "completed")
         self.assertEqual(len(c["chat"]), 1)
 
 
@@ -383,7 +398,7 @@ class TestWeb(Rent5Case):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.headers["X-Frame-Options"], "DENY")
         self.assertIn("script-src 'self'", res.headers["Content-Security-Policy"])
-        for page in ("login.html", "signup.html", "apply.html", "my.html", "contract.html", "doc.html"):
+        for page in ("login.html", "signup.html", "my.html", "contract.html", "doc.html"):
             self.assertEqual(self.client.get(f"/{page}").status_code, 200, page)
         self.assertNotIn("<script>", self.client.get("/").text)                              # 인라인 스크립트 없음 (CSP)
 

@@ -3,7 +3,7 @@ tests/test_gateway.py — rent5 를 서버처럼 게이트웨이(core.gateway)�
 
   - /rent5/ 화면 · /api/rent5/ API 가 마운트된다
   - 오류가 500 이 아니라 올바른 상태코드 + 안내 JSON 으로 나온다 (ApiError → DomainError)
-  - 가입부터 입주 처리까지 게이트웨이 경로로 한 번 끝까지 간다
+  - 가입부터 예약 · 계약금 송금(계약 종료)까지 게이트웨이 경로로 한 번 끝까지 간다
 실행: py -m unittest discover -s rent5/tests   (저장소 루트에서)
 """
 import os
@@ -85,26 +85,25 @@ class TestErrorsAreNot500(GatewayCase):
 
 
 class TestFlowThroughGateway(GatewayCase):
-    def test_signup_to_move_in(self):
+    def test_signup_to_completed(self):
         landlord = self.signup("owner1", "김임대", "010-1111-2222")
         tenant = self.signup("tenant1", "이임차", "010-3333-4444")
         lid = self.call("POST", "/listings", landlord, address="서울 시크로 12", room="302호", deposit=10_000_000, rent=500_000,
-                        mgmt=50_000, available_from="2026-12-01")["listing"]["id"]
+                        mgmt=50_000, available_from="2026-12-01", contact_phone="010-1111-2222")["listing"]["id"]
         self.assertEqual(len(self.call("GET", "/listings")["listings"]), 1)
-        cid = self.call("POST", f"/listings/{lid}/apply", tenant, message="안녕하세요")["contract_id"]
-        terms = {"address": "서울 시크로 12 302호", "deposit": 10_000_000, "down_payment": 1_000_000, "rent": 500_000, "mgmt": 50_000,
-                 "start": "2026-12-01", "months": 12, "owner_match": True, "seizure": False, "mortgage": 0}
-        self.call("POST", f"/contracts/{cid}/offer", landlord, **terms)
-        seen = self.call("GET", f"/contracts/{cid}", tenant)["contract"]["offer_hash"]
-        c = self.call("POST", f"/contracts/{cid}/tenant-sign", tenant, offer_hash=seen, agree=True, birth="1995-03-04",
-                      address="부산시 1", emergency="부모 010-9999-0000")["contract"]
-        self.call("POST", f"/contracts/{cid}/landlord-sign", landlord, final_hash=c["final_hash"])
-        self.call("POST", f"/contracts/{cid}/deposit", landlord)
-        c = self.call("POST", f"/contracts/{cid}/balance", landlord)["contract"]
-        self.assertEqual(c["status"], "active")
+        cid = self.call("POST", f"/listings/{lid}/reserve", tenant)["contract_id"]
+        self.call("POST", f"/listings/{lid}/reserve", self.signup("tenant2", "박다른", "010-5555-6666"), status=409)
+        self.call("POST", f"/contracts/{cid}/messages", tenant, text="방 잘 봤습니다")
+        self.call("POST", f"/contracts/{cid}/confirm-landlord-info", tenant)
+        self.call("POST", f"/contracts/{cid}/confirm-tenant-info", landlord)
+        self.call("POST", f"/contracts/{cid}/registry", landlord, owner_match=True, seizure=False, mortgage=0)
+        self.call("POST", f"/contracts/{cid}/confirm-registry", tenant)
+        self.call("POST", f"/contracts/{cid}/account", landlord, bank="국민은행", number="123-456-789012", holder="김임대")
+        c = self.call("POST", f"/contracts/{cid}/pay", tenant)["contract"]
+        self.assertEqual(c["status"], "completed")
         self.assertEqual(self.call("GET", f"/contracts/{cid}/document", tenant)["document"]["final_hash"], c["final_hash"])
         self.assertEqual(self.call("GET", "/listings")["listings"], [])
-        self.call("GET", f"/contracts/{cid}", self.signup("stranger1", "제삼자", "010-5555-6666"), status=404)
+        self.call("GET", f"/contracts/{cid}", self.signup("stranger1", "제삼자", "010-7777-8888"), status=404)
 
     def test_data_lands_in_the_configured_folder(self):
         self.signup("owner1", "김임대", "010-1111-2222")

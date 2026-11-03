@@ -3,7 +3,7 @@ rent5/listings.py — 매물 올리기 · 공개 목록.
 
 누구나(로그인 없이) 보는 목록에는 주소 · 조건 · 설명 · 임대인이 직접 적은 문의 번호만 나간다.
 회원 이름 · 아이디 · 가입 번호는 나가지 않는다.
-상태: open(신청 받는 중) → reserved(조건 제시한 신청자와 진행 중) → closed(계약 성립 · 내림)
+상태: open(예약 받는 중) → reserved(예약한 한 명과 진행 중, 다른 사람은 고를 수 없다) → closed(계약 종료 · 내림)
 """
 from __future__ import annotations
 
@@ -69,13 +69,16 @@ def public(l: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def public_list(store: Store) -> List[Dict[str, Any]]:
-    items = [l for l in store.all("listings") if l["status"] == "open"]
-    return [public(l) for l in sorted(items, key=lambda l: l["created_at"], reverse=True)]
+    """열린 매물 + 예약된 매물(예약됨 표시만, 문의 번호는 가린다)."""
+    items = [l for l in store.all("listings") if l["status"] in ("open", "reserved")]
+    return [(public(l) | {"reserved": False}) if l["status"] == "open" else (public(l) | {"reserved": True, "contact_phone": ""})
+            for l in sorted(items, key=lambda l: l["created_at"], reverse=True)]
 
 
 def mine(store: Store, owner: str) -> List[Dict[str, Any]]:
     """내 매물 + 매물마다 진행 중인 신청 수."""
-    open_states = ("requested", "offered", "tenant_signed", "signed", "deposit_paid")
+    open_states = ("reserved", "info_ok", "registry_shown", "registry_ok", "account_sent",
+                   "requested", "offered", "tenant_signed", "signed", "deposit_paid")
     contracts = store.find("contracts", landlord=owner)
     out = []
     for l in sorted(store.find("listings", owner=owner), key=lambda l: l["created_at"], reverse=True):

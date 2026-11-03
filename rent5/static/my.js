@@ -9,7 +9,7 @@
   $("profile").innerHTML = `<dt>이름</dt><dd>${esc(user.name)}</dd><dt>아이디</dt><dd>${esc(user.username)}</dd><dt>휴대폰</dt><dd>${esc(user.phone)}</dd>`;
 
   const STATE_BADGE = { cancelled: "bad", active: "ok", signed: "ok", deposit_paid: "ok" };
-  const LISTING_LABEL = { open: ["신청 받는 중", "ok"], reserved: ["계약 진행 중", "warn"], closed: ["마감", ""] };
+  const LISTING_LABEL = { open: ["예약 받는 중", "ok"], reserved: ["예약됨 · 계약 진행 중", "warn"], closed: ["마감", ""] };
 
   async function loadContracts() {
     const { contracts } = await R5.api("/contracts");
@@ -31,7 +31,7 @@
       return `<div class="card stack">
         <div class="row between"><strong>${esc(l.address)} ${esc(l.room)}</strong><span class="badge ${tone}">${esc(label)}</span></div>
         <div class="small">${esc(l.lease_type)} · 보증금 ${man(l.deposit)}${l.lease_type === "전세" ? "" : ` / 월 ${man(l.monthly)}`} · 입주 ${esc(l.available_from || "협의")}</div>
-        <div class="small muted">진행 중인 신청 ${l.applications}건${l.contact_phone ? ` · 문의 번호 ${tel(l.contact_phone)}` : ""}</div>
+        <div class="small muted">진행 중인 예약 ${l.applications}건${l.contact_phone ? ` · 문의 번호 ${tel(l.contact_phone)}` : ""}</div>
         ${l.status === "open" ? `<button class="btn sm danger" type="button" data-withdraw="${esc(l.id)}">매물 내리기</button>` : ""}
       </div>`;
     }).join("") : `<span class="muted">올린 매물이 없습니다.</span>`;
@@ -52,6 +52,7 @@
     });
   });
 
+  $("contactPhone").value = user.phone;                  // 내 번호가 기본값 (바꾸거나 비울 수 있다)
   $("leaseType").addEventListener("change", () => { $("rentBox").hidden = $("leaseType").value === "전세"; });
 
   $("listingForm").addEventListener("submit", (e) => {
@@ -62,6 +63,7 @@
         deposit: $("deposit").value, rent: $("rent").value, mgmt: $("mgmt").value,
         available_from: $("availableFrom").value, description: $("description").value, contact_phone: $("contactPhone").value } });
       $("listingForm").reset();
+      $("contactPhone").value = user.phone;
       $("rentBox").hidden = false;
       R5.notify("ok", "매물을 공개했습니다.", "누구나 보는 첫 화면 목록에 나옵니다.");
       await loadListings();

@@ -74,6 +74,9 @@ textarea { min-height: 80px; resize: vertical; }
 .steps-guide li { counter-increment: s; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 13.5px; }
 .steps-guide li::before { content: counter(s); display: inline-block; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 700; margin-right: 8px; font-size: 12px; }
 
+.btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+.listing.dim { opacity: .6; }
+.listing.pick { outline: 2px solid var(--brand); }
 .listing .price { font-size: 17px; font-weight: 700; }
 .listing .desc { white-space: pre-wrap; font-size: 14px; }
 
@@ -151,3 +154,11 @@ table.list th, table.list td { text-align: left; padding: 8px 6px; border-bottom
   .wrap { max-width: none; padding: 0; }
   .doc { border: 0; padding: 0; }
 }
+
+/* 계약방: 단계 말풍선 · 자동으로 뜨는 정보 카드 */
+.msg .bubble.stepb { font-weight: 600; }
+.msg .bubble.cardb { font-size: 13.5px; min-width: min(280px, 100%); white-space: normal; }
+.msg .bubble.cardb dl.kv { grid-template-columns: 88px 1fr; margin: 6px 0; }
+.msg .bubble.cardb .ok-line { color: var(--ok); font-weight: 700; display: block; }
+.msg .bubble.cardb .wait-line { color: var(--muted); display: block; }
+details.card summary { cursor: pointer; font-weight: 700; color: var(--bad); }

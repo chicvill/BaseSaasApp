@@ -35,10 +35,10 @@
           <div id="rentBox"><label for="rent">월세 (원)</label><input id="rent" type="number" min="0" value="0"></div>
           <div><label for="mgmt">관리비 (원)</label><input id="mgmt" type="number" min="0" value="0"></div>
           <div><label for="availableFrom">입주 가능일</label><input id="availableFrom" type="date"></div>
-          <div><label for="contactPhone">문의 번호 (선택)</label><input id="contactPhone" type="tel" placeholder="비우면 번호 없이 공개"></div>
+          <div><label for="contactPhone">문의 번호</label><input id="contactPhone" type="tel" placeholder="비우면 번호 없이 공개"><span class="small muted">임차인이 [계약 신청]을 누르면 이 번호로 전화가 걸립니다. 공개 목록에 나옵니다.</span></div>
         </div>
         <div><label for="description">설명 (선택)</label><textarea id="description" maxlength="1000" placeholder="예: 남향, 풀옵션, 주차 1대"></textarea></div>
-        <p class="small muted">공개 목록에는 위 내용만 나갑니다. 이름과 아이디는 나가지 않으며, 신청한 사람에게만 이름·번호가 보입니다.</p>
+        <p class="small muted">공개 목록에는 위 내용만 나갑니다. 이름과 아이디는 나가지 않으며, 예약한 사람에게만 이름·번호가 보입니다.</p>
         <button class="btn primary" id="btnListing" type="submit">매물 공개</button>
       </form>
     </details>

@@ -135,9 +135,9 @@ def build_router(store: Store, secret: bytes) -> APIRouter:
         listings.withdraw(store, user["username"], listing_id)
         return {"success": True}
 
-    @router.post("/listings/{listing_id}/apply")
-    def apply(listing_id: str, payload: Dict[str, Any] = Payload, user: Dict[str, Any] = Depends(current_user)) -> Dict[str, Any]:
-        c = flow.apply(store, listing_id, user["username"], payload.get("message", ""))
+    @router.post("/listings/{listing_id}/reserve")
+    def reserve(listing_id: str, user: Dict[str, Any] = Depends(current_user)) -> Dict[str, Any]:
+        c = flow.reserve(store, listing_id, user["username"])
         return {"success": True, "contract_id": c["id"]}
 
     # ── 계약 ──
@@ -160,11 +160,12 @@ def build_router(store: Store, secret: bytes) -> APIRouter:
         handler.__name__ = f"contract_{name.replace('-', '_')}"
         router.post(f"/contracts/{{cid}}/{name}")(handler)
 
-    step("offer", lambda cid, u, p: flow.offer(store, cid, u, p))
-    step("tenant-sign", lambda cid, u, p: flow.tenant_sign(store, cid, u, p))
-    step("landlord-sign", lambda cid, u, p: flow.landlord_sign(store, cid, u, p))
-    step("deposit", lambda cid, u, p: flow.confirm_deposit(store, cid, u))
-    step("balance", lambda cid, u, p: flow.confirm_balance(store, cid, u))
+    step("confirm-landlord-info", lambda cid, u, p: flow.confirm_landlord_info(store, cid, u))
+    step("confirm-tenant-info", lambda cid, u, p: flow.confirm_tenant_info(store, cid, u))
+    step("registry", lambda cid, u, p: flow.show_registry(store, cid, u, p))
+    step("confirm-registry", lambda cid, u, p: flow.confirm_registry(store, cid, u))
+    step("account", lambda cid, u, p: flow.send_account(store, cid, u, p))
+    step("pay", lambda cid, u, p: flow.pay(store, cid, u))
     step("messages", lambda cid, u, p: flow.say(store, cid, u, p.get("text")))
     step("cancel", lambda cid, u, p: flow.cancel(store, cid, u, p.get("reason", "")))
 
