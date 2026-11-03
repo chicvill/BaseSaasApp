@@ -5,9 +5,12 @@
   const KEY = "rent5.token";
   // 단독 실행은 /api, 게이트웨이(/rent5/ 아래)에서는 /api/rent5
   const API = location.pathname.startsWith("/rent5/") ? "/api/rent5" : "/api";
+  // 로그인은 탭마다 따로 둔다(sessionStorage). 같은 브라우저의 두 탭에서 임대인 · 임차인으로 각각 로그인해 서로 확인할 수 있다.
+  // (localStorage 로 두면 나중에 로그인한 계정이 모든 탭의 로그인을 덮어쓴다.)
+  try { localStorage.removeItem(KEY); } catch (_) { /* 이전 방식으로 저장해 둔 값은 지운다 */ }
   const store = {
-    get() { try { return localStorage.getItem(KEY) || ""; } catch (_) { return ""; } },
-    set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch (_) { /* 저장 못 해도 이번 화면은 동작 */ } },
+    get() { try { return sessionStorage.getItem(KEY) || ""; } catch (_) { return ""; } },
+    set(v) { try { v ? sessionStorage.setItem(KEY, v) : sessionStorage.removeItem(KEY); } catch (_) { /* 저장 못 해도 이번 화면은 동작 */ } },
   };
 
   const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
