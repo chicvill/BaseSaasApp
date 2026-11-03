@@ -165,6 +165,7 @@ def build_router(store: Store, secret: bytes) -> APIRouter:
     step("landlord-sign", lambda cid, u, p: flow.landlord_sign(store, cid, u, p))
     step("deposit", lambda cid, u, p: flow.confirm_deposit(store, cid, u))
     step("balance", lambda cid, u, p: flow.confirm_balance(store, cid, u))
+    step("messages", lambda cid, u, p: flow.say(store, cid, u, p.get("text")))
     step("cancel", lambda cid, u, p: flow.cancel(store, cid, u, p.get("reason", "")))
 
     @router.get("/health")

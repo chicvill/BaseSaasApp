@@ -23,8 +23,15 @@
   <ol class="progress" id="progress"></ol>
 
   <div class="split" id="split">
-    <section class="pane" id="paneOther" aria-label="상대방 화면"></section>
-    <div class="split-bar" id="splitBar" aria-hidden="true">▲ 상대방 &nbsp;·&nbsp; 나 ▼</div>
+    <section class="chatroom" id="chatroom" aria-label="대화">
+      <div class="pane-head" id="chatHead"></div>
+      <div class="chat-log" id="chatLog" role="log" aria-live="polite"></div>
+      <form class="chat-form" id="chatForm">
+        <input id="chatText" maxlength="500" autocomplete="off" placeholder="메시지를 입력하세요">
+        <button class="btn primary" id="chatSend" type="submit">보내기</button>
+      </form>
+    </section>
+    <div class="split-bar" id="splitBar" aria-hidden="true">▲ 대화 &nbsp;·&nbsp; 내 할 일 ▼</div>
     <section class="pane" id="paneMine" aria-label="내 화면">
       <div id="mineInfo"></div>
       <div class="stack" id="actions"></div>

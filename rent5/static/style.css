@@ -108,23 +108,37 @@ table.list th, table.list td { text-align: left; padding: 8px 6px; border-bottom
 .pane-head h2 { margin: 0; color: var(--accent); }
 .pane-head .who-tag { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--tint); color: var(--accent); }
 .split-bar { text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; padding: 6px 0; }
-.chat { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; }
-.bubble { max-width: 92%; background: var(--tint); border: 1px solid var(--accent); border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 14px; align-self: flex-start; }
-.pane.mine .bubble { align-self: flex-end; border-radius: 14px 14px 4px 14px; }
-.bubble time { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
-.bubble.empty { background: transparent; border-style: dashed; color: var(--muted); }
+.chatroom { --accent: var(--brand); --tint: var(--info-bg); display: flex; flex-direction: column; min-height: 0; background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--accent); border-radius: var(--radius); padding: 12px 14px; }
+.chatroom.landlord { --accent: var(--warn); --tint: var(--warn-bg); }
+.chatroom.tenant { --accent: var(--brand); --tint: var(--info-bg); }
+.chatroom .pane-head h2 { color: var(--accent); }
+.chat-log { flex: 1; min-height: 160px; max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 2px 8px; }
+.chat-log .day { align-self: center; font-size: 11px; color: var(--muted); margin: 6px 0 2px; }
+.chat-log .notice { align-self: center; text-align: center; font-size: 12px; color: var(--muted); background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; }
+.msg { --c: var(--brand); --ct: var(--info-bg); display: flex; flex-wrap: wrap; align-items: flex-end; gap: 4px 6px; max-width: 86%; }
+.msg.landlord { --c: var(--warn); --ct: var(--warn-bg); }
+.msg.theirs { align-self: flex-start; }
+.msg.mine { align-self: flex-end; flex-direction: row-reverse; }
+.msg .name { flex-basis: 100%; font-size: 12px; font-weight: 700; color: var(--c); }
+.msg .bubble { background: var(--ct); border: 1px solid var(--c); border-radius: 4px 14px 14px 14px; padding: 7px 12px; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+.msg.mine .bubble { border-radius: 14px 4px 14px 14px; }
+.msg time { font-size: 11px; color: var(--muted); }
+.chat-form { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.chat-form input { flex: 1; }
+.chatroom.flash { animation: flash 1.6s ease-out 1; }
 .pending { border: 1px dashed var(--accent); color: var(--accent); border-radius: 10px; padding: 8px 12px; font-weight: 700; font-size: 14px; margin: 0 0 12px; }
 .pending.me { background: var(--tint); border-style: solid; }
 .pane details { margin: 0 0 12px; }
 .pane summary { cursor: pointer; font-weight: 700; font-size: 14px; }
 .pane .card { border-color: var(--accent); }
-.pane.flash { animation: flash 1.6s ease-out 1; }
 @keyframes flash { from { box-shadow: 0 0 0 4px var(--accent); } to { box-shadow: 0 0 0 0 transparent; } }
 @media (min-width: 760px) {
-  .split { display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1.4fr); height: calc(100vh - 250px); min-height: 520px; }
+  .split { display: grid; grid-template-rows: minmax(0, 1.2fr) auto minmax(0, 1fr); height: calc(100vh - 250px); min-height: 520px; }
   .pane { overflow-y: auto; }
+  .chat-log { max-height: none; }
+  .chatroom { overflow: hidden; }
 }
-@media (prefers-reduced-motion: reduce) { .pane.flash { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .chatroom.flash { animation: none; } }
 
 @media (max-width: 560px) {
   .progress { grid-template-columns: repeat(3, 1fr); row-gap: 10px; }

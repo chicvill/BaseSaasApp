@@ -18,31 +18,54 @@
   const dl = (rows) => `<dl class="kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
   const field = (fid, label, attrs = "", value = "") => `<div><label for="${fid}">${esc(label)}</label><input id="${fid}" value="${esc(value)}" ${attrs}></div>`;
 
-  // ── 위(상대방) · 아래(나) 두 화면 ──
-  const SAY = { apply: "계약을 신청했습니다.", offer: "계약 조건을 제시했습니다.", tenant_sign: "내용을 확인하고 서명했습니다.",
-    landlord_sign: "서명했습니다 — 계약이 성립했습니다.", deposit: "계약금 입금을 확인했습니다.", balance: "잔금 입금을 확인했습니다 — 입주 처리.", cancel: "계약을 취소했습니다." };
+  // ── 위(대화) · 아래(내 할 일) ──
   const ROLE_LABEL = { landlord: "임대인", tenant: "임차인" };
   const TURN = { requested: "landlord", offered: "tenant", tenant_signed: "landlord", signed: "landlord", deposit_paid: "landlord" };
   const LANDLORD_EVENTS = ["offer", "landlord_sign", "deposit", "balance"];
   const other = () => (c.role === "landlord" ? "tenant" : "landlord");
-
   const partyOf = (e) => e.what === "cancel" ? (e.by === user.username ? c.role : other())
     : LANDLORD_EVENTS.includes(e.what) ? "landlord" : "tenant";
+  const NOTICE = { apply: "임차인이 계약을 신청했습니다", offer: "임대인이 조건을 제시했습니다", tenant_sign: "임차인이 서명했습니다",
+    landlord_sign: "임대인이 서명 — 계약이 성립했습니다", deposit: "계약금 입금이 확인되었습니다", balance: "잔금 입금이 확인되었습니다 — 입주 처리", cancel: "계약이 취소되었습니다" };
 
-  function bubbles(role) {
-    const items = c.events.filter((e) => partyOf(e) === role).map((e) => {
-      let text = esc(SAY[e.what] || e.what);
-      if (e.what === "apply" && c.message) text += `<br>“${esc(c.message)}”`;
-      if (e.what === "cancel" && c.cancel_reason) text += `<br>사유: ${esc(c.cancel_reason)}`;
-      return `<div class="bubble">${text}<time>${esc(when(e.at))}</time></div>`;
-    });
-    return `<div class="chat">${items.join("") || `<div class="bubble empty">${role === c.role ? "아직 한 일이 없습니다." : "아직 응답이 없습니다."}</div>`}</div>`;
+  // 카카오톡처럼 시간 순서대로 말풍선(대화)과 가운데 안내(진행 단계)를 한 줄로 섞는다.
+  function timeline() {
+    const items = c.events.map((e) => ({ at: e.at, kind: "notice", text: NOTICE[e.what] || e.what, extra: e.what === "cancel" && c.cancel_reason ? `사유: ${c.cancel_reason}` : "" }));
+    if (c.message) {
+      const apply = c.events.find((e) => e.what === "apply");
+      items.push({ at: apply ? apply.at : c.created_at, kind: "msg", role: "tenant", mine: c.role === "tenant", text: c.message });
+    }
+    (c.chat || []).forEach((m) => items.push({ at: m.at, kind: "msg", role: m.role, mine: m.mine, text: m.text }));
+    return items.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  }
+
+  function chatHtml() {
+    const items = timeline();
+    let lastDay = "";
+    return items.map((it) => {
+      const day = String(it.at).slice(0, 10);
+      const sep = day !== lastDay ? `<div class="day">${esc(day)}</div>` : "";
+      lastDay = day;
+      if (it.kind === "notice") return `${sep}<div class="notice">${esc(it.text)}${it.extra ? `<br>${esc(it.extra)}` : ""}</div>`;
+      return `${sep}<div class="msg ${it.mine ? "mine" : "theirs"} ${it.role}">
+        ${it.mine ? "" : `<span class="name">${ROLE_LABEL[it.role]} ${esc(c[it.role].name)}</span>`}
+        <div class="bubble">${esc(it.text)}</div><time>${esc(String(it.at).slice(11, 16))}</time></div>`;
+    }).join("");
+  }
+
+  function renderChat() {
+    const log = $("chatLog");
+    const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    const first = !log.dataset.ready;
+    log.innerHTML = chatHtml();
+    log.dataset.ready = "1";
+    if (first || nearBottom) log.scrollTop = log.scrollHeight;
   }
 
   function details(role) {
     const t = c.terms, r = c.registry, i = c.tenant_info;
     if (role === "landlord" && t) {
-      return `<details open><summary>제시한 조건 · 등기부 확인</summary>` + dl([
+      return `<details open><summary>제시된 조건 · 등기부 확인</summary>` + dl([
         ["주소", esc(t.address)], ["구분", esc(t.lease_type)], ["보증금", won(t.deposit)], ["계약금", won(t.down_payment)],
         t.lease_type === "전세" ? null : ["월세 · 관리비", `${won(t.rent)} + ${won(t.mgmt)}`],
         ["기간", `${esc(t.start)} ~ ${esc(t.end)} (${t.months}개월)`],
@@ -57,14 +80,6 @@
     return "";
   }
 
-  function paneHtml(role) {
-    const party = c[role], mine = role === c.role;
-    const turn = TURN[c.status] === role;
-    const pending = turn ? (mine ? `<div class="pending me">내 차례입니다</div>` : `<div class="pending">⏳ ${ROLE_LABEL[role]}의 응답을 기다리는 중</div>`) : "";
-    return `<div class="pane-head"><h2>${ROLE_LABEL[role]} · ${esc(party.name)} ${tel(party.phone)}</h2><span class="who-tag">${mine ? "나" : "상대방"}</span></div>`
-      + bubbles(role) + pending + details(role);
-  }
-
   let flashed = false;
   function renderInfo() {
     $("title").textContent = c.terms ? c.terms.address : `${c.listing.address} ${c.listing.room || ""}`.trim();
@@ -74,11 +89,15 @@
     $("progress").innerHTML = c.status === "cancelled" ? "" : STEP_LABEL.map((label, i) =>
       `<li class="${i < idx || c.status === "active" ? "done" : i === idx ? "now" : ""}">${esc(label)}</li>`).join("");
 
-    $("paneOther").className = `pane ${other()} other${flashed ? " flash" : ""}`;
+    const o = other(), turn = TURN[c.status];
+    $("chatroom").className = `chatroom ${o}${flashed ? " flash" : ""}`;
     $("paneMine").className = `pane ${c.role} mine`;
     flashed = false;
-    $("paneOther").innerHTML = paneHtml(other());
-    $("mineInfo").innerHTML = paneHtml(c.role);
+    $("chatHead").innerHTML = `<h2>${ROLE_LABEL[o]} · ${esc(c[o].name)} ${tel(c[o].phone)}</h2>`
+      + `<span class="who-tag">${turn === o ? "⏳ 응답 대기" : "상대방"}</span>`;
+    renderChat();
+    $("mineInfo").innerHTML = `<div class="pane-head"><h2>${ROLE_LABEL[c.role]} · ${esc(c[c.role].name)} ${tel(c[c.role].phone)}</h2>`
+      + `<span class="who-tag">${turn === c.role ? "내 차례" : "나"}</span></div>` + details("landlord") + details("tenant");
     $("split").hidden = false;
   }
 
@@ -190,26 +209,40 @@
 
   function render() { renderInfo(); renderActions(); }
 
-  // 상대방이 응답하면 몇 초 안에 화면이 바뀐다 (이 화면을 열어 둔 동안만 확인한다).
-  const stamp = (x) => `${x.status}|${x.events.length}|${x.offer_hash || ""}`;
+  // 상대방의 응답 · 메시지는 몇 초 안에 반영된다 (이 화면을 열어 둔 동안만 확인한다).
+  const stamp = (x) => `${x.status}|${x.events.length}|${x.offer_hash || ""}|${(x.chat || []).length}`;
   async function poll() {
-    if (document.hidden || !c || c.status === "cancelled" || c.status === "active") return;
+    if (document.hidden || !c) return;
     try {
       const next = (await R5.api(`/contracts/${encodeURIComponent(id)}`)).contract;
       if (stamp(next) === stamp(c)) return;
       const stepChanged = next.status !== c.status || next.offer_hash !== c.offer_hash;
+      const newChat = (next.chat || []).length > (c.chat || []).length;
       c = next;
-      flashed = true;
+      flashed = stepChanged;
       renderInfo();
-      if (stepChanged) renderActions();
-      R5.notify("ok", "상대방이 응답했습니다.", c.status_label);
+      if (stepChanged) { renderActions(); R5.notify("ok", "상대방이 응답했습니다.", c.status_label); }
+      else if (newChat) $("chatLog").scrollTop = $("chatLog").scrollHeight;
     } catch (err) { /* 일시적인 오류는 다음 확인 때 다시 시도 */ }
   }
+
+  $("chatForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("chatText").value.trim();
+    if (!text) return;
+    R5.run($("chatSend"), async () => {
+      c = (await R5.api(`/contracts/${encodeURIComponent(id)}/messages`, { method: "POST", body: { text } })).contract;
+      $("chatText").value = "";
+      renderInfo();
+      $("chatLog").scrollTop = $("chatLog").scrollHeight;
+      $("chatText").focus();
+    }, "...");
+  });
 
   try {
     c = (await R5.api(`/contracts/${encodeURIComponent(id)}`)).contract;
     render();
-    setInterval(poll, 4000);
+    setInterval(poll, 3000);
   } catch (err) {
     $("statusLine").textContent = "";
     R5.fail(err);

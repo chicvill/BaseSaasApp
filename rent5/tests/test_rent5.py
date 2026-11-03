@@ -346,6 +346,37 @@ class TestContractFlow(Rent5Case):
         self.assertEqual([e["by"] for e in events], ["tenant1", "owner1", "tenant1", "owner1"])
 
 
+class TestChat(Rent5Case):
+    def test_two_parties_talk_and_each_sees_it_from_their_side(self):
+        landlord, tenant = self.parties()
+        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
+        self.post(f"contracts/{cid}/messages", tenant, text="  안녕하세요, 내일 방을 볼 수 있을까요?  ")
+        c = self.post(f"contracts/{cid}/messages", landlord, text="네, 오후 3시에 오세요.")["contract"]
+        self.assertEqual([(m["mine"], m["role"], m["text"]) for m in c["chat"]],
+                         [(False, "tenant", "안녕하세요, 내일 방을 볼 수 있을까요?"), (True, "landlord", "네, 오후 3시에 오세요.")])
+        seen = self.get(f"contracts/{cid}", tenant)["contract"]["chat"]
+        self.assertEqual([m["mine"] for m in seen], [True, False])               # 같은 대화를 상대 쪽에서 본다
+        self.assertNotIn("by", seen[0])                                           # 아이디는 내려보내지 않는다
+
+    def test_only_the_two_parties_can_talk_and_text_is_checked(self):
+        landlord, tenant = self.parties()
+        cid = self.post(f"listings/{self.listing(landlord)}/apply", tenant)["contract_id"]
+        stranger = self.signup("stranger1", "제삼자", "010-5555-6666")
+        self.post(f"contracts/{cid}/messages", stranger, status=404, text="끼어들기")
+        self.post(f"contracts/{cid}/messages", tenant, status=422, text="   ")
+        self.post(f"contracts/{cid}/messages", tenant, status=422, text="x" * 501)
+        self.post(f"contracts/{cid}/messages", tenant, status=422, text="주민번호 900101-1234567")
+        self.post(f"contracts/{cid}/messages", status=401, text="로그인 없이")
+        self.assertEqual(self.get(f"contracts/{cid}", tenant)["contract"]["chat"], [])
+
+    def test_can_still_talk_after_signing_and_cancel(self):
+        landlord, tenant = self.parties()
+        cid = self.to_signed(landlord, tenant, self.listing(landlord))
+        c = self.post(f"contracts/{cid}/messages", tenant, text="계약금 보냈어요")["contract"]
+        self.assertEqual(c["status"], "signed")                                   # 대화는 계약 진행 상태를 바꾸지 않는다
+        self.assertEqual(len(c["chat"]), 1)
+
+
 class TestWeb(Rent5Case):
     def test_security_headers_and_static_pages(self):
         res = self.client.get("/")

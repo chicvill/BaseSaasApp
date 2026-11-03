@@ -210,6 +210,21 @@ def cancel(store: Store, cid: str, actor: str, reason: str = "") -> Dict[str, An
                        cancel_reason=clean_text(reason, "취소 사유", 200) or "취소")
 
 
+# ── 대화 (계약 당사자 둘만, 어느 단계에서나) ──
+MAX_CHAT = 500
+
+
+def say(store: Store, cid: str, actor: str, text: Any) -> Dict[str, Any]:
+    with store.lock:
+        c = _get(store, cid)
+        role_of(c, actor)
+        text = clean_text(text, "메시지", 500, required=True)
+        chat = c.get("chat") or []
+        if len(chat) >= MAX_CHAT:
+            raise ApiError(409, f"대화는 계약마다 {MAX_CHAT}개까지 남길 수 있습니다.", hint="전화로 이어서 이야기해 주세요.")
+        return store.update("contracts", cid, chat=chat + [{"at": now_iso(), "by": actor, "text": text}])
+
+
 # ── 화면용 ──
 def actions(c: Dict[str, Any], role: str) -> List[str]:
     s, out = c["status"], []
@@ -230,9 +245,11 @@ def view(store: Store, c: Dict[str, Any], actor: str) -> Dict[str, Any]:
     l = store.first("listings", id=c["listing_id"]) or {}
     keys = ("id", "listing_id", "status", "message", "terms", "registry", "tenant_info", "offer_hash", "final_hash",
             "tenant_signed_at", "signed_at", "deposit_confirmed_at", "moved_in_at", "cancel_reason", "events", "created_at")
+    chat = [{"at": m["at"], "mine": m["by"] == actor, "role": "landlord" if m["by"] == c["landlord"] else "tenant", "text": m["text"]}
+            for m in c.get("chat") or []]
     terms = c["terms"] or {}
     return {k: c.get(k) for k in keys} | {
-        "status_label": STATUS_LABEL[c["status"]], "role": role, "actions": actions(c, role), "steps": STEPS,
+        "chat": chat, "status_label": STATUS_LABEL[c["status"]], "role": role, "actions": actions(c, role), "steps": STEPS,
         "landlord": _party(store, c["landlord"]), "tenant": _party(store, c["tenant"]),
         "listing": {k: l.get(k) for k in ("address", "room", "lease_type", "deposit", "rent", "mgmt", "available_from")},
         "report_required": bool(terms) and (terms["deposit"] > REPORT_DEPOSIT or terms["rent"] > REPORT_RENT),
