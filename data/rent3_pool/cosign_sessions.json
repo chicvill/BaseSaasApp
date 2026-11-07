@@ -1,14 +1,14 @@
 {
   "pool": "rent3_pool",
   "collection": "cosign_sessions",
-  "revision": 2,
-  "updated_at": "2026-10-29T19:17:02",
+  "revision": 13,
+  "updated_at": "2026-11-04T06:26:08",
   "count": 1,
   "items": [
     {
       "id": "cs_2e289e9e",
       "created_at": "2026-10-29T19:17:02",
-      "updated_at": "2026-10-29T19:17:02",
+      "updated_at": "2026-11-04T06:26:08",
       "session_code": "408188",
       "mode": "NEW",
       "prev_contract_id": "",
@@ -23,9 +23,19 @@
       "lessor_phone": "010-2222-1111",
       "lessor_account": "신한 110-482-998877",
       "id_tenant": "",
-      "current_step": 1,
+      "initiated_by_role": "lessor",
+      "call_status": "CONNECTED",
+      "called_at": "2026-11-04T06:19:58",
+      "responded_at": "",
+      "lessor_login_verified": true,
+      "tenant_login_verified": true,
+      "current_step": 3,
       "status": "IN_PROGRESS",
       "revision": 1,
+      "lessor_checked_tenant_id": true,
+      "lessor_id_checked_at": "2026-11-04T06:26:08",
+      "tenant_checked_lessor_id": true,
+      "tenant_id_checked_at": "2026-11-04T06:22:30",
       "registry_data": {
         "issue_number": "1101-2026-884920",
         "owner_name": "김임대 (시크빌 대표)",
@@ -34,7 +44,7 @@
         "checked_date": "2026-10-29"
       },
       "step1_lessor_confirmed": true,
-      "step1_tenant_locked": false,
+      "step1_tenant_locked": true,
       "option_checks": [
         {
           "item": "시스템 에어컨",
@@ -68,8 +78,8 @@
         }
       ],
       "facility_notes": "도배·장판·수압·배수·도어락 현장 동반 확인 이상 없음",
-      "step2_lessor_confirmed": false,
-      "step2_tenant_locked": false,
+      "step2_lessor_confirmed": true,
+      "step2_tenant_locked": true,
       "terms": {
         "tenant_name": "김예비",
         "tenant_phone": "010-9999-2030",

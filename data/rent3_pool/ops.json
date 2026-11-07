@@ -1,9 +1,9 @@
 {
   "pool": "rent3_pool",
   "collection": "ops",
-  "revision": 7,
-  "updated_at": "2026-10-29T19:17:02",
-  "count": 6,
+  "revision": 8,
+  "updated_at": "2026-11-03T22:19:30",
+  "count": 7,
   "items": [
     {
       "id": "rtms_a20a592e",
@@ -116,6 +116,21 @@
       "message": "[🤝 공동 임대계약방 개설] 203호 실시간 공동 계약서가 준비되었습니다. 참여코드 [408188]로 입장해 함께 확인·작성해 주세요.",
       "quick_action_label": "공동 임대계약방 입장",
       "quick_action_url": "/rent3_contract/?session=cs_2e289e9e&role=tenant",
+      "is_read": false,
+      "_kind": "directchat"
+    },
+    {
+      "id": "chat_cb097305",
+      "created_at": "2026-11-03T22:19:30",
+      "updated_at": "2026-11-03T22:19:30",
+      "branch": "main",
+      "id_room": "room_main_203",
+      "room_no": "203",
+      "sender_role": "tenant",
+      "sender_name": "홍길동",
+      "message": "내일  방문 ?",
+      "quick_action_label": "",
+      "quick_action_url": "",
       "is_read": false,
       "_kind": "directchat"
     }

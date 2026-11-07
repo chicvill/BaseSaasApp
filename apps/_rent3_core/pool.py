@@ -58,6 +58,46 @@ class JsonDataPool:
 
     def ensure_dir(self) -> None:
         os.makedirs(self.pool_dir, exist_ok=True)
+        os.makedirs(os.path.join(self.pool_dir, "rooms"), exist_ok=True)
+
+    @property
+    def rooms_dir(self) -> str:
+        d = os.path.join(self.pool_dir, "rooms")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    def format_room_filename(self, doc: dict) -> str:
+        b_name = str(doc.get("building_name") or "건물").strip()
+        room_no = str(doc.get("room_no") or "호실").strip()
+        mid = str(doc.get("move_in_date") or "").strip()
+        date_str = "00000000"
+        if mid:
+            parts = [p.strip() for p in mid.replace("-", ".").replace("/", ".").split(".") if p.strip()]
+            if len(parts) >= 3:
+                try:
+                    y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+                    date_str = f"{y:04d}{m:02d}{d:02d}"
+                except ValueError:
+                    date_str = "".join([c for c in mid if c.isdigit()])[:8] or "00000000"
+            else:
+                digits = "".join([c for c in mid if c.isdigit()])
+                if len(digits) >= 8:
+                    date_str = digits[:8]
+        return f"{b_name}-{room_no}-{date_str}.json"
+
+    def save_room_partition(self, doc: dict) -> str:
+        fn = self.format_room_filename(doc)
+        target_path = os.path.join(self.rooms_dir, fn)
+        payload = {
+            "file_name": fn,
+            "building_name": doc.get("building_name", ""),
+            "room_no": str(doc.get("room_no", "")),
+            "move_in_date": doc.get("move_in_date", ""),
+            "data": doc,
+            "updated_at": now_iso(),
+        }
+        self._atomic_write_json(target_path, payload)
+        return target_path
 
     def file_path(self, collection: str) -> str:
         return os.path.join(self.pool_dir, f"{collection}.json")

@@ -3,6 +3,8 @@ apps/rent3/routers/pool_hub.py — 통합관리용 공동 JSON Data Pool 관제 
 """
 from __future__ import annotations
 
+import json
+import os
 import re
 from typing import Any, Dict, List
 
@@ -400,9 +402,9 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         core_u = CoreUser.by_username(matched_admin.username)
         admin_pw = matched_admin.password or "0202"
         valid_pw = (
-            pw == "0202"
+            pw in ("0202", "1212")
             or pw == admin_pw
-            or (core_u.check_password(pw) if core_u else (pw == "1212"))
+            or (core_u.check_password(pw) if core_u else False)
         )
         if not valid_pw:
             raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호(0202)를 확인해 주세요.")
@@ -451,9 +453,10 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         phone_tail = _digits(matched_lessor.phone)[-4:] if len(_digits(matched_lessor.phone)) >= 4 else ""
         custom_pw = matched_lessor.password
         valid_pw = (
-            core_u.check_password(pw)
-            if core_u
-            else (pw == "1212" or (bool(custom_pw) and pw == custom_pw) or (bool(phone_tail) and pw == phone_tail))
+            pw == "1212"
+            or (bool(custom_pw) and pw == custom_pw)
+            or (bool(phone_tail) and pw == phone_tail)
+            or (core_u.check_password(pw) if core_u else False)
         )
         if not valid_pw:
             raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="기본 비밀번호(1212) 또는 설정한 비밀번호를 확인해 주세요.")
@@ -666,3 +669,39 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
         },
         "message": f"{name}님 본인인증 회원가입이 완료되었습니다! 전용 화면으로 이동합니다.",
     }
+
+
+@router.get("/rooms/files")
+def list_room_partition_files() -> Dict[str, Any]:
+    """분리 보관된 개별 호실 JSON 파일 목록 조회."""
+    p = pool()
+    rooms_dir = p.rooms_dir
+    files = []
+    if os.path.exists(rooms_dir):
+        for fname in sorted(os.listdir(rooms_dir)):
+            if fname.endswith(".json"):
+                fpath = os.path.join(rooms_dir, fname)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as fp:
+                        doc = json.load(fp)
+                    files.append({
+                        "file_name": fname,
+                        "building_name": doc.get("building_name", ""),
+                        "room_no": doc.get("room_no", ""),
+                        "move_in_date": doc.get("move_in_date", ""),
+                        "updated_at": doc.get("updated_at", ""),
+                    })
+                except Exception:
+                    files.append({"file_name": fname})
+    return {"count": len(files), "files": files}
+
+
+@router.get("/rooms/files/{file_name}")
+def get_room_partition_file(file_name: str) -> Dict[str, Any]:
+    """개별 호실 분리 JSON 파일 단건 직접 조회 (O(1))."""
+    p = pool()
+    fpath = os.path.join(p.rooms_dir, file_name)
+    if not os.path.exists(fpath):
+        raise NotFound(f"호실 파일 '{file_name}'을 찾을 수 없습니다.")
+    with open(fpath, "r", encoding="utf-8") as fp:
+        return json.load(fp)

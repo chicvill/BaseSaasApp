@@ -1,9 +1,9 @@
 {
   "pool": "rent3_pool",
   "collection": "users",
-  "revision": 9,
-  "updated_at": "2026-10-29T19:17:01",
-  "count": 8,
+  "revision": 11,
+  "updated_at": "2026-11-04T06:28:04",
+  "count": 9,
   "items": [
     {
       "id": "admin_master",
@@ -75,7 +75,7 @@
     {
       "id": "tenant_201",
       "created_at": "2026-10-29T19:17:01",
-      "updated_at": "2026-10-29T19:17:01",
+      "updated_at": "2026-11-04T06:28:04",
       "name": "이민수",
       "phone": "010-8888-2010",
       "email": "minsu@example.com",
@@ -92,6 +92,7 @@
       "checked_in_at": "2026-07-01T14:00:00",
       "checkin_memo": "에어컨 및 도어락 정상 작동 확인 완료",
       "status": "ACTIVE",
+      "password": "1212",
       "_kind": "tenant"
     },
     {
@@ -158,6 +159,30 @@
       "checked_in_at": "",
       "checkin_memo": "",
       "status": "ACTIVE",
+      "_kind": "tenant"
+    },
+    {
+      "id": "tenant_main_101",
+      "created_at": "2026-10-30T18:33:19",
+      "updated_at": "2026-10-30T18:33:19",
+      "name": "배종봉",
+      "phone": "010-5151-7788",
+      "email": "",
+      "account_number": "국민 987-654-321012",
+      "business_number": "",
+      "car_number": "",
+      "car_model": "",
+      "doorlock_pwd": "1234*",
+      "branch": "main",
+      "id_building": "",
+      "current_room_id": "",
+      "room_no": "",
+      "checked_in": false,
+      "checked_in_at": "",
+      "checkin_memo": "",
+      "status": "ACTIVE",
+      "password": "1212",
+      "username": "baejongbong",
       "_kind": "tenant"
     }
   ]

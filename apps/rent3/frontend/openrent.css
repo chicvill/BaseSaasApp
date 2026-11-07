@@ -700,11 +700,162 @@ body.or-body {
   color: #ffffff;
 }
 
-/* Override Bass alert stack width cleanly on light portal */
+/* ── OpenRent High-Contrast Alert Banners (최상단 고정 팝업 & z-index 최상위 가독성 강화) ── */
 #app-alert.bass-alert-stack {
-  max-width: 1120px;
-  margin: 12px auto 0;
-  padding: 0 20px;
+  position: fixed !important;
+  top: 24px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(860px, 92vw) !important;
+  max-width: 860px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  z-index: 99999 !important; /* 모달(z-index: 250)을 포함한 모든 화면 최상단에 표시 */
+  pointer-events: none;
+}
+
+#app-alert .bass-alert,
+body.or-body .bass-alert {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+  font-family: -apple-system, BlinkMacSystemFont, 'Pretendard', 'Noto Sans KR', sans-serif;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-width: 1.5px;
+}
+
+/* 오류 (Error) 배너: 밝은 배경에서도 선명하게 읽히는 진한 버건디/크림슨 (#7f1d1d, #991b1b) */
+#app-alert .bass-alert--error,
+body.or-body .bass-alert--error {
+  color: #7f1d1d !important;
+  background: #fef2f2 !important;
+  border-color: #f87171 !important;
+}
+
+#app-alert .bass-alert--error .bass-alert__icon,
+body.or-body .bass-alert--error .bass-alert__icon {
+  font-size: 22px !important;
+  line-height: 1.2;
+  filter: drop-shadow(0 1px 2px rgba(185, 28, 28, 0.25));
+}
+
+#app-alert .bass-alert--error .bass-alert__msg,
+body.or-body .bass-alert--error .bass-alert__msg {
+  color: #7f1d1d !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+}
+
+#app-alert .bass-alert--error .bass-alert__hint,
+body.or-body .bass-alert--error .bass-alert__hint {
+  color: #991b1b !important;
+  font-weight: 600 !important;
+  font-size: 13.5px !important;
+  opacity: 1 !important;
+  margin-top: 4px !important;
+  line-height: 1.45;
+}
+
+#app-alert .bass-alert--error .bass-alert__close,
+body.or-body .bass-alert--error .bass-alert__close {
+  color: #7f1d1d !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  opacity: 0.75 !important;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+#app-alert .bass-alert--error .bass-alert__close:hover,
+body.or-body .bass-alert--error .bass-alert__close:hover {
+  opacity: 1 !important;
+  transform: scale(1.15);
+  color: #450a0a !important;
+}
+
+/* 경고 (Warning) 배너 */
+#app-alert .bass-alert--warning,
+body.or-body .bass-alert--warning {
+  color: #78350f !important;
+  background: #fffbeb !important;
+  border-color: #f59e0b !important;
+}
+#app-alert .bass-alert--warning .bass-alert__msg,
+body.or-body .bass-alert--warning .bass-alert__msg {
+  color: #78350f !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+}
+#app-alert .bass-alert--warning .bass-alert__hint,
+body.or-body .bass-alert--warning .bass-alert__hint {
+  color: #92400e !important;
+  font-weight: 600 !important;
+  opacity: 1 !important;
+  margin-top: 4px !important;
+}
+#app-alert .bass-alert--warning .bass-alert__close,
+body.or-body .bass-alert--warning .bass-alert__close {
+  color: #78350f !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  opacity: 0.75 !important;
+}
+
+/* 성공 (Success) 배너 */
+#app-alert .bass-alert--success,
+body.or-body .bass-alert--success {
+  color: #064e3b !important;
+  background: #ecfdf5 !important;
+  border-color: #10b981 !important;
+}
+#app-alert .bass-alert--success .bass-alert__msg,
+body.or-body .bass-alert--success .bass-alert__msg {
+  color: #064e3b !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+}
+#app-alert .bass-alert--success .bass-alert__hint,
+body.or-body .bass-alert--success .bass-alert__hint {
+  color: #047857 !important;
+  font-weight: 600 !important;
+  opacity: 1 !important;
+  margin-top: 4px !important;
+}
+#app-alert .bass-alert--success .bass-alert__close,
+body.or-body .bass-alert--success .bass-alert__close {
+  color: #064e3b !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  opacity: 0.75 !important;
+}
+
+/* 변경/알림 (Diff) 배너 */
+#app-alert .bass-alert--diff,
+body.or-body .bass-alert--diff {
+  color: #7c2d12 !important;
+  background: #fff7ed !important;
+  border-color: #f97316 !important;
+}
+#app-alert .bass-alert--diff .bass-alert__msg,
+body.or-body .bass-alert--diff .bass-alert__msg {
+  color: #7c2d12 !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+}
+#app-alert .bass-alert--diff .bass-alert__hint,
+body.or-body .bass-alert--diff .bass-alert__hint {
+  color: #c2410c !important;
+  font-weight: 600 !important;
+  opacity: 1 !important;
+  margin-top: 4px !important;
+}
+#app-alert .bass-alert--diff .bass-alert__close,
+body.or-body .bass-alert--diff .bass-alert__close {
+  color: #7c2d12 !important;
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  opacity: 0.75 !important;
 }
 
 @media (max-width: 900px) {

@@ -23,7 +23,7 @@ from uuid import uuid4
 from pydantic import Field
 
 from core.errors import Conflict, DomainError, Mismatch
-from .pool import PoolObj, now_iso
+from .pool import PoolObj, now_iso, pool
 
 BRANCH_ALIASES = {
     "main": "main",
@@ -252,7 +252,10 @@ class Room(PoolObj):
     id: str = Field(default_factory=lambda: f"room_{uuid4().hex[:6]}")
     branch: str = "main"
     id_building: str = ""
+    building_name: Optional[str] = ""
     room_no: str = ""
+    move_in_date: Optional[str] = ""
+    payments: Optional[List[Any]] = Field(default_factory=list)
     name: str = ""
     floor: int = 2
     area_sqm: float = 23.0
@@ -314,6 +317,14 @@ class Room(PoolObj):
         self.is_published = True
         self.available_from = "즉시입주"
         return self.save(action="room_vacated_and_relisted", app_source=app_source)
+
+    def save(self, action: str = "updated", app_source: str = "rent3") -> "Room":
+        res = super().save(action=action, app_source=app_source)
+        try:
+            pool().save_room_partition(self.model_dump())
+        except Exception:
+            pass
+        return res
 
 
 # ─────────────────────────────────────────────────────────────

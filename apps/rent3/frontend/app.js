@@ -130,9 +130,20 @@
     });
     $("formAccountLogin").style.display = tabName === "login" ? "block" : "none";
     $("formRegister").style.display = tabName === "register" ? "block" : "none";
+    const alertBox = $("authModalAlert");
+    if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
+
+    // 로그인에 입력한 번호가 있으면 회원가입 탭 진입 시 자동 연동
+    const ident = ($("loginIdentifier").value || "").trim();
+    const digits = ident.replace(/[^0-9]/g, "");
+    if (tabName === "register" && !$("regPhone").value && digits.length >= 8) {
+      $("regPhone").value = digits.length === 11 ? `${digits.slice(0,3)}-${digits.slice(3,7)}-${digits.slice(7)}` : ident;
+    }
   }
 
   function openAuthModal({ tab = "login", preset = "", targetHint = "" } = {}) {
+    const alertBox = $("authModalAlert");
+    if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
     switchAuthTab(tab === "register" ? "register" : "login");
     $("loginTargetHint").value = targetHint || "";
     $("chkAdminPoolHub").checked = targetHint === "pool";
@@ -273,7 +284,7 @@
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
             <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-inquiry"
               data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
               💬 1:1 방문문의
@@ -282,6 +293,12 @@
               data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
               📞 공동계약 호출
             </button>
+          </div>
+          <div style="margin-top:6px;">
+            <a href="/rent3_contract2/?role=tenant&room=${encodeURIComponent(l.room_no)}&branch=${encodeURIComponent(l.branch)}"
+               class="or-btn or-btn--sm" style="width:100%; display:block; text-align:center; background:#FEE500; color:#371D1E; font-weight:bold; text-decoration:none; border:1px solid #E2D000; padding:6px 0;">
+              💬 카톡형 실시간 계약방 바로입장
+            </a>
           </div>
         </div>
       </article>
@@ -465,47 +482,112 @@
   $("formAccountLogin").addEventListener("submit", (e) => {
     e.preventDefault();
     const btn = $("btnSubmitLogin");
+    const alertBox = $("authModalAlert");
+    if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
+
+    const rawIdent = ($("loginIdentifier").value || "").trim();
+    const rawDigits = rawIdent.replace(/[^0-9]/g, "");
+    const formattedPhone = rawDigits.length === 11
+      ? `${rawDigits.slice(0,3)}-${rawDigits.slice(3,7)}-${rawDigits.slice(7)}`
+      : rawIdent;
+
     Bass.withLock(btn, async () => {
       let hint = $("loginTargetHint").value || "";
       if ($("chkAdminPoolHub").checked && !hint) hint = "pool";
 
-      const res = await Bass.api(APP_ID, "/pool/auth/login", {
-        method: "POST",
-        body: {
-          login_mode: "account",
-          identifier: $("loginIdentifier").value,
-          password: $("loginPassword").value,
-          target_hint: hint,
-        },
-      });
-      saveSession(res.user, res.token);
-      closeAuthModal();
-      Bass.updateAppAlert("success", res.message, `자동 이동: ${res.redirect_url}`);
-      window.location.href = res.redirect_url;
+      try {
+        const res = await Bass.api(APP_ID, "/pool/auth/login", {
+          method: "POST",
+          body: {
+            login_mode: "account",
+            identifier: rawIdent,
+            password: $("loginPassword").value,
+            target_hint: hint,
+          },
+        });
+        saveSession(res.user, res.token);
+        closeAuthModal();
+        Bass.updateAppAlert("success", res.message, `자동 이동: ${res.redirect_url}`);
+        window.location.href = res.redirect_url;
+      } catch (err) {
+        if (alertBox) {
+          const isNotFound = (err.message || "").includes("찾을 수 없습니다");
+          let quickBtnHtml = "";
+          if (isNotFound && (rawDigits.length >= 8 || rawIdent)) {
+            quickBtnHtml = `
+              <div style="margin-top:10px; padding-top:8px; border-top:1px dashed #fca5a5;">
+                <div style="font-size:12px; color:#991b1b; margin-bottom:6px; font-weight:600;">
+                  💡 아직 등록되지 않은 번호입니다. 간편 본인인증으로 즉시 가입하시겠습니까?
+                </div>
+                <button type="button" id="btnSwitchToRegisterWithPhone" class="or-btn or-btn--green or-btn--sm" style="width:100%; font-size:13px; font-weight:700;">
+                  ✨ '${formattedPhone}' 번호로 3초 간편가입 진행 ➔
+                </button>
+              </div>`;
+          }
+
+          alertBox.style.display = "block";
+          alertBox.innerHTML = `
+            <div style="background:#fef2f2; border:1.5px solid #f87171; border-radius:10px; padding:12px 14px; color:#7f1d1d;">
+              <div style="font-weight:800; font-size:14px; display:flex; align-items:center; gap:6px;">
+                <span>❌</span> <span>${Bass.escapeHtml(err.message || "로그인에 실패했습니다.")}</span>
+              </div>
+              ${err.hint ? `<div style="font-size:12.5px; color:#991b1b; margin-top:4px; font-weight:600; line-height:1.4;">${Bass.escapeHtml(err.hint)}</div>` : ""}
+              ${quickBtnHtml}
+            </div>`;
+
+          const quickBtn = $("btnSwitchToRegisterWithPhone");
+          if (quickBtn) {
+            quickBtn.addEventListener("click", () => {
+              alertBox.style.display = "none";
+              switchAuthTab("register");
+              $("regPhone").value = formattedPhone;
+              $("regName").focus();
+            });
+          }
+        }
+        throw err;
+      }
     }, "본인인증 확인 및 이동 중... ⏳");
   });
 
   // 간편 본인인증 회원가입 -> Data Pool 등록 후 역할/공동계약 페이지로 자동 이동
   $("formRegister").addEventListener("submit", (e) => {
     e.preventDefault();
+    const alertBox = $("authModalAlert");
+    if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
+
     Bass.withLock($("btnSubmitRegister"), async () => {
-      const res = await Bass.api(APP_ID, "/pool/auth/register", {
-        method: "POST",
-        body: {
-          role: $("regRole").value,
-          name: $("regName").value,
-          phone: $("regPhone").value,
-          username: $("regUsername").value,
-          building_name: $("regBuildingName").value,
-          address: $("regAddress").value,
-          password: $("regPassword").value,
-          target_hint: $("loginTargetHint").value || "",
-        },
-      });
-      saveSession(res.user, res.token);
-      closeAuthModal();
-      Bass.updateAppAlert("success", res.message);
-      window.location.href = res.redirect_url;
+      try {
+        const res = await Bass.api(APP_ID, "/pool/auth/register", {
+          method: "POST",
+          body: {
+            role: $("regRole").value,
+            name: $("regName").value,
+            phone: $("regPhone").value,
+            username: $("regUsername").value,
+            building_name: $("regBuildingName").value,
+            address: $("regAddress").value,
+            password: $("regPassword").value,
+            target_hint: $("loginTargetHint").value || "",
+          },
+        });
+        saveSession(res.user, res.token);
+        closeAuthModal();
+        Bass.updateAppAlert("success", res.message);
+        window.location.href = res.redirect_url;
+      } catch (err) {
+        if (alertBox) {
+          alertBox.style.display = "block";
+          alertBox.innerHTML = `
+            <div style="background:#fef2f2; border:1.5px solid #f87171; border-radius:10px; padding:12px 14px; color:#7f1d1d;">
+              <div style="font-weight:800; font-size:14px; display:flex; align-items:center; gap:6px;">
+                <span>❌</span> <span>${Bass.escapeHtml(err.message || "회원가입에 실패했습니다.")}</span>
+              </div>
+              ${err.hint ? `<div style="font-size:12.5px; color:#991b1b; margin-top:4px; font-weight:600;">${Bass.escapeHtml(err.hint)}</div>` : ""}
+            </div>`;
+        }
+        throw err;
+      }
     }, "본인인증 가입 및 이동 중... ⏳");
   });
 
