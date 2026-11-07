@@ -6,7 +6,7 @@ apps/rent3_contract/app.py — 임대인·임차인이 함께 보며 작성하�
 """
 from fastapi import APIRouter
 from core import BaseSaaSApp
-from apps._rent3_core import CoSignSession, Contract, ensure_pool_seeded
+from apps.rent_dist._rent3_core import CoSignSession, Contract, ensure_pool_seeded
 from .api import router
 
 

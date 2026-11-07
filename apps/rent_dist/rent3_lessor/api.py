@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
-from apps._rent3_core import (
+from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     BrokerContractTextParser,
     Building,

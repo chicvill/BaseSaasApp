@@ -6,7 +6,7 @@ apps/rent3_tenant/app.py — 예비 임차인 & 입주 세입자 전용 매물 �
 """
 from fastapi import APIRouter
 from core import BaseSaaSApp
-from apps._rent3_core import Room, Tenant, ensure_pool_seeded
+from apps.rent_dist._rent3_core import Room, Tenant, ensure_pool_seeded
 from .api import router
 
 

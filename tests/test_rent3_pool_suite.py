@@ -15,7 +15,7 @@ if ROOT not in sys.path:
 
 from fastapi.testclient import TestClient
 from core.gateway import create_gateway
-from apps._rent3_core import POOL_COLLECTIONS, ensure_pool_seeded, pool, use_pool_dir
+from apps.rent_dist._rent3_core import POOL_COLLECTIONS, ensure_pool_seeded, pool, use_pool_dir
 
 RENT3_SPLIT_APPS = ["rent3", "rent3_admin", "rent3_lessor", "rent3_tenant", "rent3_contract"]
 

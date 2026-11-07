@@ -33,7 +33,7 @@ class Rent3App(BaseSaaSApp):
 
     def on_startup(self) -> None:
         """기동 시 기본 공개 매물 시드 데이터 및 공동 JSON Data Pool 확인·생성."""
-        from apps._rent3_core import ensure_pool_seeded
+        from apps.rent_dist._rent3_core import ensure_pool_seeded
         ensure_pool_seeded()
         listings = RentalListing.all()
         if not listings:

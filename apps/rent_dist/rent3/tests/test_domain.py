@@ -1,5 +1,5 @@
 import unittest
-from apps.rent3.domain import (
+from apps.rent_dist.rent3.domain import (
     RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, 
     CoSigningSession, CheckOutRecord, calculate_branch_tax_roi, calculate_portfolio_tax_roi,
     RentPaymentCertificate, generate_rent_certificate
@@ -117,7 +117,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_rtms_and_checkout_domain(self):
         """RTMS 전월세신고/확정일자 및 퇴실 정산 도메인 테스트."""
-        from apps.rent3.domain import RtmsContractReport, CheckOutRecord, MonthlyBill
+        from apps.rent_dist.rent3.domain import RtmsContractReport, CheckOutRecord, MonthlyBill
 
         # RTMS 리포트 생성 및 제출
         report = RtmsContractReport(
@@ -173,7 +173,7 @@ class TestRent3Domain(unittest.TestCase):
         self.assertEqual(bill.total_amount, 550000)
 
         # 1:1 인앱 채팅 사진 첨부
-        from apps.rent3.domain import ChatMessage
+        from apps.rent_dist.rent3.domain import ChatMessage
         chat = ChatMessage(
             branch="main",
             room_id="203",
@@ -187,7 +187,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_lease_renewal_lifecycle(self):
         """계약 만기 D-Day 알림 및 갱신/묵시적 연장 전자서명 테스트."""
-        from apps.rent3.domain import LeaseRenewal
+        from apps.rent_dist.rent3.domain import LeaseRenewal
         from datetime import datetime, timedelta
 
         # 1. 갱신 제안 생성 (만기 90일 전 -> 갱신 통지 가능 기간)
@@ -236,7 +236,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_maintenance_ticket_lifecycle(self):
         """하자보수(A/S) 티켓 접수, 업체 배정, 전후 사진 및 비용 정산 테스트."""
-        from apps.rent3.domain import MaintenanceTicket
+        from apps.rent_dist.rent3.domain import MaintenanceTicket
 
         # 1. 티켓 접수
         ticket = MaintenanceTicket(
@@ -286,7 +286,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_checkout_settlement_full_lifecycle(self):
         """퇴실 점검표, 공과금/청소비 세부 정산, 세입자 서명 및 보증금 반환 완결 테스트."""
-        from apps.rent3.domain import CheckOutRecord
+        from apps.rent_dist.rent3.domain import CheckOutRecord
 
         # 1. 퇴실 점검 착수
         rec = CheckOutRecord(
@@ -390,7 +390,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_building_operating_expense_and_monthly_summary(self):
         """지점별 공용 운영비(승강기·청소·공용전기수도 등) 실지출 전산 등록 및 월별 실결산(NOI) 테스트."""
-        from apps.rent3.domain import BuildingOperatingExpense, calculate_monthly_operating_summary
+        from apps.rent_dist.rent3.domain import BuildingOperatingExpense, calculate_monthly_operating_summary
 
         # 1. 공용 운영비 신규 전산 등록
         exp = BuildingOperatingExpense(
@@ -449,7 +449,7 @@ class TestRent3Domain(unittest.TestCase):
 
     def test_annual_tax_statement_and_csv_generation(self):
         """임대인 5월 종합소득세 홈택스 제출용 연간 소득·필요경비 표준 전산 명세서 및 엑셀(CSV) 생성 테스트."""
-        from apps.rent3.domain import generate_annual_tax_statement, generate_tax_statement_csv
+        from apps.rent_dist.rent3.domain import generate_annual_tax_statement, generate_tax_statement_csv
 
         # 1. 시크빌(main) 단일 지점 연간 종소세 명세서 생성 검증
         stmt_main = generate_annual_tax_statement(branch="main", year=2026)

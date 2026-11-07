@@ -1,7 +1,7 @@
 """apps/rent3/tests/test_entities.py — 8대 표준 엔티티 및 워크플로우 단위 테스트.
 """
 import unittest
-from apps.rent3.entities import (
+from apps.rent_dist.rent3.entities import (
     Admin, Lessor, Tenant, BuildingEntity, RoomEntity, ContractEntity,
     Pay, Outlay, Rent3EntityManager, Rent3WorkflowEngine, seed_default_entities_if_empty
 )

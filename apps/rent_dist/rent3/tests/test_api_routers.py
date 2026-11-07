@@ -6,9 +6,9 @@ FastAPI TestClient를 활용하여 모듈화된 4개 라우터(public_apps, oper
 import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from apps.rent3.api import router
-from apps.rent3.entities import seed_default_entities_if_empty
-from apps.rent3.domain import RentalApplication
+from apps.rent_dist.rent3.api import router
+from apps.rent_dist.rent3.entities import seed_default_entities_if_empty
+from apps.rent_dist.rent3.domain import RentalApplication
 
 class TestRent3ModularApi(unittest.TestCase):
     @classmethod

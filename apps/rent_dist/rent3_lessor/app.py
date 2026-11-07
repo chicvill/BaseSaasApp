@@ -6,7 +6,7 @@ rent2의 객체지향 수납 규칙(후불 입주월 비과세, 가짜 체납 �
 """
 from fastapi import APIRouter
 from core import BaseSaaSApp
-from apps._rent3_core import Building, Pay, Room, ensure_pool_seeded
+from apps.rent_dist._rent3_core import Building, Pay, Room, ensure_pool_seeded
 from .api import router
 
 

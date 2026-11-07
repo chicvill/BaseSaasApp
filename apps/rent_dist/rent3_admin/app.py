@@ -6,7 +6,7 @@ apps/rent3_admin/app.py — 플랫폼 총괄 관리인 전용 가맹·사용료�
 """
 from fastapi import APIRouter
 from core import BaseSaaSApp
-from apps._rent3_core import Building, Lessor, RtmsReport, ensure_pool_seeded
+from apps.rent_dist._rent3_core import Building, Lessor, RtmsReport, ensure_pool_seeded
 from .api import router
 
 

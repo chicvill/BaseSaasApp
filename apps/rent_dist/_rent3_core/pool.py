@@ -26,7 +26,7 @@ from core.kernel import actor
 
 T = TypeVar("T", bound="PoolObj")
 
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 DEFAULT_POOL_DIR = os.path.join(ROOT_DIR, "data", "rent3_pool")
 
 POOL_COLLECTIONS = (

@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from apps._rent3_core import (
+from apps.rent_dist._rent3_core import (
     Admin,
     Building,
     Contract,

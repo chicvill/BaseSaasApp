@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, issue_token
 from core.errors import Conflict, DomainError, NotFound
-from apps._rent3_core import (
+from apps.rent_dist._rent3_core import (
     POOL_COLLECTIONS,
     Admin,
     Building,

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.errors import DomainError, NotFound
-from apps._rent3_core import (
+from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
     CheckOutSettlement,
