@@ -50,6 +50,11 @@ class RoomLimitReq(BaseModel):
     room_limit: int
 
 
+class AccountResetReq(BaseModel):
+    kind: str        # lessor | tenant
+    id: str
+
+
 class AiLimitReq(BaseModel):
     ai_monthly_limit: int
 
@@ -250,6 +255,20 @@ def set_room_limit(lessor_id: str, req: RoomLimitReq):
     lessor.room_limit = req.room_limit
     lessor.save(action="lessor_room_limit_changed", app_source=APP_SRC)
     return {"success": True, "message": f"호실 한도를 {req.room_limit}실로 바꿨습니다.", "lessor": lessor.model_dump()}
+
+
+@router.post("/accounts/reset-password", dependencies=ADMIN_ONLY)
+def reset_account_password(req: AccountResetReq):
+    """본인인증 이력이 없어 직접 재설정할 수 없는 계정에 임시 비밀번호를 발급한다. 임시 비밀번호는 이 응답에서 한 번만 보인다(해시로 저장)."""
+    from apps.rent_dist._rent3_core import passwords as pwd
+    obj = Lessor.get(req.id) if req.kind == "lessor" else Tenant.get(req.id) if req.kind == "tenant" else None
+    if obj is None:
+        raise DomainError("계정을 찾을 수 없습니다. kind 는 lessor 또는 tenant 여야 합니다.")
+    temp = pwd.temp_password()
+    obj.password = pwd.hash_password(temp)
+    obj.save(action="password_reset_by_admin", app_source=APP_SRC)
+    return {"success": True, "message": f"'{obj.name}' 님의 임시 비밀번호를 발급했습니다. 본인에게 안전하게 전달하고 바로 바꾸게 하세요.",
+            "temporary_password": temp}
 
 
 @router.post("/lessors/{lessor_id}/ai-limit", dependencies=ADMIN_ONLY)

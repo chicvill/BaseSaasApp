@@ -1536,5 +1536,116 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             os.environ.pop("RENT3_FAKE_IDENTITY", None)
 
 
+    def test_24_password_hash_lockout_reset_and_admin_temp(self):
+        """24. 비밀번호 해시 저장·평문 자동 전환, 로그인 잠금, 본인인증 기반 재설정, 관리자 임시 비밀번호, 배포 환경 데모 계정 숨김."""
+        import os
+        from apps.rent_dist._rent3_core import Lessor, ratelimit
+
+        c = self.client
+        ratelimit.reset_all()
+        os.environ["RENT3_DEMO_LOGIN"] = "0"   # 배포 환경처럼 동작
+        users = lambda: open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read()
+
+        def login(ident, pw):
+            return c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                          json={"login_mode": "account", "identifier": ident, "password": pw})
+
+        try:
+            # (a) 가입한 비밀번호는 해시로만 저장된다
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "해시임대", "phone": "01044440001", "username": "hashlsr", "password": "Hash#Pass9", "branch": "hashb"})
+            self.assertEqual(reg.status_code, 200)
+            self.assertNotIn("Hash#Pass9", users())
+            self.assertIn("pbkdf2_sha256$", users())
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 200)
+            self.assertEqual(login("hashlsr", "Hash#Pass8").status_code, 401)
+
+            # (b) 예전 평문 저장분: 로그인에 성공하면 해시로 전환, 약한 평문(1212)은 배포 환경에서 거부
+            Lessor(username="legacy", name="평문임대", phone="010-4444-0002", branch="legacyb", password="Legacy#Pass9").save("test")
+            self.assertEqual(login("legacy", "Legacy#Pass9").status_code, 200)
+            self.assertNotIn("Legacy#Pass9", users())
+            Lessor(username="weaklegacy", name="약한평문", phone="010-4444-0003", branch="weakl", password="1212").save("test")
+            self.assertEqual(login("weaklegacy", "1212").status_code, 401)
+
+            # (c) 5번 틀리면 잠기고, 맞는 비밀번호도 잠금 동안은 거부된다 (429)
+            for _ in range(5):
+                self.assertEqual(login("lockme", "wrong-pass").status_code, 401)
+            locked = login("lockme", "wrong-pass")
+            self.assertEqual(locked.status_code, 429)
+            self.assertIn("분 뒤", locked.json()["message"])
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 200)  # 다른 계정은 영향 없음(접속 주소 한도 미만)
+
+            # (d) 본인인증 기반 재설정: 본인인증 이력이 있는 계정만 직접 가능
+            ratelimit.reset_all()
+            reg2 = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "재설정임대", "phone": "01044440004", "username": "rstlsr", "password": "Old#Pass99", "branch": "rstb"})
+            lh = self._as(reg2.json()["token"])
+            who = {"branch": "rstb", "name": "재설정임대", "phone": "01044440004", "birth": "19700101"}
+            os.environ["RENT3_FAKE_IDENTITY"] = "1"   # 이 구간만 가짜 본인인증 허용(본인인증 이력 만들기용)
+            c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "000000"}).status_code, 200)
+            rs = {"identifier": "rstlsr", "name": "재설정임대", "phone": "01044440004", "birth": "700101"}
+            R = "/api/rent3/pool/auth/password-reset"
+            self.assertEqual(c.post(f"{R}/start", headers=self.NOAUTH, json=rs).status_code, 200)
+            bad = c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "name": "다른사람", "code": "000000", "new_password": "New#Pass99"})
+            self.assertEqual(bad.status_code, 400)                                                # 정보가 다름
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "111111", "new_password": "New#Pass99"}).status_code, 400)  # 인증번호 틀림
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "000000", "new_password": "1212"}).status_code, 400)        # 약한 비밀번호
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "000000", "new_password": "New#Pass99"}).status_code, 200)
+            os.environ["RENT3_FAKE_IDENTITY"] = "0"
+            self.assertEqual(login("rstlsr", "Old#Pass99").status_code, 401)
+            self.assertEqual(login("rstlsr", "New#Pass99").status_code, 200)
+
+            # (e) 본인인증 이력이 없는 계정은 직접 재설정 불가 — 계정 존재 여부는 알리지 않는다
+            nov = {"identifier": "hashlsr", "name": "해시임대", "phone": "01044440001", "birth": "700101"}
+            self.assertEqual(c.post(f"{R}/start", headers=self.NOAUTH, json=nov).status_code, 200)
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**nov, "code": "000000", "new_password": "New#Pass99"}).status_code, 400)
+
+            # (f) 관리자 임시 비밀번호: 관리자만, 한 번만 보이고, 해시로 저장
+            body = {"kind": "lessor", "id": reg.json()["user"]["id"]}
+            self.assertEqual(c.post("/api/rent3_admin/accounts/reset-password", headers=self.NOAUTH, json=body).status_code, 401)
+            self.assertIn(c.post("/api/rent3_admin/accounts/reset-password", headers=lh, json=body).status_code, (401, 403))
+            tmp = c.post("/api/rent3_admin/accounts/reset-password", json=body).json()["temporary_password"]
+            self.assertNotIn(tmp, users())
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 401)
+            self.assertEqual(login("hashlsr", tmp).status_code, 200)
+
+            # (g) 배포 환경에서는 데모 계정(공통 비밀번호 안내)을 내려주지 않는다
+            self.assertEqual(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["demo_accounts"], [])
+        finally:
+            os.environ.pop("RENT3_DEMO_LOGIN", None)
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+            ratelimit.reset_all()
+        self.assertTrue(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["demo_accounts"])  # 로컬 시연에서는 보인다
+
+    def test_25_password_migration_script(self):
+        """25. 평문 비밀번호 전환 스크립트: 약한 값은 비우고, 그 밖은 해시로 바꾸며, 다시 실행해도 안전하다."""
+        import subprocess
+        import tempfile
+        from apps.rent_dist._rent3_core import Lessor
+
+        tmp = tempfile.mkdtemp(prefix="rent3_mig_")
+        env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+        script = os.path.join(ROOT, "scripts", "hash_passwords.py")
+        # 임시 풀을 시드하고 평문 비밀번호 두 개를 심는다
+        code = (
+            "import sys; sys.path.insert(0, %r)\n"
+            "from apps.rent_dist._rent3_core import ensure_pool_seeded, use_pool_dir, Lessor\n"
+            "use_pool_dir(%r); ensure_pool_seeded(force=True)\n"
+            "Lessor(username='mig1', name='이전1', phone='010-4444-1001', branch='mig1', password='Plain#Pass9').save('t')\n"
+            "Lessor(username='mig2', name='이전2', phone='010-4444-1002', branch='mig2', password='1212').save('t')\n"
+        ) % (ROOT, tmp)
+        subprocess.run([sys.executable, "-c", code], check=True, env=env, capture_output=True)
+        out = subprocess.run([sys.executable, script, "--pool-dir", tmp], check=True, env=env, capture_output=True, text=True, encoding="utf-8").stdout
+        self.assertIn("약한 비밀번호 비움", out)
+        raw = open(os.path.join(tmp, "users.json"), encoding="utf-8").read()
+        self.assertNotIn("Plain#Pass9", raw)
+        self.assertIn("pbkdf2_sha256$", raw)
+        self.assertNotIn('"password": "1212"', raw)
+        again = subprocess.run([sys.executable, script, "--pool-dir", tmp], check=True, env=env, capture_output=True, text=True, encoding="utf-8").stdout
+        self.assertIn("해시로 전환 0 · 약한 비밀번호 비움 0", again)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

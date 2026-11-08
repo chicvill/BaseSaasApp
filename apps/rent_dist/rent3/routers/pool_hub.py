@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, issue_token
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import contract_scope, lessor_token, tenant_token
+from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(require_role("superadmin", "admin"))]
@@ -147,7 +148,7 @@ def pool_file_raw(collection: str) -> Dict[str, Any]:
 
 
 @router.get("/landing")
-def portal_landing() -> Dict[str, Any]:
+def portal_landing(request: Request) -> Dict[str, Any]:
     """OpenRent 스타일 직거래 포털 메인 화면용 실시간 Data Pool 집계."""
     ensure_pool_seeded()
     meta = pool().overview()
@@ -279,7 +280,7 @@ def portal_landing() -> Dict[str, Any]:
         ],
         "listings": listings,
         "open_sessions": open_sessions,
-        "demo_accounts": demo_accounts,
+        "demo_accounts": demo_accounts if demo_login_allowed(request) else [],  # 공통 비밀번호는 로컬에서만 안내
     }
 
 
@@ -351,8 +352,30 @@ def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
     }
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def _is_loopback(request: Request) -> bool:
+    return _client_ip(request) in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
 @router.post("/auth/login")
 def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
+    """로그인(무차별 대입 방어 포함): 계정별 5회·접속 주소별 30회 실패 시 15분 잠금."""
+    who = (req.identifier or req.session_code or "").strip().lower()
+    keys = [f"u:{who}", f"ip:{_client_ip(request)}"]
+    ratelimit.check("login", keys)
+    try:
+        out = _portal_role_login(req, request)
+    except (Unauthorized, DomainError, NotFound):
+        ratelimit.fail("login", keys)
+        raise
+    ratelimit.clear("login", keys[:1])
+    return out
+
+
+def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     """통합 본인인증 로그인 — 계정 역할(관리인/임대인/입주임차인/예비임차인) 및 공동계약 호출 목적에 맞춰 전용 URL을 반환."""
     ensure_pool_seeded()
     ensure_default_admins()
@@ -470,11 +493,14 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         core_u = CoreUser.by_username(matched_lessor.username) if matched_lessor.username else None
         phone_tail = _digits(matched_lessor.phone)[-4:] if len(_digits(matched_lessor.phone)) >= 4 else ""
         custom_pw = matched_lessor.password
-        valid_pw = (core_u.check_password(pw) if core_u else False) or (
-            bool(custom_pw) and custom_pw != "1212" and pw == custom_pw
-        ) or (
-            demo and (pw == "1212" or (bool(custom_pw) and pw == custom_pw) or (bool(phone_tail) and pw == phone_tail))
+        stored_ok = bool(custom_pw) and custom_pw != "1212" and (demo or pw.lower() not in pwd.WEAK) and pwd.verify(custom_pw, pw)
+        valid_pw = (core_u.check_password(pw) if core_u else False) or stored_ok or (
+            demo and (pw == "1212" or (bool(custom_pw) and not pwd.is_hashed(custom_pw) and pw == custom_pw)
+                      or (bool(phone_tail) and pw == phone_tail))
         )
+        if valid_pw and stored_ok and not pwd.is_hashed(custom_pw):  # 예전 평문 → 해시로 전환
+            matched_lessor.password = pwd.hash_password(pw)
+            matched_lessor.save("password_hashed", app_source="rent3_portal")
         if not valid_pw:
             raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="가입할 때 설정한 비밀번호를 확인해 주세요.")
         tok = lessor_token(matched_lessor)
@@ -525,9 +551,14 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     if matched_tenant:
         phone_tail = _digits(matched_tenant.phone)[-4:] if len(_digits(matched_tenant.phone)) >= 4 else ""
         custom_pw = matched_tenant.password
-        valid_pw = (bool(custom_pw) and custom_pw != "1212" and pw == custom_pw) or (
-            demo and (pw == "1212" or (bool(custom_pw) and pw == custom_pw) or (bool(phone_tail) and pw == phone_tail))
+        stored_ok = bool(custom_pw) and custom_pw != "1212" and (demo or pw.lower() not in pwd.WEAK) and pwd.verify(custom_pw, pw)
+        valid_pw = stored_ok or (
+            demo and (pw == "1212" or (bool(custom_pw) and not pwd.is_hashed(custom_pw) and pw == custom_pw)
+                      or (bool(phone_tail) and pw == phone_tail))
         )
+        if valid_pw and stored_ok and not pwd.is_hashed(custom_pw):
+            matched_tenant.password = pwd.hash_password(pw)
+            matched_tenant.save("password_hashed", app_source="rent3_portal")
         if not valid_pw:
             raise Unauthorized(
                 "임차인 비밀번호가 올바르지 않습니다.",
@@ -578,6 +609,82 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     )
 
 
+class PasswordResetReq(BaseModel):
+    identifier: str
+    name: str
+    phone: str
+    birth: str
+    code: str = ""
+    new_password: str = ""
+
+
+def _find_account(identifier: str):
+    """재설정 대상 계정(임대인·임차인). 관리자는 서버 설정(BASS_SEED_PASSWORD)이나 관리 도구로만 바꾼다."""
+    ident = identifier.strip().lower()
+    num = _digits(identifier)
+    for lsr in Lessor.all():
+        if (lsr.username and lsr.username.lower() == ident) or lsr.id.lower() == ident or (len(num) >= 8 and _digits(lsr.phone) == num):
+            return lsr
+    for t in Tenant.all():
+        if t.id.lower() == ident or (len(num) >= 8 and _digits(t.phone) == num):
+            return t
+    return None
+
+
+def _reset_target(req: PasswordResetReq):
+    """본인인증을 마친 계정이고 입력한 실명·생년월일·휴대폰이 그 인증과 같을 때만 대상. 아니면 None (존재 여부를 알리지 않는다)."""
+    acct = _find_account(req.identifier)
+    idn = (acct.identity if acct else None) or {}
+    if not (acct and idn.get("verified")):
+        return None
+    try:
+        birth6 = fr.normalize_birth(req.birth)
+    except DomainError:
+        return None
+    same = (
+        fr._norm_name(idn.get("name")) == fr._norm_name(req.name)
+        and idn.get("birth6") == birth6
+        and _digits(idn.get("phone")) == _digits(req.phone)
+    )
+    return acct if same else None
+
+
+@router.post("/auth/password-reset/start")
+def password_reset_start(req: PasswordResetReq, request: Request) -> Dict[str, Any]:
+    """비밀번호 재설정 1단계: 본인인증 번호 발송. 계정이 있든 없든 같은 응답을 준다."""
+    ensure_pool_seeded()
+    keys = [f"u:{req.identifier.strip().lower()}", f"ip:{_client_ip(request)}"]
+    ratelimit.check("reset", keys)
+    ratelimit.fail("reset", keys)  # 인증번호 요청도 횟수로 센다
+    if _reset_target(req) is not None:
+        fr.provider(_is_loopback(request)).start(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth))
+    return {"success": True, "message": "입력한 정보가 가입 때 본인인증한 정보와 같으면 인증번호를 보냅니다.",
+            "hint": "시연용 인증번호는 000000 입니다." if fr.fake_allowed(_is_loopback(request)) else ""}
+
+
+@router.post("/auth/password-reset/confirm")
+def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str, Any]:
+    """비밀번호 재설정 2단계: 인증번호 확인 후 새 비밀번호 저장 (해시). 로그인은 새 비밀번호로 다시 해야 한다."""
+    ensure_pool_seeded()
+    keys = [f"u:{req.identifier.strip().lower()}", f"ip:{_client_ip(request)}"]
+    ratelimit.check("reset", keys)
+    acct = _reset_target(req)
+    try:
+        if acct is None:
+            raise DomainError("입력한 정보가 본인인증한 정보와 다릅니다.",
+                              hint="본인인증을 마친 계정만 직접 재설정할 수 있습니다. 그렇지 않으면 본사에 문의해 주세요.")
+        pwd.validate_new_password(req.new_password)
+        fr.provider(_is_loopback(request)).confirm(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth), req.code)
+    except DomainError:
+        ratelimit.fail("reset", keys)
+        raise
+    acct.password = pwd.hash_password(req.new_password.strip())
+    acct.save("password_reset_by_identity", app_source="rent3_portal")
+    ratelimit.clear("reset", keys[:1])
+    ratelimit.clear("login", [f"u:{req.identifier.strip().lower()}"])
+    return {"success": True, "message": "비밀번호를 바꿨습니다. 새 비밀번호로 로그인해 주세요."}
+
+
 @router.post("/auth/register")
 def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
     """OpenRent 포털 간편 본인인증 회원가입 — 예비임차인 또는 신규 임대인을 Data Pool에 등록하고 해당 역할 페이지로 즉시 연결."""
@@ -586,8 +693,11 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
     phone = req.phone.strip()
     pw = req.password.strip() or "1212"
     is_contract_hint = (req.target_hint or "").startswith("contract")
-    if not demo_login_allowed(request) and (len(pw) < 6 or pw in ("1212", "0202", "123456", "000000")):
-        raise DomainError("비밀번호는 6자 이상이어야 하며 흔한 숫자(1212 등)는 쓸 수 없습니다.", hint="영문·숫자를 섞어 설정해 주세요.")
+    if not demo_login_allowed(request):
+        pwd.validate_new_password(pw)
+    ip_key = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("register", ip_key)  # 같은 주소에서 가입을 반복하면 잠깐 막는다
+    ratelimit.fail("register", ip_key)
     if not name or not phone:
         raise DomainError("성명과 휴대폰 번호는 필수 입력 항목입니다.")
 
@@ -610,7 +720,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
             email=req.email.strip(),
             branch=branch_code,
             status="PENDING_APPROVAL",  # 가맹 심사 통과 전에는 매물 공개·직거래 불가
-            password=pw,
+            password=pwd.hash_password(pw),
         ).save("portal_lessor_registered", app_source="rent3_portal")
 
         if not Building.first(branch=branch_code):
@@ -657,7 +767,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
         phone=phone,
         email=req.email.strip(),
         status="PROSPECT",
-        password=pw,
+        password=pwd.hash_password(pw),
     ).save("portal_prospect_registered", app_source="rent3_portal")
 
     target_url = (

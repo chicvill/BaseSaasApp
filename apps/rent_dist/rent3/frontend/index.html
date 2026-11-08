@@ -198,7 +198,7 @@
           <div>
             <span class="or-brand__tag" style="background:#e0f2fe;color:#075985;border-color:#bae6fd;">👑 총괄 관리인 전용 앱</span>
             <h3>플랫폼 관제 (rent3_admin)</h3>
-            <p><code>admin / 0202</code> 로그인 시 총괄 관리인 전용 앱(<code>/rent3_admin/</code>)으로 이동해 임대인 가맹 승인, 월 SaaS 이용료 정산, 전 지점 NOI·RTMS를 관제합니다.</p>
+            <p>총괄 관리인 계정으로 로그인하면 총괄 관리인 전용 앱(<code>/rent3_admin/</code>)으로 이동해 임대인 가맹 승인, 월 SaaS 이용료 정산, 전 지점 NOI·RTMS를 관제합니다.</p>
           </div>
           <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="admin">관리인 전용 앱 로그인 →</button>
         </article>
@@ -320,8 +320,8 @@
           <input id="loginIdentifier" class="or-input" placeholder="예: chic, admin, 010-8888-2010, 이민수" required>
         </div>
         <div class="or-field">
-          <label for="loginPassword">비밀번호 (관리인: 0202 · 임차인: 휴대폰 뒷 4자리 가능)</label>
-          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호 입력 (관리인: 0202 / 기본: 1212)" value="1212" required>
+          <label for="loginPassword">비밀번호</label>
+          <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호" autocomplete="current-password" required>
         </div>
         <div class="or-field" style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--or-muted);">
           <input id="chkAdminPoolHub" type="checkbox">
@@ -330,12 +330,31 @@
         <button type="submit" id="btnSubmitLogin" class="or-btn or-btn--blue" style="width:100%; padding:12px;">
           본인인증 로그인 후 이동 →
         </button>
+        <div style="text-align:center;margin-top:8px;"><a href="#" id="lnkForgot" style="font-size:12.5px;">비밀번호를 잊으셨나요?</a></div>
 
         <!-- 원클릭 역할별 데모 계정 칩 -->
         <div style="margin-top:16px; padding-top:14px; border-top:1px solid var(--or-border);">
           <div style="font-size:12px; font-weight:700; color:var(--or-muted);">⚡ 역할별 본인인증 완료 계정 원클릭 로그인 (클릭 시 즉시 이동)</div>
           <div id="demoAccountGrid" class="or-demo-grid"></div>
         </div>
+      </form>
+
+      <!-- 비밀번호 재설정 (본인인증 기반) -->
+      <form id="formReset" style="display:none;">
+        <div style="font-size:12px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
+          🔑 가입 때 <strong>휴대폰 본인인증을 마친 계정</strong>은 실명·생년월일·휴대폰 인증으로 직접 재설정할 수 있습니다. 인증 이력이 없으면 본사에 문의해 임시 비밀번호를 받으세요.
+        </div>
+        <div class="or-field"><label for="rsIdent">아이디 또는 가입한 휴대폰 번호</label><input id="rsIdent" class="or-input" autocomplete="username"></div>
+        <div class="or-field"><label for="rsName">실명</label><input id="rsName" class="or-input"></div>
+        <div class="or-field"><label for="rsPhone">휴대폰 번호</label><input id="rsPhone" class="or-input" placeholder="010-0000-0000"></div>
+        <div class="or-field"><label for="rsBirth">생년월일 (6자리 또는 8자리)</label><input id="rsBirth" class="or-input" placeholder="650312"></div>
+        <div class="or-field" style="display:flex;gap:6px;align-items:center;">
+          <button type="button" id="btnRsStart" class="or-btn or-btn--outline or-btn--sm">인증번호 받기</button>
+          <input id="rsCode" class="or-input" placeholder="인증번호" style="flex:1;min-width:0;">
+        </div>
+        <div class="or-field"><label for="rsNew">새 비밀번호</label><input id="rsNew" type="password" class="or-input" placeholder="8자 이상, 영문과 숫자를 모두 포함" autocomplete="new-password"></div>
+        <button type="button" id="btnRsConfirm" class="or-btn or-btn--blue" style="width:100%; padding:12px;">비밀번호 바꾸기</button>
+        <div style="text-align:center;margin-top:8px;"><a href="#" id="lnkBackLogin" style="font-size:12.5px;">← 로그인으로 돌아가기</a></div>
       </form>
 
       <!-- TAB 2: 간편 본인인증 회원가입 -->
@@ -374,7 +393,7 @@
         </div>
         <div class="or-field">
           <label for="regPassword">비밀번호 설정</label>
-          <input id="regPassword" type="password" class="or-input" value="1212" required>
+          <input id="regPassword" type="password" class="or-input" placeholder="8자 이상, 영문과 숫자를 모두 포함" autocomplete="new-password" required>
         </div>
         <button type="submit" id="btnSubmitRegister" class="or-btn or-btn--green" style="width:100%; padding:12px;">
           ✨ 본인인증 가입 완료 및 이동 →

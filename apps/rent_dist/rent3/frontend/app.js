@@ -130,6 +130,7 @@
     });
     $("formAccountLogin").style.display = tabName === "login" ? "block" : "none";
     $("formRegister").style.display = tabName === "register" ? "block" : "none";
+    const fr = $("formReset"); if (fr) fr.style.display = "none";
     const alertBox = $("authModalAlert");
     if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
 
@@ -164,9 +165,9 @@
       const ex = state.demoAccounts.find((d) => d.group === "임대인");
       if (ex) $("loginIdentifier").value = ex.identifier;
     } else if (preset === "admin") {
-      sub.textContent = "총괄 관리인(admin / 0202)으로 로그인하면 관리인 전용 앱(/rent3_admin/)으로 즉시 이동합니다.";
+      sub.textContent = "총괄 관리인 계정으로 로그인하면 관리인 전용 앱(/rent3_admin/)으로 즉시 이동합니다.";
       $("loginIdentifier").value = "admin";
-      $("loginPassword").value = "0202";
+      if (state.demoAccounts.length) $("loginPassword").value = "0202"; // 시연(로컬) 환경에서만 미리 채움
     } else {
       sub.textContent = "본인인증 로그인 즉시 계정의 역할에 맞는 전용 페이지로 자동 이동합니다.";
     }
@@ -375,6 +376,41 @@
     });
   }
 
+  // ── 비밀번호 재설정 (본인인증 기반) ──
+  function bindPasswordReset() {
+    const link = $("lnkForgot");
+    if (!link) return;
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      $("formAccountLogin").style.display = "none";
+      $("formRegister").style.display = "none";
+      $("formReset").style.display = "block";
+      if (!$("rsIdent").value) $("rsIdent").value = ($("loginIdentifier").value || "").trim();
+    });
+    $("lnkBackLogin").addEventListener("click", (e) => { e.preventDefault(); switchAuthTab("login"); });
+    const body = () => ({
+      identifier: $("rsIdent").value.trim(), name: $("rsName").value.trim(),
+      phone: $("rsPhone").value.trim(), birth: $("rsBirth").value.trim(),
+    });
+    $("btnRsStart").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/pool/auth/password-reset/start", { method: "POST", body: body() });
+        Bass.updateAppAlert("success", r.message, r.hint || "");
+      });
+    });
+    $("btnRsConfirm").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/pool/auth/password-reset/confirm", {
+          method: "POST", body: { ...body(), code: $("rsCode").value.trim(), new_password: $("rsNew").value } });
+        Bass.updateAppAlert("success", r.message);
+        $("rsNew").value = ""; $("rsCode").value = "";
+        $("loginIdentifier").value = $("rsIdent").value.trim();
+        $("loginPassword").value = "";
+        switchAuthTab("login");
+      });
+    });
+  }
+
   async function loadPortalData() {
     const data = await Bass.api(APP_ID, "/pool/landing");
     const st = data.stats || {};
@@ -382,6 +418,14 @@
     state.branches = data.branches || [];
     state.openSessions = data.open_sessions || [];
     state.demoAccounts = data.demo_accounts || [];
+    // 시연(로컬) 환경에서만 공통 비밀번호를 미리 채우고 데모 칩을 보여 준다. 배포 환경은 빈 칸.
+    const demoOn = state.demoAccounts.length > 0;
+    if (demoOn) {
+      if (!$("loginPassword").value) $("loginPassword").value = "1212";
+      if (!$("regPassword").value) $("regPassword").value = "1212";
+    }
+    const demoBox = $("demoAccountGrid") && $("demoAccountGrid").parentElement;
+    if (demoBox) demoBox.style.display = demoOn ? "" : "none";
 
     $("statBuildingsRooms").textContent = `${st.total_buildings || 0}채 · ${st.total_rooms || 0}실`;
     $("statVacancies").textContent = `${st.vacant_published_count || 0}건 공개 중`;
@@ -695,6 +739,7 @@
   }
 
   renderSessionUI();
+  bindPasswordReset();
   loadPortalData()
     .then(() => {
       if (urlParams.get("login") === "1") {
