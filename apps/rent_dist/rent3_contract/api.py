@@ -228,6 +228,7 @@ def list_incoming_calls(
 @router.get("/sessions")
 def list_sessions(branch: Optional[str] = None):
     ensure_pool_seeded()
+    CoSignSession.expire_idle()
     sessions = CoSignSession.find(branch=normalize_branch_id(branch)) if branch else CoSignSession.all()
     sessions_sorted = sorted(sessions, key=lambda s: s.updated_at, reverse=True)
     return {
@@ -323,6 +324,9 @@ def verify_counterparty_id(session_id: str, req: VerifyIdReq):
 def get_session(token: str):
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(token)
+    if s.is_idle_expired():
+        CoSignSession.expire_idle(s.branch, s.room_no)
+        s = CoSignSession.by_code_or_id(token)
     contract = Contract.get(s.created_contract_id) if s.created_contract_id else None
     return {
         "success": True,

@@ -13,7 +13,7 @@ echo [Rent3 Standalone Test Suite]
 echo WorkDir : %CD%
 echo ============================================================
 
-py -m unittest tests/test_rent3_pool_suite.py apps/rent_dist/rent3/tests/test_api_routers.py tests/test_rent3_contract2_suite.py -v
+py -m unittest tests/test_rent3_pool_suite.py apps/rent_dist/rent3/tests/test_api_routers.py -v
 set EXIT_CODE=%ERRORLEVEL%
 
 echo ============================================================

@@ -143,11 +143,11 @@
                      <button class="bass-btn bass-btn--sm btn-toggle-expiry" data-room="${r.room_no}" data-default-open="${defaultExpOpen}" type="button">${isExpiryOpen ? "📅 만기예고 접기" : "📅 전출확인·연장예고"}</button>
                      ${hasPhoto ? `<button class="bass-btn bass-btn--sm btn-toggle-photo" data-room="${r.room_no}" type="button">${isPhotoOpen ? "🖼️ 계약서 닫기" : "📸 첨부 계약서 보기"}</button>` : ""}
                      <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개 재계약 등록</button>
-                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a> <a class="bass-btn bass-btn--sm" style="background:#FEE500; color:#371D1E; font-weight:bold; border:1px solid #E2D000;" href="/rent3_contract2/?role=lessor&room=${encodeURIComponent(r.room_no)}">💬 카톡형 계약방</a>`
+                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
                   : `<span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 매물 공개중" : "공실 비공개"}</span>
                      <button class="bass-btn bass-btn--sm btn-pub-toggle" data-id="${r.id}" data-pub="${!r.is_published}" type="button">${r.is_published ? "비공개 전환" : "직거래 매물 공개"}</button>
                      <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개계약 사진등록</button>
-                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a> <a class="bass-btn bass-btn--sm" style="background:#FEE500; color:#371D1E; font-weight:bold; border:1px solid #E2D000;" href="/rent3_contract2/?role=lessor&room=${encodeURIComponent(r.room_no)}">💬 카톡형 공동계약</a>`
+                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
                 }
               </div>
             </div>

@@ -991,7 +991,7 @@
   function renderCancelled(s) {
     const why = (s.tenant_registry || {}).recheck_changed
       ? "임차인이 체결 직전 등기부에서 변동을 확인해 계약이 중단되었습니다."
-      : "이 계약은 중단되었습니다.";
+      : (s.cancel_reason || "이 계약은 중단되었습니다.");
     elStepPanel.innerHTML = `
       <h3 style="margin:0 0 6px;">⛔ 계약이 중단되었습니다</h3>
       <p class="bass-muted" style="font-size:13px;margin:0 0 12px;">${esc(why)} 필요하면 홈에서 새로 계약을 시작할 수 있습니다.</p>

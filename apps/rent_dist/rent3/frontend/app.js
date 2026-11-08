@@ -290,15 +290,10 @@
               💬 1:1 방문문의
             </button>
             <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
-              data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
-              📞 공동계약 호출
+              data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}"
+              ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
+              ${l.contract_in_progress ? "🔒 계약 진행 중" : "📞 공동계약 호출"}
             </button>
-          </div>
-          <div style="margin-top:6px;">
-            <a href="/rent3_contract2/?role=tenant&room=${encodeURIComponent(l.room_no)}&branch=${encodeURIComponent(l.branch)}"
-               class="or-btn or-btn--sm" style="width:100%; display:block; text-align:center; background:#FEE500; color:#371D1E; font-weight:bold; text-decoration:none; border:1px solid #E2D000; padding:6px 0;">
-              💬 카톡형 실시간 계약방 바로입장
-            </a>
           </div>
         </div>
       </article>

@@ -175,6 +175,7 @@ def portal_landing() -> Dict[str, Any]:
             "status_description": r.status_description,
             "options": opts,
             "image": img_url,
+            "contract_in_progress": CoSignSession.live_for_room(r.branch, r.room_no) is not None,
             "lessor_name": lsr.name if lsr else "건물 소유주",
             "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "010-2222-1111")),
         })

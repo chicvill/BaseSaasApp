@@ -1094,5 +1094,67 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("NO_VALUE", codes(ex(mortgage_total=100000000), property_value=0))
 
 
+    def test_14_live_contract_blocks_other_tenants(self):
+        """14. 계약이 진행 중인 호실은 포털에서 '계약 진행 중'으로 표시되고, 다른 임차인은 호출할 수 없다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "906", "is_published": True, "deposit": 5000000})
+
+        def flag():
+            ls = self.client.get("/api/rent3/pool/landing").json()["listings"]
+            return next(l for l in ls if l["room_no"] == "906")["contract_in_progress"]
+
+        self.assertFalse(flag())
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "906", "mode": "NEW",
+                "tenant_name": "먼저온사람", "tenant_phone": "010-6000-0001"}
+        first = self.client.post(f"{base}/sessions/call", json=call)
+        self.assertEqual(first.status_code, 200)
+        sid = first.json()["session"]["id"]
+        self.assertTrue(flag())
+
+        # 다른 임차인은 거부
+        other = dict(call, tenant_name="나중에온사람", tenant_phone="010-6000-0002")
+        self.assertIn(self.client.post(f"{base}/sessions/call", json=other).status_code, (400, 409))
+        # 당사자(같은 연락처, 형식이 달라도)는 이어서 입장
+        again = self.client.post(f"{base}/sessions/call", json=dict(call, tenant_phone="01060000001"))
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["session"]["id"], sid)
+        # 임대인은 자기 호실 계약에 다시 들어올 수 있다
+        les = self.client.post(f"{base}/sessions/call", json=dict(call, caller_role="lessor"))
+        self.assertEqual(les.status_code, 200)
+        self.assertEqual(les.json()["session"]["id"], sid)
+
+
+    def test_15_idle_contract_auto_released_after_24h(self):
+        """15. 24시간 무응답 계약은 자동 해제되어 호실이 다시 열리고, 방금 만든 계약은 유지된다."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import cosign
+
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "907", "is_published": True, "deposit": 5000000})
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "907", "mode": "NEW",
+                "tenant_name": "무응답", "tenant_phone": "010-7000-0001"}
+        sid = self.client.post(f"{base}/sessions/call", json=call).json()["session"]["id"]
+
+        def flag():
+            ls = self.client.get("/api/rent3/pool/landing").json()["listings"]
+            return next(l for l in ls if l["room_no"] == "907")["contract_in_progress"]
+
+        self.assertTrue(flag())  # 방금 만든 계약은 24시간 이내 → 유지
+        orig = cosign.IDLE_EXPIRE
+        try:
+            cosign.IDLE_EXPIRE = timedelta(seconds=-1)  # 모든 진행 계약이 24시간을 넘긴 것으로 간주
+            self.assertFalse(flag())  # 자동 해제 → 버튼 다시 활성
+            got = self.client.get(f"{base}/sessions/{sid}").json()["session"]
+            self.assertEqual(got["status"], "CANCELLED")
+            self.assertIn("24시간", got["cancel_reason"])
+        finally:
+            cosign.IDLE_EXPIRE = orig
+        # 해제 뒤에는 다른 임차인이 새로 시작할 수 있다
+        other = dict(call, tenant_name="새사람", tenant_phone="010-7000-0002")
+        r = self.client.post(f"{base}/sessions/call", json=other)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotEqual(r.json()["session"]["id"], sid)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ import hashlib
 import os
 import random
 import re
+from datetime import datetime, timedelta
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import uuid4
 
@@ -41,6 +42,10 @@ from .models import (
 from .ops import DirectChat, RtmsReport
 from .broker import ALLOWED_MIME_TO_EXT, EXT_TO_MIME, MAX_PHOTO_BYTES
 from .pool import PoolObj, now_iso, pool
+
+
+# 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다.
+IDLE_EXPIRE = timedelta(hours=24)
 
 
 class CoSignSession(PoolObj):
@@ -92,6 +97,7 @@ class CoSignSession(PoolObj):
     registry_attachment_name: str = ""
     registry_attachment_sha256: str = ""
     tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
+    cancel_reason: str = ""                  # 취소 사유(자동 해제 등)
     registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
     registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
 
@@ -422,6 +428,47 @@ class CoSignSession(PoolObj):
 
         return session
 
+    def is_idle_expired(self, now: Optional[datetime] = None) -> bool:
+        """진행 중인 세션이 IDLE_EXPIRE 동안 무응답(변화 없음)이면 True."""
+        if self.status != "IN_PROGRESS":
+            return False
+        try:
+            last = datetime.fromisoformat(self.updated_at)
+        except (TypeError, ValueError):
+            return False
+        return (now or datetime.now()) - last >= IDLE_EXPIRE
+
+    @classmethod
+    def expire_idle(cls, branch: str = "", room_no: str = "") -> int:
+        """무응답 세션을 자동 해제(CANCELLED)한다. 해제한 건수를 돌려준다."""
+        kw: Dict[str, Any] = {"status": "IN_PROGRESS"}
+        if branch:
+            kw["branch"] = normalize_branch_id(branch)
+        if room_no:
+            kw["room_no"] = str(room_no)
+        n = 0
+        for x in cls.find(**kw):
+            if x.is_idle_expired():
+                x.status = "CANCELLED"
+                x.cancel_reason = "24시간 이상 응답이 없어 자동 해제되었습니다."
+                x.save(action="cosign_expired_idle", app_source="rent3_contract")
+                n += 1
+        return n
+
+    @classmethod
+    def live_for_room(cls, branch: str, room_no: str) -> Optional["CoSignSession"]:
+        """해당 호실에 진행 중(IN_PROGRESS)인 계약 세션. 없으면 None. (무응답 세션은 먼저 해제)"""
+        cls.expire_idle(branch, room_no)
+        return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=str(room_no), status="IN_PROGRESS")), None)
+
+    def is_tenant_party(self, id_tenant: str = "", phone: str = "") -> bool:
+        """이 계약의 임차인 당사자인지(계정 ID 또는 연락처 일치)."""
+        if id_tenant and self.id_tenant and id_tenant.strip() == self.id_tenant:
+            return True
+        digits = re.sub(r"\D", "", phone or "")
+        mine = re.sub(r"\D", "", str((self.terms or {}).get("tenant_phone") or ""))
+        return bool(digits and mine and digits == mine)
+
     @classmethod
     def call_counterparty(
         cls,
@@ -449,13 +496,15 @@ class CoSignSession(PoolObj):
 
         # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
         # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)
+        cls.expire_idle(branch, room_no)
         b_id = normalize_branch_id(branch)
         live = next(
             (x for x in cls.find(branch=b_id, room_no=str(room_no), status="IN_PROGRESS") if x.mode == mode),
             None,
         )
         if live:
-            if id_tenant and live.id_tenant and id_tenant.strip() != live.id_tenant:
+            # 진행 중인 계약에는 그 계약의 당사자만 다시 들어올 수 있다. 다른 임차인은 접근 불가.
+            if role_norm == "tenant" and not live.is_tenant_party(id_tenant, tenant_phone):
                 raise DomainError(
                     f"{room_no}호는 다른 임차인과 계약이 진행 중입니다.",
                     hint="진행 중인 계약이 끝나거나 취소된 뒤에 다시 시도해 주세요.",
