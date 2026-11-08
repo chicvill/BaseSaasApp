@@ -258,7 +258,9 @@ class Room(PoolObj):
     payments: Optional[List[Any]] = Field(default_factory=list)
     name: str = ""
     floor: int = 2
-    area_sqm: float = 23.0
+    area_sqm: float = 23.0                   # 전용면적(㎡)
+    total_floors: int = 0                    # 건물 전체 층수 (0 = 미입력)
+    direction: str = ""                      # 향 (남향·동향 등)
     room_category: str = "주거용 원룸"        # 주거용 원룸 / 오피스텔 / 상가/사무실
     vat_applicable: bool = False             # 상가/업무용 시 True
     id_tenant: str = ""

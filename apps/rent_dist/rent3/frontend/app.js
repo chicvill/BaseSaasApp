@@ -267,7 +267,7 @@
         <div class="or-prop-body">
           <div>
             <div style="font-size:12px; font-weight:700; color:var(--or-muted);">
-              ${esc(l.building_name)} · ${esc(l.room_category)} · ${l.floor}층 (${l.area_sqm}㎡)
+              ${esc(l.building_name)} · ${esc(l.room_category)} · ${l.floor}${l.total_floors ? `/${l.total_floors}` : ""}층 · 전용 ${l.area_sqm}㎡${l.direction ? ` · ${esc(l.direction)}` : ""}
             </div>
             <h3 style="margin:4px 0 2px; font-size:17px; color:var(--or-navy);">
               [${esc(l.building_name)}] ${esc(l.name)}

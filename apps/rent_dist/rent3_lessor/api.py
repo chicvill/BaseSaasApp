@@ -48,6 +48,9 @@ class RoomCreateReq(BaseModel):
     maintenance_fee: int = 50000
     pay_timing: str = "후불"
     status_description: str = "신규 등록 풀옵션 호실"
+    total_floors: int = 0
+    direction: str = ""
+    available_from: str = "즉시입주"
     is_published: bool = True
 
 
@@ -219,6 +222,9 @@ def create_or_update_room(req: RoomCreateReq):
         existing.name = req.name or existing.name
         existing.floor = req.floor
         existing.area_sqm = req.area_sqm
+        existing.total_floors = req.total_floors
+        existing.direction = req.direction
+        existing.available_from = req.available_from or "즉시입주"
         existing.room_category = req.room_category
         existing.vat_applicable = req.vat_applicable
         existing.deposit = req.deposit
@@ -238,6 +244,9 @@ def create_or_update_room(req: RoomCreateReq):
         name=req.name or f"{req.room_no}호 ({req.room_category})",
         floor=req.floor,
         area_sqm=req.area_sqm,
+        total_floors=req.total_floors,
+        direction=req.direction,
+        available_from=req.available_from or "즉시입주",
         room_category=req.room_category,
         vat_applicable=req.vat_applicable,
         deposit=req.deposit,

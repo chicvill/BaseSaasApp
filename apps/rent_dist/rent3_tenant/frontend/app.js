@@ -465,7 +465,7 @@
           <div class="bass-row" style="justify-content:space-between;">
             <div>
               <strong style="font-size:17px;">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.name || `${r.room_no}호`)}</strong>
-              <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.address)} · ${r.area_sqm}㎡ · ${Bass.escapeHtml(r.available_from)}</div>
+              <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.address)} · ${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${Bass.escapeHtml(r.direction)}` : ""} · 입주 ${Bass.escapeHtml(r.available_from)}</div>
             </div>
             <div class="bass-row" style="gap:6px;">
               ${r.is_pre_moveout_listing ? `<span class="bass-badge bass-badge--warn">📅 만기퇴실 예정 사전공개</span>` : ""}

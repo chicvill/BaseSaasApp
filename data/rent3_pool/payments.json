@@ -1,9 +1,9 @@
 {
   "pool": "rent3_pool",
   "collection": "payments",
-  "revision": 47,
-  "updated_at": "2026-11-04T07:10:18",
-  "count": 42,
+  "revision": 48,
+  "updated_at": "2026-11-08T09:51:10",
+  "count": 43,
   "items": [
     {
       "id": "pay_dbb1f77c",
@@ -1061,6 +1061,31 @@
       "amount": 500000,
       "paid_at": "2026-11-04",
       "status": "COMPLETED",
+      "_kind": "pay"
+    },
+    {
+      "id": "pay_0fd894dc",
+      "created_at": "2026-11-08T09:51:10",
+      "updated_at": "2026-11-08T09:51:10",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "id_room": "room_main_204",
+      "room_no": "204",
+      "id_contract": "ct_32834c5e",
+      "id_tenant": "imcha",
+      "payer_name": "임차인 (imcha)",
+      "billing_month": "2026-11",
+      "paid_date": "2026-11-08",
+      "rent_amount": 0,
+      "maintenance_amount": 0,
+      "vat_amount": 0,
+      "total_amount": 300000,
+      "payment_kind": "CONTRACT_DEPOSIT",
+      "method": "TRANSFER",
+      "cash_receipt_no": "CASH-2026-2BDA8C",
+      "allocated_months": [],
+      "idempotency_key": "cosign_dep:cs_196da334",
+      "raw_sms": "",
       "_kind": "pay"
     }
   ]

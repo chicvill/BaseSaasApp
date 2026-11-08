@@ -71,11 +71,24 @@
     .contract-paper table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
     .contract-paper th, .contract-paper td { border: 1px solid #444; padding: 7px 9px; text-align: left; }
     .contract-paper th { background: #f1f5f9; width: 24%; }
+    /* 좁은 화면(스마트폰): 4열 표를 항목 위/값 아래로 쌓아 글자가 한 글자씩 꺾이지 않게 한다 */
+    @media screen and (max-width: 640px) {
+      .contract-paper { padding: 16px 14px; }
+      .contract-paper table, .contract-paper tbody, .contract-paper tr, .contract-paper th, .contract-paper td { display: block; width: 100%; }
+      .contract-paper tr { margin-bottom: 8px; border: 1px solid #444; }
+      .contract-paper th, .contract-paper td { border: 0; border-bottom: 1px solid #ccc; }
+      .contract-paper th { width: 100%; padding: 5px 9px; font-size: 12px; }
+    }
+    /* 인쇄(행정복지센터 제출용): 계약서만 A4 한 장 규격으로 */
+    @page { size: A4; margin: 14mm; }
     @media print {
-      body { background: #fff !important; color: #000 !important; }
-      .no-print { display: none !important; }
-      .app-shell { max-width: none; padding: 0; }
-      .contract-paper { box-shadow: none; padding: 0; margin: 0; }
+      html, body { background: #fff !important; color: #000 !important; }
+      .no-print, #app-alert, #homeView, #dlgHost { display: none !important; }
+      .app-shell { max-width: none; padding: 0; margin: 0; }
+      #contractView, #sealedContractView { display: block !important; }
+      .contract-paper { box-shadow: none; padding: 0; margin: 0; border-radius: 0; font-size: 12pt; }
+      .contract-paper table { page-break-inside: avoid; }
+      .contract-paper th { width: 24%; }
     }
   </style>
 </head>

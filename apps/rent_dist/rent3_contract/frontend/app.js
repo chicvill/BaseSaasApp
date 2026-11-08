@@ -315,7 +315,7 @@
         <div class="room-row">
           <div class="room-row__main">
             <div class="room-row__title">${esc(r.building_name)} ${esc(r.room_no)}호</div>
-            <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}</div>
+            <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}<br>${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${esc(r.direction)}` : ""} · 입주 ${esc(r.available_from || "즉시")}</div>
           </div>
           <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">이 집으로</button>
         </div>`).join("") : `<div class="bass-muted" style="padding:10px 0;">지금 공개된 매물이 없습니다.</div>`}
@@ -1125,6 +1125,19 @@
     const regSnap = c.registry_snapshot || {};
     elSealedView.style.display = "block";
     elSealedView.innerHTML = `
+      <div class="no-print" style="margin-top:14px;">
+        <div class="bass-card" style="padding:14px;">
+          <div style="font-weight:800;margin-bottom:4px;">🎉 계약이 체결되었습니다</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">
+            행정복지센터(주민센터) 확정일자·전입신고 제출용으로 인쇄하거나 PDF로 저장하세요.
+            인쇄 창에서 "PDF로 저장"을 고르면 파일로 보관됩니다.
+          </div>
+          <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+            <button id="btnPrintContract" class="bass-btn bass-btn--primary" style="flex:2;min-width:180px;" type="button">🖨️ 계약서 인쇄 / PDF 저장 (A4)</button>
+            <button id="btnSealedHome" class="bass-btn" style="flex:1;" type="button">← 홈으로</button>
+          </div>
+        </div>
+      </div>
       <article class="contract-paper">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #000;padding-bottom:10px;margin-bottom:14px;">
           <div>
@@ -1148,6 +1161,8 @@
         </table>
       </article>
     `;
+    document.getElementById("btnPrintContract").addEventListener("click", () => window.print());
+    document.getElementById("btnSealedHome").addEventListener("click", goHome);
   }
 
   (async function init() {

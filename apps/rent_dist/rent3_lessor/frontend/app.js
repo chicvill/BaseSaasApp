@@ -975,11 +975,22 @@
 
   function renderRoomsTab() {
     const rooms = dash.rooms || [];
+    const sortedRooms = rooms.slice().sort((a, b) => String(a.room_no).localeCompare(String(b.room_no), "ko", { numeric: true }));
+    const DIRECTIONS = ["", "남향", "남동향", "남서향", "동향", "서향", "북향", "북동향", "북서향"];
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <h3>➕ 신규 호실 객체 추가 / 임대 조건 변경 (rooms.json 실시간 반영)</h3>
+        <h3>🏷️ 임대매물 등록</h3>
+        <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">호실을 고르고 조건을 확인한 뒤 등록하면 임차인 화면에 공개됩니다. 입주 중인 호실은 고를 수 없습니다.</p>
         <div class="field-grid" style="margin:10px 0;">
-          <div><label class="bass-label">호실 번호</label><input id="nrNo" class="bass-input" placeholder="예: 204"></div>
+          <div>
+            <label class="bass-label">호실</label>
+            <select id="nrRoom" class="bass-select">
+              <option value="">호실을 선택하세요</option>
+              ${sortedRooms.map((r) => `<option value="${Bass.escapeHtml(r.id)}" ${r.is_occupied ? "disabled" : ""}>${Bass.escapeHtml(r.room_no)}호 — ${r.is_occupied ? "입주중" : (r.is_published ? "매물 공개중" : "공실")}</option>`).join("")}
+              <option value="__new__">➕ 목록에 없는 새 호실 추가…</option>
+            </select>
+          </div>
+          <div id="nrNewWrap" style="display:none;"><label class="bass-label">새 호실 번호</label><input id="nrNo" class="bass-input" placeholder="예: 704"></div>
           <div>
             <label class="bass-label">부동산 유형</label>
             <select id="nrCat" class="bass-select">
@@ -988,15 +999,33 @@
               <option value="상가/사무실">상가/사무실 (VAT 10%)</option>
             </select>
           </div>
+          <div><label class="bass-label">입주가능일</label>
+            <input id="nrAvail" type="date" class="bass-input">
+            <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;margin-top:6px;cursor:pointer;"><input id="nrAvailNow" type="checkbox" checked> 즉시입주</label>
+          </div>
           <div><label class="bass-label">보증금(원)</label><input id="nrDep" type="number" class="bass-input" value="5000000"></div>
           <div><label class="bass-label">월세(원)</label><input id="nrRent" type="number" class="bass-input" value="500000"></div>
           <div><label class="bass-label">관리비(원)</label><input id="nrMaint" type="number" class="bass-input" value="50000"></div>
+          <div><label class="bass-label">전용면적(㎡)</label><input id="nrArea" type="number" step="0.1" class="bass-input" value="23"></div>
+          <div><label class="bass-label">향</label>
+            <select id="nrDir" class="bass-select">${DIRECTIONS.map((d) => `<option value="${d}">${d || "선택 안 함"}</option>`).join("")}</select>
+          </div>
+          <div><label class="bass-label">층</label><input id="nrFloor" type="number" class="bass-input" value="2"></div>
+          <div><label class="bass-label">전체 층수</label><input id="nrTotalFloors" type="number" class="bass-input" value="0" placeholder="예: 7"></div>
         </div>
-        <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">🚪 호실 저장 및 직거래 매물 게시</button>
+        <div style="margin-bottom:10px;">
+          <label class="bass-label">매물 소개 (선택)</label>
+          <input id="nrDesc" class="bass-input" placeholder="예: 남향 풀옵션, 도배·장판 새로 시공">
+        </div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+          <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">📢 임대매물 등록</button>
+          <button id="btnUnpublishRoom" class="bass-btn" type="button" style="display:none;">매물 내리기</button>
+        </div>
       </div>
 
-      <div class="bass-card">
-        <h3>🔑 호실별 디지털 도어락 & 등록 주차 차량 관제</h3>
+      <details class="bass-card">
+        <summary style="cursor:pointer;font-weight:800;">🔑 호실별 도어락 · 등록 차량 관리</summary>
+        <div style="margin-top:10px;">
         ${rooms.map((r) => `
           <div class="room-card" style="margin-top:10px;">
             <div class="bass-row" style="justify-content:space-between;">
@@ -1011,17 +1040,70 @@
             </div>
           </div>
         `).join("")}
-      </div>
+        </div>
+      </details>
     `;
 
-    document.getElementById("btnCreateRoom").addEventListener("click", function () {
+    const $nr = (id) => document.getElementById(id);
+    const roomById = (id) => rooms.find((x) => x.id === id);
+
+    function syncAvailInputs() {
+      $nr("nrAvail").disabled = $nr("nrAvailNow").checked;
+    }
+    $nr("nrAvailNow").addEventListener("change", syncAvailInputs);
+    syncAvailInputs();
+
+    $nr("nrRoom").addEventListener("change", () => {
+      const v = $nr("nrRoom").value;
+      $nr("nrNewWrap").style.display = v === "__new__" ? "block" : "none";
+      const r = roomById(v);
+      $nr("btnUnpublishRoom").style.display = r && r.is_published ? "inline-flex" : "none";
+      $nr("btnCreateRoom").textContent = r && r.is_published ? "📢 변경 내용으로 다시 등록" : "📢 임대매물 등록";
+      if (!r) return;
+      $nr("nrCat").value = r.room_category || "주거용 원룸";
+      $nr("nrDep").value = r.deposit;
+      $nr("nrRent").value = r.monthly_rent;
+      $nr("nrMaint").value = r.maintenance_fee;
+      $nr("nrArea").value = r.area_sqm;
+      $nr("nrDir").value = r.direction || "";
+      $nr("nrFloor").value = r.floor;
+      $nr("nrTotalFloors").value = r.total_floors || 0;
+      $nr("nrDesc").value = r.status_description || "";
+      const af = r.available_from || "즉시입주";
+      const isDate = /^\d{4}-\d{2}-\d{2}$/.test(af);
+      $nr("nrAvailNow").checked = !isDate;
+      $nr("nrAvail").value = isDate ? af : "";
+      syncAvailInputs();
+    });
+
+    $nr("btnUnpublishRoom").addEventListener("click", function () {
+      const r = roomById($nr("nrRoom").value);
+      if (!r) return;
       Bass.withLock(this, async () => {
-        const roomNo = document.getElementById("nrNo").value.trim();
+        const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/publish`, {
+          method: "POST",
+          body: { is_published: false },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+      });
+    });
+
+    $nr("btnCreateRoom").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const sel = $nr("nrRoom").value;
+        const picked = roomById(sel);
+        const roomNo = sel === "__new__" ? $nr("nrNo").value.trim() : (picked ? picked.room_no : "");
         if (!roomNo) {
-          Bass.updateAppAlert("warning", "호실 번호를 입력해 주세요.");
+          Bass.updateAppAlert("warning", sel === "__new__" ? "새 호실 번호를 입력해 주세요." : "등록할 호실을 선택해 주세요.");
           return;
         }
-        const cat = document.getElementById("nrCat").value;
+        const avail = $nr("nrAvailNow").checked ? "즉시입주" : $nr("nrAvail").value;
+        if (!avail) {
+          Bass.updateAppAlert("warning", "입주가능일을 고르거나 '즉시입주'를 체크해 주세요.");
+          return;
+        }
+        const cat = $nr("nrCat").value;
         const res = await Bass.api(APP_ID, "/rooms", {
           method: "POST",
           body: {
@@ -1029,9 +1111,15 @@
             room_no: roomNo,
             room_category: cat,
             vat_applicable: cat === "상가/사무실",
-            deposit: Number(document.getElementById("nrDep").value || 0),
-            monthly_rent: Number(document.getElementById("nrRent").value || 0),
-            maintenance_fee: Number(document.getElementById("nrMaint").value || 0),
+            deposit: Number($nr("nrDep").value || 0),
+            monthly_rent: Number($nr("nrRent").value || 0),
+            maintenance_fee: Number($nr("nrMaint").value || 0),
+            area_sqm: Number($nr("nrArea").value || 0),
+            direction: $nr("nrDir").value,
+            floor: Number($nr("nrFloor").value || 0),
+            total_floors: Number($nr("nrTotalFloors").value || 0),
+            available_from: avail,
+            status_description: $nr("nrDesc").value.trim() || "신규 등록 호실",
             is_published: true,
           },
         });

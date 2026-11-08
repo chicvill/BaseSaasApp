@@ -1,8 +1,8 @@
 {
   "pool": "rent3_pool",
   "collection": "rooms",
-  "revision": 73,
-  "updated_at": "2026-11-08T08:02:57",
+  "revision": 74,
+  "updated_at": "2026-11-08T09:51:10",
   "count": 32,
   "items": [
     {
@@ -850,7 +850,7 @@
     {
       "id": "room_main_204",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-11-08T08:02:57",
+      "updated_at": "2026-11-08T09:51:10",
       "branch": "main",
       "id_building": "bldg_main",
       "building_name": "",
@@ -877,8 +877,8 @@
       "area_sqm": 23.0,
       "room_category": "주거용 원룸",
       "vat_applicable": false,
-      "id_tenant": "",
-      "active_contract_id": "",
+      "id_tenant": "imcha",
+      "active_contract_id": "ct_32834c5e",
       "doorlock_pwd": "2580*",
       "registry_checked": true,
       "registry_info": {
@@ -923,7 +923,7 @@
       "maintenance_fee": 50000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
-      "is_published": true,
+      "is_published": false,
       "images": [],
       "_kind": "room"
     },
