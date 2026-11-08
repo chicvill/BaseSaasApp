@@ -376,6 +376,8 @@ description: Operational business rules, domain invariants, and verification ins
 30. **접속 위치 판정 강화**(`authz.is_local_request`): 프록시 흔적 헤더(`X-Forwarded-For` 등)가 하나라도 있으면 로컬로 보지 않는다 — uvicorn 이 `FORWARDED_ALLOW_IPS=*` 로 헤더를 믿어 주소가 `127.0.0.1` 로 위조돼도 데모 로그인·가짜 본인인증이 열리지 않는다. 로그인 시도 제한의 접속 주소는 `RENT3_TRUSTED_PROXY_HOPS=N`(믿을 수 있는 프록시 단수)이면 `X-Forwarded-For` 오른쪽 N번째 값을, 아니면 소켓 주소를 쓴다 — **프록시(Traefik) 뒤인데 이 값이 0 이면 모든 사용자가 프록시 주소 하나로 보여 30회 실패 시 전원이 잠긴다.**
 31. **배포 점검 스크립트** `py scripts/deploy_check.py [--strict]`: 필수 환경변수·시연 설정 꺼짐·`RENT3_TODAY` 미설정·영구 볼륨·쓰기 권한·평문 비밀번호·평문 민감 필드·본인인증/문자 설정을 점검한다(비밀 값은 출력 안 함). FAIL 이 하나라도 있으면 종료 코드 1. 프록시 헤더(CSP·HSTS)·CORS·볼륨 실제 마운트·백업·문자 실발송·가맹 심사 절차는 스크립트가 확인하지 못한다.
 
+32. **로그인 만료 처리**(`shared_ui/rent3_session_guard.js`, 4개 앱 index.html 에 로드): rent3 API 가 401 을 돌려주면(로그인·가입·재설정·진위확인 경로 제외) 저장된 로그인 정보를 지우고 `/rent3/?login=1&expired=1` 로 보내 "로그인이 만료되었습니다" 안내를 띄운다. 이전에는 화면이 401 을 받으면서 `/sessions` 를 2.5초마다 계속 호출했다. **`BASS_SECRET` 이 없으면 재배포마다 모든 로그인이 무효**가 되어 이 안내가 뜬다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

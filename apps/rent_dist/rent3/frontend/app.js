@@ -745,6 +745,9 @@
     .then(() => {
       if (urlParams.get("login") === "1") {
         openAuthModal({ tab: "login" });
+        if (urlParams.get("expired") === "1") {
+          Bass.updateAppAlert("warning", "로그인이 만료되었습니다. 다시 로그인해 주세요.", "보안을 위해 로그인은 12시간 동안 유지되고, 서버를 다시 시작하면 새로 로그인해야 할 수 있습니다.");
+        }
       }
     })
     .catch(Bass.showError);
