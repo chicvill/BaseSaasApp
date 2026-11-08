@@ -23,6 +23,7 @@
 
   const loggedUser = readLoggedUser();
   if (!loggedUser || !loggedUser.name) {
+    try { if (params.get("session")) window.localStorage.setItem("rent3_pending_join", params.get("session")); } catch (_) {}
     window.location.replace("/rent3/?login=1");
     return;
   }
@@ -674,12 +675,41 @@
       `}
     `;
 
+    if (!isCalleeView) renderJoinQr(s, calleeKo);
+
     const btnResp = document.getElementById("btnRespondMain");
     if (btnResp) {
       btnResp.addEventListener("click", function () {
         respondToIncomingCall(this, s.id);
       });
     }
+  }
+
+  // ───────────── 대면 참여 QR (호출한 쪽 대기 화면) ─────────────
+  // 같은 자리에 있는 상대방이 자기 휴대폰으로 QR 을 찍으면 이 계약으로 들어온다.
+  // QR 에는 계약 id 만 담긴다 — 입장은 상대방이 자기 계정으로 로그인해야 하고, 서버가 당사자인지 다시 확인한다.
+  function renderJoinQr(s, calleeKo) {
+    const joinUrl = `${window.location.origin}/rent3_contract/?session=${encodeURIComponent(s.id)}`;
+    let svg = "";
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(joinUrl);
+      qr.make();
+      svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    } catch (_) { svg = ""; }
+    const box = document.createElement("div");
+    box.className = "bass-card";
+    box.style.cssText = "padding:14px;margin-top:12px;text-align:center;";
+    box.innerHTML = `
+      <div style="font-weight:800;margin-bottom:4px;">📱 대면 참여 QR</div>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.55;margin-bottom:8px;">
+        ${Bass.escapeHtml(calleeKo)}님이 옆에 있다면 <strong>본인 휴대폰 카메라로 이 QR을 찍게</strong> 하세요.<br>
+        본인 계정으로 로그인하면 이 계약 응답 화면으로 들어옵니다.
+      </div>
+      ${svg ? `<div style="width:190px;max-width:70%;margin:0 auto;background:#fff;padding:6px;border-radius:10px;">${svg}</div>` : `<div class="bass-muted">QR을 만들지 못했습니다. 참여코드를 알려 주세요.</div>`}
+      <div style="margin-top:8px;font-size:13px;">참여코드 <strong style="letter-spacing:2px;">${Bass.escapeHtml(s.session_code || "")}</strong></div>
+      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">QR·코드만으로는 입장할 수 없습니다. 계약 당사자 계정으로 로그인해야 합니다.</div>`;
+    elStepPanel.appendChild(box);
   }
 
   // ───────────── 등기부 직접 확인 (임차인) ─────────────
@@ -1228,6 +1258,78 @@
     });
   }
 
+  let pendingFacNotes = null; // 사진을 올려 화면이 다시 그려져도 입력 중이던 메모가 사라지지 않게 한다
+
+  // 모바일 카메라 사진을 올리기 전에 줄인다(긴 변 1600px, JPEG 80%) — 업로드가 빠르고 용량 상한에 걸리지 않는다.
+  function shrinkPhoto(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+        const cv = document.createElement("canvas");
+        cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(url);
+        resolve(cv.toDataURL("image/jpeg", 0.8));
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("사진을 읽지 못했습니다.")); };
+      img.src = url;
+    });
+  }
+
+  function facilityPhotosHtml(s) {
+    const photos = s.facility_photos || [];
+    const base = `${Bass.apiBase(APP_ID)}/sessions/${encodeURIComponent(s.id)}/facility-photos`;
+    const tok = encodeURIComponent(Bass.token());
+    return `<div class="bass-card" style="padding:12px;margin:12px 0;">
+      <div style="font-weight:800;">📷 현장 사진 <span class="bass-muted" style="font-weight:400;font-size:12px;">(${photos.length}/12 · 합의 후에는 바꿀 수 없고 퇴실 정산 때 비교 자료가 됩니다)</span></div>
+      <input id="facPhotoCaption" class="bass-input" placeholder="사진 설명 (예: 욕실 천장 곰팡이, 싱크대 상판 흠집)" style="margin:8px 0 6px;">
+      <input id="facPhotoInput" type="file" accept="image/*" capture="environment" multiple class="bass-input">
+      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">휴대폰에서는 카메라가 바로 열립니다. 사진을 올리거나 지우면 상대방 화면에도 바로 보이고, 양쪽 점검 확인을 다시 받습니다.</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:10px;">
+        ${photos.map((p) => `<div style="font-size:11.5px;">
+          <a href="${base}/${encodeURIComponent(p.id)}?token=${tok}" target="_blank" rel="noopener">
+            <img src="${base}/${encodeURIComponent(p.id)}?token=${tok}" alt="${Bass.escapeHtml(p.caption || "점검 사진")}" loading="lazy"
+                 style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>
+          <div>${p.by_role === "lessor" ? "🏢" : "🔑"} ${Bass.escapeHtml(p.caption || "-")}</div>
+          ${p.by_role === currentRole ? `<button class="bass-btn bass-btn--sm js-del-photo" data-pid="${Bass.escapeHtml(p.id)}" type="button">삭제</button>` : ""}
+        </div>`).join("") || `<div class="bass-muted" style="font-size:12.5px;grid-column:1/-1;">아직 올린 사진이 없습니다.</div>`}
+      </div>
+    </div>`;
+  }
+
+  function bindFacilityPhotos(s) {
+    const input = document.getElementById("facPhotoInput");
+    if (!input) return;
+    const notes = document.getElementById("facNotes");
+    if (notes) notes.addEventListener("input", () => { pendingFacNotes = notes.value; });
+    input.addEventListener("change", async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      const caption = document.getElementById("facPhotoCaption").value.trim();
+      input.disabled = true;
+      try {
+        let last = null;
+        for (const f of files) {
+          const dataUrl = await shrinkPhoto(f);
+          last = await Bass.api(APP_ID, `/sessions/${s.id}/facility-photos`, {
+            method: "POST", body: { role: currentRole, photo_data_url: dataUrl, caption } });
+        }
+        if (last) { activeSession = last.session; Bass.updateAppAlert("success", `사진 ${files.length}장을 기록했습니다.`); renderWorkspace(); }
+      } catch (e) { Bass.showError(e); }
+      finally { input.disabled = false; }
+    });
+    document.querySelectorAll(".js-del-photo").forEach((b) => b.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/facility-photos/${encodeURIComponent(b.dataset.pid)}/delete`, {
+          method: "POST", body: { role: currentRole } });
+        activeSession = res.session;
+        renderWorkspace();
+      });
+    }));
+  }
+
   function renderStep2(s) {
     const opts = s.option_checks || [];
     elStepPanel.innerHTML = `
@@ -1243,8 +1345,9 @@
       </div>
       <div>
         <label class="bass-label">현장 시설 특기사항 메모</label>
-        <input id="facNotes" class="bass-input" value="${Bass.escapeHtml(s.facility_notes || "")}">
+        <input id="facNotes" class="bass-input" value="${Bass.escapeHtml(pendingFacNotes !== null ? pendingFacNotes : (s.facility_notes || ""))}">
       </div>
+      ${facilityPhotosHtml(s)}
       <div class="bass-row" style="margin:12px 0;">
         <span class="bass-badge ${s.step2_lessor_confirmed ? "bass-badge--ok" : "bass-badge--warn"}">임대인 확인: ${s.step2_lessor_confirmed ? "완료" : "대기"}</span>
         <span class="bass-badge ${s.step2_tenant_locked ? "bass-badge--ok" : "bass-badge--warn"}">임차인 확인 잠금: ${s.step2_tenant_locked ? "완료" : "대기"}</span>
@@ -1253,6 +1356,7 @@
         ${currentRole === "lessor" ? "🏢 시설 점검표 확인 완료" : "🔑 실물 옵션 이상 없음 상호 동의 잠금"}
       </button>
     `;
+    bindFacilityPhotos(s);
     document.getElementById("btnStep2Confirm").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const updatedOpts = opts.map((o, i) => ({
@@ -1267,6 +1371,7 @@
             facility_notes: document.getElementById("facNotes").value.trim(),
           },
         });
+        pendingFacNotes = null;
         activeSession = res.session;
         viewStep = activeSession.current_step;
         Bass.updateAppAlert("success", res.message);
@@ -1637,7 +1742,11 @@
       allSessions = list.sessions || [];
       renderHome(true);
 
-      const sid = params.get("session");
+      let sid = params.get("session");
+      if (!sid) {
+        try { sid = window.localStorage.getItem("rent3_pending_join") || ""; } catch (_) { sid = ""; }
+      }
+      try { window.localStorage.removeItem("rent3_pending_join"); } catch (_) {}
       const found = sid ? allSessions.find((x) => x.id === sid || x.session_code === sid) : null;
       if (found) {
         await openSession(found.id);

@@ -1955,5 +1955,88 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(home["keys"]["released_at"][:4], "2026")
 
 
+    def test_33_legacy_by_id_endpoints_closed_to_non_admin(self):
+        """33. 레거시: 신청서·영수증·재계약 id 만으로 조회하는 경로와 구 계약방은 일반 계정에 닫혀 있다(남의 도어락·계약 열람 방지)."""
+        c = self.client
+        chic = self._login("chic")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "레거시구경", "phone": "01066660701", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"])
+        # 임차인: 호실이 명시되지 않은 레거시 운영 경로는 모두 거부
+        for u in ("/api/rent3/tenant/checkin-info/app_main_205", "/api/rent3/tenant/receipt/x", "/api/rent3/renewals"):
+            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
+        # 구 신청서·구 계약방: 일반 계정(임대인·임차인) 거부, 관리자만
+        for u in ("/api/rent3/public/application/app_main_205", "/api/rent3/cosign/nonexistent"):
+            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
+            self.assertEqual(c.get(u, headers=chic).status_code, 403, u)
+        self.assertEqual(c.post("/api/rent3/cosign/start", headers=chic, json={"branch": "main", "room_id": "205", "deposit": 1, "monthly_rent": 1}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3/public/application/x/sign-and-pay", headers=ten, json={"tenant_signature": "a", "payment_method": "CARD"}).status_code, 403)
+        # 라운지: 본인 지점 임대인·본인 호실 임차인·관리자만
+        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=self._login("sunho")).status_code, 403)
+        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=ten).status_code, 403)
+        # 관리자는 모두 가능
+        self.assertEqual(c.get("/api/rent3/cosign/nonexistent").status_code, 404)
+
+    def test_34_facility_photos_and_join_qr_data(self):
+        """34. 시설 점검 사진: 점검 단계에서만·당사자만·본인 사진만 삭제, 올리면 임차인 확인 해제, 체결 시 해시가 계약에 남는다."""
+        import base64
+        c, base = self.client, "/api/rent3_contract"
+        png = "data:image/png;base64," + base64.b64encode(
+            bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000001e221bc330000000049454e44ae426082")).decode()
+        chic, sunho = self._login("chic"), self._login("sunho")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사진임차", "phone": "01066660801", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"]); tid = reg["user"]["id"]
+        who = {"name": "사진임차", "phone": "01066660801", "birth": "930303"}
+        c.post(f"{base}/identity/start", headers=ten, json=who)
+        c.post(f"{base}/identity/confirm", headers=ten, json={**who, "code": "000000"})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "915", "is_published": True})
+        sid = c.post(f"{base}/sessions/call", headers=ten, json={
+            "caller_role": "tenant", "branch": "main", "room_no": "915", "mode": "NEW", "tenant_name": "사진임차", "tenant_phone": "010-6666-0801"}).json()["session"]["id"]
+
+        # 호출 대기 화면의 QR 은 계약 id 만 담는다 — 로그인 없이도, 당사자가 아니어도 내용은 열리지 않는다
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=sunho).status_code, 403)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=chic).status_code, 200)
+
+        c.post(f"{base}/sessions/{sid}/respond", headers=chic, json={"responder_role": "lessor", "responder_name": "김종심"})
+        up = lambda hdr, role, cap="욕실", data=png: c.post(f"{base}/sessions/{sid}/facility-photos", headers=hdr, json={"role": role, "photo_data_url": data, "caption": cap})
+        r = up(ten, "tenant")
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["photo"]["id"]
+        self.assertEqual(len(r.json()["photo"]["sha256"]), 64)
+        # 형식·역할 검사
+        self.assertEqual(up(ten, "tenant", data="data:application/pdf;base64,AAAA").status_code, 400)
+        self.assertEqual(up(ten, "lessor").status_code, 403)                       # 임차인 토큰으로 임대인 행세 금지
+        self.assertEqual(up(sunho, "lessor").status_code, 403)                     # 다른 지점
+        # 사진은 당사자만 본다 (img 태그용 ?token= 도 동일)
+        url = f"{base}/sessions/{sid}/facility-photos/{pid}"
+        self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(url, headers=sunho).status_code, 403)
+        self.assertEqual(c.get(url, headers=chic).status_code, 200)
+        self.assertEqual(c.get(url, headers=self.NOAUTH, params={"token": ten["Authorization"].split()[1]}).status_code, 200)
+        # 임대인이 올리면 임차인 잠금이 풀리고, 남의 사진은 못 지운다
+        rl = up(chic, "lessor", "싱크대")
+        self.assertEqual(rl.status_code, 200)
+        self.assertFalse(rl.json()["session"]["step2_tenant_locked"])
+        self.assertFalse(rl.json()["session"]["step2_lessor_confirmed"])   # 사진이 바뀌면 양쪽 확인을 다시 받는다
+        self.assertEqual(c.post(f"{url}/delete", headers=chic, json={"role": "lessor"}).status_code, 400)
+        self.assertEqual(c.post(f"{url}/delete", headers=ten, json={"role": "tenant"}).status_code, 200)
+        self.assertEqual(c.get(url, headers=chic).status_code, 404)
+        # 12장 상한
+        for _ in range(11):
+            up(chic, "lessor")
+        self.assertEqual(up(chic, "lessor").status_code, 400)
+
+        # 점검 단계가 끝난 계약(체결 완료)에는 사진을 더 올릴 수 없다
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "916", "is_published": True})
+        reg2 = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사진임차2", "phone": "01066660802", "password": "Pw123456"}).json()
+        sid2 = self._complete_contract(chic, self._as(reg2["token"]), reg2["user"]["id"], "916", "사진임차2", "010-6666-0802")
+        late = c.post(f"{base}/sessions/{sid2}/facility-photos", json={"role": "lessor", "photo_data_url": png})
+        self.assertIn(late.status_code, (400, 409))
+
+
 if __name__ == "__main__":
     unittest.main()

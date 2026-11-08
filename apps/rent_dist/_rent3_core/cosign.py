@@ -106,6 +106,7 @@ class CoSignSession(PoolObj):
     # Step 2: 호실 옵션 및 시설 공동 점검표
     option_checks: List[Dict[str, Any]] = Field(default_factory=list)
     facility_notes: str = "도배·장판·수압·배수·도어락 현장 동반 확인 이상 없음"
+    facility_photos: List[Dict[str, Any]] = Field(default_factory=list)  # 시설 점검 사진(당사자가 현장에서 촬영): id·file·sha256·caption·by_role·uploaded_at
     step2_lessor_confirmed: bool = False
     step2_tenant_locked: bool = False
 
@@ -704,6 +705,72 @@ class CoSignSession(PoolObj):
             self.current_step = 3
         return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
 
+    MAX_FACILITY_PHOTOS: ClassVar[int] = 12
+    FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+    def add_facility_photo(self, role: str, data_url: str, caption: str = "", app_source: str = "rent3_contract") -> Dict[str, Any]:
+        """시설 점검 사진을 올린다(점검 단계에서만). 파일은 서버에 저장하고 SHA-256 을 남겨, 퇴실 정산 때 입주 당시 상태의 증거가 된다."""
+        self._ensure_ready_for_steps()
+        if self.current_step > 2:
+            raise DomainError("시설 점검 단계가 끝나 사진을 더 올릴 수 없습니다.", hint="점검 사진은 합의된 뒤 바뀌지 않도록 고정됩니다.")
+        if len(self.facility_photos) >= self.MAX_FACILITY_PHOTOS:
+            raise DomainError(f"점검 사진은 최대 {self.MAX_FACILITY_PHOTOS}장까지 올릴 수 있습니다.")
+        m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", (data_url or "").strip(), re.DOTALL)
+        ext = self.FACILITY_MIME.get(m.group(1).lower()) if m else None
+        if not m or not ext:
+            raise DomainError("사진 형식이 올바르지 않습니다.", hint="허용 형식: JPG, PNG, WEBP")
+        try:
+            binary = base64.b64decode(m.group(2), validate=False)
+        except Exception:
+            raise DomainError("사진을 읽지 못했습니다. 다시 선택해 주세요.")
+        if not binary:
+            raise DomainError("비어 있는 사진입니다.")
+        if len(binary) > MAX_PHOTO_BYTES:
+            raise DomainError("사진은 한 장당 10MB 이하만 허용됩니다.")
+        pid = uuid4().hex[:10]
+        abs_dir = os.path.join(pool().pool_dir, "uploads", "facility", self.id)
+        os.makedirs(abs_dir, exist_ok=True)
+        target = os.path.join(abs_dir, f"{pid}.{ext}")
+        tmp = f"{target}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fp:
+            fp.write(binary)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp, target)
+        rec = {"id": pid, "file": f"uploads/facility/{self.id}/{pid}.{ext}", "sha256": hashlib.sha256(binary).hexdigest(),
+               "caption": (caption or "").strip()[:80], "by_role": "lessor" if role == "lessor" else "tenant",
+               "uploaded_at": now_iso()}
+        self.facility_photos = [*self.facility_photos, rec]
+        # 점검 내용이 바뀌었으니 양쪽 확인을 모두 다시 받는다(상대가 보지 못한 사진에 동의한 것이 되지 않게)
+        self.step2_tenant_locked = False
+        self.step2_lessor_confirmed = False
+        self.save(action=f"facility_photo_added_by_{role}", app_source=app_source)
+        return rec
+
+    def remove_facility_photo(self, role: str, photo_id: str, app_source: str = "rent3_contract") -> None:
+        self._ensure_ready_for_steps()
+        if self.current_step > 2:
+            raise DomainError("시설 점검 단계가 끝나 사진을 지울 수 없습니다.")
+        rec = next((p for p in self.facility_photos if p["id"] == photo_id), None)
+        if rec is None:
+            raise NotFound("사진을 찾을 수 없습니다.")
+        if rec["by_role"] != ("lessor" if role == "lessor" else "tenant"):
+            raise DomainError("본인이 올린 사진만 지울 수 있습니다.")
+        self.facility_photos = [p for p in self.facility_photos if p["id"] != photo_id]
+        self.step2_tenant_locked = False
+        self.step2_lessor_confirmed = False
+        self.save(action=f"facility_photo_removed_by_{role}", app_source=app_source)
+
+    def facility_photo_path(self, photo_id: str):
+        rec = next((p for p in self.facility_photos if p["id"] == photo_id), None)
+        if rec is None:
+            raise NotFound("사진을 찾을 수 없습니다.")
+        root = os.path.abspath(os.path.join(pool().pool_dir, "uploads", "facility"))
+        cand = os.path.abspath(os.path.join(pool().pool_dir, rec["file"]))
+        if not cand.startswith(root + os.sep) or not os.path.isfile(cand):
+            raise NotFound("사진 파일을 찾을 수 없습니다.")
+        return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
+
     def update_terms(
         self,
         role: str,
@@ -923,6 +990,8 @@ class CoSignSession(PoolObj):
                 "tenant_identity": self._tenant_identity_evidence(),
                 "tenant_recheck_at": self.tenant_recheck_at,
                 "registry_attachment_sha256": self.registry_attachment_sha256,
+                "facility_photos": [{"id": p["id"], "sha256": p["sha256"], "caption": p["caption"], "by_role": p["by_role"],
+                                     "uploaded_at": p["uploaded_at"]} for p in self.facility_photos],
             },
             lessor_signature=self.lessor_signature,
             tenant_signature=self.tenant_signature,

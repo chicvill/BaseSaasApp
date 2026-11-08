@@ -300,12 +300,38 @@ async def legacy_ops_scope(request: Request) -> Dict[str, Any]:
         if t is None or not any(rx.search(path) for rx in _TENANT_OK):
             raise Forbidden("이 기능은 임대인 또는 관리자만 사용할 수 있습니다.")
         room = request.path_params.get("room_id") or body.get("room_id") or body.get("room_no") or request.query_params.get("room_id")
-        if branch and _norm_branch(branch) != _norm_branch(t.branch):
-            raise Forbidden("본인 호실의 정보만 볼 수 있습니다.")
-        if room and str(room) != str(t.room_no):
+        # 임차인은 지점·호실이 요청에 명시되고 본인 것과 같을 때만 (신청서·영수증·재계약 id 만으로 조회하는 경로는 막는다)
+        if not branch or not room:
+            raise Forbidden("본인 호실을 지정한 요청만 사용할 수 있습니다.", hint="새 임차인 앱(마이홈)을 이용해 주세요.")
+        if _norm_branch(branch) != _norm_branch(t.branch) or str(room) != str(t.room_no):
             raise Forbidden("본인 호실의 정보만 볼 수 있습니다.")
         return c
     raise Forbidden("권한이 없습니다.")
+
+
+async def legacy_public_scope(request: Request):
+    """레거시 공개 앱: 매물 목록 조회는 공개, 입주신청은 로그인, 라운지는 본인 호실·본인 지점만,
+    그 밖(신청서 id 조회·구 계약방·서명결제)은 본사 관리자만 — id 만 알면 남의 신청서·계약 세션을 읽거나 바꿀 수 있기 때문이다."""
+    path = request.url.path
+    if request.method == "GET" and "/public/listings" in path:
+        return None
+    if "/auth/" in path:
+        return None  # 각 핸들러가 직접 막는다(_require_fake_identity)
+    c = need_claims(request)
+    if is_admin(c):
+        return c
+    if path.endswith("/public/apply"):
+        return c
+    if "/public/lounge/" in path and request.method == "GET":
+        branch, room = request.path_params.get("branch"), request.path_params.get("room_id")
+        if c.get("r") in LESSOR_ROLES and branch and _norm_branch(branch) == _norm_branch(c.get("b")):
+            return c
+        if c.get("r") == "tenant":
+            from .models import Tenant
+            t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+            if t and branch and room and _norm_branch(branch) == _norm_branch(t.branch) and str(room) == str(t.room_no):
+                return c
+    raise Forbidden("이 기능은 더 이상 일반 계정에 열려 있지 않습니다.", hint="새 앱(임대인 장부·임차인 마이홈·계약 앱)을 이용해 주세요.")
 
 
 PUBLIC_CONTRACT_PATHS = ("/verify", "/status")

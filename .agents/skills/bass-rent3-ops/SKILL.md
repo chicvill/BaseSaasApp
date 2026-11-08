@@ -364,6 +364,10 @@ description: Operational business rules, domain invariants, and verification ins
 
 22. **잔금 확인 전 출입 정보 잠금**: 새로 체결한 계약은 `keys_released=False` — 임차인 마이홈 API 가 `doorlock_pwd`(임차인·호실)·`common_entrance_pwd` 를 "입주 당일 잔금 완납 후 공개"로 **서버에서 마스킹**하고 `keys{locked, balance_due, move_in_date}` 만 준다. 임대인이 `POST /rent3_lessor/rooms/{id}/release-keys`(`balance_checked: true` = 본인 은행 앱의 실제 입금 내역 직접 확인, 해당 지점 임대인·관리자만)로 교부하면 즉시 열린다(교부자·시각 기록). 체결 화면은 잔금액·납부일·계좌와 "교부 후 공개" 안내만 보여 준다. `keys_released=None`(예전 계약)은 기존대로 공개. 입주일 도래 자체로 자동 공개하지는 않는다(임대인 확인이 필수). 한계: 임대인이 입금을 확인하지 않고 교부할 수 있다(책임 소재 기록용).
 
+23. **레거시 응답 점검 결과**: 레거시 임차인 경로는 지점·호실이 요청에 **둘 다 명시되고 본인 것과 같을 때만** 허용(신청서·영수증·재계약 id 만으로 조회하는 `/tenant/checkin-info/{id}`·`/tenant/receipt/{id}`·`/renewals*` 등은 임차인 거부 — 남의 도어락·영수증 열람 방지). 레거시 공개 앱은 `GET /public/listings` 만 공개, `/public/apply` 는 로그인, 라운지는 본인 지점 임대인·본인 호실 임차인, **신청서 id 조회·구 계약방(`/cosign/*`)·서명결제는 본사 관리자만**(id 만 알면 남의 것을 읽거나 바꿀 수 있었고, GET 이 가짜 신청서를 자동 생성함). 레거시 응답에는 하드코딩된 기본 도어락·와이파이 값이 남아 있으니 새 앱으로 완전히 대체하면 해당 라우터를 제거할 것.
+24. **대면 참여 QR**(호출한 쪽 대기 화면): 계약 id 만 담은 링크(`/rent3_contract/?session=`) — 비로그인 401, 당사자가 아니면 403이라 QR 만으로는 입장 불가. 비로그인으로 열면 id 를 기억해 두었다가 로그인 후 계약 앱에서 이어 연다.
+25. **시설 점검 사진**(`/sessions/{id}/facility-photos`): 점검 단계(step ≤ 2)에서만, 당사자만, 최대 12장·장당 10MB(화면에서 긴 변 1600px JPEG 로 줄여 올림), 본인이 올린 사진만 삭제. 사진을 올리거나 지우면 **양쪽 점검 확인이 풀린다**(상대가 보지 못한 사진에 동의한 것이 되지 않게). 파일은 `uploads/facility/{세션}/` 에 저장, SHA-256 은 체결 계약 스냅샷(`registry_snapshot.facility_photos`)에 남는다(무결성 해시 본체에는 미포함). 이미지 링크는 `?token=` 인증. 퇴실 정산 화면에서 이 사진과 비교하는 기능은 아직 없다(요청 시 불필요로 결정됨).
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

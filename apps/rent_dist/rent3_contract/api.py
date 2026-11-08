@@ -74,6 +74,16 @@ class Step2ConfirmReq(BaseModel):
     facility_notes: Optional[str] = None
 
 
+class FacilityPhotoReq(BaseModel):
+    role: str = "tenant"
+    photo_data_url: str
+    caption: str = ""
+
+
+class FacilityPhotoDeleteReq(BaseModel):
+    role: str = "tenant"
+
+
 class TermsUpdateReq(BaseModel):
     role: str = "lessor"
     updates: Dict[str, Any] = Field(default_factory=dict)
@@ -535,6 +545,28 @@ def confirm_step2(session_id: str, req: Step2ConfirmReq):
         "message": "Step 2 호실 옵션 및 시설 점검표 상태가 실시간 반영되었습니다.",
         "session": s.model_dump(),
     }
+
+
+@router.post("/sessions/{session_id}/facility-photos")
+def add_facility_photo(session_id: str, req: FacilityPhotoReq):
+    """시설 점검 사진 업로드(모바일 카메라). 당사자만, 점검 단계에서만."""
+    s = CoSignSession.by_code_or_id(session_id)
+    rec = s.add_facility_photo(req.role, req.photo_data_url, req.caption, app_source=APP_SRC)
+    return {"success": True, "message": "점검 사진이 기록되었습니다.", "photo": rec, "session": s.model_dump()}
+
+
+@router.get("/sessions/{session_id}/facility-photos/{photo_id}")
+def get_facility_photo(session_id: str, photo_id: str):
+    s = CoSignSession.by_code_or_id(session_id)
+    path, mime = s.facility_photo_path(photo_id)
+    return FileResponse(path, media_type=mime)
+
+
+@router.post("/sessions/{session_id}/facility-photos/{photo_id}/delete")
+def delete_facility_photo(session_id: str, photo_id: str, req: FacilityPhotoDeleteReq):
+    s = CoSignSession.by_code_or_id(session_id)
+    s.remove_facility_photo(req.role, photo_id, app_source=APP_SRC)
+    return {"success": True, "message": "사진을 지웠습니다.", "session": s.model_dump()}
 
 
 @router.post("/sessions/{session_id}/terms")

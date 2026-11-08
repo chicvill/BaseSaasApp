@@ -5,23 +5,13 @@
 import secrets
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
-from apps.rent_dist._rent3_core.authz import need_claims
+from apps.rent_dist._rent3_core.authz import legacy_public_scope
 from pydantic import BaseModel, Field
 
 from ..domain import (
     RentalListing, RentalApplication, CheckInRecord, MaintenanceRequest, 
     CoSigningSession
 )
-
-def _legacy_public_scope(request: Request):
-    """공개 매물 조회(GET /public/listings...)와 로컬 시연용 가짜 신원확인 경로만 로그인 없이 연다."""
-    path = request.url.path
-    if request.method == "GET" and "/public/listings" in path:
-        return None
-    if "/auth/" in path:
-        return None  # 각 핸들러가 직접 막는다(_require_fake_identity)
-    return need_claims(request)
-
 
 def _require_fake_identity(request: Request) -> None:
     """이 경로의 신원확인은 시뮬레이션(가짜)이다. 서버 PC 또는 RENT3_FAKE_IDENTITY=1 에서만 쓴다."""
@@ -31,7 +21,7 @@ def _require_fake_identity(request: Request) -> None:
         raise HTTPException(status_code=403, detail="이 가입·신원확인 경로는 사용할 수 없습니다. 포털에서 가입하고 휴대폰 본인인증을 진행해 주세요.")
 
 
-router = APIRouter(tags=["rent3_public"], dependencies=[Depends(_legacy_public_scope)])
+router = APIRouter(tags=["rent3_public"], dependencies=[Depends(legacy_public_scope)])
 
 
 # ─────────────────────────────────────────────────────────────
