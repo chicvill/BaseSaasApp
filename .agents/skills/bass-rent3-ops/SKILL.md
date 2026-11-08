@@ -355,6 +355,9 @@ description: Operational business rules, domain invariants, and verification ins
 
 17. **임차인 사기 방어(추가)**: 한 임차인이 동시에 진행할 수 있는 계약은 2건(`MAX_LIVE_PER_TENANT`) — 호실 선점·잠금 악용 방지(이미 진행 중인 호실 재입장은 허용). **체결(Step 5)은 임대인이 "본인 은행 앱의 실제 입금 내역을 직접 확인"했다고 명시(`own_account_checked`)해야** 서버가 받는다(입금 캡처 위조 방어).
 
+18. **본인인증 제공자 선택** (`RENT3_IDENTITY_PROVIDER`): `sms`(문자 인증번호, 현재 발송 업체 solapi — `RENT3_SMS_SENDER/API_KEY/API_SECRET/FROM`)가 구현됨. **문자 인증은 휴대폰 소유만 확인**(assurance=`phone_only`)하므로 실명·생년월일은 자기 입력값이다 → 등기부 대조는 항상 `PHONE_ONLY`(관리자가 신분증 등으로 확인, 자동 일치 없음), 임차인 "한 사람 1계정" 검사도 약해진다. 통신사 PASS(실명·생년월일 확인)는 통신사 본인확인 중계업체와 계약 후 `IdentityProvider` 로 추가하면 `verified_name` 이 되어 자동 대조가 다시 동작한다. 솔라피 발송은 외부 호출이라 **실서버에서 시험하지 못한 코드**이다(발송 전 소액 시험 필요). 인증번호는 해시 보관·5분 만료·5회 제한·60초 재발송 간격.
+19. **운영 데이터는 서버에만 둔다**: `data/rent3_pool/`·`data/platform.db` 는 git 추적에서 제외(.gitignore). 배포 컨테이너는 `RENT3_POOL_DIR` 을 **영구 볼륨**으로 지정해야 하며(없으면 배포마다 시드 데이터로 초기화됨), 처음 한 번 `scripts/hash_passwords.py --pool-dir 경로` 로 약한 비밀번호를 정리한다. 이전 커밋 이력에는 시연용 데이터(약한 비밀번호 포함)가 남아 있다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|
@@ -362,6 +365,8 @@ description: Operational business rules, domain invariants, and verification ins
 | `BASS_SEED_PASSWORD` | 본사 관리자(admin) 등 기본 계정의 비밀번호. 없으면 무작위로 만들고 서버 로그에 한 번만 출력 |
 | `RENT3_DEMO_LOGIN=0` | 데모 비밀번호 완전 차단(프록시 뒤에서 loopback 판정이 흐려질 때 명시) |
 | `GEMINI_API_KEY` | 등기부 AI 읽기 |
+| `RENT3_POOL_DIR` | 운영 데이터 폴더(영구 볼륨). 저장소에는 데이터가 없다 |
+| `RENT3_IDENTITY_PROVIDER=sms` + `RENT3_SMS_*` | 본인인증(문자). 없으면 배포에서 인증이 막힌다 |
 
 ### 5.7 알려진 미해결 위험 (착수 전 확인)
 - 저장소(git)에 올라간 `data/rent3_pool/users.json` 에는 **예전 평문 비밀번호가 남아 있다** — 배포 서버에서 `scripts/hash_passwords.py` 를 실행하고, 저장소의 데이터 파일은 정리할 것.

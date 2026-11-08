@@ -16,8 +16,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 import re
+import secrets
+import threading
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -68,7 +72,86 @@ class FakeProvider(IdentityProvider):
         return {"name": name, "phone": phone, "birth6": birth6, "provider": "fake", "fake": True}
 
 
-PROVIDERS: Dict[str, IdentityProvider] = {"none": IdentityProvider(), "fake": FakeProvider()}
+class SmsProvider(IdentityProvider):
+    """문자(SMS) 인증번호 확인. **휴대폰 소유만 확인**한다 — 실명·생년월일은 본인이 입력한 값이라 검증되지 않는다(assurance=phone_only).
+    그래서 등기부 자동 대조는 '심사 우선'을 주지 않고 항상 관리자가 확인한다. 실명 확인(PASS 등)이 필요하면 별도 제공자로 교체한다.
+
+    발송 업체는 RENT3_SMS_SENDER 로 고른다(현재 solapi). 키는 RENT3_SMS_API_KEY / RENT3_SMS_API_SECRET / RENT3_SMS_FROM(등록된 발신번호).
+    인증번호는 해시로만 보관하고 5분 유효, 5회 틀리면 폐기, 같은 번호는 60초 안에 재발송할 수 없다."""
+    name = "sms"
+    TTL = 300
+    MAX_TRIES = 5
+    RESEND_GAP = 60
+
+    def __init__(self) -> None:
+        self._pending: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    def _send(self, phone: str, text: str) -> None:
+        sender = os.getenv("RENT3_SMS_SENDER", "").strip().lower()
+        if sender == "solapi":
+            self._send_solapi(phone, text)
+        else:
+            raise DomainError("문자 발송 업체가 설정되지 않았습니다.", hint="서버에 RENT3_SMS_SENDER 와 업체 키를 설정해 주세요.")
+
+    @staticmethod
+    def _send_solapi(phone: str, text: str) -> None:
+        import hmac as _hmac
+        import json as _json
+        import urllib.request
+        key, secret, sender_no = (os.getenv("RENT3_SMS_API_KEY", ""), os.getenv("RENT3_SMS_API_SECRET", ""), os.getenv("RENT3_SMS_FROM", ""))
+        if not (key and secret and sender_no):
+            raise DomainError("문자 발송 키가 설정되지 않았습니다.", hint="RENT3_SMS_API_KEY / RENT3_SMS_API_SECRET / RENT3_SMS_FROM")
+        date = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        salt = secrets.token_hex(16)
+        sig = _hmac.new(secret.encode(), (date + salt).encode(), hashlib.sha256).hexdigest()
+        body = _json.dumps({"message": {"to": _digits(phone), "from": _digits(sender_no), "text": text}}).encode()
+        req = urllib.request.Request("https://api.solapi.com/messages/v4/send", data=body, method="POST", headers={
+            "Content-Type": "application/json",
+            "Authorization": f"HMAC-SHA256 apiKey={key}, date={date}, salt={salt}, signature={sig}"})
+        try:
+            urllib.request.urlopen(req, timeout=10).read()
+        except Exception as exc:  # 네트워크·인증 실패 — 상세는 숨기고 안내만
+            raise DomainError("문자를 보내지 못했습니다.", hint=f"잠시 뒤 다시 시도해 주세요. ({type(exc).__name__})")
+
+    def start(self, name: str, phone: str, birth6: str) -> Dict[str, Any]:
+        ph = _digits(phone)
+        now = time.time()
+        with self._lock:
+            cur = self._pending.get(ph)
+            if cur and now - cur["sent"] < self.RESEND_GAP:
+                raise DomainError("인증번호를 방금 보냈습니다. 잠시 뒤 다시 요청해 주세요.")
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            self._pending[ph] = {"h": hashlib.sha256((ph + code).encode()).hexdigest(), "sent": now, "tries": 0}
+        try:
+            self._send(phone, f"[Rent3] 인증번호 {code} (5분 안에 입력하세요. 타인에게 알려주지 마세요)")
+        except DomainError:
+            with self._lock:
+                self._pending.pop(ph, None)
+            raise
+        return {"sent": True}
+
+    def confirm(self, name: str, phone: str, birth6: str, code: str) -> Dict[str, Any]:
+        ph = _digits(phone)
+        now = time.time()
+        with self._lock:
+            cur = self._pending.get(ph)
+            if not cur or now - cur["sent"] > self.TTL:
+                self._pending.pop(ph, None)
+                raise DomainError("인증번호가 만료되었거나 요청 기록이 없습니다.", hint="인증번호를 다시 받아 주세요.")
+            cur["tries"] += 1
+            if cur["tries"] > self.MAX_TRIES:
+                self._pending.pop(ph, None)
+                raise DomainError("인증번호를 너무 많이 틀렸습니다.", hint="인증번호를 다시 받아 주세요.")
+            ok = hmac.compare_digest(cur["h"], hashlib.sha256((ph + (code or "").strip()).encode()).hexdigest())
+            if ok:
+                self._pending.pop(ph, None)
+        if not ok:
+            raise DomainError("인증번호가 올바르지 않습니다.")
+        return {"name": name, "phone": phone, "birth6": birth6, "provider": "sms", "assurance": "phone_only"}
+
+
+PROVIDERS: Dict[str, IdentityProvider] = {"none": IdentityProvider(), "fake": FakeProvider(), "sms": SmsProvider()}
 
 
 def fake_allowed(is_loopback: bool) -> bool:
@@ -99,6 +182,7 @@ def verify_identity_record(res: Dict[str, Any]) -> Dict[str, Any]:
         "birth6": res["birth6"],
         "provider": res["provider"],
         "fake": bool(res.get("fake")),
+        "assurance": res.get("assurance", "verified_name"),  # phone_only = 휴대폰 소유만 확인(실명·생년월일은 자기 입력)
         "verified_at": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -115,6 +199,7 @@ def mask_identity(idn: Dict[str, Any]) -> Dict[str, Any]:
         "birth6": (idn.get("birth6", "")[:2] + "****") if idn.get("birth6") else "",
         "provider": idn.get("provider", ""),
         "fake": bool(idn.get("fake")),
+        "assurance": idn.get("assurance", "verified_name"),
         "verified_at": idn.get("verified_at", ""),
     }
 
@@ -149,6 +234,7 @@ def check_ownership(identity: Dict[str, Any], extracted: Optional[Dict[str, Any]
     if extracted.get("document_type") != "registry" or not extracted.get("readable", True):
         return out("NOT_REGISTRY", "등기사항증명서로 읽히지 않았습니다. 관리자가 원본을 직접 확인합니다.", "high")
 
+    idn_phone_only = identity.get("assurance") == "phone_only"
     me = _norm_name(identity.get("name"))
     birth6 = identity.get("birth6", "")
     owners = extracted.get("owners") or []
@@ -167,6 +253,8 @@ def check_ownership(identity: Dict[str, Any], extracted: Optional[Dict[str, Any]
     shared = len(owners) > 1
     info = {"address_ok": addr_ok, "birth_check": birth_state, "owner_count": len(owners), "share": m.get("share", "")}
 
+    if idn_phone_only and birth_state != "mismatch":
+        return out("PHONE_ONLY", "휴대폰 소유만 확인된 신원입니다(실명·생년월일은 본인 입력). 이름이 등기부와 같아도 관리자가 신분증 등으로 확인해야 합니다.", "caution", **info)
     if birth_state == "mismatch":
         return out("BIRTH_MISMATCH", "이름은 같지만 생년월일이 등기부와 다릅니다(동명이인 가능). 관리자가 확인합니다.", "high", **info)
     if shared:

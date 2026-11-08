@@ -1743,5 +1743,57 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("입금", no.json()["message"])
 
 
+    def test_29_sms_identity_provider(self):
+        """29. 문자 인증: 해시 보관·5분 만료·5회 제한·재발송 간격, 휴대폰 소유만 확인(phone_only)이라 등기부 자동 일치를 주지 않는다."""
+        import os
+        from apps.rent_dist._rent3_core import franchise as fr
+        c = self.client
+        prov = fr.PROVIDERS["sms"]
+        sent = {}
+        prov._send = lambda phone, text: sent.update({"phone": phone, "text": text})
+        prov._pending.clear()
+        os.environ["RENT3_IDENTITY_PROVIDER"] = "sms"
+        os.environ["RENT3_FAKE_IDENTITY"] = "0"
+        try:
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "문자임대", "phone": "01055550501", "username": "smslsr", "password": "Pw123456", "branch": "smsb"})
+            lh = self._as(reg.json()["token"])
+            who = {"branch": "smsb", "name": "문자임대", "phone": "01055550501", "birth": "19700101"}
+            st = c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(st.status_code, 200)
+            code = sent["text"].split("인증번호 ")[1][:6]
+            self.assertNotIn(code, str(prov._pending))                      # 평문 미보관
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who).status_code, 400)  # 재발송 간격
+            bad = c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "000000" if code != "000000" else "111111"})
+            self.assertEqual(bad.status_code, 400)
+            ok = c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": code})
+            self.assertEqual(ok.status_code, 200)
+            self.assertEqual(ok.json()["application"]["identity"]["assurance"], "phone_only")
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": code}).status_code, 400)  # 재사용 불가
+
+            # 휴대폰 소유만 확인된 신원은 등기부가 완벽히 일치해도 자동 일치가 아니다
+            chk = fr.check_ownership({"verified": True, "name": "문자임대", "birth6": "700101", "assurance": "phone_only"},
+                {"document_type": "registry", "readable": True, "property_address": "인천 서해구 석남동 507-34",
+                 "owners": [{"name": "문자임대", "share": "", "id_front": "700101"}]}, "인천 서해구 석남동 507-34")
+            self.assertEqual(chk["code"], "PHONE_ONLY")
+            self.assertFalse(chk["auto_pass"])
+
+            # 5회 틀리면 폐기, 만료되면 거부
+            prov._pending.clear(); prov._pending["01055550501"] = {"h": "x", "sent": 0, "tries": 0}
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "123456"}).status_code, 400)
+            # 발송 업체 미설정이면 안내와 함께 거부
+            prov._send = fr.SmsProvider._send.__get__(prov)
+            prov._pending.clear()
+            os.environ.pop("RENT3_SMS_SENDER", None)
+            r = c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("업체", r.json()["message"])
+        finally:
+            os.environ.pop("RENT3_IDENTITY_PROVIDER", None)
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+            prov._pending.clear()
+            prov.__dict__.pop("_send", None)
+
+
 if __name__ == "__main__":
     unittest.main()

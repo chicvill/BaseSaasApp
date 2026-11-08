@@ -39,3 +39,7 @@ data/rent5_pool/
 
 # 플랫폼 공통 DB (계정 비밀번호 해시·변경 이력) — 런타임 데이터, 없으면 서버가 새로 만든다
 data/platform.db
+
+# 운영 데이터(DB·Data Pool)는 서버에만 둔다 — 저장소에 올리지 않는다
+data/rent3_pool/
+data/platform.db
