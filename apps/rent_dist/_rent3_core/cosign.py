@@ -123,6 +123,24 @@ class CoSignSession(PoolObj):
         c_tag = "호출중" if self.call_status == "CALLING" else f"Step {self.current_step}/5"
         return f"공동계약 [{self.room_no}호] {c_tag} ({self.status}, rev={self.revision})"
 
+    def compute_integrity_hash(self) -> str:
+        """현재 세션 데이터로 계산한 무결성 해시. 서명 시점에 저장한 값과 비교해 변조 여부를 확인한다."""
+        return Contract.compute_integrity_hash({
+            "session_id": self.id,
+            "revision": self.revision,
+            "identity_verification": {
+                "lessor_login_verified": self.lessor_login_verified,
+                "tenant_login_verified": self.tenant_login_verified,
+                "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
+                "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
+            },
+            "registry_data": self.registry_data,
+            "option_checks": self.option_checks,
+            "terms": self.terms,
+            "lessor_signature": self.lessor_signature,
+            "tenant_signature": self.tenant_signature,
+        })
+
     def is_jeonse(self) -> bool:
         t = self.terms or {}
         return t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
@@ -711,21 +729,7 @@ class CoSignSession(PoolObj):
             self.tenant_signed_at = now_iso()
 
         if self.lessor_signature and self.tenant_signature:
-            self.integrity_hash = Contract.compute_integrity_hash({
-                "session_id": self.id,
-                "revision": self.revision,
-                "identity_verification": {
-                    "lessor_login_verified": self.lessor_login_verified,
-                    "tenant_login_verified": self.tenant_login_verified,
-                    "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
-                    "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
-                },
-                "registry_data": self.registry_data,
-                "option_checks": self.option_checks,
-                "terms": self.terms,
-                "lessor_signature": self.lessor_signature,
-                "tenant_signature": self.tenant_signature,
-            })
+            self.integrity_hash = self.compute_integrity_hash()
             if self.current_step < 5:
                 self.current_step = 5
 

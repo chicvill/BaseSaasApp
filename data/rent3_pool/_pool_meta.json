@@ -1,18 +1,18 @@
 {
   "pool_name": "rent3_pool",
   "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
-  "total_revision": 3519,
-  "total_objects": 151,
+  "total_revision": 4428,
+  "total_objects": 156,
   "last_updated_collection": "",
-  "updated_at": "2026-11-08T11:15:18",
+  "updated_at": "2026-11-08T12:21:09",
   "collections": {
     "users": {
       "file": "users.json",
       "exists": true,
-      "count": 10,
-      "revision": 13,
-      "size_bytes": 6439,
-      "updated_at": "2026-11-08T09:51:10"
+      "count": 11,
+      "revision": 14,
+      "size_bytes": 7083,
+      "updated_at": "2026-11-08T11:39:10"
     },
     "buildings": {
       "file": "buildings.json",
@@ -26,33 +26,33 @@
       "file": "rooms.json",
       "exists": true,
       "count": 32,
-      "revision": 74,
-      "size_bytes": 68999,
-      "updated_at": "2026-11-08T09:51:10"
+      "revision": 75,
+      "size_bytes": 69073,
+      "updated_at": "2026-11-08T11:39:10"
     },
     "cosign_sessions": {
       "file": "cosign_sessions.json",
       "exists": true,
       "count": 4,
-      "revision": 32,
-      "size_bytes": 28920,
-      "updated_at": "2026-11-08T10:46:50"
+      "revision": 38,
+      "size_bytes": 41422,
+      "updated_at": "2026-11-08T11:39:10"
     },
     "contracts": {
       "file": "contracts.json",
       "exists": true,
-      "count": 8,
-      "revision": 11,
-      "size_bytes": 25247,
-      "updated_at": "2026-11-08T09:51:10"
+      "count": 9,
+      "revision": 13,
+      "size_bytes": 40525,
+      "updated_at": "2026-11-08T11:39:10"
     },
     "payments": {
       "file": "payments.json",
       "exists": true,
-      "count": 43,
-      "revision": 48,
-      "size_bytes": 34564,
-      "updated_at": "2026-11-08T09:51:10"
+      "count": 44,
+      "revision": 49,
+      "size_bytes": 35350,
+      "updated_at": "2026-11-08T11:39:10"
     },
     "outlays": {
       "file": "outlays.json",
@@ -65,10 +65,10 @@
     "ops": {
       "file": "ops.json",
       "exists": true,
-      "count": 17,
-      "revision": 18,
-      "size_bytes": 10943,
-      "updated_at": "2026-11-08T10:38:29"
+      "count": 19,
+      "revision": 20,
+      "size_bytes": 12210,
+      "updated_at": "2026-11-08T11:39:10"
     }
   }
 }

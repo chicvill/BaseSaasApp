@@ -1,8 +1,8 @@
 {
   "pool": "rent3_pool",
   "collection": "rooms",
-  "revision": 74,
-  "updated_at": "2026-11-08T09:51:10",
+  "revision": 75,
+  "updated_at": "2026-11-08T11:39:10",
   "count": 32,
   "items": [
     {
@@ -355,7 +355,7 @@
     {
       "id": "room_main_203",
       "created_at": "2026-10-29T19:17:01",
-      "updated_at": "2026-11-08T07:54:18",
+      "updated_at": "2026-11-08T11:39:10",
       "branch": "main",
       "id_building": "bldg_main",
       "building_name": "",
@@ -443,10 +443,12 @@
       "name": "203호 (채광 최상 남향 즉시입주)",
       "floor": 2,
       "area_sqm": 23.8,
+      "total_floors": 0,
+      "direction": "",
       "room_category": "주거용 원룸",
       "vat_applicable": false,
-      "id_tenant": "",
-      "active_contract_id": "",
+      "id_tenant": "tenant_43a879",
+      "active_contract_id": "ct_ccd0ffff",
       "doorlock_pwd": "2030*",
       "registry_checked": true,
       "registry_info": {
@@ -487,11 +489,11 @@
       "lease_type": "월세",
       "pay_timing": "후불",
       "deposit": 5000000,
-      "monthly_rent": 290000,
-      "maintenance_fee": 150000,
+      "monthly_rent": 500000,
+      "maintenance_fee": 50000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
-      "is_published": true,
+      "is_published": false,
       "images": [],
       "_kind": "room"
     },

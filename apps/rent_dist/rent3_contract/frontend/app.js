@@ -172,6 +172,7 @@
     }
 
     html += currentRole === "lessor" ? homeLessorHtml() : homeTenantHtml();
+    html += `<div style="text-align:center;margin-top:14px;"><a class="bass-btn bass-btn--sm" href="verify.html">🔍 계약서 진위 확인</a></div>`;
     elHomeBody.innerHTML = html;
 
     elHomeBody.querySelectorAll(".js-respond").forEach((b) =>
@@ -631,6 +632,64 @@
   // ───────────── 등기부 직접 확인 (임차인) ─────────────
   const IROS_URL = "https://www.iros.go.kr";
 
+  // 인터넷등기소 열기: 열기 전에 검색할 주소를 클립보드에 복사한다.
+  function searchAddress(s) {
+    return `${s.building_address || ""} ${s.room_no}호`.trim();
+  }
+
+  function irosBoxHtml(addr) {
+    return `
+      <div style="font-size:12.5px;margin-top:8px;">① 먼저 검색할 주소를 복사하고, ② 인터넷등기소에서 붙여 넣어 검색하세요.</div>
+      <div class="bass-row" style="gap:6px;margin-top:6px;">
+        <input id="irosAddr" class="bass-input" style="flex:1;min-width:0;" readonly value="${esc(addr)}">
+        <button id="btnCopyAddr" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
+      </div>
+      <button id="btnOpenIros" class="bass-btn bass-btn--primary" style="margin-top:8px;width:100%;" type="button">🏛️ 주소 복사하고 인터넷등기소 열기</button>
+      <div id="irosMsg" class="bass-muted" style="font-size:12px;margin-top:6px;min-height:16px;">
+        새 창이 열리지 않으면 주소창에 <strong>iros.go.kr</strong> 을 직접 입력하세요.
+      </div>`;
+  }
+
+  // 복사는 사용자의 터치 동작 안에서 '동기'로 시작해야 한다 (일부 휴대폰 브라우저는 await 뒤에 새 창·복사를 막는다).
+  function copyNow(input) {
+    try {
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, input.value.length);
+      if (document.execCommand("copy")) return true;
+    } catch (_) { /* 아래 방법으로 */ }
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(input.value).then(() => true, () => false);
+    }
+    return false;
+  }
+
+  function bindIrosBox() {
+    const msg = document.getElementById("irosMsg");
+    const input = document.getElementById("irosAddr");
+    const say = (t) => { if (msg) msg.innerHTML = t; };
+
+    document.getElementById("btnCopyAddr").addEventListener("click", () => {
+      Promise.resolve(copyNow(input)).then((ok) => say(
+        ok ? "✅ 주소가 복사되었습니다. 등기소 검색창에 붙여 넣으세요."
+           : "복사하지 못했습니다. 위 주소를 길게 눌러 직접 복사해 주세요."));
+    });
+
+    document.getElementById("btnOpenIros").addEventListener("click", () => {
+      const copied = copyNow(input);              // 1) 먼저 복사 (동기)
+      const w = window.open(IROS_URL, "_blank");  // 2) 같은 터치 안에서 바로 열기
+      if (w) { try { w.opener = null; } catch (_) { /* 무시 */ } }
+      Promise.resolve(copied).then((ok) => {
+        if (!w) {
+          say("새 창이 차단되었습니다. 주소창에 <strong>iros.go.kr</strong> 을 직접 입력해 접속하세요." + (ok ? " (주소는 복사되어 있습니다)" : ""));
+        } else {
+          say(ok ? "✅ 주소가 복사되었습니다. 열린 등기소 창에서 '부동산 주소로 열람'을 고르고 붙여 넣으세요."
+                 : "등기소를 열었습니다. 위 주소를 직접 복사해 입력하세요.");
+        }
+      });
+    });
+  }
+
   function isJeonseSession(s) {
     const t = s.terms || {};
     return t.lease_type === "전세" || Number(t.monthly_rent || 0) === 0;
@@ -674,8 +733,7 @@
           서류는 위조되거나, 진본이어도 발급 뒤에 바뀌었을 수 있습니다.
           <strong>인터넷등기소에서 직접</strong> 아래 주소로 열람한 결과를 입력해 주세요. 열람은 소유자 동의 없이 누구나 할 수 있습니다.
         </div>
-        <div style="font-size:12.5px;margin-top:6px;">열람할 부동산: <strong>${esc(address)}</strong></div>
-        <a class="bass-btn bass-btn--primary" style="margin-top:8px;display:block;text-align:center;text-decoration:none;" href="${IROS_URL}" target="_blank" rel="noopener">🏛️ 인터넷등기소 열기 (새 창)</a>
+        ${irosBoxHtml(searchAddress(s))}
       </div>
 
       <div class="id-card-box ${s.tenant_checked_lessor_id ? "is-verified" : ""}" style="margin-bottom:12px;">
@@ -743,6 +801,7 @@
       </button>
     `;
 
+    bindIrosBox();
     const $ = (id) => document.getElementById(id);
     elStepPanel.querySelectorAll("input, select").forEach((el) => {
       el.addEventListener("focus", () => { isEditingForm = true; });
@@ -836,13 +895,13 @@
           처음 열람한 뒤 <strong>근저당이 새로 잡히거나 소유자가 바뀌는 사고</strong>가 가장 흔합니다.
           체결 전에 인터넷등기소에서 한 번 더 열람해 처음 확인한 내용과 같은지 보세요.
         </div>
-        <div style="font-size:12.5px;margin-top:6px;">열람할 부동산: <strong>${esc(address)}</strong></div>
         <div style="font-size:12.5px;margin-top:4px;">처음 확인한 내용: 소유자 ${esc(tr.owner_name || "-")} · 채권최고액 ${fmtWon(tr.mortgage_amount)} · 압류/신탁 ${esc(tr.seizure_or_trust || "-")}</div>
-        <a class="bass-btn bass-btn--primary" style="margin-top:8px;display:block;text-align:center;text-decoration:none;" href="${IROS_URL}" target="_blank" rel="noopener">🏛️ 인터넷등기소 열기 (새 창)</a>
+        ${irosBoxHtml(searchAddress(s))}
       </div>
       <button id="btnRecheckOk" class="bass-btn bass-btn--primary" style="width:100%;margin-bottom:8px;" type="button">✅ 다시 열람했고, 변동 없음을 확인했습니다</button>
       <button id="btnRecheckChanged" class="bass-btn" style="width:100%;border-color:var(--err);color:var(--err);" type="button">🚨 변동이 있습니다 — 계약 중단</button>
     `;
+    bindIrosBox();
     const send = (btn, changed) => Bass.withLock(btn, async () => {
       if (changed && !window.confirm("등기부에 변동이 있어 계약을 중단합니다. 되돌릴 수 없습니다. 계속할까요?")) return;
       const res = await Bass.api(APP_ID, `/sessions/${s.id}/recheck`, { method: "POST", body: { changed } });
@@ -1378,6 +1437,14 @@
     const c = sealedContract;
     const regSnap = c.registry_snapshot || {};
     const tdr = regSnap.tenant_direct_registry || {};
+    const verifyUrl = `${window.location.origin}/rent3_contract/verify.html?no=${encodeURIComponent(c.id)}&hash=${c.integrity_hash}`;
+    let qrSvg = "";
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(verifyUrl);
+      qr.make();
+      qrSvg = qr.createSvgTag({ cellSize: 3, margin: 0, scalable: true });
+    } catch (_) { qrSvg = ""; }
     elSealedView.style.display = "block";
     elSealedView.innerHTML = `
       <div class="no-print" style="margin-top:14px;">
@@ -1385,7 +1452,7 @@
           <div style="font-weight:800;margin-bottom:4px;">🎉 계약이 체결되었습니다</div>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">
             행정복지센터(주민센터) 확정일자·전입신고 제출용으로 인쇄하거나 PDF로 저장하세요.
-            인쇄 창에서 "PDF로 저장"을 고르면 파일로 보관됩니다.<br>            <strong>잔금을 보내기 전과 입주 당일에도 인터넷등기소에서 한 번 더 열람</strong>하고, 전입신고·확정일자는 입주 당일 바로 받으세요.
+            인쇄 창에서 "PDF로 저장"을 고르면 파일로 보관됩니다. 계약서 하단 QR로 언제든 진위를 확인할 수 있습니다.<br>            <strong>잔금을 보내기 전과 입주 당일에도 인터넷등기소에서 한 번 더 열람</strong>하고, 전입신고·확정일자는 입주 당일 바로 받으세요.
           </div>
           <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
             <button id="btnPrintContract" class="bass-btn bass-btn--primary" style="flex:2;min-width:180px;" type="button">🖨️ 계약서 인쇄 / PDF 저장 (A4)</button>
@@ -1413,6 +1480,7 @@
           ${tdr.submitted ? `<tr><th>임차인 직접 열람 확인</th><td colspan="3">인터넷등기소 직접 열람 (${Bass.escapeHtml(tdr.viewed_at || "-")}) · 소유자 ${Bass.escapeHtml(tdr.owner_name || "-")} · 근저당 채권최고액 ${fmtWon(tdr.mortgage_amount)} · 압류/신탁 ${Bass.escapeHtml(tdr.seizure_or_trust || "-")}${tdr.guarantee_status ? ` · 보증금 반환보증 ${Bass.escapeHtml(tdr.guarantee_status)}` : ""}${regSnap.tenant_recheck_at ? ` · 체결 직전 재열람 확인 ${Bass.escapeHtml(String(regSnap.tenant_recheck_at).slice(0, 16).replace("T", " "))}` : ""}${regSnap.registry_attachment_sha256 ? `<br><span style="font-family:monospace;font-size:10.5px;">첨부 SHA-256 ${Bass.escapeHtml(regSnap.registry_attachment_sha256)}</span>` : ""}</td></tr>` : ""}
           <tr><th>특약사항</th><td colspan="3" style="white-space:pre-line;">${Bass.escapeHtml(c.special_terms)}</td></tr>
           <tr><th>임대인(갑) 서명</th><td>${Bass.escapeHtml(c.lessor_name)} &nbsp; ${renderSigCell(c.lessor_signature)}</td><th>임차인(을) 서명</th><td>${Bass.escapeHtml(c.tenant_name)} (${Bass.escapeHtml(c.tenant_phone)}) &nbsp; ${renderSigCell(c.tenant_signature)}</td></tr>
+          <tr><th>진위 확인</th><td colspan="3"><div style="display:flex;gap:12px;align-items:center;">${qrSvg ? `<div style="width:92px;height:92px;flex:none;">${qrSvg}</div>` : ""}<div style="font-size:11.5px;line-height:1.5;">QR을 찍거나 아래 주소로 접속하면 이 계약서가 서버 기록과 같은지 확인할 수 있습니다.<br><span style="font-family:monospace;font-size:10px;word-break:break-all;">${Bass.escapeHtml(verifyUrl)}</span></div></div></td></tr>
           <tr><th>무결성 해시(SHA-256)</th><td colspan="3" style="font-family:monospace;font-size:11px;word-break:break-all;">${Bass.escapeHtml(c.integrity_hash)}</td></tr>
         </table>
       </article>

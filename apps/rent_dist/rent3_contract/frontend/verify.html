@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>🔍 계약서 진위 확인 — Rent3</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <style>
+    [hidden] { display: none !important; }
+    .shell { max-width: 560px; margin: 0 auto; padding: 16px 14px 60px; }
+    .result { margin-top: 14px; padding: 16px; border-radius: 16px; border: 2px solid var(--border); }
+    .result h2 { margin: 0 0 6px; font-size: 18px; }
+    .result.ok { border-color: var(--ok); background: hsl(150 70% 40% / .12); }
+    .result.warn { border-color: var(--warn); background: hsl(38 90% 50% / .12); }
+    .result.bad { border-color: var(--err); background: hsl(0 80% 50% / .12); }
+    .kv { display: grid; grid-template-columns: 96px 1fr; gap: 6px 10px; font-size: 13.5px; margin-top: 10px; }
+    .kv dt { color: var(--muted, #94a3b8); }
+    .kv dd { margin: 0; word-break: break-all; }
+    textarea.bass-input { min-height: 84px; font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="bass-row" style="justify-content:space-between;margin-bottom:10px;">
+      <a class="bass-btn bass-btn--sm" href="/rent3_contract/">← 임대계약</a>
+    </div>
+
+    <div class="bass-card">
+      <h1 style="font-size:20px;margin:0 0 6px;">🔍 계약서 진위 확인</h1>
+      <p class="bass-muted" style="font-size:13px;margin:0 0 12px;">
+        종이 계약서나 PDF 하단의 <strong>무결성 해시(SHA-256, 64자리)</strong>를 입력하면,
+        서버에 기록된 계약과 같은지, 서명한 뒤 내용이 바뀌지 않았는지 확인합니다.
+        계약서의 QR을 찍으면 값이 자동으로 채워집니다. 로그인은 필요 없습니다.
+      </p>
+      <label class="bass-label" for="vHash">무결성 해시 (64자리)</label>
+      <textarea id="vHash" class="bass-input" placeholder="예: 1a3b7d00be3683c4be3e17941a694cd7..." autocomplete="off" spellcheck="false"></textarea>
+      <label class="bass-label" for="vNo" style="margin-top:10px;">계약번호 (선택)</label>
+      <input id="vNo" class="bass-input" placeholder="예: ct_32834c5e" autocomplete="off">
+      <button id="btnVerify" class="bass-btn bass-btn--primary" style="width:100%;margin-top:12px;" type="button">진위 확인하기</button>
+    </div>
+
+    <div id="vResult" hidden></div>
+
+    <p class="bass-muted" style="font-size:12px;margin-top:14px;line-height:1.6;">
+      ※ 이 확인은 이 서비스 서버에 저장된 기록과의 대조입니다. 주민센터 확정일자나 법적 효력을 대신하지 않으며,
+      개인정보(성명·연락처)는 표시하지 않습니다.
+    </p>
+  </main>
+
+  <script>
+    (function () {
+      "use strict";
+      var $ = function (id) { return document.getElementById(id); };
+      var LABELS = {
+        INTACT: { cls: "ok", icon: "✅", title: "진본입니다 — 변경 없음" },
+        MATCHED_NO_SOURCE: { cls: "warn", icon: "⚠️", title: "기록과 일치 (내용 변경 여부는 확인 불가)" },
+        ALTERED: { cls: "bad", icon: "🚨", title: "서버 데이터가 서명 뒤에 바뀌었습니다" },
+        LEDGER_MISMATCH: { cls: "bad", icon: "🚨", title: "계약 원장이 서명 내용과 다릅니다" },
+        MISMATCH: { cls: "bad", icon: "🚨", title: "계약번호와 해시가 맞지 않습니다" },
+        NOT_FOUND: { cls: "bad", icon: "❌", title: "이 해시의 계약이 없습니다" },
+        INVALID_INPUT: { cls: "warn", icon: "⚠️", title: "입력값을 확인해 주세요" }
+      };
+
+      function esc(v) {
+        return String(v == null ? "" : v).replace(/[&<>"']/g, function (c) {
+          return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+        });
+      }
+
+      function show(data) {
+        var meta = LABELS[data.result] || { cls: "warn", icon: "⚠️", title: data.result || "확인 불가" };
+        var s = data.summary;
+        var html = '<div class="result ' + meta.cls + '"><h2>' + meta.icon + " " + esc(meta.title) + "</h2>" +
+          '<div style="font-size:13.5px;line-height:1.55;">' + esc(data.message) + "</div>";
+        if (s) {
+          html += '<dl class="kv">' +
+            "<dt>계약번호</dt><dd>" + esc(s.contract_no) + "</dd>" +
+            "<dt>목적물</dt><dd>" + esc(s.building_name) + " " + esc(s.room_no) + "호</dd>" +
+            "<dt>체결일</dt><dd>" + esc(s.contract_date) + " (" + esc(s.lease_type) + ")</dd>" +
+            "<dt>확정일자</dt><dd>" + esc(s.fixed_date_no || "-") + "</dd>" +
+            "<dt>상태</dt><dd>" + esc(s.status) + "</dd></dl>" +
+            '<div class="bass-muted" style="font-size:12px;margin-top:8px;">위 정보가 손에 든 계약서와 같은지 함께 확인하세요.</div>';
+        }
+        if (data.diffs && data.diffs.length) {
+          html += '<div style="margin-top:10px;font-weight:800;font-size:13px;">서명 내용과 다른 항목</div><ul style="margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.7;">';
+          data.diffs.forEach(function (d) {
+            html += "<li><strong>" + esc(d.label) + "</strong>" +
+              (d.signed !== "" || d.ledger !== "" ? ": 서명 " + esc(d.signed) + " → 원장 " + esc(d.ledger) : ": 값이 다릅니다") + "</li>";
+          });
+          html += "</ul>";
+        }
+        html += "</div>";
+        $("vResult").innerHTML = html;
+        $("vResult").hidden = false;
+        $("vResult").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+
+      function run() {
+        var btn = $("btnVerify");
+        btn.disabled = true;
+        btn.textContent = "확인 중...";
+        var q = "hash=" + encodeURIComponent($("vHash").value) + "&no=" + encodeURIComponent($("vNo").value.trim());
+        fetch("/api/rent3_contract/verify?" + q)
+          .then(function (r) { return r.json(); })
+          .then(show)
+          .catch(function () {
+            show({ result: "INVALID_INPUT", message: "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요." });
+          })
+          .then(function () { btn.disabled = false; btn.textContent = "진위 확인하기"; });
+      }
+
+      $("btnVerify").addEventListener("click", run);
+      var p = new URLSearchParams(window.location.search);
+      if (p.get("hash")) {
+        $("vHash").value = p.get("hash");
+        $("vNo").value = p.get("no") || "";
+        run();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -461,6 +461,123 @@ def complete_step5(session_id: str, req: Step5CompleteReq):
     }
 
 
+def _ledger_diffs(ct: Contract, sess: CoSignSession) -> List[Dict[str, Any]]:
+    """계약서에 표시되는 원장(contracts.json)이 서명 당시 세션 내용과 같은지 비교한다.
+
+    서명 해시는 세션 데이터로만 계산되므로, 원장만 따로 고치면 해시 검사로는 걸리지 않는다.
+    """
+    t = sess.terms or {}
+    checks = [
+        ("deposit", "보증금", int(t.get("deposit", ct.deposit)), int(ct.deposit)),
+        ("monthly_rent", "월 임차료", int(t.get("monthly_rent", ct.monthly_rent)), int(ct.monthly_rent)),
+        ("maintenance_fee", "월 관리비", int(t.get("maintenance_fee", ct.maintenance_fee)), int(ct.maintenance_fee)),
+        ("contract_deposit", "계약금", int(t.get("contract_deposit", ct.contract_deposit)), int(ct.contract_deposit)),
+        ("lease_term_months", "임대차 개월 수", int(t.get("lease_term_months", ct.lease_term_months)), int(ct.lease_term_months)),
+        ("lease_type", "임대 유형", t.get("lease_type", ct.lease_type), ct.lease_type),
+        ("pay_timing", "납부 시기", t.get("pay_timing", ct.pay_timing), ct.pay_timing),
+        ("move_in_date", "입주일", t.get("move_in_date") or ct.move_in_date, ct.move_in_date),
+        ("special_terms", "특약사항", t.get("special_terms", ct.special_terms), ct.special_terms),
+        ("tenant_name", "임차인 성명", t.get("tenant_name", ct.tenant_name), ct.tenant_name),
+        ("tenant_phone", "임차인 연락처", t.get("tenant_phone", ct.tenant_phone), ct.tenant_phone),
+        ("room_no", "호실", sess.room_no, ct.room_no),
+        ("lessor_signature", "임대인 서명", sess.lessor_signature, ct.lessor_signature),
+        ("tenant_signature", "임차인 서명", sess.tenant_signature, ct.tenant_signature),
+        ("integrity_hash", "무결성 해시", sess.integrity_hash, ct.integrity_hash),
+    ]
+    diffs: List[Dict[str, Any]] = []
+    for key, label, signed, ledger in checks:
+        if str(signed) != str(ledger):
+            # 서명·해시·개인정보는 값을 그대로 보이지 않고 '다름'만 알린다.
+            hide = key in ("lessor_signature", "tenant_signature", "integrity_hash", "tenant_name", "tenant_phone", "special_terms")
+            diffs.append({
+                "field": key, "label": label,
+                "signed": "" if hide else signed,
+                "ledger": "" if hide else ledger,
+            })
+    return diffs
+
+
+@router.get("/verify")
+def verify_contract_integrity(hash: str = "", no: str = ""):
+    """계약서 진위 확인 (공개). 인쇄본의 무결성 해시(SHA-256)와 계약번호로 서버 기록과 대조한다.
+
+    개인정보(성명·연락처)는 응답에 넣지 않고, 확인에 필요한 최소 정보만 돌려준다.
+    """
+    ensure_pool_seeded()
+    h = re.sub(r"[^0-9a-fA-F]", "", hash or "").lower()
+    contract_no = (no or "").strip()
+    if len(h) != 64:
+        return {
+            "success": True,
+            "result": "INVALID_INPUT",
+            "message": "무결성 해시는 64자리(0-9, a-f)입니다. 계약서에 적힌 값을 그대로 입력해 주세요.",
+        }
+
+    ct = next((c for c in Contract.all() if (c.integrity_hash or "").lower() == h), None)
+    if ct is None and contract_no:
+        by_no = Contract.get(contract_no)
+        if by_no:
+            return {
+                "success": True,
+                "result": "MISMATCH",
+                "message": "입력한 계약번호는 존재하지만 서버에 기록된 해시와 다릅니다. 인쇄본이 변조되었거나 다른 계약서일 수 있습니다.",
+                "contract_no": by_no.id,
+            }
+    if ct is None:
+        return {
+            "success": True,
+            "result": "NOT_FOUND",
+            "message": "이 해시로 체결된 계약이 서버에 없습니다. 인쇄본이 변조되었거나 이 시스템에서 만든 계약서가 아닐 수 있습니다.",
+        }
+    if contract_no and contract_no != ct.id:
+        return {
+            "success": True,
+            "result": "MISMATCH",
+            "message": "해시는 서버에 있지만 입력한 계약번호와 다른 계약의 것입니다. 인쇄본의 계약번호가 바뀌었을 수 있습니다.",
+        }
+
+    summary = {
+        "contract_no": ct.id,
+        "building_name": ct.id_building and (Building.get(ct.id_building).building_name if Building.get(ct.id_building) else ""),
+        "room_no": ct.room_no,
+        "contract_date": ct.contract_date,
+        "lease_type": ct.lease_type,
+        "fixed_date_no": getattr(ct, "fixed_date_no", "") or "",
+        "status": ct.status,
+    }
+    sess = CoSignSession.get(ct.cosign_session_id) if ct.cosign_session_id else None
+    if sess is None:
+        return {
+            "success": True,
+            "result": "MATCHED_NO_SOURCE",
+            "message": "서버에 기록된 해시와 일치합니다. 다만 원본 계약 데이터가 없어 내용 변경 여부까지는 다시 계산할 수 없습니다.",
+            "summary": summary,
+        }
+    recomputed = sess.compute_integrity_hash()
+    if recomputed != (ct.integrity_hash or "").lower():
+        return {
+            "success": True,
+            "result": "ALTERED",
+            "message": "서버에 저장된 계약 데이터가 서명 이후 바뀌었습니다. 이 계약서는 신뢰할 수 없습니다. 관리자에게 문의하세요.",
+            "summary": summary,
+        }
+    diffs = _ledger_diffs(ct, sess)
+    if diffs:
+        return {
+            "success": True,
+            "result": "LEDGER_MISMATCH",
+            "message": "서명 당시 내용은 그대로지만, 계약서에 표시되는 계약 원장이 서명 내용과 다릅니다. 원장이 서명 뒤에 수정되었을 수 있어 이 계약서는 신뢰할 수 없습니다.",
+            "summary": summary,
+            "diffs": diffs,
+        }
+    return {
+        "success": True,
+        "result": "INTACT",
+        "message": "인쇄본의 해시가 서버 기록과 일치하고, 서명 이후 계약 내용과 계약 원장이 바뀌지 않았습니다.",
+        "summary": summary,
+    }
+
+
 @router.get("/contracts/{contract_id}")
 def get_sealed_contract(contract_id: str):
     ensure_pool_seeded()

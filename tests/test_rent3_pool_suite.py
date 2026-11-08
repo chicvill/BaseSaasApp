@@ -928,5 +928,65 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(r_ok.status_code, 200)
 
 
+    def test_12_contract_verify_hash(self):
+        """12. 계약서 진위 확인: 일치·변조·없는 해시·계약번호 불일치·잘못된 입력을 구분한다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "904", "is_published": True})
+        sid = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "904",
+            "tenant_name": "진위확인", "tenant_phone": "010-5555-0004", "mode": "NEW"}).json()["session"]["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "진위확인", "responder_phone": "010-5555-0004"})
+        self.client.post(f"{base}/sessions/{sid}/step1", json={
+            "role": "lessor", "checked_counterparty_id": True,
+            "registry_updates": {"owner_name": "김임대", "mortgage_amount": 0}})
+        self._tenant_direct_registry(sid)
+        self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step2", json={"role": role})
+        rev = self.client.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
+        self._tenant_recheck_ok(sid)
+        done = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"}).json()
+        ct = done["contract"]
+        h, no = ct["integrity_hash"], ct["id"]
+        self.assertEqual(len(h), 64)
+
+        v = self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()
+        self.assertEqual(v["result"], "INTACT")
+        self.assertEqual(v["summary"]["room_no"], "904")
+        self.assertNotIn("진위확인", str(v), "응답에 임차인 성명이 들어가면 안 된다")
+        # 공백·줄바꿈·대문자로 옮겨 적어도 인식
+        spaced = " ".join(h[i:i + 8] for i in range(0, 64, 8)).upper()
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": spaced}).json()["result"], "INTACT")
+        # 없는 해시 / 계약번호 불일치 / 잘못된 입력
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": "0" * 64}).json()["result"], "NOT_FOUND")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": "ct_other"}).json()["result"], "MISMATCH")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": "abc"}).json()["result"], "INVALID_INPUT")
+
+        # 계약 원장(contracts.json)만 몰래 고치면 LEDGER_MISMATCH (해시 검사로는 걸리지 않는 변조)
+        from apps.rent_dist._rent3_core import CoSignSession, Contract
+        led = Contract.get(no)
+        orig_rent = led.monthly_rent
+        led.monthly_rent = orig_rent + 50000
+        led.save("test_tamper_ledger")
+        v2 = self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()
+        self.assertEqual(v2["result"], "LEDGER_MISMATCH")
+        self.assertIn("monthly_rent", [d["field"] for d in v2["diffs"]])
+        self.assertNotIn("진위확인", str(v2), "원장 불일치 응답에도 임차인 성명이 들어가면 안 된다")
+        led.monthly_rent = orig_rent
+        led.save("test_restore_ledger")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()["result"], "INTACT")
+
+        # 서명 뒤 계약 데이터가 바뀌면 ALTERED
+        sess = CoSignSession.get(sid)
+        sess.terms = {**sess.terms, "monthly_rent": int(sess.terms.get("monthly_rent", 0)) + 100000}
+        sess.save("test_tamper")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()["result"], "ALTERED")
+
+
 if __name__ == "__main__":
     unittest.main()
