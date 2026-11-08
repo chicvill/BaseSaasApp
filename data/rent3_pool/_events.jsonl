@@ -299,3 +299,8 @@
 {"at": "2026-11-08T15:35:50", "actor": "system", "app_source": "manual", "collection": "buildings", "kind": "building", "id": "bldg_main", "action": "phone_normalized", "summary": "건물 시크빌 본점 (main)"}
 {"at": "2026-11-08T15:35:50", "actor": "system", "app_source": "manual", "collection": "buildings", "kind": "building", "id": "bldg_sunho", "action": "phone_normalized", "summary": "건물 선호아트빌 (sunho)"}
 {"at": "2026-11-08T15:35:50", "actor": "system", "app_source": "manual", "collection": "buildings", "kind": "building", "id": "bldg_sinbi", "action": "phone_normalized", "summary": "건물 신비주택 & 상가 (sinbi)"}
+{"at": "2026-11-08T15:42:38", "actor": "system", "app_source": "rent3_pool", "collection": "contracts", "kind": "contract", "id": "ct2_11e0c9ac", "action": "deleted", "summary": "계약[직거래] 101호 이민수 (월세/후불)"}
+{"at": "2026-11-08T15:42:38", "actor": "system", "app_source": "rent3_pool", "collection": "contracts", "kind": "contract", "id": "ct2_f5151500", "action": "deleted", "summary": "계약[직거래] 101호 이민수 (월세/후불)"}
+{"at": "2026-11-08T15:42:38", "actor": "system", "app_source": "rent3_pool", "collection": "payments", "kind": "pay", "id": "pay_73922d60", "action": "deleted", "summary": "수납 101호 이민수 0원 (2026-11)"}
+{"at": "2026-11-08T15:42:38", "actor": "system", "app_source": "rent3_pool", "collection": "payments", "kind": "pay", "id": "pay_acde983e", "action": "deleted", "summary": "수납 101호 이민수 0원 (2026-11)"}
+{"at": "2026-11-08T15:42:38", "actor": "system", "app_source": "manual", "collection": "rooms", "kind": "room", "id": "room_main_101", "action": "restored_after_contract2_removal", "summary": "호실 main:101호 (입주중)"}

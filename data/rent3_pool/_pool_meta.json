@@ -1,10 +1,10 @@
 {
   "pool_name": "rent3_pool",
   "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
-  "total_revision": 5181,
-  "total_objects": 160,
-  "last_updated_collection": "buildings",
-  "updated_at": "2026-11-08T15:35:50",
+  "total_revision": 5191,
+  "total_objects": 156,
+  "last_updated_collection": "",
+  "updated_at": "2026-11-08T15:43:51",
   "collections": {
     "users": {
       "file": "users.json",
@@ -26,9 +26,9 @@
       "file": "rooms.json",
       "exists": true,
       "count": 32,
-      "revision": 104,
-      "size_bytes": 70480,
-      "updated_at": "2026-11-08T15:30:45"
+      "revision": 105,
+      "size_bytes": 70484,
+      "updated_at": "2026-11-08T15:42:38"
     },
     "cosign_sessions": {
       "file": "cosign_sessions.json",
@@ -41,18 +41,18 @@
     "contracts": {
       "file": "contracts.json",
       "exists": true,
-      "count": 10,
-      "revision": 15,
-      "size_bytes": 62629,
-      "updated_at": "2026-11-08T15:25:11"
+      "count": 8,
+      "revision": 17,
+      "size_bytes": 60026,
+      "updated_at": "2026-11-08T15:42:38"
     },
     "payments": {
       "file": "payments.json",
       "exists": true,
-      "count": 45,
-      "revision": 50,
-      "size_bytes": 36136,
-      "updated_at": "2026-11-08T15:25:11"
+      "count": 43,
+      "revision": 52,
+      "size_bytes": 34456,
+      "updated_at": "2026-11-08T15:42:38"
     },
     "outlays": {
       "file": "outlays.json",

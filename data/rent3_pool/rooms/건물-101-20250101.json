@@ -6,7 +6,7 @@
   "data": {
     "id": "room_main_101",
     "created_at": "2026-10-30T18:33:19",
-    "updated_at": "2026-11-08T15:30:45",
+    "updated_at": "2026-11-08T15:42:38",
     "branch": "main",
     "id_building": "bldg_main",
     "building_name": "",
@@ -35,8 +35,8 @@
     "direction": "",
     "room_category": "주거용 원룸",
     "vat_applicable": false,
-    "id_tenant": "tenant_201",
-    "active_contract_id": "ct2_f5151500",
+    "id_tenant": "tenant_main_101",
+    "active_contract_id": "ct_main_101",
     "doorlock_pwd": "2580*",
     "registry_checked": true,
     "registry_info": {
@@ -84,5 +84,5 @@
     "is_published": false,
     "images": []
   },
-  "updated_at": "2026-11-08T15:30:45"
+  "updated_at": "2026-11-08T15:42:38"
 }
