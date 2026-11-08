@@ -46,6 +46,7 @@ from .pool import PoolObj, now_iso, pool
 
 # 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다.
 IDLE_EXPIRE = timedelta(hours=24)
+MAX_LIVE_PER_TENANT = 2  # 한 임차인이 동시에 진행할 수 있는 계약 수 (호실 선점·잠금 악용 방지)
 
 
 class CoSignSession(PoolObj):
@@ -515,6 +516,15 @@ class CoSignSession(PoolObj):
                 "가맹 승인된 건물만 직거래 계약을 시작할 수 있습니다.",
                 hint="이 건물은 가맹 심사 중이거나 이용이 정지되었습니다.",
             )
+
+        if role_norm == "tenant":
+            mine = [x for x in cls.find(status="IN_PROGRESS") if x.is_tenant_party(id_tenant, tenant_phone)
+                    and not (x.branch == normalize_branch_id(branch) and x.room_no == str(room_no))]
+            if len(mine) >= MAX_LIVE_PER_TENANT:
+                raise DomainError(
+                    f"동시에 진행할 수 있는 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
+                    hint="진행 중인 계약을 마치거나 취소한 뒤 다른 호실을 선택해 주세요.",
+                )
 
         # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
         # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)

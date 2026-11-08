@@ -1522,6 +1522,9 @@
             </select>
           </div>
         </div>
+        ${currentRole === "lessor" ? `<label class="check-row" style="margin-bottom:10px;border-color:var(--warn);">
+          <span style="font-size:12.5px;line-height:1.55;">⚠️ <strong>내 은행 앱의 실제 입금 내역</strong>에서 계약금이 들어온 것을 직접 확인했습니다. (임차인이 보여 주는 이체 완료 화면·캡처는 위조될 수 있습니다)</span>
+          <input type="checkbox" id="chkOwnAccount"></label>` : ""}
         ${s.tenant_recheck_at ? "" : `<div class="bass-card" style="padding:10px 12px;margin-bottom:10px;font-size:12.5px;border-color:var(--warn);">
           ⏳ 임차인이 체결 직전 등기부 재열람을 확인하면 체결 버튼이 열립니다.</div>`}
         <button id="btnCompleteSeal" class="bass-btn bass-btn--primary" style="width:100%;" type="button" ${s.tenant_recheck_at ? "" : "disabled"}>
@@ -1534,9 +1537,11 @@
       btn.addEventListener("click", function () {
         Bass.withLock(this, async () => {
           const method = document.getElementById("payMethodSel").value;
+          const own = document.getElementById("chkOwnAccount");
+          if (!own || !own.checked) { Bass.updateAppAlert("warning", "내 계좌의 실제 입금 내역을 확인했다는 항목에 체크해 주세요."); return; }
           const res = await Bass.api(APP_ID, `/sessions/${s.id}/step5/complete`, {
             method: "POST",
-            body: { payment_method: method },
+            body: { payment_method: method, own_account_checked: true },
           });
           activeSession = res.session;
           sealedContract = res.contract;

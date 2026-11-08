@@ -114,6 +114,7 @@ class RecheckReq(BaseModel):
 
 class Step5CompleteReq(BaseModel):
     payment_method: str = "TRANSFER"
+    own_account_checked: bool = False   # 임대인이 본인 계좌의 실제 거래내역에서 입금을 직접 확인함
 
 
 @router.get("/status")
@@ -581,6 +582,11 @@ def sign_step4(session_id: str, req: Step4SignReq):
 @router.post("/sessions/{session_id}/step5/complete")
 def complete_step5(session_id: str, req: Step5CompleteReq):
     s = CoSignSession.by_code_or_id(session_id)
+    if not req.own_account_checked:
+        raise DomainError(
+            "본인 계좌의 실제 거래내역에서 입금을 직접 확인해야 체결할 수 있습니다.",
+            hint="임차인이 보여 주는 이체 완료 화면·캡처는 위조될 수 있습니다. 은행 앱의 입금 내역을 확인해 주세요.",
+        )
     result = s.complete_step5_and_seal(payment_method=req.payment_method, app_source=APP_SRC)
     return {
         "success": True,

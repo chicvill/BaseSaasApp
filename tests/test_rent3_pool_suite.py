@@ -207,7 +207,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(bool(r_sig["session"]["integrity_hash"]))
 
         self._tenant_recheck_ok(sid)
-        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
         self.assertEqual(r_seal.status_code, 200)
         sealed = r_seal.json()
         self.assertTrue(sealed["contract"]["fixed_date_no"].startswith("FIX-"))
@@ -853,7 +853,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         # [G] 최종 계약 체결 봉인 -> 생성된 계약서 스냅샷에 상호 신분증 확인 증적이 영구 박제되었는지 검증
         self._tenant_recheck_ok(sid)
-        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
         self.assertEqual(r_seal.status_code, 200)
         snap = r_seal.json()["contract"]["registry_snapshot"]
         self.assertTrue(snap["lessor_login_verified"])
@@ -923,17 +923,17 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for role in ("lessor", "tenant"):
                 self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
 
-            r_no = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+            r_no = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
             self.assertEqual(r_no.status_code, 400, "재열람 확인 없이는 체결할 수 없어야 한다")
 
             r_rc = self.client.post(f"{base}/sessions/{sid}/recheck", json={"changed": changed})
             self.assertEqual(r_rc.status_code, 200)
             if changed:
                 self.assertEqual(r_rc.json()["session"]["status"], "CANCELLED")
-                r_after = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+                r_after = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
                 self.assertIn(r_after.status_code, (400, 409))  # 중단된 계약은 체결 불가
             else:
-                r_ok = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+                r_ok = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
                 self.assertEqual(r_ok.status_code, 200)
 
 
@@ -959,7 +959,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for role in ("lessor", "tenant"):
             self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
         self._tenant_recheck_ok(sid)
-        done = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"}).json()
+        done = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True}).json()
         ct = done["contract"]
         h, no = ct["integrity_hash"], ct["id"]
         self.assertEqual(len(h), 64)
@@ -1714,6 +1714,33 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.get("/api/rent3_admin/overview", headers=adm).status_code, 401)
         # 다시 로그인하면 새 토큰은 정상
         self.assertEqual(c.get("/api/rent3_admin/overview", headers=self._login("admin")).status_code, 200)
+
+
+    def test_28_tenant_fraud_guards(self):
+        """28. 임차인 사기 방어: 한 임차인의 동시 계약 2건 제한(호실 선점), 임대인 본인 계좌 입금 확인 없이는 체결 불가."""
+        c = self.client
+        r = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "선점자", "phone": "01066660401", "password": "Pw123456"}).json()
+        th = self._as(r["token"])
+        who = {"name": "선점자", "phone": "01066660401", "birth": "950101"}
+        c.post("/api/rent3_contract/identity/start", headers=th, json=who)
+        c.post("/api/rent3_contract/identity/confirm", headers=th, json={**who, "code": "000000"})
+        for no in ("911", "912", "913"):
+            c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": no, "is_published": True})
+        call = lambda no: c.post("/api/rent3_contract/sessions/call", headers=th, json={
+            "caller_role": "tenant", "branch": "main", "room_no": no, "mode": "NEW", "tenant_name": "선점자", "tenant_phone": "010-6666-0401"})
+        self.assertEqual(call("911").status_code, 200)
+        self.assertEqual(call("912").status_code, 200)
+        self.assertEqual(call("911").status_code, 200)     # 이미 진행 중인 호실 재입장은 허용
+        third = call("913")
+        self.assertEqual(third.status_code, 400)
+        self.assertIn("동시에", third.json()["message"])
+
+        # 체결: 계좌 확인 표시 없이는 거부 (다른 조건과 무관하게 먼저 걸린다)
+        sid = call("911").json()["session"]["id"]
+        no = c.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        self.assertEqual(no.status_code, 400)
+        self.assertIn("입금", no.json()["message"])
 
 
 if __name__ == "__main__":
