@@ -83,8 +83,19 @@
     node.querySelector(".bass-alert__close").addEventListener("click", close);
     while (stack.children.length >= 3) stack.firstElementChild.remove();
     stack.append(node);
-    const ms = timeout ?? (lv === "success" ? 5000 : lv === "error" ? 0 : 9000);
-    if (ms) setTimeout(close, ms);
+    // 기본: 성공 5초 · 경고/기타 9초 · 오류는 닫을 때까지. 앱이 window.BASS_ERROR_TIMEOUT(ms)을 지정하면 오류·경고에 그 시간을 쓴다.
+    const errMs = Number(global.BASS_ERROR_TIMEOUT) || 0;
+    const ms = timeout ?? (lv === "success" ? 5000 : (lv === "error" || lv === "warning") && errMs ? errMs : lv === "error" ? 0 : 9000);
+    if (ms) {
+      // 읽는 동안(마우스를 올리거나 터치하는 동안)에는 닫히지 않고, 손을 떼면 다시 센다
+      let timer = setTimeout(close, ms);
+      const hold = () => { clearTimeout(timer); };
+      const release = () => { clearTimeout(timer); timer = setTimeout(close, ms); };
+      node.addEventListener("mouseenter", hold);
+      node.addEventListener("mouseleave", release);
+      node.addEventListener("touchstart", hold, { passive: true });
+      node.addEventListener("touchend", release, { passive: true });
+    }
     return node;
   }
 

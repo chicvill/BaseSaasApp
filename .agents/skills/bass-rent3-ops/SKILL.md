@@ -378,6 +378,8 @@ description: Operational business rules, domain invariants, and verification ins
 
 32. **로그인 만료 처리**(`shared_ui/rent3_session_guard.js`, 4개 앱 index.html 에 로드): rent3 API 가 401 을 돌려주면(로그인·가입·재설정·진위확인 경로 제외) 저장된 로그인 정보를 지우고 `/rent3/?login=1&expired=1` 로 보내 "로그인이 만료되었습니다" 안내를 띄운다. 이전에는 화면이 401 을 받으면서 `/sessions` 를 2.5초마다 계속 호출했다. **`BASS_SECRET` 이 없으면 재배포마다 모든 로그인이 무효**가 되어 이 안내가 뜬다.
 
+33. **오류·경고 알림 자동 닫힘**: Rent3 화면(포털 + 4개 앱)은 `window.BASS_ERROR_TIMEOUT = 2000`(`auth_fetch.js`·`rent3_session_guard.js` 가 지정)이라 오류·경고 알림이 **2초 뒤** 닫히고, 마우스를 올리거나 터치하는 동안은 유지된다. 성공 5초는 그대로. 지정하지 않은 다른 앱은 예전처럼 오류가 닫을 때까지 남는다. 힌트가 긴 메시지(예: 가맹 심사 반려 사유, 로그인 만료 안내)는 2초에 읽기 어려울 수 있으니, 어르신 사용자 반응을 보고 값을 늘릴 것.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

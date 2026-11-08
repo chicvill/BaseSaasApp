@@ -3,6 +3,7 @@
 (function () {
   "use strict";
   if (window.__rent3GuardPatched) return;
+  window.BASS_ERROR_TIMEOUT = 2000; // Rent3: 오류·경고 알림은 2초 뒤 자동으로 닫힌다(마우스를 올리거나 터치하는 동안은 유지)
   window.__rent3GuardPatched = true;
   var orig = window.fetch.bind(window);
   var redirecting = false;
