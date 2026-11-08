@@ -37,6 +37,8 @@
     else loadListings().catch(Bass.showError);
   }
 
+  window.addEventListener("beforeprint", () => { const d = document.getElementById("moreServices"); if (d) d.open = true; });
+
   btnMyhome.addEventListener("click", () => setMode("myhome"));
   btnListings.addEventListener("click", () => setMode("listings"));
 
@@ -51,7 +53,7 @@
   async function loadMyhome() {
     if (!tenantList.length) await loadTenants();
     if (!selectedTenantId) {
-      elMyhome.innerHTML = `<div class="bass-card">현재 활성 입주 세입자가 없습니다. 공실 탐색 탭에서 계약을 진행해 보세요.</div>`;
+      elMyhome.innerHTML = `<div class="bass-card">현재 활성 입주 세입자가 없습니다. '빈 집 찾기'에서 계약을 진행해 보세요.</div>`;
       return;
     }
     const data = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}`);
@@ -87,23 +89,6 @@
           </div>
         </div>
 
-        <div class="field-grid" style="margin-top:14px;">
-          <div class="listing-card" style="margin:0;">
-            <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
-            <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
-              <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
-            </div>
-            <div style="font-size:12.5px;margin-top:4px;">공동현관: <code>${Bass.escapeHtml(b.common_entrance_pwd || "#1004*")}</code> · Wi-Fi: <code>${Bass.escapeHtml(b.wifi_info || "-")}</code></div>
-          </div>
-
-          <div class="listing-card" style="margin:0;">
-            <div class="bass-muted" style="font-size:12px;">🚗 내 차량 건물 주차 등록</div>
-            <div class="bass-row" style="margin-top:6px;">
-              <input id="carNoInput" class="bass-input" style="flex:1;" value="${Bass.escapeHtml(t.car_number || "")}" placeholder="예: 12가 3456">
-              <button id="btnSaveCar" class="bass-btn bass-btn--sm bass-btn--primary" type="button">등록</button>
-            </div>
-          </div>
-        </div>
       </div>
 
       ${activeBns.map((bn) => `
@@ -127,6 +112,49 @@
           </div>
         </div>
       `).join("")}
+
+      <div class="bass-card no-print" style="margin-bottom:14px;">
+        <h3>💳 월별 납부 현황 & 온라인 간편 납부 (임대인 FIFO 장부 실시간 동기화)</h3>
+        <div style="margin:10px 0;">
+          ${(lg.months || []).map((m) => `
+            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px;">
+              <span><strong>${m.ym}</strong> · 청구 ${fmtWon(m.due)}</span>
+              <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${Bass.escapeHtml(m.note)}</span>
+            </div>
+          `).join("")}
+        </div>
+        <div class="bass-row">
+          <input id="payAmtInput" type="number" class="bass-input" style="width:170px;" value="${lg.total_unpaid > 0 ? lg.total_unpaid : (Number(ct.monthly_rent || 0) + Number(ct.maintenance_fee || 0))}">
+          <select id="payMethodSel" class="bass-select" style="width:160px;">
+            <option value="KAKAOPAY">카카오페이</option>
+            <option value="CARD">신용/체크카드</option>
+            <option value="TRANSFER">계좌이체</option>
+          </select>
+          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부 (payments.json 반영)</button>
+        </div>
+      </div>
+
+      <details id="moreServices" style="margin-bottom:14px;">
+        <summary class="no-print" style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 서비스 (도어락 · 차량 · 만기 안내 · A/S · 세액공제 증명서)</summary>
+        <div class="bass-card no-print" style="margin-bottom:14px;">
+        <div class="field-grid" style="margin-top:14px;">
+          <div class="listing-card" style="margin:0;">
+            <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
+            <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
+              <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
+            </div>
+            <div style="font-size:12.5px;margin-top:4px;">공동현관: <code>${Bass.escapeHtml(b.common_entrance_pwd || "#1004*")}</code> · Wi-Fi: <code>${Bass.escapeHtml(b.wifi_info || "-")}</code></div>
+          </div>
+
+          <div class="listing-card" style="margin:0;">
+            <div class="bass-muted" style="font-size:12px;">🚗 내 차량 건물 주차 등록</div>
+            <div class="bass-row" style="margin-top:6px;">
+              <input id="carNoInput" class="bass-input" style="flex:1;" value="${Bass.escapeHtml(t.car_number || "")}" placeholder="예: 12가 3456">
+              <button id="btnSaveCar" class="bass-btn bass-btn--sm bass-btn--primary" type="button">등록</button>
+            </div>
+          </div>
+        </div>
+        </div>
 
       ${showExpiryCard ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid var(--warn);">
@@ -224,27 +252,6 @@
       ` : ""}
 
       <div class="bass-card no-print" style="margin-bottom:14px;">
-        <h3>💳 월별 납부 현황 & 온라인 간편 납부 (임대인 FIFO 장부 실시간 동기화)</h3>
-        <div style="margin:10px 0;">
-          ${(lg.months || []).map((m) => `
-            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px;">
-              <span><strong>${m.ym}</strong> · 청구 ${fmtWon(m.due)}</span>
-              <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${Bass.escapeHtml(m.note)}</span>
-            </div>
-          `).join("")}
-        </div>
-        <div class="bass-row">
-          <input id="payAmtInput" type="number" class="bass-input" style="width:170px;" value="${lg.total_unpaid > 0 ? lg.total_unpaid : (Number(ct.monthly_rent || 0) + Number(ct.maintenance_fee || 0))}">
-          <select id="payMethodSel" class="bass-select" style="width:160px;">
-            <option value="KAKAOPAY">카카오페이</option>
-            <option value="CARD">신용/체크카드</option>
-            <option value="TRANSFER">계좌이체</option>
-          </select>
-          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부 (payments.json 반영)</button>
-        </div>
-      </div>
-
-      <div class="bass-card no-print" style="margin-bottom:14px;">
         <h3>🔧 1:1 시설 수리(A/S) 요청 접수</h3>
         <div class="field-grid" style="margin:10px 0;">
           <select id="asCat" class="bass-select">
@@ -293,6 +300,7 @@
           </table>
         </article>
       ` : ""}
+      </details>
     `;
 
     document.getElementById("tenantSel").addEventListener("change", (ev) => {
@@ -449,7 +457,7 @@
 
     elListings.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <h3>📢 중개수수료(복비) 0원 즉시입주·만기예정 직거래 공실 쇼케이스 (${list.length}실)</h3>
+        <h3>📢 지금 계약 가능한 빈 집 (${list.length}실)</h3>
         <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실(<code>rooms.json</code>)이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
       </div>
       ${list.map((r) => `

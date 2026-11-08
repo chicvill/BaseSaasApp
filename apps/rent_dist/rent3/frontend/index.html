@@ -21,11 +21,7 @@
 
       <nav class="or-navlinks" aria-label="주요 메뉴">
         <a href="#listingsSection" class="or-navlink">공실 매물 찾기</a>
-        <a href="#forTenantsSection" class="or-navlink">임차인 안내</a>
-        <a href="#forLandlordsSection" class="or-navlink">임대인 안내</a>
-        <a href="#rentNowSection" class="or-navlink">Rent Now 공동계약</a>
-        <a href="/rent3/pool.html" class="or-navlink">Data Pool 관제</a>
-        <a href="manual.html" class="or-navlink">📘 매뉴얼</a>
+        <a href="#rentNowSection" class="or-navlink">직거래 계약</a>
       </nav>
 
       <div class="or-nav-cta">
@@ -44,9 +40,25 @@
           <a id="navGoWorkspace" href="/rent3/" class="or-btn or-btn--blue or-btn--sm">내 전용 페이지 →</a>
           <button id="btnNavLogout" type="button" class="or-btn or-btn--outline or-btn--sm">로그아웃</button>
         </div>
+        <button type="button" data-r3-burger class="or-btn or-btn--outline or-btn--sm">☰ 더보기</button>
       </div>
     </div>
   </header>
+
+
+  <!-- ☰ 더보기: 핵심 외 기능 -->
+  <aside class="r3-drawer" data-r3-drawer>
+    <div class="r3-drawer__group">안내</div>
+    <button type="button" class="r3-item" id="menuForTenants">🔑 임차인 안내</button>
+    <button type="button" class="r3-item" id="menuForLandlords">🏢 임대인 안내</button>
+    <div class="r3-drawer__group">도구</div>
+    <button type="button" class="or-chip r3-item" id="btnToggleAfford">🧮 월세 적정 예산 계산기</button>
+    <a href="manual.html">📘 이용 매뉴얼</a>
+    <div class="r3-drawer__group">운영</div>
+    <a href="/rent3/pool.html">🌐 Data Pool 관제</a>
+    <a href="/rent3/Rent3_QA_Test_Checklist.pdf" target="_blank" rel="noopener">📄 QA 체크리스트 PDF</a>
+    <a href="/">BaseSaasApp 게이트웨이</a>
+  </aside>
 
   <!-- 로그인된 사용자 상단 빠른 복귀 배너 -->
   <div id="activeSessionStrip" class="or-session-strip" style="display:none;">
@@ -65,14 +77,8 @@
   <!-- 2. OpenRent Hero & Central Property Search Fold -->
   <section class="or-hero">
     <div class="or-container" style="text-align:center;">
-      <div class="or-hero__eyebrow">
-        ✨ Rent Directly from Verified Landlords · 복비 0원 안심 직거래 & 실시간 Data Pool 연동
-      </div>
-      <h1>더 빠르고, 더 안전하게<br>집주인과 직접 계약하고 스마트하게 관리하세요</h1>
-      <p class="or-hero__sub">
-        OpenRent 직거래 표준을 한국 임대차 환경에 최적화했습니다. 허위매물 없는 실시간 공실 탐색부터
-        5단계 공동 전자계약(Rent Now), 입주일 기준 자동 청구·FIFO 수납, 세무 결산까지 역할별 맞춤 화면을 제공합니다.
-      </p>
+            <h1>집주인과 직접, 수수료 없이 계약하세요</h1>
+      <p class="or-hero__sub">빈 집을 찾고, 그 자리에서 계약하고, 월세 납부까지 한곳에서 확인합니다.</p>
 
       <!-- Main Search Box -->
       <form id="heroSearchForm" class="or-search-card" autocomplete="off">
@@ -95,10 +101,6 @@
       <div class="or-filter-bar" id="quickFilterBar">
         <button type="button" class="or-chip is-active" data-filter="all">전체 공개 매물</button>
         <button type="button" class="or-chip" data-filter="instant">⚡ 즉시입주 가능</button>
-        <button type="button" class="or-chip" data-filter="pre_moveout">📦 만기전출 사전공개</button>
-        <button type="button" class="or-chip" data-filter="clean_title">🛡️ 등기 근저당 0원 클린</button>
-        <button type="button" class="or-chip" data-filter="commercial">🏢 사업자·상가/오피스텔</button>
-        <button type="button" class="or-chip" id="btnToggleAfford">🧮 월세 적정 예산 계산기</button>
       </div>
 
       <!-- Collapsible Affordability Calculator (OpenRent Signature Feature) -->
@@ -130,7 +132,7 @@
   </section>
 
   <!-- 3. Trust & Live Data Pool Stats Strip -->
-  <section class="or-trust-strip">
+  <section class="or-trust-strip" hidden>
     <div class="or-container">
       <div class="or-trust-grid">
         <div class="or-trust-item">
@@ -155,7 +157,7 @@
 
   <main class="or-container">
     <!-- 4. Role-Based Login Gateway Cards -->
-    <section class="or-section" style="padding-bottom:16px;">
+    <section class="or-section" style="padding-bottom:16px;" hidden>
       <div class="or-section__head">
         <div>
           <h2 class="or-section__title">🔐 로그인 후 내 역할에 맞는 전용 페이지로 자동 이동</h2>
@@ -207,11 +209,11 @@
     <section id="listingsSection" class="or-section">
       <div class="or-section__head">
         <div>
-          <h2 class="or-section__title">🏡 실시간 소유주 직거래 공개 매물 (Zero Agency Fees)</h2>
-          <p class="or-section__sub" id="listingCountSub">공동 Data Pool(<code>rooms.json</code>)과 실시간 동기화되어 계약 완료 시 즉시 목록에서 내려갑니다.</p>
+          <h2 class="or-section__title">🏡 지금 계약 가능한 매물</h2>
+          <p class="or-section__sub" id="listingCountSub">집주인이 직접 올린 빈 집입니다. 마음에 들면 문의하고 바로 계약을 시작하세요.</p>
         </div>
         <div style="display:flex; gap:8px;">
-          <button type="button" id="btnRefreshListings" class="or-btn or-btn--outline or-btn--sm">🔄 실시간 새로고침</button>
+          <button type="button" id="btnRefreshListings" class="or-btn or-btn--outline or-btn--sm">🔄 새로고침</button>
         </div>
       </div>
 
@@ -224,22 +226,12 @@
     <section id="rentNowSection" class="or-section" style="padding-top:10px;">
       <div class="or-cosign-banner">
         <div>
-          <span class="or-brand__tag" style="background:rgba(46,184,92,0.25);color:#bbf7d0;border-color:rgba(46,184,92,0.5);">OpenRent "Rent Now" × 본인인증 호출·응답 공동계약</span>
-          <h2 style="font-size:24px; font-weight:800; margin:10px 0 8px;">🤝 각자 로그인 후 매물 호출·응답으로 시작하는 안심 공동계약</h2>
-          <p style="font-size:14px; color:#dbeafe; margin:0;">
-            임대인과 임차인은 각각 로그인 과정에서 <strong>본인인증(신분 확인)</strong>을 완료합니다. 둘 중 먼저 입장한 당사자가 매물을 선택해 상대를 호출하고 상대방이 응답하면 계약이 개시되며, <strong>서로 신분증 확인 체크 + 등기부등본 권리 확인 + Revision Lock 조건 합의</strong>가 모두 완료되어야만 자필 서명이 활성화됩니다.
-          </p>
-          <div class="or-step-row">
-            <span class="or-step-badge">📞 매물 선택 · 호출 & 응답 개시</span>
-            <span class="or-step-badge">① 상호 신분증 체크 & 등기부 확인</span>
-            <span class="or-step-badge">② 6대 시설·옵션 점검</span>
-            <span class="or-step-badge">③ 조건 합의 (Revision Lock)</span>
-            <span class="or-step-badge">④ 양측 자필 전자서명 & 봉인</span>
-          </div>
+          <h2 style="font-size:24px; font-weight:800; margin:0 0 8px;">🤝 직거래 계약하기</h2>
+          <p style="font-size:14px; color:#dbeafe; margin:0;">임대인과 임차인이 각자 로그인한 뒤, 매물을 고르고 서로 확인하며 전자서명으로 계약을 마칩니다.</p>
         </div>
 
         <div id="quickCosignPanel" style="background:#ffffff; color:var(--or-text); padding:20px; border-radius:12px;">
-          <div style="font-size:15px; font-weight:800; color:var(--or-navy); margin-bottom:8px;">📞 본인인증 공동계약 호출 · 응답 센터</div>
+          <div style="font-size:15px; font-weight:800; color:var(--or-navy); margin-bottom:8px;">📞 계약 시작 · 응답</div>
           <div id="quickCosignAuthStatus" style="font-size:12.5px; background:#f8fafc; border:1px solid var(--or-border); border-radius:8px; padding:10px 12px; margin-bottom:10px;">
             🔒 임대인 또는 임차인으로 본인인증 로그인하면 매물을 선택해 상대를 호출하거나 도착한 호출에 즉시 응답할 수 있습니다.
           </div>
@@ -248,14 +240,14 @@
             <div id="openSessionsSummary" style="font-size:12.5px; color:var(--or-muted); display:grid; gap:5px;"></div>
           </div>
           <button type="button" id="btnQuickCosignGo" class="or-btn or-btn--green" style="width:100%;">
-            🤝 공동계약 화면 입장 (매물 선택 · 호출/응답) →
+            🤝 계약 화면 열기 →
           </button>
         </div>
       </div>
     </section>
 
     <!-- 7. OpenRent Dual-Audience Value Pillars (For Tenants vs For Landlords) -->
-    <section class="or-section" style="padding-top:10px;">
+    <section id="infoPanel" class="or-section" style="padding-top:10px;" hidden>
       <div class="or-dual-grid">
         <article id="forTenantsSection" class="or-pillar">
           <span class="or-brand__tag" style="background:#eef2ff;color:#3730a3;border-color:#c7d2fe;">For Tenants · 임차인 혜택</span>
@@ -291,17 +283,8 @@
 
   <!-- Footer -->
   <footer class="or-footer">
-    <div class="or-container" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px;">
-      <div>
-        <strong style="color:#fff;">🏡 OpenRent · Rent3 Direct PropTech SaaS</strong><br>
-        <span>공인중개사법 준수 직거래 IT 솔루션 (거래 건당 중개수수료 0원) · 실시간 JSON Data Pool 기반</span>
-      </div>
-      <div style="display:flex; gap:16px; flex-wrap:wrap;">
-        <a href="/">BaseSaasApp 게이트웨이</a>
-        <a href="/rent3/pool.html">Data Pool 관제</a>
-        <a href="/rent3/Rent3_QA_Test_Checklist.pdf" target="_blank" rel="noopener">QA 체크리스트 PDF</a>
-        <a href="manual.html">공식 운영 매뉴얼</a>
-      </div>
+    <div class="or-container" style="text-align:center;">
+      <span>🏡 Rent3 · 중개수수료 0원 직거래</span>
     </div>
   </footer>
 
@@ -475,6 +458,18 @@
   </div>
 
   <script src="/shared/ui/bass.js"></script>
+  <script src="hamburger.js"></script>
+  <script>
+    (function () {
+      function showInfo(id) {
+        var panel = document.getElementById("infoPanel");
+        panel.hidden = false;
+        document.getElementById(id).scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      document.getElementById("menuForTenants").addEventListener("click", function () { showInfo("forTenantsSection"); });
+      document.getElementById("menuForLandlords").addEventListener("click", function () { showInfo("forLandlordsSection"); });
+    })();
+  </script>
   <script src="app.js"></script>
 </body>
 </html>

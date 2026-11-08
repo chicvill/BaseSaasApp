@@ -1,4 +1,10 @@
-/* apps/rent3_contract/frontend/app.js — 본인인증 호출·응답 & 상호 신분증·등기 확인 기반 공동계약 클라이언트 */
+/* apps/rent3_contract/frontend/app.js — 임대계약 전용 화면.
+ *
+ * 한 화면에 임대인/임차인을 오가는 스위치는 없다. 로그인한 역할로만 동작하므로
+ * 임대인과 임차인이 각자의 스마트폰에서 같은 계약을 진행한다.
+ *   홈  : 내 역할에 맞는 현황 + 임대계약 버튼
+ *   계약: 위쪽 진행 차트 + 그 아래 단계별 모달 (내 차례 → 상대 대기 → 다음 단계)
+ */
 (function () {
   "use strict";
 
@@ -16,331 +22,382 @@
   }
 
   const loggedUser = readLoggedUser();
-  const initialRoleFromSession =
-    loggedUser && (loggedUser.role === "tenant" || loggedUser.role === "prospect")
-      ? "tenant"
-      : "lessor";
-
-  let currentRole = params.get("role")
-    ? (params.get("role") === "tenant" ? "tenant" : "lessor")
-    : initialRoleFromSession;
-  let activeSessionId = params.get("session") || "";
-  const preselectBranch = params.get("call_branch") || "";
-  const preselectRoom = params.get("call_room") || "";
+  if (!loggedUser || !loggedUser.name) {
+    window.location.replace("/rent3/?login=1");
+    return;
+  }
+  const currentRole = (loggedUser.role === "tenant" || loggedUser.role === "prospect")
+    ? "tenant"
+    : (loggedUser.role === "cosign" && params.get("role") === "tenant" ? "tenant" : "lessor");
+  const myTenantId = loggedUser.tenant_id || loggedUser.id || "";
+  const myBranch = loggedUser.branch && loggedUser.branch !== "all" ? loggedUser.branch : "";
+  const ROLE_KO = { lessor: "임대인", tenant: "임차인" };
+  const OTHER_KO = currentRole === "lessor" ? "임차인" : "임대인";
 
   let candidateRooms = [];
   let participantTenants = [];
   let allSessions = [];
+  let activeSessionId = "";
   let activeSession = null;
   let sealedContract = null;
   let viewStep = 1;
   let lastRevision = null;
   let lastCallStatus = null;
   let isEditingForm = false;
+  let myhome = null;          // 임차인: 기존 입주 호실 납부 현황
+  let lessorDash = null;      // 임대인: 호실별 미납 현황
+  let homeSig = "";
+  let modalKey = "";
+  let modalAnimating = false;
+  let modalTimer = null;
 
-  const elRoleLessor = document.getElementById("btnRoleLessor");
-  const elRoleTenant = document.getElementById("btnRoleTenant");
-  const elSessionSelect = document.getElementById("sessionSelect");
-  const elWorkspace = document.getElementById("sessionWorkspace");
+  const elHome = document.getElementById("homeView");
+  const elHomeBody = document.getElementById("homeBody");
+  const elContract = document.getElementById("contractView");
+  const elModal = document.getElementById("stepModal");
+  const elCard = document.getElementById("stepCard");
   const elStepPanel = document.getElementById("stepPanel");
   const elSealedView = document.getElementById("sealedContractView");
-  const elIncomingBox = document.getElementById("incomingCallBox");
-  const elAuthBar = document.getElementById("authIdentityBar");
+  const elDlgHost = document.getElementById("dlgHost");
+
+  const esc = Bass.escapeHtml;
+  const digits = (v) => String(v || "").replace(/\D/g, "");
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
   }
 
-  function renderAuthIdentityBar() {
-    const u = readLoggedUser();
-    if (u && u.name) {
-      elAuthBar.innerHTML = `
-        <div>
-          🛡️ <strong>로그인 본인인증(신분 확인) 완료</strong>:
-          <strong>${Bass.escapeHtml(u.name)}</strong>
-          ${u.phone ? `(${Bass.escapeHtml(u.phone)})` : ""}
-          · <span class="bass-badge bass-badge--ok">${Bass.escapeHtml(u.role_label || u.role)}</span>
-        </div>
-        <div class="bass-muted">현재 조작 시점: <strong>${currentRole === "lessor" ? "🏢 임대인(갑)" : "🔑 임차인(을)"}</strong></div>
-      `;
-    } else {
-      elAuthBar.innerHTML = `
-        <div>
-          🔐 각 당사자는 로그인 과정에서 본인인증(신분 확인)을 거칩니다. 아래 역할 화면 전환으로 양측 호출·응답·신분증 체크를 즉시 테스트할 수 있습니다.
-        </div>
-        <a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3/?login=1">🔐 본인인증 로그인</a>
-      `;
-    }
-  }
+  document.getElementById("whoBadge").textContent =
+    `🛡️ ${loggedUser.name} · ${currentRole === "lessor" ? "임대인" : "임차인"}`;
 
-  function syncCallPanelForRole() {
-    const sel = document.getElementById("newRoomSelect");
-    const val = sel.value || "";
-    const [br, rNo] = val.split("|");
-    const room = candidateRooms.find((x) => x.branch === br && x.room_no === rNo);
-    const ownerInfo = document.getElementById("selectedRoomOwnerInfo");
-    const tenantPickerWrap = document.getElementById("participantTenantWrap");
-    const btnCall = document.getElementById("btnCallCounterparty");
-    const u = readLoggedUser();
-
-    if (room && ownerInfo) {
-      const occNote = room.is_occupied
-        ? `현재 입주 임차인: ${Bass.escapeHtml(room.active_tenant_name || "-")} (${Bass.escapeHtml(room.active_tenant_phone || "-")})`
-        : "공실 · 즉시 계약 가능";
-      ownerInfo.innerHTML =
-        `📍 <strong>[${Bass.escapeHtml(room.building_name)} ${Bass.escapeHtml(room.room_no)}호]</strong> ` +
-        `소유주(임대인): <strong>${Bass.escapeHtml(room.lessor_name)}</strong> (${Bass.escapeHtml(room.lessor_phone || "-")}) · ${occNote}`;
-    }
-
-    if (currentRole === "lessor") {
-      if (tenantPickerWrap) tenantPickerWrap.style.display = "block";
-      document.getElementById("lblCallTenantName").textContent = "호출할 임차인 성명";
-      document.getElementById("lblCallTenantPhone").textContent = "호출할 임차인 휴대폰 번호";
-      btnCall.textContent = "📞 선택한 매물로 임차인 호출하여 공동계약 시작 요청";
-      if (room && room.is_occupied && document.getElementById("newModeSelect").value === "RENEWAL") {
-        if (room.active_tenant_name) document.getElementById("newTenantName").value = room.active_tenant_name;
-        if (room.active_tenant_phone) document.getElementById("newTenantPhone").value = room.active_tenant_phone;
-      }
-    } else {
-      if (tenantPickerWrap) tenantPickerWrap.style.display = "none";
-      document.getElementById("lblCallTenantName").textContent = "내 성명 (본인인증 임차인)";
-      document.getElementById("lblCallTenantPhone").textContent = "내 휴대폰 번호 (본인인증 연락처)";
-      btnCall.textContent = "📞 선택한 매물의 임대인 호출하여 공동계약 시작 요청";
-      if (u && (u.role === "tenant" || u.role === "prospect")) {
-        if (!document.getElementById("newTenantName").value && u.name) {
-          document.getElementById("newTenantName").value = u.name;
-        }
-        if (!document.getElementById("newTenantPhone").value && u.phone) {
-          document.getElementById("newTenantPhone").value = u.phone;
-        }
-      }
-    }
-  }
-
-  function renderIncomingCallBanner() {
-    const incoming = allSessions.filter(
-      (s) => s.status === "IN_PROGRESS" && s.call_status === "CALLING" && s.initiated_by_role !== currentRole
-    );
-    if (!incoming.length) {
-      elIncomingBox.style.display = "none";
-      elIncomingBox.innerHTML = "";
-      return;
-    }
-    const targetLabel = currentRole === "lessor" ? "임대인(갑)" : "임차인(을)";
-    elIncomingBox.style.display = "block";
-    elIncomingBox.innerHTML = `
-      <div style="font-weight:800; font-size:14.5px; margin-bottom:8px;">
-        🔔 ${targetLabel}님에게 도착한 공동계약 호출 (${incoming.length}건) — 응답하면 양측이 연결되어 계약이 시작됩니다!
-      </div>
-      <div style="display:grid; gap:8px;">
-        ${incoming.map((c) => {
-          const callerDesc = c.initiated_by_role === "lessor"
-            ? `임대인 ${Bass.escapeHtml(c.lessor_name)}`
-            : `임차인 ${Bass.escapeHtml((c.terms && c.terms.tenant_name) || "예비임차인")} (${Bass.escapeHtml((c.terms && c.terms.tenant_phone) || "-")})`;
-          return `
-            <div class="bass-row" style="justify-content:space-between; background:hsl(232 30% 10% / .65); padding:10px 12px; border-radius:10px; border:1px solid var(--border);">
-              <div style="font-size:13px;">
-                <strong>[${Bass.escapeHtml(c.building_name)} ${Bass.escapeHtml(c.room_no)}호]</strong>
-                · 호출자: <strong>${callerDesc}</strong> (본인인증 완료)
-              </div>
-              <button type="button" class="bass-btn bass-btn--primary bass-btn--sm js-respond-call" data-sid="${Bass.escapeHtml(c.id)}">
-                ✅ 호출 응답 및 공동계약 시작
-              </button>
-            </div>
-          `;
-        }).join("")}
-      </div>
-    `;
-
-    elIncomingBox.querySelectorAll(".js-respond-call").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        const sid = this.dataset.sid;
-        respondToIncomingCall(this, sid);
-      });
-    });
-  }
-
-  function respondToIncomingCall(btnEl, sessionId) {
-    const u = readLoggedUser();
-    Bass.withLock(btnEl, async () => {
-      const body = {
-        responder_role: currentRole,
-        responder_name: u && u.name ? u.name : "",
-        responder_phone: u && u.phone ? u.phone : "",
-        id_tenant: currentRole === "tenant" && u && (u.tenant_id || u.id) ? (u.tenant_id || u.id) : "",
-      };
-      const res = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sessionId)}/respond`, {
-        method: "POST",
-        body,
-      });
-      activeSessionId = res.session.id;
-      activeSession = res.session;
-      viewStep = 1;
-      lastRevision = null;
-      await loadSessionList();
-      Bass.updateAppAlert("success", res.message, "이제 Step 1에서 서로 신분증을 확인 체크하고 등기부등본을 확인해 주세요.");
-    }, "호출 응답 연결 중... ⏳");
-  }
-
-  function setRole(role) {
-    currentRole = role;
-    elRoleLessor.classList.toggle("is-active", role === "lessor");
-    elRoleTenant.classList.toggle("is-active", role === "tenant");
-    renderAuthIdentityBar();
-    syncCallPanelForRole();
-    renderIncomingCallBanner();
-    if (activeSession) renderWorkspace();
-  }
-
-  elRoleLessor.addEventListener("click", () => setRole("lessor"));
-  elRoleTenant.addEventListener("click", () => setRole("tenant"));
-
-  async function loadCandidateRoomsAndParticipants() {
+  // ───────────────────────── 데이터 ─────────────────────────
+  async function loadCandidateRooms() {
     const [roomData, partData] = await Promise.all([
       Bass.api(APP_ID, "/rooms"),
       Bass.api(APP_ID, "/participants"),
     ]);
     candidateRooms = roomData.rooms || [];
     participantTenants = partData.tenants || [];
-
-    const sel = document.getElementById("newRoomSelect");
-    sel.innerHTML = candidateRooms.map((r) => {
-      const tag = r.is_occupied ? "입주중(재계약용)" : "공실(즉시계약)";
-      return `<option value="${r.branch}|${r.room_no}">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.room_no)}호 — ${tag} (보 ${fmtWon(r.deposit)} / 월 ${fmtWon(r.monthly_rent)})</option>`;
-    }).join("");
-
-    if (preselectBranch && preselectRoom) {
-      const targetVal = `${preselectBranch}|${preselectRoom}`;
-      if (candidateRooms.some((r) => `${r.branch}|${r.room_no}` === targetVal)) {
-        sel.value = targetVal;
-        document.getElementById("callLaunchDetails").open = true;
-      }
-    }
-
-    const pSel = document.getElementById("participantTenantSelect");
-    pSel.innerHTML =
-      `<option value="">-- 직접 입력 또는 가입된 임차인 선택 --</option>` +
-      participantTenants.map((t, idx) =>
-        `<option value="${idx}">[${t.status === "PROSPECT" ? "예비임차인" : `${Bass.escapeHtml(t.room_no)}호 입주`}] ${Bass.escapeHtml(t.name)} (${Bass.escapeHtml(t.phone)})</option>`
-      ).join("");
-
-    pSel.addEventListener("change", () => {
-      if (pSel.value === "") return;
-      const picked = participantTenants[Number(pSel.value)];
-      if (picked) {
-        document.getElementById("newTenantName").value = picked.name || "";
-        document.getElementById("newTenantPhone").value = picked.phone || "";
-      }
-    });
-
-    sel.addEventListener("change", syncCallPanelForRole);
-    document.getElementById("newModeSelect").addEventListener("change", syncCallPanelForRole);
-    syncCallPanelForRole();
   }
+
+  async function loadRoleExtras() {
+    try {
+      if (currentRole === "tenant" && loggedUser.role === "tenant" && myTenantId) {
+        const d = await Bass.api("rent3_tenant", `/myhome/${encodeURIComponent(myTenantId)}`);
+        myhome = d && d.room ? d : null;
+      } else if (currentRole === "lessor") {
+        const q = myBranch ? `?branch=${encodeURIComponent(myBranch)}` : "";
+        lessorDash = await Bass.api("rent3_lessor", `/dashboard${q}`);
+      }
+    } catch (_) {
+      myhome = null;
+      lessorDash = null;
+    }
+  }
+
+  function isMine(s) {
+    if (currentRole === "lessor") return !myBranch || s.branch === myBranch;
+    const terms = s.terms || {};
+    const up = digits(loggedUser.phone);
+    return Boolean(
+      (s.id_tenant && s.id_tenant === myTenantId) ||
+      (up.length >= 8 && digits(terms.tenant_phone) === up) ||
+      (terms.tenant_name && terms.tenant_name === loggedUser.name)
+    );
+  }
+
+  const mySessions = () => allSessions.filter(isMine);
+  const incomingCalls = () =>
+    mySessions().filter((s) => s.status === "IN_PROGRESS" && s.call_status === "CALLING" && s.initiated_by_role !== currentRole);
+  const ongoingSessions = () =>
+    mySessions().filter((s) => s.status === "IN_PROGRESS" && !(s.call_status === "CALLING" && s.initiated_by_role !== currentRole));
 
   async function loadSessionList() {
     const data = await Bass.api(APP_ID, "/sessions");
-    document.getElementById("poolBadge").textContent = `JSON Pool v${data.pool_revision}`;
     allSessions = data.sessions || [];
-    renderIncomingCallBanner();
-
-    if (!allSessions.length) {
-      elSessionSelect.innerHTML = `<option value="">개설된 공동 계약 세션 없음</option>`;
-      return;
+    if (activeSessionId && !elContract.hidden) {
+      await fetchActiveSession(true);
+    } else {
+      renderHome(true);
     }
-    elSessionSelect.innerHTML = allSessions.map((s) => {
-      let stateTag = `Step ${s.current_step}/5`;
-      if (s.status === "COMPLETED") stateTag = "체결완료";
-      else if (s.call_status === "CALLING") {
-        stateTag = s.initiated_by_role === "lessor" ? "🔔 임차인 응답대기" : "🔔 임대인 응답대기";
-      }
-      return `<option value="${s.id}">[${stateTag}] ${Bass.escapeHtml(s.building_name)} ${Bass.escapeHtml(s.room_no)}호 — 임대인 ${Bass.escapeHtml(s.lessor_name)} ↔ 임차인 ${Bass.escapeHtml((s.terms && s.terms.tenant_name) || "응답대기")}</option>`;
-    }).join("");
+  }
 
-    if (!activeSessionId || !allSessions.some((s) => s.id === activeSessionId)) {
-      activeSessionId = allSessions[0].id;
+  // ───────────────────────── 홈 ─────────────────────────
+  function sessionTag(s) {
+    if (s.call_status === "CALLING") {
+      return s.initiated_by_role === currentRole ? `⏳ ${OTHER_KO} 응답 대기` : "🔔 응답 필요";
     }
-    elSessionSelect.value = activeSessionId;
+    return `단계 ${s.current_step}/5`;
+  }
+
+  function renderHome(force) {
+    if (!elContract.hidden) return;
+    const sig = JSON.stringify([
+      mySessions().map((s) => [s.id, s.call_status, s.current_step, s.status]),
+      candidateRooms.map((r) => `${r.room_no}${r.is_occupied ? 1 : 0}${r.is_published ? 1 : 0}`).join(), myhome ? myhome.pool_revision : 0, lessorDash ? lessorDash.pool_revision : 0,
+    ]);
+    if (!force && sig === homeSig) return;
+    if (elDlgHost.firstChild) return; // 입력 중인 창을 지우지 않는다
+    homeSig = sig;
+
+    const incoming = incomingCalls();
+    const ongoing = ongoingSessions();
+    let html = "";
+
+    if (incoming.length) {
+      html += `<div class="call-banner">
+        <div style="font-weight:800;margin-bottom:8px;">🔔 ${ROLE_KO[currentRole]}님께 계약 요청이 왔습니다</div>
+        ${incoming.map((c) => `
+          <div class="bass-row" style="justify-content:space-between;margin-top:6px;">
+            <div style="font-size:13px;"><strong>${esc(c.building_name)} ${esc(c.room_no)}호</strong><br>
+              <span class="bass-muted">${c.initiated_by_role === "lessor" ? `임대인 ${esc(c.lessor_name)}` : `임차인 ${esc((c.terms && c.terms.tenant_name) || "예비임차인")}`}</span></div>
+            <button class="bass-btn bass-btn--primary js-respond" data-sid="${esc(c.id)}" type="button">✅ 응답하고 시작</button>
+          </div>`).join("")}
+      </div>`;
+    }
+
+    if (ongoing.length) {
+      html += `<div class="bass-card" style="margin-bottom:14px;">
+        <h3 style="margin:0 0 8px;">진행 중인 계약</h3>
+        ${ongoing.map((s) => `
+          <div class="room-row">
+            <div class="room-row__main">
+              <div class="room-row__title">${esc(s.building_name)} ${esc(s.room_no)}호</div>
+              <div class="room-row__meta bass-muted">${sessionTag(s)} · ${esc((s.terms && s.terms.tenant_name) || "임차인 응답 대기")}</div>
+            </div>
+            <button class="bass-btn bass-btn--primary bass-btn--sm js-open" data-sid="${esc(s.id)}" type="button">이어서 진행 →</button>
+          </div>`).join("")}
+      </div>`;
+    }
+
+    html += currentRole === "lessor" ? homeLessorHtml() : homeTenantHtml();
+    elHomeBody.innerHTML = html;
+
+    elHomeBody.querySelectorAll(".js-respond").forEach((b) =>
+      b.addEventListener("click", function () { respondToIncomingCall(this, this.dataset.sid); }));
+    elHomeBody.querySelectorAll(".js-open").forEach((b) =>
+      b.addEventListener("click", () => openSession(b.dataset.sid)));
+    elHomeBody.querySelectorAll(".js-lessor-call").forEach((b) =>
+      b.addEventListener("click", () => openLessorCallDialog(b.dataset.room)));
+    const tBtn = document.getElementById("btnTenantContract");
+    if (tBtn) tBtn.addEventListener("click", () => openTenantPickerDialog());
+  }
+
+  function homeLessorHtml() {
+    const rooms = candidateRooms.filter((r) => !myBranch || r.branch === myBranch);
+    const unpaidByRoom = {};
+    if (lessorDash && Array.isArray(lessorDash.rooms)) {
+      lessorDash.rooms.forEach((r) => { unpaidByRoom[r.room_no] = r.ledger ? Number(r.ledger.total_unpaid || 0) : 0; });
+    }
+    const bname = rooms[0] ? rooms[0].building_name : "내 건물";
+    const occupied = rooms.filter((r) => r.is_occupied).length;
+    return `<div class="bass-card">
+      <h2 style="margin:0 0 4px;font-size:19px;">🏢 ${esc(bname)} 호실 현황</h2>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;">전체 ${rooms.length}실 · 입주 ${occupied}실 · 공실 ${rooms.length - occupied}실</div>
+      ${rooms.map((r) => {
+        const unpaid = unpaidByRoom[r.room_no] || 0;
+        const stateBadge = r.is_occupied
+          ? `<span class="bass-badge bass-badge--ok">입주중</span>`
+          : `<span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "매물 공개중" : "공실"}</span>`;
+        const unpaidBadge = r.is_occupied && unpaid > 0 ? ` <span class="bass-badge bass-badge--err">미납 ${fmtWon(unpaid)}</span>` : "";
+        return `<div class="room-row">
+          <div class="room-row__main">
+            <div class="room-row__title">${esc(r.room_no)}호 ${stateBadge}${unpaidBadge}</div>
+            <div class="room-row__meta bass-muted">${r.is_occupied ? `임차인 ${esc(r.active_tenant_name || "-")} · ` : ""}보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)}</div>
+          </div>
+          <button class="bass-btn bass-btn--primary bass-btn--sm js-lessor-call" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">${r.is_occupied ? "재계약" : "임대계약"}</button>
+        </div>`;
+      }).join("") || `<div class="bass-muted">등록된 호실이 없습니다.</div>`}
+    </div>`;
+  }
+
+  function homeTenantHtml() {
+    let pay = "";
+    if (myhome) {
+      const lg = myhome.ledger || { months: [], total_unpaid: 0 };
+      const r = myhome.room || {};
+      pay = `<div class="bass-card" style="margin-bottom:14px;">
+        <div class="bass-row" style="justify-content:space-between;margin-bottom:8px;">
+          <h3 style="margin:0;">🏠 ${esc((myhome.building && myhome.building.building_name) || "")} ${esc(r.room_no || "")}호 납부 현황</h3>
+          <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "완납"}</span>
+        </div>
+        ${(lg.months || []).slice(-6).map((m) => `
+          <div class="pay-row"><span><strong>${esc(m.ym)}</strong> · ${fmtWon(m.due)}</span>
+          <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${esc(m.note)}</span></div>`).join("")}
+      </div>`;
+    }
+    const incoming = incomingCalls();
+    const ongoing = ongoingSessions();
+    const label = incoming.length ? "🔔 임대인 요청 확인하기"
+      : ongoing.length ? "▶ 진행 중인 계약 이어서 하기"
+      : "📝 임대계약";
+    return `${pay}
+      <div class="bass-card">
+        <h3 style="margin:0 0 6px;">새 집 계약</h3>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;">공개된 매물을 고르면 임대인에게 계약 요청이 전달됩니다.</div>
+        <button id="btnTenantContract" class="bass-btn bass-btn--primary big-cta" type="button">${label}</button>
+      </div>`;
+  }
+
+  // ───────────────────────── 다이얼로그 ─────────────────────────
+  function openDialog(innerHtml) {
+    elDlgHost.innerHTML = `<div class="dlg-backdrop"><div class="dlg">${innerHtml}</div></div>`;
+    const bd = elDlgHost.firstChild;
+    bd.addEventListener("click", (e) => { if (e.target === bd) closeDialog(); });
+    return bd;
+  }
+  function closeDialog() {
+    elDlgHost.innerHTML = "";
+    renderHome(true);
+  }
+
+  function findRoom(val) {
+    const [br, no] = String(val).split("|");
+    return candidateRooms.find((x) => x.branch === br && x.room_no === no);
+  }
+
+  function openLessorCallDialog(val) {
+    const room = findRoom(val);
+    if (!room) return;
+    const renewal = room.is_occupied;
+    const prospects = participantTenants.filter((t) => t.status === "PROSPECT");
+    const bd = openDialog(`
+      <h3 style="margin:0 0 4px;">${esc(room.room_no)}호 ${renewal ? "재계약" : "임대계약"}</h3>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;">보증금 ${fmtWon(room.deposit)} · 월 ${fmtWon(room.monthly_rent)}</div>
+      ${renewal ? "" : `
+        <label class="bass-label">계약할 임차인 선택</label>
+        <select id="dlgTenantSel" class="bass-select">
+          <option value="">-- 직접 입력 --</option>
+          ${prospects.map((t) => `<option value="${esc(t.id)}">${esc(t.name)} (${esc(t.phone)})</option>`).join("")}
+        </select>`}
+      <label class="bass-label" style="margin-top:8px;">임차인 성명</label>
+      <input id="dlgName" class="bass-input" value="${renewal ? esc(room.active_tenant_name || "") : ""}" ${renewal ? "readonly" : ""}>
+      <label class="bass-label" style="margin-top:8px;">임차인 휴대폰</label>
+      <input id="dlgPhone" class="bass-input" value="${renewal ? esc(room.active_tenant_phone || "") : ""}" ${renewal ? "readonly" : ""} placeholder="010-0000-0000">
+      <div class="bass-row" style="margin-top:14px;gap:8px;">
+        <button id="dlgCancel" class="bass-btn" style="flex:1;" type="button">취소</button>
+        <button id="dlgGo" class="bass-btn bass-btn--primary" style="flex:2;" type="button">📞 임차인에게 계약 요청</button>
+      </div>`);
+    const sel = bd.querySelector("#dlgTenantSel");
+    if (sel) sel.addEventListener("change", () => {
+      const t = participantTenants.find((x) => x.id === sel.value);
+      bd.querySelector("#dlgName").value = t ? t.name : "";
+      bd.querySelector("#dlgPhone").value = t ? t.phone : "";
+    });
+    bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
+    bd.querySelector("#dlgGo").addEventListener("click", function () {
+      const name = bd.querySelector("#dlgName").value.trim();
+      const phone = bd.querySelector("#dlgPhone").value.trim();
+      const picked = sel && sel.value ? sel.value : (renewal && room.active_tenant_id ? room.active_tenant_id : "");
+      if (!name || !phone) { Bass.updateAppAlert("warning", "임차인 성명과 휴대폰을 입력해 주세요."); return; }
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/sessions/call", {
+          method: "POST",
+          body: { caller_role: "lessor", branch: room.branch, room_no: room.room_no,
+                  mode: renewal ? "RENEWAL" : "NEW", tenant_name: name, tenant_phone: phone, id_tenant: picked },
+        });
+        elDlgHost.innerHTML = "";
+        await afterCall(res);
+      }, "요청 보내는 중... ⏳");
+    });
+  }
+
+  function openTenantPickerDialog() {
+    const incoming = incomingCalls();
+    if (incoming.length) { openSession(incoming[0].id); return; }
+    const ongoing = ongoingSessions();
+    if (ongoing.length) { openSession(ongoing[0].id); return; }
+    const listings = candidateRooms.filter((r) => !r.is_occupied && r.is_published);
+    const bd = openDialog(`
+      <h3 style="margin:0 0 4px;">계약할 집 고르기</h3>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다.</div>
+      ${listings.length ? listings.map((r) => `
+        <div class="room-row">
+          <div class="room-row__main">
+            <div class="room-row__title">${esc(r.building_name)} ${esc(r.room_no)}호</div>
+            <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}</div>
+          </div>
+          <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">이 집으로</button>
+        </div>`).join("") : `<div class="bass-muted" style="padding:10px 0;">지금 공개된 매물이 없습니다.</div>`}
+      <button id="dlgCancel" class="bass-btn" style="width:100%;margin-top:8px;" type="button">닫기</button>`);
+    bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
+    bd.querySelectorAll(".js-pick").forEach((b) => b.addEventListener("click", function () {
+      const room = findRoom(this.dataset.room);
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/sessions/call", {
+          method: "POST",
+          body: { caller_role: "tenant", branch: room.branch, room_no: room.room_no, mode: "NEW",
+                  tenant_name: loggedUser.name || "", tenant_phone: loggedUser.phone || "", id_tenant: myTenantId },
+        });
+        elDlgHost.innerHTML = "";
+        await afterCall(res);
+      }, "요청 보내는 중... ⏳");
+    }));
+  }
+
+  async function afterCall(res) {
+    Bass.updateAppAlert("success", res.message);
+    const list = await Bass.api(APP_ID, "/sessions");
+    allSessions = list.sessions || [];
+    await openSession(res.session.id);
+  }
+
+  function respondToIncomingCall(btnEl, sessionId) {
+    Bass.withLock(btnEl, async () => {
+      const res = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sessionId)}/respond`, {
+        method: "POST",
+        body: {
+          responder_role: currentRole,
+          responder_name: loggedUser.name || "",
+          responder_phone: loggedUser.phone || "",
+          id_tenant: currentRole === "tenant" ? myTenantId : "",
+        },
+      });
+      Bass.updateAppAlert("success", res.message);
+      await openSession(res.session.id);
+    }, "응답 연결 중... ⏳");
+  }
+
+  // ───────────────────────── 계약 화면 ─────────────────────────
+  async function openSession(id) {
+    activeSessionId = id;
+    activeSession = null;
+    lastRevision = null;
+    lastCallStatus = null;
+    modalKey = "";
+    modalAnimating = false;
+    clearTimeout(modalTimer);
+    elCard.classList.remove("is-open", "is-closing");
+    elHome.hidden = true;
+    elContract.hidden = false;
+    window.scrollTo(0, 0);
     await fetchActiveSession(true);
   }
 
-  elSessionSelect.addEventListener("change", async () => {
-    activeSessionId = elSessionSelect.value;
-    lastRevision = null;
-    await fetchActiveSession(true);
-  });
-
-  document.getElementById("btnCallCounterparty").addEventListener("click", function () {
-    Bass.withLock(this, async () => {
-      const val = document.getElementById("newRoomSelect").value;
-      const [branch, roomNo] = val.split("|");
-      const mode = document.getElementById("newModeSelect").value;
-      const tenantName = document.getElementById("newTenantName").value.trim();
-      const tenantPhone = document.getElementById("newTenantPhone").value.trim();
-      const pIdx = document.getElementById("participantTenantSelect").value;
-      const pickedT = pIdx !== "" ? participantTenants[Number(pIdx)] : null;
-      const u = readLoggedUser();
-
-      let idTenant = "";
-      if (currentRole === "tenant" && u && (u.tenant_id || u.id)) {
-        idTenant = u.tenant_id || u.id;
-      } else if (pickedT && pickedT.id) {
-        idTenant = pickedT.id;
-      }
-
-      const res = await Bass.api(APP_ID, "/sessions/call", {
-        method: "POST",
-        body: {
-          caller_role: currentRole,
-          branch,
-          room_no: roomNo,
-          mode,
-          tenant_name: tenantName,
-          tenant_phone: tenantPhone,
-          id_tenant: idTenant,
-        },
-      });
-      activeSessionId = res.session.id;
-      viewStep = 1;
-      lastRevision = null;
-      document.getElementById("callLaunchDetails").open = false;
-      await loadSessionList();
-      Bass.updateAppAlert("success", res.message);
-    }, "상대방 호출 발송 중... ⏳");
-  });
-
-  document.getElementById("stepperBar").addEventListener("click", (e) => {
-    const pill = e.target.closest(".step-pill");
-    if (!pill || !activeSession) return;
-    if (activeSession.call_status === "CALLING") {
-      Bass.updateAppAlert("warning", "호출받은 상대방이 응답(연결)한 뒤 계약 단계를 진행할 수 있습니다.");
-      return;
-    }
-    viewStep = Number(pill.dataset.step);
-    renderWorkspace();
-  });
+  function goHome() {
+    activeSessionId = "";
+    activeSession = null;
+    modalKey = "";
+    clearTimeout(modalTimer);
+    elModal.hidden = true;
+    elContract.hidden = true;
+    elHome.hidden = false;
+    loadRoleExtras().then(() => loadSessionList()).catch(Bass.showError);
+  }
+  document.getElementById("btnBackHome").addEventListener("click", goHome);
 
   async function fetchActiveSession(forceRender = false) {
     if (!activeSessionId) return;
     const res = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(activeSessionId)}`);
-    document.getElementById("poolBadge").textContent = `JSON Pool v${res.pool_revision}`;
-    const prevStep = activeSession ? activeSession.current_step : 1;
+    const prevStep = activeSession ? activeSession.current_step : 0;
     const prevStatus = activeSession ? activeSession.status : "";
     activeSession = res.session;
     sealedContract = res.contract;
 
-    // 동기화된 최신 상태로 목록 중 해당 세션도 업데이트
     const idx = allSessions.findIndex((x) => x.id === activeSession.id);
-    if (idx >= 0) {
-      allSessions[idx] = activeSession;
-      renderIncomingCallBanner();
-    }
+    if (idx >= 0) allSessions[idx] = activeSession;
 
-    if (forceRender) {
-      viewStep = activeSession.current_step;
-    } else if (activeSession.current_step !== prevStep) {
-      viewStep = activeSession.current_step;
-    }
+    if (forceRender || activeSession.current_step !== prevStep) viewStep = activeSession.current_step;
 
     if (
       forceRender ||
@@ -356,43 +413,141 @@
     }
   }
 
+  // 단계별로 "내 차례"인지, 이미 마쳐서 상대를 기다려야 하는지 판단한다.
+  function stepProgress(s, step) {
+    switch (step) {
+      case 1: return {
+        lessor: s.lessor_checked_tenant_id && s.step1_lessor_confirmed,
+        tenant: s.tenant_checked_lessor_id && s.step1_tenant_locked,
+        label: "신분증 확인 · 등기부 확인",
+      };
+      case 2: return { lessor: s.step2_lessor_confirmed, tenant: s.step2_tenant_locked, label: "옵션·시설 점검" };
+      case 3: return { lessor: s.step3_lessor_agreed, tenant: s.step3_tenant_agreed, label: "계약 조건 동의" };
+      case 4: return { lessor: !!s.lessor_signature, tenant: !!s.tenant_signature, label: "전자서명" };
+      default: return { lessor: s.status === "COMPLETED", tenant: s.status === "COMPLETED", label: "계약 체결" };
+    }
+  }
+
+  function blockedMessage(s, step) {
+    if (currentRole !== "tenant") return "";
+    if (step === 1 && !s.step1_lessor_confirmed) return "임대인이 신분증 확인과 등기부등본 제시를 마치면 이 창이 열립니다.";
+    if (step === 2 && !s.step2_lessor_confirmed) return "임대인이 옵션·시설 점검표를 작성하면 이 창이 열립니다.";
+    if (step === 5) return "임대인이 계약금 입금을 확인하고 체결하면 계약이 완료됩니다.";
+    return "";
+  }
+
+  function planModal(s) {
+    if (s.call_status === "CALLING") {
+      const callee = currentRole !== s.initiated_by_role;
+      return { key: `${s.id}:call:${callee ? "respond" : "wait"}`, render: () => renderCallHandshake(s) };
+    }
+    const step = viewStep;
+    if (step === s.current_step) {
+      const prog = stepProgress(s, step);
+      const mine = prog[currentRole];
+      const blocked = blockedMessage(s, step);
+      if (mine || blocked) {
+        return { key: `${s.id}:s${step}:wait`, render: () => renderWaiting(s, step, prog, mine, blocked) };
+      }
+    }
+    return { key: `${s.id}:s${step}:act`, render: () => renderStepN(s, step) };
+  }
+
+  function renderStepN(s, step) {
+    if (step === 1) renderStep1(s);
+    else if (step === 2) renderStep2(s);
+    else if (step === 3) renderStep3(s);
+    else if (step === 4) renderStep4(s);
+    else renderStep5(s);
+  }
+
+  function renderWaiting(s, step, prog, mine, blocked) {
+    const row = (role, done) => `
+      <div class="wait-row">
+        <span>${role === "lessor" ? "🏢 임대인" : "🔑 임차인"}${role === currentRole ? " (나)" : ""}</span>
+        ${done ? `<span class="bass-badge bass-badge--ok">완료 ✓</span>` : `<span class="bass-badge bass-badge--warn">진행 중<span class="wait-dots"></span></span>`}
+      </div>`;
+    elStepPanel.innerHTML = `
+      <h3 style="margin:0 0 6px;">${mine ? "✅ 내 차례를 마쳤습니다" : `⏳ ${OTHER_KO}의 차례입니다`}</h3>
+      <p class="bass-muted" style="font-size:13px;margin:0 0 6px;">
+        ${esc(blocked || `${OTHER_KO}이 [${prog.label}]을 마치면 자동으로 다음 단계가 열립니다. 이 화면을 닫지 말고 기다려 주세요.`)}
+      </p>
+      ${row("lessor", prog.lessor)}${row("tenant", prog.tenant)}`;
+  }
+
+  function positionModal() {
+    const head = document.getElementById("cvHead");
+    elModal.style.top = `${Math.round(head.getBoundingClientRect().bottom)}px`;
+  }
+  window.addEventListener("resize", positionModal);
+  window.addEventListener("scroll", positionModal, { passive: true });
+  // 알림 배너가 생기고 사라질 때도 모달이 진행 차트 바로 아래에 붙어 있게 한다.
+  if (window.ResizeObserver) new ResizeObserver(positionModal).observe(document.body);
+
+  function openCardAnim() {
+    elCard.classList.remove("is-closing", "is-open");
+    void elCard.offsetWidth;
+    elCard.classList.add("is-open");
+  }
+
+  function switchModal(s) {
+    if (modalAnimating) return;
+    const plan = planModal(s);
+    elModal.hidden = false;
+    positionModal();
+    if (plan.key === modalKey) { plan.render(); return; }
+    const first = modalKey === "";
+    modalKey = plan.key;
+    if (first) { plan.render(); openCardAnim(); return; }
+    // 기존 창이 닫히고, 다음 창이 열린다
+    modalAnimating = true;
+    elCard.classList.remove("is-open");
+    elCard.classList.add("is-closing");
+    clearTimeout(modalTimer);
+    modalTimer = setTimeout(() => {
+      modalAnimating = false;
+      if (!activeSession) return;
+      planModal(activeSession).render();
+      openCardAnim();
+      elModal.scrollTop = 0;
+    }, 210);
+  }
+
   function renderWorkspace() {
     if (!activeSession) return;
-    elWorkspace.style.display = "block";
+    elHome.hidden = true;
+    elContract.hidden = false;
     const s = activeSession;
-    document.getElementById("wsTitle").textContent =
-      `${s.building_name} ${s.room_no}호 (${s.mode === "RENEWAL" ? "재계약" : "신규 직거래 공동계약"})`;
+    document.getElementById("wsTitle").textContent = `${s.building_name} ${s.room_no}호`;
     document.getElementById("wsMeta").textContent =
-      `소재지: ${s.building_address} · 임대인: ${s.lessor_name} ↔ 임차인: ${(s.terms && s.terms.tenant_name) || "응답 대기"} · 현재 조작 시점: ${currentRole === "lessor" ? "🏢 임대인(갑)" : "🔑 임차인(을)"}`;
-    document.getElementById("revBadge").textContent = `Revision v${s.revision}`;
+      `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}`;
 
     const callBadge = document.getElementById("callStateBadge");
-    if (s.call_status === "CALLING") {
+    if (s.status === "COMPLETED") {
+      callBadge.className = "bass-badge bass-badge--ok";
+      callBadge.textContent = "체결 완료";
+    } else if (s.call_status === "CALLING") {
       callBadge.className = "bass-badge bass-badge--warn";
-      callBadge.textContent = "🔔 호출 응답 대기 중";
+      callBadge.textContent = "응답 대기";
     } else {
       callBadge.className = "bass-badge bass-badge--ok";
-      callBadge.textContent = "🤝 양측 호출·응답 연결됨";
+      callBadge.textContent = "연결됨";
     }
 
     document.querySelectorAll(".step-pill").forEach((pill) => {
       const n = Number(pill.dataset.step);
-      pill.classList.toggle("is-now", s.call_status !== "CALLING" && n === viewStep);
-      pill.classList.toggle("is-done", s.call_status !== "CALLING" && (n < s.current_step || s.status === "COMPLETED"));
+      const connected = s.call_status !== "CALLING";
+      pill.classList.toggle("is-now", connected && s.status !== "COMPLETED" && n === s.current_step);
+      pill.classList.toggle("is-done", connected && (n < s.current_step || s.status === "COMPLETED"));
     });
 
-    if (s.call_status === "CALLING") {
-      renderCallHandshake(s);
+    if (s.status === "COMPLETED") {
+      elModal.hidden = true;
+      modalKey = "";
       renderSealedPaper();
       return;
     }
-
-    if (viewStep === 1) renderStep1(s);
-    else if (viewStep === 2) renderStep2(s);
-    else if (viewStep === 3) renderStep3(s);
-    else if (viewStep === 4) renderStep4(s);
-    else renderStep5(s);
-
+    switchModal(s);
     renderSealedPaper();
   }
 
@@ -447,7 +602,6 @@
           <div style="font-weight:800; margin-bottom:4px;">📡 ${Bass.escapeHtml(calleeKo)}님의 호출 응답을 기다리고 있습니다...</div>
           <div class="bass-muted" style="font-size:12.5px;">
             상대방이 로그인 후 <strong>[호출 응답 및 공동계약 시작]</strong>을 클릭하면 자동으로 ① 신분증 확인 및 등기부등본 열람 화면으로 전환됩니다.
-            (단일 브라우저에서 시연하려면 상단의 <strong>${currentRole === "lessor" ? "🔑 임차인(을) 로그인 화면" : "🏢 임대인(갑) 로그인 화면"}</strong> 버튼을 눌러 응답해 보세요!)
           </div>
         </div>
       `}
@@ -998,14 +1152,41 @@
 
   (async function init() {
     try {
-      setRole(currentRole);
-      await loadCandidateRoomsAndParticipants();
-      await loadSessionList();
-      setInterval(() => {
-        if (!document.hidden && activeSessionId && !isEditingForm) {
-          fetchActiveSession(false).catch(() => {});
-        }
+      await loadCandidateRooms();
+      await loadRoleExtras();
+      const list = await Bass.api(APP_ID, "/sessions");
+      allSessions = list.sessions || [];
+      renderHome(true);
+
+      const sid = params.get("session");
+      const found = sid ? allSessions.find((x) => x.id === sid || x.session_code === sid) : null;
+      if (found) {
+        await openSession(found.id);
+      } else if (params.get("call_branch") && params.get("call_room")) {
+        const val = `${params.get("call_branch")}|${params.get("call_room")}`;
+        if (currentRole === "lessor") openLessorCallDialog(val);
+        else openTenantPickerDialog();
+      }
+
+      setInterval(async () => {
+        if (document.hidden) return;
+        try {
+          if (!elContract.hidden) {
+            if (activeSessionId && !isEditingForm) await fetchActiveSession(false);
+          } else if (!elDlgHost.firstChild) {
+            const l = await Bass.api(APP_ID, "/sessions");
+            allSessions = l.sessions || [];
+            renderHome(false);
+          }
+        } catch (_) { /* 다음 주기에 재시도 */ }
       }, 2500);
+
+      setInterval(async () => {
+        if (document.hidden || !elContract.hidden) return;
+        await loadRoleExtras();
+        await loadCandidateRooms().catch(() => {});
+        renderHome(false);
+      }, 15000);
     } catch (err) {
       Bass.showError(err);
     }

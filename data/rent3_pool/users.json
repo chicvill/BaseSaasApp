@@ -1,9 +1,9 @@
 {
   "pool": "rent3_pool",
   "collection": "users",
-  "revision": 11,
-  "updated_at": "2026-11-04T06:28:04",
-  "count": 9,
+  "revision": 12,
+  "updated_at": "2026-11-08T07:54:19",
+  "count": 10,
   "items": [
     {
       "id": "admin_master",
@@ -183,6 +183,29 @@
       "status": "ACTIVE",
       "password": "1212",
       "username": "baejongbong",
+      "_kind": "tenant"
+    },
+    {
+      "id": "imcha",
+      "created_at": "2026-11-08T07:54:19",
+      "updated_at": "2026-11-08T07:54:19",
+      "name": "임차인 (imcha)",
+      "phone": "010-0000-1212",
+      "email": "",
+      "account_number": "",
+      "business_number": "",
+      "car_number": "",
+      "car_model": "",
+      "doorlock_pwd": "1234*",
+      "branch": "main",
+      "id_building": "",
+      "current_room_id": "",
+      "room_no": "",
+      "checked_in": false,
+      "checked_in_at": "",
+      "checkin_memo": "",
+      "status": "PROSPECT",
+      "password": "1212",
       "_kind": "tenant"
     }
   ]

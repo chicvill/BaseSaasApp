@@ -22,35 +22,38 @@
   <main class="app-shell">
     <div id="app-alert"></div>
 
-    <div class="nav-pills">
-      <a class="bass-btn bass-btn--sm" href="/rent3/pool.html">🌐 통합 Data Pool 허브</a>
-      <a class="bass-btn bass-btn--sm" href="/rent3_lessor/">🏢 임대인 앱</a>
-      <a class="bass-btn bass-btn--sm" href="/rent3_tenant/">🔑 임차인 앱</a>
-      <a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/">🤝 공동 임대계약 앱</a>
-      <a class="bass-btn bass-btn--sm" href="manual.html">📘 매뉴얼</a>
-    </div>
-
-    <header class="bass-card">
+        <header class="bass-card">
       <div class="bass-row" style="justify-content:space-between;">
         <div>
-          <h1 style="font-size:21px;margin-bottom:4px;">👑 플랫폼 총괄 관리인 거버넌스 센터</h1>
-          <div class="bass-muted" style="font-size:13px;">중개수수료 0원 합법 SaaS 과금 · 전 지점 포트폴리오 NOI · RTMS 감시 · 공동 JSON Data Pool 감사</div>
+          <h1 style="font-size:21px;margin-bottom:4px;">👑 관리인 · 가맹비 수납</h1>
+          <div class="bass-muted" style="font-size:13px;">임대인 가맹 현황과 월 가맹비 납부를 확인합니다.</div>
         </div>
-        <span id="poolBadge" class="bass-badge bass-badge--ok bass-badge--pulse">JSON Pool v-</span>
+        <span id="poolBadge" hidden></span>
+        <button type="button" data-r3-burger>☰ 더보기</button>
       </div>
       <div id="kpiGrid" class="kpi-grid"></div>
     </header>
 
     <nav class="tabs" id="tabBar">
-      <button class="bass-btn tab-btn is-active" data-tab="lessors" type="button">🏢 임대인 가맹 · 월 SaaS 사용료</button>
-      <button class="bass-btn tab-btn" data-tab="portfolio" type="button">📊 전 지점 건물 포트폴리오 & RTMS</button>
-      <button class="bass-btn tab-btn" data-tab="pool" type="button">📂 실시간 JSON Data Pool 탐색기</button>
+      <button class="bass-btn tab-btn is-active" data-tab="lessors" type="button">🏢 임대인 가맹 · 월 가맹비</button>
+
+      <aside class="r3-drawer" data-r3-drawer>
+        <div class="r3-drawer__group">관제 도구</div>
+        <button class="bass-btn tab-btn" data-tab="portfolio" type="button">📊 전 지점 건물 현황</button>
+        <button class="bass-btn tab-btn" data-tab="pool" type="button">📂 Data Pool 탐색기</button>
+        <div class="r3-drawer__group">그 밖의</div>
+        <a href="manual.html">📘 이용 매뉴얼</a>
+        <a href="/rent3/pool.html">🌐 Data Pool 관제</a>
+        <a href="/rent3_lessor/">🏢 임대인 앱</a>
+        <a href="/rent3_tenant/">🔑 임차인 앱</a>
+      </aside>
     </nav>
 
     <section id="tabContent"></section>
   </main>
 
   <script src="/shared/ui/bass.js"></script>
+  <script src="/rent3/hamburger.js"></script>
   <script src="/rent3/session-bar.js"></script>
   <script src="app.js"></script>
 </body>

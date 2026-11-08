@@ -1,18 +1,18 @@
 {
   "pool_name": "rent3_pool",
-  "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\Rent3_Standalone\\data\\rent3_pool",
-  "total_revision": 898,
-  "total_objects": 133,
-  "last_updated_collection": "rooms",
-  "updated_at": "2026-11-04T07:10:18",
+  "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
+  "total_revision": 2277,
+  "total_objects": 144,
+  "last_updated_collection": "",
+  "updated_at": "2026-11-08T09:40:06",
   "collections": {
     "users": {
       "file": "users.json",
       "exists": true,
-      "count": 9,
-      "revision": 11,
-      "size_bytes": 5794,
-      "updated_at": "2026-11-04T06:28:04"
+      "count": 10,
+      "revision": 12,
+      "size_bytes": 6416,
+      "updated_at": "2026-11-08T07:54:19"
     },
     "buildings": {
       "file": "buildings.json",
@@ -25,18 +25,18 @@
     "rooms": {
       "file": "rooms.json",
       "exists": true,
-      "count": 30,
-      "revision": 47,
-      "size_bytes": 64636,
-      "updated_at": "2026-11-04T07:10:18"
+      "count": 32,
+      "revision": 73,
+      "size_bytes": 68982,
+      "updated_at": "2026-11-08T08:02:57"
     },
     "cosign_sessions": {
       "file": "cosign_sessions.json",
       "exists": true,
-      "count": 1,
-      "revision": 13,
-      "size_bytes": 3960,
-      "updated_at": "2026-11-04T06:26:08"
+      "count": 4,
+      "revision": 17,
+      "size_bytes": 15740,
+      "updated_at": "2026-11-08T09:34:51"
     },
     "contracts": {
       "file": "contracts.json",
@@ -65,10 +65,10 @@
     "ops": {
       "file": "ops.json",
       "exists": true,
-      "count": 7,
-      "revision": 8,
-      "size_bytes": 4586,
-      "updated_at": "2026-11-03T22:19:30"
+      "count": 12,
+      "revision": 13,
+      "size_bytes": 7926,
+      "updated_at": "2026-11-08T09:34:51"
     }
   }
 }

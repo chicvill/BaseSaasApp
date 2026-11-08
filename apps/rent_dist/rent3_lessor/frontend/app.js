@@ -95,57 +95,6 @@
     const rooms = dash.rooms || [];
     const noticeRooms = dash.expiry_notice_rooms || [];
     elTabContent.innerHTML = `
-      ${noticeRooms.length > 0 ? `
-        <div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
-          <div class="bass-row" style="justify-content:space-between;">
-            <div>
-              <h3 style="margin:0;">⚖️ 만기 6~2개월 전 전출계획 확인 · 연장 재계약 예고 대상 (${noticeRooms.length}실)</h3>
-              <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
-                주택임대차보호법 제6조에 따라 만기 <strong>6개월 ~ 2개월 전</strong>에 전출계획을 확인하고, 전출의사가 없을 때 조건 변경(5% 상한) 또는 동일조건 연장 재계약을 예고해야 묵시적 갱신 분쟁을 예방합니다.
-              </p>
-            </div>
-            <span class="bass-badge bass-badge--warn">법정 통지구간 도래</span>
-          </div>
-          <div class="bass-row" style="margin-top:8px;flex-wrap:wrap;gap:6px;">
-            ${noticeRooms.map((nr) => `
-              <span class="bass-badge ${nr.check_status === "STAY_CONFIRMED" || nr.check_status === "RENEWAL_PREVIEWED" || nr.check_status === "RENEWAL_ACKNOWLEDGED" ? "bass-badge--ok" : "bass-badge--warn"}">
-                ${Bass.escapeHtml(nr.room_no)}호 ${Bass.escapeHtml(nr.tenant_name)} · 만기 ${Bass.escapeHtml(nr.expiry_date)} (D-${nr.days_to_expiry} · 통지마감 ${Bass.escapeHtml(nr.notice_deadline_date)})
-              </span>
-            `).join("")}
-          </div>
-        </div>
-      ` : ""}
-
-      <div class="bass-card" style="margin-bottom:14px;">
-        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
-          <div>
-            <h3 style="margin:0;">🔔 매월 임대료 납입일(=입주일) 3일 전 통보 · 납입일 1일 후 미납 통보</h3>
-            <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
-              입주일 일자를 매월 납입일로 자동 산정하여 <strong>납입일 3일 전(D-3)</strong> 사전 안내 및 <strong>납입일 1일 후(D+1)</strong> 미납 호실 독촉 통보를 발송합니다 (완납 호실 오발송 원천 차단).
-            </p>
-          </div>
-          <div class="bass-row" style="flex-wrap:wrap;gap:8px;">
-            <label style="font-size:12px;">기준일
-              <input id="billingRefDate" type="date" class="bass-input" style="width:145px;" value="${Bass.escapeHtml(dash.as_of_date || dash.today || "")}">
-            </label>
-            <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;">
-              <input id="chkCatchupOverdue" type="checkbox" checked>
-              납입일+1일 이후 미통보 미납 포함
-            </label>
-            <button id="btnAutoDispatchBilling" class="bass-btn bass-btn--primary" type="button">⚡ D-3 납입통보 · D+1 미납통보 일괄 실행</button>
-          </div>
-        </div>
-        ${(dash.recent_billing_notices || []).length > 0 ? `
-          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);display:flex;flex-wrap:wrap;gap:6px;">
-            ${(dash.recent_billing_notices || []).slice(0, 6).map((bn) => `
-              <span class="bass-badge ${bn.status === "RESOLVED_PAID" ? "bass-badge--ok" : (bn.notice_type === "OVERDUE_1D" ? "bass-badge--err" : "bass-badge--info")}">
-                ${bn.notice_type === "OVERDUE_1D" ? "🚨 미납통보" : "🔔 3일전통보"} · ${Bass.escapeHtml(bn.room_no)}호 ${Bass.escapeHtml(bn.tenant_name)} (${Bass.escapeHtml(bn.billing_ym)} · ${fmtWon(bn.amount_due)} · ${bn.status === "RESOLVED_PAID" ? "완납해소" : (bn.status === "ACKNOWLEDGED" ? "세입자확인" : "발송됨")})
-              </span>
-            `).join("")}
-          </div>
-        ` : ""}
-      </div>
-
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>📩 은행 입금 알림문자 붙여넣기 (자동 파싱 & FIFO 순차 상계)</h3>
         <p class="bass-muted" style="font-size:13px;">가장 오래된 미납월부터 순차 상계하며, 동일 입금 재등록은 자동 차단(황색 배너)됩니다.</p>
@@ -304,6 +253,63 @@
           </div>
         `;
       }).join("")}
+
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 안내 (만기 예고 · 납입일 사전/미납 통보)</summary>
+        <div style="margin-top:12px;">
+      ${noticeRooms.length > 0 ? `
+        <div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
+          <div class="bass-row" style="justify-content:space-between;">
+            <div>
+              <h3 style="margin:0;">⚖️ 만기 6~2개월 전 전출계획 확인 · 연장 재계약 예고 대상 (${noticeRooms.length}실)</h3>
+              <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
+                주택임대차보호법 제6조에 따라 만기 <strong>6개월 ~ 2개월 전</strong>에 전출계획을 확인하고, 전출의사가 없을 때 조건 변경(5% 상한) 또는 동일조건 연장 재계약을 예고해야 묵시적 갱신 분쟁을 예방합니다.
+              </p>
+            </div>
+            <span class="bass-badge bass-badge--warn">법정 통지구간 도래</span>
+          </div>
+          <div class="bass-row" style="margin-top:8px;flex-wrap:wrap;gap:6px;">
+            ${noticeRooms.map((nr) => `
+              <span class="bass-badge ${nr.check_status === "STAY_CONFIRMED" || nr.check_status === "RENEWAL_PREVIEWED" || nr.check_status === "RENEWAL_ACKNOWLEDGED" ? "bass-badge--ok" : "bass-badge--warn"}">
+                ${Bass.escapeHtml(nr.room_no)}호 ${Bass.escapeHtml(nr.tenant_name)} · 만기 ${Bass.escapeHtml(nr.expiry_date)} (D-${nr.days_to_expiry} · 통지마감 ${Bass.escapeHtml(nr.notice_deadline_date)})
+              </span>
+            `).join("")}
+          </div>
+        </div>
+      ` : ""}
+
+      <div class="bass-card" style="margin-bottom:14px;">
+        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div>
+            <h3 style="margin:0;">🔔 매월 임대료 납입일(=입주일) 3일 전 통보 · 납입일 1일 후 미납 통보</h3>
+            <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
+              입주일 일자를 매월 납입일로 자동 산정하여 <strong>납입일 3일 전(D-3)</strong> 사전 안내 및 <strong>납입일 1일 후(D+1)</strong> 미납 호실 독촉 통보를 발송합니다 (완납 호실 오발송 원천 차단).
+            </p>
+          </div>
+          <div class="bass-row" style="flex-wrap:wrap;gap:8px;">
+            <label style="font-size:12px;">기준일
+              <input id="billingRefDate" type="date" class="bass-input" style="width:145px;" value="${Bass.escapeHtml(dash.as_of_date || dash.today || "")}">
+            </label>
+            <label style="font-size:12.5px;display:flex;align-items:center;gap:5px;cursor:pointer;">
+              <input id="chkCatchupOverdue" type="checkbox" checked>
+              납입일+1일 이후 미통보 미납 포함
+            </label>
+            <button id="btnAutoDispatchBilling" class="bass-btn bass-btn--primary" type="button">⚡ D-3 납입통보 · D+1 미납통보 일괄 실행</button>
+          </div>
+        </div>
+        ${(dash.recent_billing_notices || []).length > 0 ? `
+          <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);display:flex;flex-wrap:wrap;gap:6px;">
+            ${(dash.recent_billing_notices || []).slice(0, 6).map((bn) => `
+              <span class="bass-badge ${bn.status === "RESOLVED_PAID" ? "bass-badge--ok" : (bn.notice_type === "OVERDUE_1D" ? "bass-badge--err" : "bass-badge--info")}">
+                ${bn.notice_type === "OVERDUE_1D" ? "🚨 미납통보" : "🔔 3일전통보"} · ${Bass.escapeHtml(bn.room_no)}호 ${Bass.escapeHtml(bn.tenant_name)} (${Bass.escapeHtml(bn.billing_ym)} · ${fmtWon(bn.amount_due)} · ${bn.status === "RESOLVED_PAID" ? "완납해소" : (bn.status === "ACKNOWLEDGED" ? "세입자확인" : "발송됨")})
+              </span>
+            `).join("")}
+          </div>
+        ` : ""}
+      </div>
+
+        </div>
+      </details>
     `;
 
     document.getElementById("btnPasteSms").addEventListener("click", function () {

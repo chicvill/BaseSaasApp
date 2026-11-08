@@ -1,9 +1,9 @@
 {
   "pool": "rent3_pool",
   "collection": "rooms",
-  "revision": 47,
-  "updated_at": "2026-11-04T07:10:18",
-  "count": 30,
+  "revision": 73,
+  "updated_at": "2026-11-08T08:02:57",
+  "count": 32,
   "items": [
     {
       "id": "room_main_201",
@@ -355,63 +355,11 @@
     {
       "id": "room_main_203",
       "created_at": "2026-10-29T19:17:01",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "203",
-      "name": "203호 (채광 최상 남향 즉시입주)",
-      "floor": 2,
-      "area_sqm": 23.8,
-      "room_category": "주거용 원룸",
-      "vat_applicable": false,
-      "id_tenant": "",
-      "active_contract_id": "",
-      "doorlock_pwd": "2030*",
-      "registry_checked": true,
-      "registry_info": {
-        "issue_number": "1101-2026-884920",
-        "owner_name": "김임대",
-        "mortgage_amount": 0,
-        "clean_title": true,
-        "verified_at": "2026-10-29"
-      },
-      "status_description": "신규 천장형 에어컨·빌트인 냉장고 완비, 복비 0원 직거래 즉시입주",
-      "option_list": [
-        {
-          "item": "시스템 에어컨",
-          "quantity": 1,
-          "condition": "정상(최상)"
-        },
-        {
-          "item": "드럼 세탁기",
-          "quantity": 1,
-          "condition": "정상(양호)"
-        },
-        {
-          "item": "빌트인 냉장고",
-          "quantity": 1,
-          "condition": "정상(최상)"
-        },
-        {
-          "item": "인덕션 쿡탑",
-          "quantity": 1,
-          "condition": "정상"
-        },
-        {
-          "item": "디지털 도어락",
-          "quantity": 1,
-          "condition": "신규 교체"
-        }
-      ],
-      "lease_type": "월세",
-      "pay_timing": "후불",
-      "deposit": 5000000,
-      "monthly_rent": 290000,
-      "maintenance_fee": 150000,
-      "available_from": "즉시입주",
-      "pre_moveout_notice": false,
-      "is_published": true,
-      "images": [],
       "move_in_date": null,
       "payments": [
         [
@@ -492,6 +440,59 @@
           0
         ]
       ],
+      "name": "203호 (채광 최상 남향 즉시입주)",
+      "floor": 2,
+      "area_sqm": 23.8,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "2030*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-10-29"
+      },
+      "status_description": "신규 천장형 에어컨·빌트인 냉장고 완비, 복비 0원 직거래 즉시입주",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 5000000,
+      "monthly_rent": 290000,
+      "maintenance_fee": 150000,
+      "available_from": "즉시입주",
+      "pre_moveout_notice": false,
+      "is_published": true,
+      "images": [],
       "_kind": "room"
     },
     {
@@ -849,10 +850,28 @@
     {
       "id": "room_main_204",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T08:02:57",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "204",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.2",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.3",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "204호",
       "floor": 2,
       "area_sqm": 23.0,
@@ -869,7 +888,7 @@
         "clean_title": true,
         "verified_at": "2026-10-31"
       },
-      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "status_description": "신규 등록 풀옵션 호실",
       "option_list": [
         {
           "item": "시스템 에어컨",
@@ -900,38 +919,32 @@
       "lease_type": "월세",
       "pay_timing": "후불",
       "deposit": 5000000,
-      "monthly_rent": 290000,
-      "maintenance_fee": 150000,
+      "monthly_rent": 500000,
+      "maintenance_fee": 50000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
-      "is_published": false,
+      "is_published": true,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.2",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.3",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_205",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "205",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.23",
+          250000,
+          150000,
+          0
+        ]
+      ],
       "name": "205호",
       "floor": 2,
       "area_sqm": 23.0,
@@ -985,25 +998,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.23",
-          250000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_301",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "301",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.28",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "301호",
       "floor": 3,
       "area_sqm": 23.0,
@@ -1057,25 +1071,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.28",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_302",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "302",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.18",
+          0,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.18",
+          0,
+          150000,
+          0
+        ]
+      ],
       "name": "302호",
       "floor": 3,
       "area_sqm": 23.0,
@@ -1122,39 +1144,40 @@
       ],
       "lease_type": "월세",
       "pay_timing": "후불",
-      "deposit": 5000000,
+      "deposit": 40000000,
       "monthly_rent": 0,
       "maintenance_fee": 150000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.18",
-          0,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.18",
-          0,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_303",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "303",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.12",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.14",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "303호",
       "floor": 3,
       "area_sqm": 23.0,
@@ -1208,32 +1231,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.12",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.14",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_304",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "304",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.8",
+          340000,
+          50000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.1",
+          340000,
+          50000,
+          0
+        ]
+      ],
       "name": "304호",
       "floor": 3,
       "area_sqm": 23.0,
@@ -1280,39 +1304,40 @@
       ],
       "lease_type": "월세",
       "pay_timing": "후불",
-      "deposit": 5000000,
+      "deposit": 10000000,
       "monthly_rent": 340000,
       "maintenance_fee": 50000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.8",
-          340000,
-          50000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.1",
-          340000,
-          50000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_305",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "305",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.15",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.15",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "305호",
       "floor": 3,
       "area_sqm": 23.0,
@@ -1359,13 +1384,23 @@
       ],
       "lease_type": "월세",
       "pay_timing": "후불",
-      "deposit": 5000000,
+      "deposit": 3000000,
       "monthly_rent": 290000,
       "maintenance_fee": 150000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_401",
+      "created_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "",
+      "room_no": "401",
       "move_in_date": null,
       "payments": [
         [
@@ -1383,15 +1418,6 @@
           0
         ]
       ],
-      "_kind": "room"
-    },
-    {
-      "id": "room_main_401",
-      "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
-      "branch": "main",
-      "id_building": "bldg_main",
-      "room_no": "401",
       "name": "401호",
       "floor": 4,
       "area_sqm": 23.0,
@@ -1445,32 +1471,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.15",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.15",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_402",
       "created_at": "2026-10-31T07:33:29",
-      "updated_at": "2026-10-31T07:33:29",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "402",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.28",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "402호",
       "floor": 4,
       "area_sqm": 23.0,
@@ -1516,33 +1536,41 @@
         }
       ],
       "lease_type": "월세",
-      "pay_timing": "후불",
-      "deposit": 5000000,
+      "pay_timing": "선불",
+      "deposit": 3000000,
       "monthly_rent": 290000,
       "maintenance_fee": 150000,
       "available_from": "즉시입주",
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.28",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_403",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:18",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "403",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.20",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.19",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "403호",
       "floor": 4,
       "area_sqm": 23.0,
@@ -1596,32 +1624,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_404",
+      "created_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:18",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "",
+      "room_no": "404",
       "move_in_date": null,
       "payments": [
         [
           202601,
-          "2026.1.20",
+          "2026.1.24",
           290000,
           150000,
           0
         ],
         [
           202610,
-          "2026.10.19",
+          "2026.10.6",
           290000,
           150000,
           0
         ]
       ],
-      "_kind": "room"
-    },
-    {
-      "id": "room_main_404",
-      "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
-      "branch": "main",
-      "id_building": "bldg_main",
-      "room_no": "404",
       "name": "404호",
       "floor": 4,
       "area_sqm": 23.0,
@@ -1675,32 +1704,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_405",
+      "created_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "",
+      "room_no": "405",
       "move_in_date": null,
       "payments": [
         [
           202601,
-          "2026.1.24",
+          "2026.1.25",
           290000,
           150000,
           0
         ],
         [
           202610,
-          "2026.10.6",
+          "2026.10.5",
           290000,
           150000,
           0
         ]
       ],
-      "_kind": "room"
-    },
-    {
-      "id": "room_main_405",
-      "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
-      "branch": "main",
-      "id_building": "bldg_main",
-      "room_no": "405",
       "name": "405호",
       "floor": 4,
       "area_sqm": 23.0,
@@ -1754,32 +1784,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.25",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.5",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_501",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "501",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.2.1",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "501호",
       "floor": 5,
       "area_sqm": 23.0,
@@ -1833,25 +1857,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.2.1",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_502",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "502",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.15",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.15",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "502호",
       "floor": 5,
       "area_sqm": 23.0,
@@ -1905,32 +1937,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.15",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.15",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_503",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "503",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.24",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "503호",
       "floor": 5,
       "area_sqm": 23.0,
@@ -1984,25 +2010,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.24",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_504",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "504",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.1",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.1",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "504호",
       "floor": 5,
       "area_sqm": 23.0,
@@ -2056,32 +2090,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.1",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.1",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_505",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "505",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.26",
+          250000,
+          150000,
+          0
+        ]
+      ],
       "name": "505호",
       "floor": 5,
       "area_sqm": 23.0,
@@ -2127,7 +2155,7 @@
         }
       ],
       "lease_type": "월세",
-      "pay_timing": "후불",
+      "pay_timing": "선불",
       "deposit": 5000000,
       "monthly_rent": 250000,
       "maintenance_fee": 150000,
@@ -2135,25 +2163,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.26",
-          250000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_601",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "601",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.23",
+          350000,
+          90000,
+          0
+        ]
+      ],
       "name": "601호",
       "floor": 6,
       "area_sqm": 23.0,
@@ -2207,25 +2236,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.23",
-          350000,
-          90000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_602",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "602",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.2",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.1",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "602호",
       "floor": 6,
       "area_sqm": 23.0,
@@ -2279,32 +2316,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.2",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.1",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_603",
       "created_at": "2026-10-31T07:33:30",
-      "updated_at": "2026-10-31T07:33:30",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "603",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.27",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "603호",
       "floor": 6,
       "area_sqm": 23.0,
@@ -2358,25 +2389,33 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.27",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_604",
       "created_at": "2026-10-31T07:33:31",
-      "updated_at": "2026-10-31T07:33:31",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "604",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.14",
+          290000,
+          150000,
+          0
+        ],
+        [
+          202610,
+          "2026.10.14",
+          290000,
+          150000,
+          0
+        ]
+      ],
       "name": "604호",
       "floor": 6,
       "area_sqm": 23.0,
@@ -2430,32 +2469,26 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.14",
-          290000,
-          150000,
-          0
-        ],
-        [
-          202610,
-          "2026.10.14",
-          290000,
-          150000,
-          0
-        ]
-      ],
       "_kind": "room"
     },
     {
       "id": "room_main_605",
       "created_at": "2026-10-31T07:33:31",
-      "updated_at": "2026-10-31T07:33:31",
+      "updated_at": "2026-11-08T07:54:19",
       "branch": "main",
       "id_building": "bldg_main",
+      "building_name": "",
       "room_no": "605",
+      "move_in_date": null,
+      "payments": [
+        [
+          202601,
+          "2026.1.26",
+          290000,
+          100000,
+          0
+        ]
+      ],
       "name": "605호",
       "floor": 6,
       "area_sqm": 23.0,
@@ -2509,16 +2542,136 @@
       "pre_moveout_notice": false,
       "is_published": false,
       "images": [],
-      "move_in_date": null,
-      "payments": [
-        [
-          202601,
-          "2026.1.26",
-          290000,
-          100000,
-          0
-        ]
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_702",
+      "created_at": "2026-11-08T07:54:19",
+      "updated_at": "2026-11-08T07:54:19",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "",
+      "room_no": "702",
+      "move_in_date": "",
+      "payments": [],
+      "name": "702호 (주거용 원룸)",
+      "floor": 7,
+      "area_sqm": 23.0,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "2580*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-11-08"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
       ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 6000000,
+      "monthly_rent": 290000,
+      "maintenance_fee": 250000,
+      "available_from": "즉시입주",
+      "pre_moveout_notice": false,
+      "is_published": false,
+      "images": [],
+      "_kind": "room"
+    },
+    {
+      "id": "room_main_703",
+      "created_at": "2026-11-08T07:54:19",
+      "updated_at": "2026-11-08T07:54:19",
+      "branch": "main",
+      "id_building": "bldg_main",
+      "building_name": "",
+      "room_no": "703",
+      "move_in_date": "",
+      "payments": [],
+      "name": "703호 (주거용 원룸)",
+      "floor": 7,
+      "area_sqm": 23.0,
+      "room_category": "주거용 원룸",
+      "vat_applicable": false,
+      "id_tenant": "",
+      "active_contract_id": "",
+      "doorlock_pwd": "2580*",
+      "registry_checked": true,
+      "registry_info": {
+        "issue_number": "1101-2026-884920",
+        "owner_name": "김임대",
+        "mortgage_amount": 0,
+        "clean_title": true,
+        "verified_at": "2026-11-08"
+      },
+      "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+      "option_list": [
+        {
+          "item": "시스템 에어컨",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "드럼 세탁기",
+          "quantity": 1,
+          "condition": "정상(양호)"
+        },
+        {
+          "item": "빌트인 냉장고",
+          "quantity": 1,
+          "condition": "정상(최상)"
+        },
+        {
+          "item": "인덕션 쿡탑",
+          "quantity": 1,
+          "condition": "정상"
+        },
+        {
+          "item": "디지털 도어락",
+          "quantity": 1,
+          "condition": "신규 교체"
+        }
+      ],
+      "lease_type": "월세",
+      "pay_timing": "후불",
+      "deposit": 5000000,
+      "monthly_rent": 290000,
+      "maintenance_fee": 150000,
+      "available_from": "즉시입주",
+      "pre_moveout_notice": false,
+      "is_published": false,
+      "images": [],
       "_kind": "room"
     }
   ]
