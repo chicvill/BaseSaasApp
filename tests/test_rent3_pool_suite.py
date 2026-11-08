@@ -1795,5 +1795,35 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             prov.__dict__.pop("_send", None)
 
 
+    def test_30_no_sensitive_fields_in_public_or_cross_party_listings(self):
+        """30. 도어락 비밀번호·등기 정보·입주자 연락처·타 계약 세션이 공개 목록이나 타인에게 내려가지 않는다."""
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "구경꾼", "phone": "01066660501", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"])
+        chic, sunho = self._login("chic"), self._login("sunho")
+        secret_keys = ("doorlock_pwd", "registry_info", "id_tenant", "active_contract_id")
+
+        for hdr in (self.NOAUTH, ten):   # 비로그인·임차인
+            for r in c.get("/api/rent3_tenant/listings", headers=hdr).json()["listings"]:
+                for k in secret_keys:
+                    self.assertNotIn(k, r, f"공개 매물 목록에 {k} 노출")
+                if r.get("active_cosign_session"):
+                    self.assertEqual(set(r["active_cosign_session"]), {"id", "session_code"})
+        for r in c.get("/api/rent3_contract/rooms", headers=ten).json()["rooms"]:
+            for k in secret_keys:
+                self.assertNotIn(k, r)
+            self.assertEqual(r["active_tenant_phone"], "")
+        self.assertEqual(c.get("/api/rent3_contract/participants", headers=ten).json()["tenants"], [])
+
+        # 임대인: 자기 지점은 전체, 다른 지점은 가려진다
+        rooms = c.get("/api/rent3_contract/rooms", headers=sunho).json()["rooms"]
+        main = [r for r in rooms if r["branch"] == "main"]
+        own = [r for r in rooms if r["branch"] == "sunho"]
+        self.assertTrue(main and all("doorlock_pwd" not in r and r["active_tenant_phone"] == "" for r in main))
+        self.assertTrue(own and any("doorlock_pwd" in r for r in own))
+        self.assertTrue(c.get("/api/rent3_contract/participants", headers=chic).json()["tenants"])
+
+
 if __name__ == "__main__":
     unittest.main()

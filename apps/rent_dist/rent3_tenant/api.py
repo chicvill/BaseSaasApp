@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.errors import DomainError, NotFound
-from apps.rent_dist._rent3_core.authz import any_user, api_headers, staff_only, tenant_scope
+from apps.rent_dist._rent3_core.authz import any_user, api_headers, public_room, staff_only, tenant_scope
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -99,13 +99,13 @@ def list_open_listings(branch: Optional[str] = None):
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)
         cards.append({
-            **r.model_dump(),
+            **public_room(r.model_dump()),  # 도어락·등기·입주자 정보는 공개 목록에 싣지 않는다
             "is_pre_moveout_listing": r.is_occupied and r.pre_moveout_notice,
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lessor.name if lessor else "임대인",
             "lessor_phone": lessor.phone if lessor else "",
-            "active_cosign_session": sess.model_dump() if sess else None,
+            "active_cosign_session": {"id": sess.id, "session_code": sess.session_code} if sess else None,
         })
 
     return {

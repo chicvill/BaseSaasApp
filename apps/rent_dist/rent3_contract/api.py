@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import franchise as fr
-from apps.rent_dist._rent3_core.authz import api_headers, claims_from, contract_scope, is_admin, session_party_ok
+from apps.rent_dist._rent3_core.authz import api_headers, claims_from, public_room, contract_scope, is_admin, session_party_ok
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -135,8 +135,11 @@ def get_status():
 
 
 @router.get("/rooms")
-def list_candidate_rooms(branch: Optional[str] = None):
+def list_candidate_rooms(request: Request, branch: Optional[str] = None):
     ensure_pool_seeded()
+    c = claims_from(request) or {}
+    staff_all = is_admin(c)
+    my_branch = normalize_branch_id(c.get("b")) if c.get("r") in ("lessor", "branch_admin") else None
     rooms = Room.find(branch=normalize_branch_id(branch)) if branch else Room.all()
     bldgs = {b.id: b for b in Building.all()}
     lessors_by_branch = {lsr.branch: lsr for lsr in Lessor.all()}
@@ -147,15 +150,15 @@ def list_candidate_rooms(branch: Optional[str] = None):
         lsr = lessors_by_branch.get(r.branch)
         occ_t = tenants_by_room.get(r.id)
         items.append({
-            **r.model_dump(),
+            **(r.model_dump() if (staff_all or r.branch == my_branch) else public_room(r.model_dump())),
             "is_occupied": r.is_occupied,
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lsr.name if lsr else "건물 소유주",
             "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "")),
-            "active_tenant_id": occ_t.id if occ_t else "",
-            "active_tenant_name": occ_t.name if occ_t else "",
-            "active_tenant_phone": occ_t.phone if occ_t else "",
+            **({"active_tenant_id": occ_t.id if occ_t else "", "active_tenant_name": occ_t.name if occ_t else "",
+                "active_tenant_phone": occ_t.phone if occ_t else ""} if (staff_all or r.branch == my_branch) else
+               {"active_tenant_id": "", "active_tenant_name": "", "active_tenant_phone": ""}),
         })
     return {
         "success": True,
@@ -164,9 +167,12 @@ def list_candidate_rooms(branch: Optional[str] = None):
 
 
 @router.get("/participants")
-def list_participants():
-    """본인인증 가입된 임대인·임차인(예비임차인 포함) 목록 조회 — 매물 선택 후 상대방 호출 시 활용."""
+def list_participants(request: Request):
+    """임대인이 상대방을 고를 때 쓰는 가입자 목록. 임대인·관리자에게만 내려주고, 임차인에게는 빈 목록을 준다(타인 연락처 보호)."""
     ensure_pool_seeded()
+    c = claims_from(request) or {}
+    if not (is_admin(c) or c.get("r") in ("lessor", "branch_admin")):
+        return {"success": True, "lessors": [], "tenants": []}
     lessors = [
         {
             "id": lsr.id,
