@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from apps.rent_dist._rent3_core.pool import now_iso
+
 from core.errors import DomainError, NotFound
 from apps.rent_dist._rent3_core.authz import any_user, api_headers, public_room, staff_only, tenant_scope
 from apps.rent_dist._rent3_core import (
@@ -195,7 +197,7 @@ def get_myhome(tenant_id: str):
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
         "tenant": tenant_d,
-        "keys": {"locked": keys_locked, "message": LOCKED_TEXT if keys_locked else "",
+        "keys": {"registry_check": (ct.balance_registry if ct else {}), "locked": keys_locked, "message": LOCKED_TEXT if keys_locked else "",
                  "balance_due": balance if keys_locked else 0,
                  "move_in_date": ct.move_in_date if ct else "", "released_at": ct.keys_released_at if ct else ""},
         "building": bldg_d,
@@ -212,6 +214,29 @@ def get_myhome(tenant_id: str):
         "pending_checkout": checkouts[0].model_dump() if checkouts else None,
         "chats": [c.model_dump() for c in chats],
     }
+
+
+class BalanceRegistryReq(BaseModel):
+    changed: bool                 # 직접 열람해 보니 계약일 이후 변동이 있다
+    issue_number: str = ""        # 이번에 열람한 등기부의 발급확인번호
+
+
+@router.post("/myhome/{tenant_id}/balance-registry-check", dependencies=[Depends(tenant_scope)])
+def balance_registry_check(tenant_id: str, req: BalanceRegistryReq):
+    """잔금일 등기부 재열람 결과. 임차인이 인터넷등기소에서 직접 열람한 뒤 변동 여부를 기록한다.
+    변동 없음이어야 임대인이 도어락·공동현관 정보를 교부할 수 있다. 변동이 있으면 잠금이 유지되고 임대인 화면에 표시된다."""
+    t = Tenant.get(tenant_id) or Tenant.first(phone=tenant_id)
+    if not t:
+        raise NotFound(f"임차인('{tenant_id}') 정보를 찾을 수 없습니다.")
+    room = Room.get(t.current_room_id) if t.current_room_id else None
+    ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
+    if ct is None or ct.keys_released is not False:
+        raise DomainError("잔금일 등기부 확인 대상 계약이 아닙니다.", hint="출입 정보 교부 전의 새 계약에서만 사용합니다.")
+    ct.balance_registry = {"checked_at": now_iso(), "changed": bool(req.changed), "issue_number": req.issue_number.strip()}
+    ct.save(action="balance_registry_changed_reported" if req.changed else "balance_registry_checked", app_source=APP_SRC)
+    msg = ("등기부 변동을 신고했습니다. 임대인·본사 확인 전까지 잔금 납부를 보류하세요." if req.changed
+           else "잔금일 등기부 확인을 기록했습니다. 잔금 입금 후 임대인이 확인하면 출입 정보가 열립니다.")
+    return {"success": True, "message": msg, "balance_registry": ct.balance_registry}
 
 
 @router.post("/myhome/{tenant_id}/pay", dependencies=[Depends(tenant_scope)])

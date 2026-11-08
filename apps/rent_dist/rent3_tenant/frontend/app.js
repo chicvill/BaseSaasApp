@@ -140,7 +140,18 @@
         <div class="field-grid" style="margin-top:14px;">
           <div class="listing-card" style="margin:0;">
             <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
-            ${(data.keys && data.keys.locked) ? `<div style="margin:6px 0;padding:8px 10px;border-left:4px solid var(--warn);font-size:12.5px;line-height:1.6;">🔒 <strong>도어락·공동현관은 입주 당일 잔금 완납 후 공개됩니다.</strong><br>잔금 ${fmtWon(data.keys.balance_due)} · 입주일 ${Bass.escapeHtml(data.keys.move_in_date || "-")}<br>임대인이 잔금 입금을 확인하면 이 화면에 바로 열립니다.</div>` : ""}
+            ${(data.keys && data.keys.locked) ? `<div style="margin:6px 0;padding:8px 10px;border-left:4px solid var(--warn);font-size:12.5px;line-height:1.6;">🔒 <strong>도어락·공동현관은 입주 당일 잔금 완납 후 공개됩니다.</strong><br>잔금 ${fmtWon(data.keys.balance_due)} · 입주일 ${Bass.escapeHtml(data.keys.move_in_date || "-")}<br>임대인이 잔금 입금을 확인하면 이 화면에 바로 열립니다.
+              <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
+                <strong>잔금을 보내기 전에 등기부를 직접 열람하세요.</strong> 계약 이후 근저당·압류가 새로 생겼는지 확인하는 마지막 기회입니다.<br>
+                ${data.keys.registry_check && data.keys.registry_check.checked_at
+                  ? (data.keys.registry_check.changed ? "⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요." : "✅ 잔금일 등기부 확인 완료 (" + Bass.escapeHtml(String(data.keys.registry_check.checked_at).slice(0, 16).replace("T", " ")) + ")")
+                  : "아직 확인하지 않았습니다."}
+                <div class="bass-row" style="margin-top:6px;gap:6px;">
+                  <a class="bass-btn bass-btn--sm" href="https://www.iros.go.kr" target="_blank" rel="noopener">인터넷등기소 열기 ↗</a>
+                  <button class="bass-btn bass-btn--sm bass-btn--primary btn-bal-reg" data-changed="false" type="button">변동 없음 확인</button>
+                  <button class="bass-btn bass-btn--sm btn-bal-reg" data-changed="true" type="button">변동 있음 신고</button>
+                </div>
+              </div></div>` : ""}
             <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
               <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
             </div>
@@ -290,7 +301,7 @@
           <table>
             <tr><th>임대인(공급자)</th><td>${Bass.escapeHtml(cert.lessor.name)} (사업자 ${Bass.escapeHtml(cert.lessor.business_number)})</td><th>임차인</th><td>${Bass.escapeHtml(cert.tenant.name)} (${Bass.escapeHtml(cert.tenant.room_no)}호)</td></tr>
             <tr><th>임대 목적물 주소</th><td colspan="3">${Bass.escapeHtml(cert.lessor.address)}</td></tr>
-            <tr><th>계약기간 / 확정일자</th><td>${Bass.escapeHtml(cert.contract.move_in_date)} ~ ${Bass.escapeHtml(cert.contract.expiry_date)}</td><th>확정일자 번호</th><td>${Bass.escapeHtml(cert.contract.fixed_date_no)}</td></tr>
+            <tr><th>계약기간 / 접수번호</th><td>${Bass.escapeHtml(cert.contract.move_in_date)} ~ ${Bass.escapeHtml(cert.contract.expiry_date)}</td><th>계약 접수번호</th><td>${Bass.escapeHtml(cert.contract.fixed_date_no)} <span class="bass-muted" style="font-size:11px;">(접수번호, 확정일자 아님)</span></td></tr>
             <tr><th>연간 총 납입액</th><td><strong>${fmtWon(cert.total_paid)}</strong></td><th>17% 예상 세액공제</th><td><strong>${fmtWon(cert.estimated_tax_credit_17pct)}</strong></td></tr>
           </table>
           <table>
@@ -308,6 +319,17 @@
       selectedTenantId = ev.target.value;
       loadMyhome().catch(Bass.showError);
     });
+
+    document.querySelectorAll(".btn-bal-reg").forEach((btn) => btn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const changed = btn.dataset.changed === "true";
+        if (!changed && !window.confirm("인터넷등기소에서 등기부를 직접 열람했고, 계약 이후 근저당·압류 등 새로 생긴 권리가 없는 것을 확인했습니까?")) return;
+        const num = changed ? "" : (window.prompt("열람한 등기부의 발급확인번호 (선택)") || "");
+        const res = await Bass.api(APP_ID, `/myhome/${t.id}/balance-registry-check`, { method: "POST", body: { changed, issue_number: num } });
+        Bass.updateAppAlert(changed ? "warning" : "success", res.message);
+        await loadMyhome();
+      });
+    }));
 
     document.getElementById("btnToggleDl").addEventListener("click", () => {
       showDoorlock = !showDoorlock;

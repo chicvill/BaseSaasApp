@@ -1945,6 +1945,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         rel = f"/api/rent3_lessor/rooms/{room.id}/release-keys"
         self.assertEqual(c.post(rel, headers=th, json={"balance_checked": True}).status_code, 403)          # 임차인은 못 연다
         self.assertEqual(c.post(rel, headers=self._login("sunho"), json={"balance_checked": True}).status_code, 403)  # 다른 지점도
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 잔금일 등기부 확인 전
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "issue_number": "1101-2026-555"}).status_code, 200)
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": False}).status_code, 400)        # 입금 확인 표시 필수
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 이미 교부
@@ -2036,6 +2039,90 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         sid2 = self._complete_contract(chic, self._as(reg2["token"]), reg2["user"]["id"], "916", "사진임차2", "010-6666-0802")
         late = c.post(f"{base}/sessions/{sid2}/facility-photos", json={"role": "lessor", "photo_data_url": png})
         self.assertIn(late.status_code, (400, 409))
+
+
+    def test_35_prefill_before_meeting_and_balance_day_registry(self):
+        """35. 대면 전 사전 작성(임대인=조건, 임차인=이메일·차량번호, 상대 연결 전까지만) + 잔금일 등기부 변동 신고 시 교부 불가."""
+        c, base = self.client, "/api/rent3_contract"
+        chic = self._login("chic")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사전임차", "phone": "01066660901", "password": "Pw123456"}).json()
+        ten, tid = self._as(reg["token"]), reg["user"]["id"]
+        who = {"name": "사전임차", "phone": "01066660901", "birth": "940404"}
+        c.post(f"{base}/identity/start", headers=ten, json=who)
+        c.post(f"{base}/identity/confirm", headers=ten, json={**who, "code": "000000"})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "917", "is_published": True, "deposit": 7000000, "monthly_rent": 450000})
+        sid = c.post(f"{base}/sessions/call", headers=chic, json={
+            "caller_role": "lessor", "branch": "main", "room_no": "917", "mode": "NEW",
+            "tenant_name": "사전임차", "tenant_phone": "010-6666-0901", "id_tenant": tid}).json()["session"]["id"]
+        pf = f"{base}/sessions/{sid}/prefill"
+
+        # 임대인: 조건 사전 작성(매물 값이 이미 채워져 있고 입주일 등만 바꾼다)
+        cur = c.get(f"{base}/sessions/{sid}", headers=chic).json()["session"]["terms"]
+        self.assertEqual((cur["deposit"], cur["monthly_rent"]), (7000000, 450000))   # 매물 등록 값이 자동으로 채워짐
+        r = c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-11-25", "contract_deposit": 500000, "special_terms": "반려동물 불가"}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["session"]["terms"]["move_in_date"], "2026-11-25")
+        self.assertTrue(r.json()["session"]["draft_prefilled_at"])
+        # 검증: 날짜 형식·계약금>보증금·허용 항목 밖
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "내일"}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"contract_deposit": 99999999}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"tenant_name": "바꿈"}}).status_code, 400)
+        # 임차인: 이메일·차량번호만 (금액·입주일은 못 바꾼다), 임대인 행세·타 지점 불가
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "tenant", "updates": {"tenant_email": "a@b.kr", "tenant_car_number": "12가3456"}}).status_code, 200)
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "tenant", "updates": {"deposit": 1}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "lessor", "updates": {"deposit": 1}}).status_code, 403)
+        self.assertEqual(c.post(pf, headers=self._login("sunho"), json={"role": "lessor", "updates": {"deposit": 1}}).status_code, 403)
+
+        # 연결되면 사전 작성은 닫히고(이후 변경은 ③단계 합의), 사전 작성한 값은 그대로 이어진다
+        c.post(f"{base}/sessions/{sid}/respond", headers=ten, json={"responder_role": "tenant", "responder_name": "사전임차", "responder_phone": "010-6666-0901", "id_tenant": tid})
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-12-01"}}).status_code, 400)
+        t2 = c.get(f"{base}/sessions/{sid}", headers=chic).json()["session"]["terms"]
+        self.assertEqual((t2["move_in_date"], t2["tenant_email"], t2["special_terms"]), ("2026-11-25", "a@b.kr", "반려동물 불가"))
+
+        # 사전 작성한 초안은 72시간까지 보존된다(일반 호출은 24시간)
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import CoSignSession
+        sid2 = c.post(f"{base}/sessions/call", headers=chic, json={
+            "caller_role": "lessor", "branch": "main", "room_no": "918", "mode": "NEW", "tenant_name": "사전임차", "tenant_phone": "010-6666-0901", "id_tenant": tid}).json()["session"]["id"] \
+            if c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "918", "is_published": True}).status_code == 200 else ""
+        s2 = CoSignSession.get(sid2)
+        later = datetime.fromisoformat(s2.updated_at) + timedelta(hours=30)
+        self.assertTrue(s2.is_idle_expired(later))                       # 사전 작성 전: 24시간 규칙
+        c.post(f"{base}/sessions/{sid2}/prefill", headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-12-05"}})
+        s2 = CoSignSession.get(sid2)
+        self.assertFalse(s2.is_idle_expired(datetime.fromisoformat(s2.updated_at) + timedelta(hours=30)))
+        self.assertTrue(s2.is_idle_expired(datetime.fromisoformat(s2.updated_at) + timedelta(hours=73)))
+
+    def test_36_balance_day_registry_change_blocks_key_release(self):
+        """36. 잔금일 등기부에서 변동을 신고하면 교부 불가, 다시 '변동 없음'으로 확인돼야 교부된다."""
+        c = self.client
+        chic = self._login("chic")
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "919", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "잔금등기", "phone": "01066660902", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        self._complete_contract(chic, th, tid, "919", "잔금등기", "010-6666-0902")
+        room = Room.first(branch="main", room_no="919")
+        rel = f"/api/rent3_lessor/rooms/{room.id}/release-keys"
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        # 다른 임차인은 남의 계약에 확인을 기록할 수 없다
+        other = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "남", "phone": "01066660903", "password": "Pw123456"}).json()
+        self.assertEqual(c.post(chk, headers=self._as(other["token"]), json={"changed": False}).status_code, 403)
+        self.assertEqual(c.post(chk, headers=chic, json={"changed": False}).status_code, 403)   # 임대인이 대신 확인 불가
+
+        self.assertEqual(c.post(chk, headers=th, json={"changed": True, "issue_number": "1101-2026-777"}).status_code, 200)
+        r = c.post(rel, headers=chic, json={"balance_checked": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("변동", r.json()["message"])
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertTrue(home["keys"]["locked"])                                  # 변동 신고 중에는 잠금 유지
+        self.assertTrue(home["keys"]["registry_check"]["changed"])
+        # 해소 후 임차인이 다시 변동 없음으로 확인하면 교부 가능
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False}).status_code, 200)
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
+        # 교부 후에는 더 기록할 수 없다
+        self.assertEqual(c.post(chk, headers=th, json={"changed": True}).status_code, 400)
 
 
 if __name__ == "__main__":

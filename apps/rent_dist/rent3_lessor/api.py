@@ -461,6 +461,13 @@ def release_keys(room_id: str, req: ReleaseKeysReq, request: Request):
     ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
     if ct is None or ct.keys_released is not False:
         raise DomainError("교부 대기 중인 계약이 없습니다.", hint="이미 교부했거나 잠금 대상이 아닌 계약입니다.")
+    br = ct.balance_registry or {}
+    if br.get("changed"):
+        raise DomainError("임차인이 잔금일 등기부에서 변동을 신고했습니다. 교부할 수 없습니다.",
+                          hint="등기부를 함께 확인해 변동이 해소되거나 합의된 뒤 임차인이 다시 '변동 없음'으로 확인해야 합니다. 필요하면 본사에 문의하세요.")
+    if not br.get("checked_at"):
+        raise DomainError("임차인의 잔금일 등기부 확인이 아직 없습니다.",
+                          hint="잔금일에 임차인이 인터넷등기소에서 직접 등기부를 열람하고 변동 없음을 확인해야 합니다.")
     if not req.balance_checked:
         raise DomainError("본인 계좌의 실제 입금 내역에서 잔금을 직접 확인해야 교부할 수 있습니다.",
                           hint="임차인이 보여 주는 이체 완료 화면은 위조될 수 있습니다.")

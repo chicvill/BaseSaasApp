@@ -675,6 +675,7 @@
       `}
     `;
 
+    renderPrefill(s);
     if (!isCalleeView) renderJoinQr(s, calleeKo);
 
     const btnResp = document.getElementById("btnRespondMain");
@@ -683,6 +684,54 @@
         respondToIncomingCall(this, s.id);
       });
     }
+  }
+
+  // ───────────── 대면 전 사전 작성 (상대가 연결하기 전) ─────────────
+  // 임대인: 계약 조건(매물 등록 값이 이미 채워져 있음), 임차인: 이메일·차량번호.
+  // 만나서는 입주일만 확인하면 되게 하되, 조건은 ③단계에서 양쪽이 다시 보고 동의해야 효력이 생긴다.
+  function renderPrefill(s) {
+    const t = s.terms || {};
+    const box = document.createElement("div");
+    box.className = "bass-card";
+    box.style.cssText = "padding:14px;margin-top:12px;";
+    const head = `<div style="font-weight:800;margin-bottom:4px;">📝 대면 전 미리 작성</div>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.55;margin-bottom:8px;">미리 적어 두면 만나서는 <strong>입주일 정도만 확인</strong>하면 됩니다. 여기 적은 내용은 초안이며, 만난 뒤 ③단계에서 양쪽이 조건을 다시 보고 동의해야 계약이 진행됩니다. (상대가 연결하기 전까지만 고칠 수 있고, 작성 후 72시간 안에 만나지 않으면 자동으로 해제됩니다)</div>`;
+    if (currentRole === "lessor") {
+      box.innerHTML = head + `
+        <div class="field-grid">
+          <div><label class="bass-label">입주 예정일(잔금일)</label><input id="pfMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
+          <div><label class="bass-label">계약 기간(개월)</label><input id="pfTerm" type="number" class="bass-input" value="${Number(t.lease_term_months || 12)}"></div>
+          <div><label class="bass-label">보증금(원)</label><input id="pfDeposit" type="number" class="bass-input" value="${Number(t.deposit || 0)}"></div>
+          <div><label class="bass-label">계약금(원, 보증금 안)</label><input id="pfConDep" type="number" class="bass-input" value="${Number(t.contract_deposit || 0)}"></div>
+          <div><label class="bass-label">월세(원)</label><input id="pfRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
+          <div><label class="bass-label">관리비(원)</label><input id="pfFee" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
+          <div><label class="bass-label">월세 납부</label><select id="pfPay" class="bass-select"><option value="후불" ${t.pay_timing === "후불" ? "selected" : ""}>후불</option><option value="선불" ${t.pay_timing === "선불" ? "selected" : ""}>선불</option></select></div>
+        </div>
+        <label class="bass-label" style="margin-top:8px;">특약사항</label>
+        <textarea id="pfSpecial" class="bass-input" rows="3">${esc(t.special_terms || "")}</textarea>
+        <button id="btnPrefillSave" class="bass-btn bass-btn--primary" style="width:100%;margin-top:8px;" type="button">💾 사전 작성 저장</button>`;
+    } else {
+      box.innerHTML = head + `
+        <div class="field-grid">
+          <div><label class="bass-label">이메일</label><input id="pfEmail" type="email" class="bass-input" value="${esc(t.tenant_email || "")}"></div>
+          <div><label class="bass-label">차량번호(선택)</label><input id="pfCar" class="bass-input" value="${esc(t.tenant_car_number || "")}"></div>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">이름·연락처는 본인인증된 값으로 고정됩니다. 금액과 입주일은 임대인이 정하고, 만나서 함께 확인합니다.</div>
+        <button id="btnPrefillSave" class="bass-btn bass-btn--primary" style="width:100%;margin-top:8px;" type="button">💾 사전 작성 저장</button>`;
+    }
+    elStepPanel.appendChild(box);
+    document.getElementById("btnPrefillSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const v = (id) => document.getElementById(id).value;
+        const updates = currentRole === "lessor"
+          ? { move_in_date: v("pfMoveIn"), lease_term_months: Number(v("pfTerm")), deposit: Number(v("pfDeposit")), contract_deposit: Number(v("pfConDep")),
+              monthly_rent: Number(v("pfRent")), maintenance_fee: Number(v("pfFee")), pay_timing: v("pfPay"), special_terms: v("pfSpecial") }
+          : { tenant_email: v("pfEmail").trim(), tenant_car_number: v("pfCar").trim() };
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/prefill`, { method: "POST", body: { role: currentRole, updates } });
+        activeSession = res.session;
+        Bass.updateAppAlert("success", res.message);
+      });
+    });
   }
 
   // ───────────── 대면 참여 QR (호출한 쪽 대기 화면) ─────────────
@@ -1608,7 +1657,7 @@
       <div class="bass-card" style="padding:14px;margin:12px 0;">
         <div><strong>입금 계좌:</strong> ${Bass.escapeHtml(s.lessor_account)} (예금주: ${Bass.escapeHtml(s.lessor_name)})</div>
         <div><strong>당일 계약금:</strong> ${fmtWon(t.contract_deposit)} / <strong>보증금 총액:</strong> ${fmtWon(t.deposit)} / <strong>월세+관리비:</strong> ${fmtWon(Number(t.monthly_rent || 0) + Number(t.maintenance_fee || 0))} (${Bass.escapeHtml(t.pay_timing)})</div>
-        ${s.fixed_date_no ? `<div style="margin-top:6px;color:var(--ok);font-weight:700;">🏛️ 대법원 확정일자 자동 부여 완료: ${Bass.escapeHtml(s.fixed_date_no)}</div>` : ""}
+        ${s.fixed_date_no ? `<div style="margin-top:6px;color:var(--ok);font-weight:700;">📄 계약 접수번호: ${Bass.escapeHtml(s.fixed_date_no)}<div class="bass-muted" style="font-weight:400;font-size:12px;">이 번호는 이 서비스의 접수번호이며 <strong>법적 확정일자가 아닙니다.</strong> 입주일에 전입신고와 함께 주민센터(또는 등기소)에서 확정일자를 받아야 보증금이 보호됩니다.</div></div>` : ""}
       </div>
       ${done ? `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--warn);font-size:13px;line-height:1.7;">
         <strong>💰 잔금 안내</strong><br>
@@ -1712,7 +1761,7 @@
             <div style="font-size:12px;">계약번호: ${Bass.escapeHtml(c.id)} · 체결일: ${Bass.escapeHtml(c.contract_date)}</div>
           </div>
           <div style="border:2px solid #b91c1c;color:#b91c1c;padding:6px 10px;font-weight:800;font-size:12px;text-align:center;">
-            확정일자 부여필<br>${Bass.escapeHtml(c.fixed_date_no)}
+            계약 접수번호<br>${Bass.escapeHtml(c.fixed_date_no)}<br><span style="font-size:10px;font-weight:600;">(확정일자 아님)</span>
           </div>
         </div>
 

@@ -74,6 +74,11 @@ class Step2ConfirmReq(BaseModel):
     facility_notes: Optional[str] = None
 
 
+class PrefillReq(BaseModel):
+    role: str = "lessor"
+    updates: Dict[str, Any] = Field(default_factory=dict)
+
+
 class FacilityPhotoReq(BaseModel):
     role: str = "tenant"
     photo_data_url: str
@@ -547,6 +552,14 @@ def confirm_step2(session_id: str, req: Step2ConfirmReq):
     }
 
 
+@router.post("/sessions/{session_id}/prefill")
+def prefill_session(session_id: str, req: PrefillReq):
+    """대면 전 사전 작성: 임대인은 계약 조건, 임차인은 이메일·차량번호. 상대가 연결하기 전에만 가능하며 만난 뒤 ③단계에서 다시 합의한다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    s.prefill(req.role, req.updates, app_source=APP_SRC)
+    return {"success": True, "message": "사전 작성 내용을 저장했습니다. 만나서 ③단계에서 양쪽이 다시 확인합니다.", "session": s.model_dump()}
+
+
 @router.post("/sessions/{session_id}/facility-photos")
 def add_facility_photo(session_id: str, req: FacilityPhotoReq):
     """시설 점검 사진 업로드(모바일 카메라). 당사자만, 점검 단계에서만."""
@@ -630,7 +643,7 @@ def complete_step5(session_id: str, req: Step5CompleteReq):
         "success": True,
         "message": (
             f"계약 체결 완료! 공동 Data Pool(contracts.json, rooms.json, users.json, payments.json)이 "
-            f"즉시 업데이트되었으며 확정일자({result['contract']['fixed_date_no']})가 부여되었습니다."
+            f"즉시 업데이트되었습니다. 계약 접수번호는 {result['contract']['fixed_date_no']} 입니다 (법적 확정일자는 주민센터·등기소에서 별도로 받아야 합니다)."
         ),
         **result,
     }

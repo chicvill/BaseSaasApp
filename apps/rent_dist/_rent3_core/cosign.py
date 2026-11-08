@@ -46,6 +46,7 @@ from .pool import PoolObj, now_iso, pool
 
 # 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다.
 IDLE_EXPIRE = timedelta(hours=24)
+IDLE_EXPIRE_DRAFT = timedelta(hours=72)  # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
 MAX_LIVE_PER_TENANT = 2  # 한 임차인이 동시에 진행할 수 있는 계약 수 (호실 선점·잠금 악용 방지)
 
 
@@ -106,6 +107,7 @@ class CoSignSession(PoolObj):
     # Step 2: 호실 옵션 및 시설 공동 점검표
     option_checks: List[Dict[str, Any]] = Field(default_factory=list)
     facility_notes: str = "도배·장판·수압·배수·도어락 현장 동반 확인 이상 없음"
+    draft_prefilled_at: str = ""            # 대면 전 사전 작성 시각(있으면 자동 해제 기한이 72시간)
     facility_photos: List[Dict[str, Any]] = Field(default_factory=list)  # 시설 점검 사진(당사자가 현장에서 촬영): id·file·sha256·caption·by_role·uploaded_at
     step2_lessor_confirmed: bool = False
     step2_tenant_locked: bool = False
@@ -439,7 +441,8 @@ class CoSignSession(PoolObj):
             last = datetime.fromisoformat(self.updated_at)
         except (TypeError, ValueError):
             return False
-        return (now or datetime.now()) - last >= IDLE_EXPIRE
+        window = IDLE_EXPIRE_DRAFT if (self.draft_prefilled_at and self.call_status == "CALLING") else IDLE_EXPIRE
+        return (now or datetime.now()) - last >= max(window, IDLE_EXPIRE)
 
     @classmethod
     def expire_idle(cls, branch: str = "", room_no: str = "") -> int:
@@ -705,8 +708,54 @@ class CoSignSession(PoolObj):
             self.current_step = 3
         return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
 
+    PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
+                                            "contract_deposit", "pay_timing", "lease_type", "special_terms")
+    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number")
     MAX_FACILITY_PHOTOS: ClassVar[int] = 12
     FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+    def prefill(self, role: str, updates: Dict[str, Any], app_source: str = "rent3_contract") -> "CoSignSession":
+        """대면 전 사전 작성. 상대가 아직 연결하기 전(CALLING)에만 가능하다.
+        임대인은 계약 조건(입주일·금액·특약)을, 임차인은 본인 연락 정보(이메일·차량번호)를 미리 적는다.
+        여기서 적은 값은 '초안'일 뿐이다 — 만난 뒤 ③단계에서 양쪽이 조건을 다시 보고 동의해야 효력이 생긴다."""
+        self._ensure_in_progress()
+        if self.call_status != "CALLING":
+            raise DomainError("이미 양쪽이 연결되어 사전 작성을 할 수 없습니다.", hint="연결 뒤의 조건 변경은 ③단계에서 하며 양쪽 동의를 다시 받습니다.")
+        allowed = self.PREFILL_LESSOR_KEYS if role == "lessor" else self.PREFILL_TENANT_KEYS
+        bad = [k for k in updates if k not in allowed]
+        if bad:
+            raise DomainError(f"이 역할이 미리 적을 수 없는 항목입니다: {', '.join(bad)}",
+                              hint="임대인은 계약 조건, 임차인은 이메일·차량번호만 사전 작성할 수 있습니다.")
+        merged = {**self.terms}
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        for k, v in updates.items():
+            if v is None:
+                continue
+            if k in int_fields:
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    raise DomainError(f"{k} 는 숫자여야 합니다.")
+                if v < 0:
+                    raise DomainError("금액·기간은 0 이상이어야 합니다.")
+            elif isinstance(v, str):
+                v = v.strip()
+            if k == "move_in_date" and not re_is_date(str(v)):
+                raise DomainError("입주일은 YYYY-MM-DD 형식이어야 합니다.")
+            if k == "pay_timing" and v not in ("후불", "선불"):
+                raise DomainError("월세 납부 시기는 후불 또는 선불이어야 합니다.")
+            if k == "lease_type" and v not in ("월세", "전세"):
+                raise DomainError("임대 유형은 월세 또는 전세여야 합니다.")
+            merged[k] = v
+        if int(merged.get("contract_deposit", 0)) > int(merged.get("deposit", 0)):
+            raise DomainError("계약금은 보증금보다 클 수 없습니다.")
+        if self.mode == "RENEWAL" and self.prev_contract_id and role == "lessor":
+            prev_ct = Contract.get(self.prev_contract_id)
+            if prev_ct:
+                prev_ct.validate_renewal_cap(new_deposit=int(merged.get("deposit", 0)), new_rent=int(merged.get("monthly_rent", 0)))
+        self.terms = merged
+        self.draft_prefilled_at = now_iso()
+        return self.save(action=f"prefilled_by_{role}", app_source=app_source)
 
     def add_facility_photo(self, role: str, data_url: str, caption: str = "", app_source: str = "rent3_contract") -> Dict[str, Any]:
         """시설 점검 사진을 올린다(점검 단계에서만). 파일은 서버에 저장하고 SHA-256 을 남겨, 퇴실 정산 때 입주 당시 상태의 증거가 된다."""
@@ -1056,8 +1105,8 @@ class CoSignSession(PoolObj):
             sender_role="system",
             sender_name="전자계약 체결 알림",
             message=(
-                f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었으며, "
-                f"대법원 확정일자({rtms.fixed_date_no})가 자동 부여되었습니다."
+                f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었습니다. "
+                f"계약 접수번호는 {rtms.fixed_date_no} 입니다. (법적 확정일자는 아닙니다 — 주민센터·등기소에서 별도로 받으세요)"
             ),
         ).save(action="chat_auto_sent", app_source=app_source)
 

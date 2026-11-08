@@ -401,6 +401,8 @@ class Contract(PoolObj):
     deposit: int = 5000000                   # 보증금
     # 출입 정보(도어락·공동현관) 교부 여부: None=예전 계약(공개), False=잠금(잔금 확인 전), True=임대인이 잔금 입금을 확인하고 교부
     keys_released: Optional[bool] = None
+    # 잔금일 등기부 재확인(임차인이 직접 열람): {checked_at, changed, issue_number} — 변동 없음으로 확인돼야 임대인이 출입 정보를 교부할 수 있다
+    balance_registry: Dict[str, Any] = Field(default_factory=dict)
     keys_released_at: str = ""
     keys_released_by: str = ""
     monthly_rent: int = 500000               # 월 임차료

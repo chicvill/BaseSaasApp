@@ -77,7 +77,7 @@
             "<dt>계약번호</dt><dd>" + esc(s.contract_no) + "</dd>" +
             "<dt>목적물</dt><dd>" + esc(s.building_name) + " " + esc(s.room_no) + "호</dd>" +
             "<dt>체결일</dt><dd>" + esc(s.contract_date) + " (" + esc(s.lease_type) + ")</dd>" +
-            "<dt>확정일자</dt><dd>" + esc(s.fixed_date_no || "-") + "</dd>" +
+            "<dt>계약 접수번호(확정일자 아님)</dt><dd>" + esc(s.fixed_date_no || "-") + "</dd>" +
             "<dt>상태</dt><dd>" + esc(s.status) + "</dd></dl>" +
             '<div class="bass-muted" style="font-size:12px;margin-top:8px;">위 정보가 손에 든 계약서와 같은지 함께 확인하세요.</div>';
         }

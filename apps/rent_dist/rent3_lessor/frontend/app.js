@@ -241,7 +241,7 @@
                   ? `<span class="bass-badge ${lg && lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg && lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "완납(정상)"}</span>
                      <button class="bass-btn bass-btn--sm btn-toggle-expiry" data-room="${r.room_no}" data-default-open="${defaultExpOpen}" type="button">${isExpiryOpen ? "📅 만기예고 접기" : "📅 전출확인·연장예고"}</button>
                      ${hasPhoto ? `<button class="bass-btn bass-btn--sm btn-toggle-photo" data-room="${r.room_no}" type="button">${isPhotoOpen ? "🖼️ 계약서 닫기" : "📸 첨부 계약서 보기"}</button>` : ""}
-                     ${ct && ct.keys_released === false ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-release-keys" data-id="${r.id}" data-room="${r.room_no}" data-bal="${Math.max(Number(ct.deposit || 0) - Number(ct.contract_deposit || 0), 0)}" data-movein="${Bass.escapeHtml(ct.move_in_date || "")}" type="button">🔑 잔금 확인 & 도어락 교부</button>` : ""}
+                     ${ct && ct.keys_released === false ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-release-keys" data-id="${r.id}" data-room="${r.room_no}" data-bal="${Math.max(Number(ct.deposit || 0) - Number(ct.contract_deposit || 0), 0)}" data-movein="${Bass.escapeHtml(ct.move_in_date || "")}" type="button">🔑 잔금 확인 & 도어락 교부</button> ${(() => { const br = ct.balance_registry || {}; return br.changed ? `<span class="bass-badge bass-badge--err">⚠️ 임차인이 잔금일 등기부 변동 신고</span>` : (br.checked_at ? `<span class="bass-badge bass-badge--ok">✅ 임차인 등기부 확인 완료</span>` : `<span class="bass-badge bass-badge--warn">⏳ 임차인 잔금일 등기부 확인 대기</span>`); })()}` : ""}
                      <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개 재계약 등록</button>
                      <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
                   : `<span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 매물 공개중" : "공실 비공개"}</span>
@@ -254,7 +254,7 @@
             ${r.is_occupied && lg ? `
               <div style="font-size:13px;margin-bottom:8px;line-height:1.6;">
                 👤 입주자: <strong>${Bass.escapeHtml(lg.tenant_name)}</strong> (${Bass.escapeHtml((ct && ct.move_in_date) || "")} ~ ${Bass.escapeHtml((ct && ct.expiry_date) || "")} · 만기 D-${lg.days_to_expiry ?? "-"})
-                ${ct && ct.fixed_date_no ? ` · 확정일자 <code>${Bass.escapeHtml(ct.fixed_date_no)}</code>` : ` · <span style="color:var(--warn);">전월세신고 확인필요</span>`}
+                ${ct && ct.fixed_date_no ? ` · 접수번호 <code>${Bass.escapeHtml(ct.fixed_date_no)}</code> <span class="bass-muted">(법적 확정일자는 입주일에 주민센터·등기소에서)</span>` : ` · <span style="color:var(--warn);">전월세신고 확인필요</span>`}
                 ${r.pre_moveout_notice ? ` · <span class="bass-badge bass-badge--warn">📢 만기퇴실 사전공실 노출중</span>` : ""}
                 ${bs ? `<br>💳 약정 납입일: <strong>매월 ${bs.payment_day}일</strong>(=입주일) · 차기 납입일 <code>${Bass.escapeHtml(bs.upcoming_due_date)}</code> (D-${bs.days_until_due})
                   ${bs.is_pre_due_3d ? ` <span class="bass-badge bass-badge--info">🔔 납입 3일전 통보 대상</span>` : ""}
