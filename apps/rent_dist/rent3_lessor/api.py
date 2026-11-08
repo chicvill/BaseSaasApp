@@ -4,7 +4,7 @@ apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
-from apps.rent_dist._rent3_core.authz import api_headers, lessor_scope
+from apps.rent_dist._rent3_core.authz import api_headers, is_local_request, lessor_scope
 from apps.rent_dist._rent3_core import franchise as fr, registry_ai
 from apps.rent_dist._rent3_core.pool import now_iso
 from fastapi.responses import FileResponse, Response
@@ -145,7 +145,7 @@ def _my_lessor(branch: str) -> Lessor:
 
 
 def _is_loopback(request: Request) -> bool:
-    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+    return is_local_request(request)
 
 
 class IdentityStartReq(BaseModel):

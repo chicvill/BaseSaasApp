@@ -45,6 +45,29 @@ def tenant_token(tenant: Any) -> str:
 
 
 # ── 토큰 읽기 ──
+# ── 접속 위치 판정 ──
+FORWARD_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host", "cf-connecting-ip")
+
+
+def is_local_request(request: Request) -> bool:
+    """서버 PC 에서 직접 온 요청인가(개발·시연 판정용).
+    프록시(Coolify/Traefik) 뒤에서는 접속 주소를 헤더로 속일 수 있으므로, 프록시 흔적 헤더가 하나라도 있으면 로컬로 보지 않는다."""
+    if any(h in request.headers for h in FORWARD_HEADERS):
+        return False
+    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
+def client_ip(request: Request) -> str:
+    """로그인 시도 제한용 접속 주소. RENT3_TRUSTED_PROXY_HOPS=N(우리 앞에 믿을 수 있는 프록시가 N단)이면
+    X-Forwarded-For 의 오른쪽에서 N번째(믿을 수 있는 프록시가 덧붙인 값)를 쓴다. 기본 0 이면 소켓 주소."""
+    hops = int(os.getenv("RENT3_TRUSTED_PROXY_HOPS", "0") or 0)
+    if hops > 0:
+        parts = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+        if len(parts) >= hops:
+            return parts[-hops]
+    return request.client.host if request.client else "unknown"
+
+
 # ── 토큰 폐기(로그아웃) ──
 # 로그아웃한 토큰은 만료 전에도 쓸 수 없게 서명 부분의 해시를 풀 폴더의 파일에 보관한다(만료된 항목은 정리).
 _rev_lock = threading.Lock()
@@ -235,103 +258,6 @@ ROOM_PRIVATE_FIELDS = ("doorlock_pwd", "registry_info", "id_tenant", "active_con
 
 def public_room(d: Dict[str, Any]) -> Dict[str, Any]:
     return {k: v for k, v in d.items() if k not in ROOM_PRIVATE_FIELDS}
-
-
-def admin_only(request: Request) -> Dict[str, Any]:
-    """본사 관리자 전용 (토큰의 역할만 본다)."""
-    c = need_claims(request)
-    if not is_admin(c):
-        raise Forbidden("본사 관리자만 사용할 수 있습니다.", hint="관리자 계정으로 로그인해 주세요.")
-    return c
-
-
-def _req_branch(request: Request, body: Dict[str, Any]) -> Optional[str]:
-    p = request.path_params
-    return (p.get("branch") or p.get("branch_id") or request.query_params.get("branch")
-            or request.query_params.get("branch_id") or _branch_of_path(p) or body.get("branch") or body.get("branch_id"))
-
-
-async def staff_branch_scope(request: Request) -> Dict[str, Any]:
-    """임대인 관리 기능(세무·경비 등): 관리자, 또는 '지점이 요청에 명시된' 자기 지점 임대인만."""
-    c = need_claims(request)
-    if is_admin(c):
-        return c
-    if c.get("r") not in LESSOR_ROLES:
-        raise Forbidden("임대인 또는 관리자만 사용할 수 있습니다.")
-    branch = _req_branch(request, await _body(request))
-    if not branch:
-        raise Forbidden("지점을 지정해야 합니다.", hint="전체 지점 자료는 본사 관리자만 볼 수 있습니다.")
-    if _norm_branch(branch) != _norm_branch(c.get("b")):
-        raise Forbidden("다른 지점의 자료에는 접근할 수 없습니다.")
-    return c
-
-
-# 임차인이 쓸 수 있는 레거시 운영 API (그 밖의 운영 API 는 임대인·관리자 전용)
-import re as _re  # noqa: E402
-
-_TENANT_OK = tuple(_re.compile(p) for p in (
-    r"/tenant/", r"/chat/[^/]+/[^/]+$", r"/chat/[^/]+/[^/]+/(send|read)$",
-    r"/maintenance/tickets$", r"/checkout/[^/]+/[^/]+$", r"/checkout/[^/]+/[^/]+/(tenant-agree|receipt)$",
-    r"/renewals$", r"/renewals/[^/]+/(sign|tacit-confirm)$",
-))
-
-
-async def legacy_ops_scope(request: Request) -> Dict[str, Any]:
-    """레거시 운영 API: 로그인 필수. /admin/* 은 본사 관리자 전용, 임대인은 자기 지점만, 임차인은 허용된 경로에서 자기 호실만."""
-    c = need_claims(request)
-    if is_admin(c):
-        return c
-    path = request.url.path.rstrip("/")
-    if "/admin/" in path + "/":
-        raise Forbidden("본사 관리자만 사용할 수 있습니다.", hint="관리자 계정으로 로그인해 주세요.")
-    body = await _body(request)
-    branch = _req_branch(request, body)
-    role = c.get("r")
-    if role in LESSOR_ROLES:
-        if not branch:
-            # 지점을 알 수 없는 조회·작업은 막는다 (다른 지점 자료가 섞여 나갈 수 있음)
-            raise Forbidden("지점을 지정해야 합니다.", hint="요청에 지점(branch)을 포함해 주세요.")
-        if _norm_branch(branch) != _norm_branch(c.get("b")):
-            raise Forbidden("다른 지점의 자료에는 접근할 수 없습니다.")
-        return c
-    if role == "tenant":
-        from .models import Tenant
-        t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
-        if t is None or not any(rx.search(path) for rx in _TENANT_OK):
-            raise Forbidden("이 기능은 임대인 또는 관리자만 사용할 수 있습니다.")
-        room = request.path_params.get("room_id") or body.get("room_id") or body.get("room_no") or request.query_params.get("room_id")
-        # 임차인은 지점·호실이 요청에 명시되고 본인 것과 같을 때만 (신청서·영수증·재계약 id 만으로 조회하는 경로는 막는다)
-        if not branch or not room:
-            raise Forbidden("본인 호실을 지정한 요청만 사용할 수 있습니다.", hint="새 임차인 앱(마이홈)을 이용해 주세요.")
-        if _norm_branch(branch) != _norm_branch(t.branch) or str(room) != str(t.room_no):
-            raise Forbidden("본인 호실의 정보만 볼 수 있습니다.")
-        return c
-    raise Forbidden("권한이 없습니다.")
-
-
-async def legacy_public_scope(request: Request):
-    """레거시 공개 앱: 매물 목록 조회는 공개, 입주신청은 로그인, 라운지는 본인 호실·본인 지점만,
-    그 밖(신청서 id 조회·구 계약방·서명결제)은 본사 관리자만 — id 만 알면 남의 신청서·계약 세션을 읽거나 바꿀 수 있기 때문이다."""
-    path = request.url.path
-    if request.method == "GET" and "/public/listings" in path:
-        return None
-    if "/auth/" in path:
-        return None  # 각 핸들러가 직접 막는다(_require_fake_identity)
-    c = need_claims(request)
-    if is_admin(c):
-        return c
-    if path.endswith("/public/apply"):
-        return c
-    if "/public/lounge/" in path and request.method == "GET":
-        branch, room = request.path_params.get("branch"), request.path_params.get("room_id")
-        if c.get("r") in LESSOR_ROLES and branch and _norm_branch(branch) == _norm_branch(c.get("b")):
-            return c
-        if c.get("r") == "tenant":
-            from .models import Tenant
-            t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
-            if t and branch and room and _norm_branch(branch) == _norm_branch(t.branch) and str(room) == str(t.room_no):
-                return c
-    raise Forbidden("이 기능은 더 이상 일반 계정에 열려 있지 않습니다.", hint="새 앱(임대인 장부·임차인 마이홈·계약 앱)을 이용해 주세요.")
 
 
 PUBLIC_CONTRACT_PATHS = ("/verify", "/status")

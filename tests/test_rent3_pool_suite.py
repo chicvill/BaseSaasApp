@@ -1668,56 +1668,6 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-    def test_26_legacy_rent3_routers_access_control(self):
-        """26. 레거시 rent3 API: 범용 CRUD·관리 기능은 관리자만, 임대인은 자기 지점만, 임차인은 허용된 경로의 자기 호실만. 가짜 신원확인·임대인 가입 경로 폐쇄."""
-        import os
-        c = self.client
-        chic, sunho = self._login("chic"), self._login("sunho")
-        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
-            "role": "prospect", "name": "레거시임차", "phone": "01066660301", "password": "Pw123456"}).json()
-        ten = self._as(reg["token"])
-
-        # 범용 엔티티 CRUD·관리자 기능: 관리자만
-        for u in ("/api/rent3/entities/summary/dashboard", "/api/rent3/admin/overview", "/api/rent3/admin/applications"):
-            self.assertEqual(c.get(u, headers=self.NOAUTH).status_code, 401, u)
-            self.assertEqual(c.get(u, headers=chic).status_code, 403, u)
-            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
-            self.assertEqual(c.get(u).status_code, 200, u)
-        self.assertEqual(c.delete("/api/rent3/entities/customers/x", headers=chic).status_code, 403)
-
-        # 세무·경비: 지점이 명시된 자기 지점만 (지점 없는 전체 조회는 관리자만)
-        t = "/api/rent3/tax/annual-statement?year=2026&branch="
-        self.assertEqual(c.get(t + "main", headers=chic).status_code, 200)
-        self.assertEqual(c.get(t + "main", headers=sunho).status_code, 403)
-        self.assertEqual(c.get("/api/rent3/tax/annual-statement?year=2026", headers=chic).status_code, 403)
-        self.assertEqual(c.get(t + "main", headers=ten).status_code, 403)
-
-        # 운영(채팅·퇴실·재계약·A/S): 임대인=자기 지점, 임차인=허용 경로의 자기 호실만
-        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=chic).status_code, 200)
-        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=sunho).status_code, 403)
-        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=ten).status_code, 403)       # 남의 호실
-        self.assertEqual(c.get("/api/rent3/checkout/list", headers=ten).status_code, 403)       # 임대인 전용 기능
-        self.assertEqual(c.get("/api/rent3/checkout/list", headers=chic).status_code, 403)      # 지점 미지정
-        self.assertEqual(c.get("/api/rent3/checkout/list?branch=main", headers=chic).status_code, 200)
-        self.assertEqual(c.get("/api/rent3/checkout/list", headers=self.NOAUTH).status_code, 401)
-
-        # 공개 앱: 매물 목록만 공개, 신청·구 계약방은 로그인 필요
-        self.assertEqual(c.get("/api/rent3/public/listings", headers=self.NOAUTH).status_code, 200)
-        self.assertEqual(c.post("/api/rent3/cosign/start", headers=self.NOAUTH, json={"branch": "main", "room_id": "205", "deposit": 1, "monthly_rent": 1}).status_code, 401)
-        self.assertEqual(c.post("/api/rent3/public/apply", headers=self.NOAUTH, json={}).status_code, 401)
-
-        # 구 가입·신원확인 경로: 임대인(지점 관리자) 계정 생성 금지, 배포 환경에서는 가짜 인증·가입 전체 폐쇄
-        land = {"username": "evil", "password": "Evil#Pass9", "name": "침입자", "phone": "01099990909", "role": "landlord", "branch": "main"}
-        self.assertEqual(c.post("/api/rent3/auth/signup", headers=self.NOAUTH, json=land).status_code, 403)
-        os.environ["RENT3_FAKE_IDENTITY"] = "0"
-        try:
-            self.assertEqual(c.post("/api/rent3/auth/verify-phone/send", headers=self.NOAUTH, json={"name": "a", "phone": "01011112222"}).status_code, 403)
-            self.assertEqual(c.post("/api/rent3/auth/social-verify", headers=self.NOAUTH, json={"provider": "kakao"}).status_code, 403)
-            self.assertEqual(c.post("/api/rent3/auth/signup", headers=self.NOAUTH, json={**land, "role": "tenant", "branch": ""}).status_code, 403)
-        finally:
-            os.environ.pop("RENT3_FAKE_IDENTITY", None)
-
-
     def test_27_logout_revokes_token_and_api_headers(self):
         """27. 로그아웃하면 토큰이 즉시 무효(임대인·관리자 모두), API 응답에 보안 헤더."""
         c = self.client
@@ -1958,29 +1908,6 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(home["keys"]["released_at"][:4], "2026")
 
 
-    def test_33_legacy_by_id_endpoints_closed_to_non_admin(self):
-        """33. 레거시: 신청서·영수증·재계약 id 만으로 조회하는 경로와 구 계약방은 일반 계정에 닫혀 있다(남의 도어락·계약 열람 방지)."""
-        c = self.client
-        chic = self._login("chic")
-        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
-            "role": "prospect", "name": "레거시구경", "phone": "01066660701", "password": "Pw123456"}).json()
-        ten = self._as(reg["token"])
-        # 임차인: 호실이 명시되지 않은 레거시 운영 경로는 모두 거부
-        for u in ("/api/rent3/tenant/checkin-info/app_main_205", "/api/rent3/tenant/receipt/x", "/api/rent3/renewals"):
-            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
-        # 구 신청서·구 계약방: 일반 계정(임대인·임차인) 거부, 관리자만
-        for u in ("/api/rent3/public/application/app_main_205", "/api/rent3/cosign/nonexistent"):
-            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
-            self.assertEqual(c.get(u, headers=chic).status_code, 403, u)
-        self.assertEqual(c.post("/api/rent3/cosign/start", headers=chic, json={"branch": "main", "room_id": "205", "deposit": 1, "monthly_rent": 1}).status_code, 403)
-        self.assertEqual(c.post("/api/rent3/public/application/x/sign-and-pay", headers=ten, json={"tenant_signature": "a", "payment_method": "CARD"}).status_code, 403)
-        # 라운지: 본인 지점 임대인·본인 호실 임차인·관리자만
-        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=chic).status_code, 200)
-        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=self._login("sunho")).status_code, 403)
-        self.assertEqual(c.get("/api/rent3/public/lounge/main/205", headers=ten).status_code, 403)
-        # 관리자는 모두 가능
-        self.assertEqual(c.get("/api/rent3/cosign/nonexistent").status_code, 404)
-
     def test_34_facility_photos_and_join_qr_data(self):
         """34. 시설 점검 사진: 점검 단계에서만·당사자만·본인 사진만 삭제, 올리면 임차인 확인 해제, 체결 시 해시가 계약에 남는다."""
         import base64
@@ -2123,6 +2050,103 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
         # 교부 후에는 더 기록할 수 없다
         self.assertEqual(c.post(chk, headers=th, json={"changed": True}).status_code, 400)
+
+
+    def test_26_legacy_api_removed_and_portal_intact(self):
+        """26. 레거시 라우터(운영·공개 앱·엔티티·세무)와 구 가입·가짜 신원확인 경로는 제거되었고, 포털(로그인·가입·매물·재설정)은 그대로 동작한다."""
+        c = self.client
+        for method, u in (("get", "/api/rent3/entities/summary/dashboard"), ("get", "/api/rent3/admin/overview"),
+                          ("get", "/api/rent3/tax/annual-statement?year=2026&branch=main"), ("get", "/api/rent3/chat/main/205"),
+                          ("get", "/api/rent3/checkout/list?branch=main"), ("get", "/api/rent3/renewals"),
+                          ("get", "/api/rent3/tenant/checkin-info/app_main_205"), ("get", "/api/rent3/public/listings"),
+                          ("get", "/api/rent3/public/application/app_main_205"), ("post", "/api/rent3/cosign/start"),
+                          ("post", "/api/rent3/auth/signup"), ("post", "/api/rent3/auth/verify-phone/send"),
+                          ("post", "/api/rent3/auth/social-verify")):
+            for hdr in (self.NOAUTH, {}):   # 로그인 여부와 무관하게 경로 자체가 없다
+                r = getattr(c, method)(u, headers=hdr)
+                self.assertIn(r.status_code, (404, 405), f"{method} {u} → {r.status_code}")
+        # 옛 화면 파일도 더는 서빙되지 않는다
+        for page in ("admin", "lessor", "tenant", "public", "home", "cosign", "login", "signup"):
+            self.assertNotEqual(c.get(f"/rent3/{page}.html", headers=self.NOAUTH).headers.get("content-type", "").split(";")[0], "text/html",
+                                f"/rent3/{page}.html 이 아직 서빙됨")
+        # 포털은 정상
+        self.assertEqual(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).status_code, 200)
+        for page in ("", "index.html", "manual.html", "pool.html"):
+            self.assertEqual(c.get(f"/rent3/{page}", headers=self.NOAUTH).status_code, 200, page)
+
+
+    def test_37_proxy_headers_never_make_a_request_local(self):
+        """37. 프록시 뒤에서 X-Forwarded-For 를 127.0.0.1 로 위조해도 데모 로그인·가짜 인증이 열리지 않는다. 로그인 제한은 믿을 수 있는 프록시 단수에 따라 접속 주소를 고른다."""
+        import os
+        from apps.rent_dist._rent3_core.authz import client_ip, is_local_request
+        c = self.client
+        for env in ("RENT3_DEMO_LOGIN", "RENT3_FAKE_IDENTITY"):
+            os.environ.pop(env, None)
+        # 로컬 직접 접속: 데모 허용
+        self.assertEqual(c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                                json={"login_mode": "account", "identifier": "chic", "password": "1212"}).status_code, 200)
+        # 같은 요청에 프록시 흔적 헤더가 있으면(위조 포함) 로컬이 아니다 → 거부
+        for h in ({"X-Forwarded-For": "127.0.0.1"}, {"X-Real-IP": "127.0.0.1"}, {"Forwarded": "for=127.0.0.1"}):
+            r = c.post("/api/rent3/pool/auth/login", headers={**self.NOAUTH, **h},
+                       json={"login_mode": "account", "identifier": "admin", "password": "1212"})
+            self.assertEqual(r.status_code, 401, h)
+        self.assertEqual(c.get("/api/rent3/pool/landing", headers={**self.NOAUTH, "X-Forwarded-For": "127.0.0.1"}).json()["demo_accounts"], [])
+
+        class Req:
+            def __init__(self, headers, host="10.0.0.5"):
+                self.headers, self.client = headers, type("C", (), {"host": host})()
+        self.assertFalse(is_local_request(Req({"x-forwarded-for": "1.2.3.4"}, "127.0.0.1")))
+        self.assertTrue(is_local_request(Req({}, "127.0.0.1")))
+        os.environ["RENT3_TRUSTED_PROXY_HOPS"] = "1"
+        try:
+            self.assertEqual(client_ip(Req({"x-forwarded-for": "6.6.6.6, 203.0.113.9"})), "203.0.113.9")   # 믿을 수 있는 프록시가 덧붙인 값
+            self.assertEqual(client_ip(Req({})), "10.0.0.5")
+        finally:
+            os.environ.pop("RENT3_TRUSTED_PROXY_HOPS", None)
+        self.assertEqual(client_ip(Req({"x-forwarded-for": "6.6.6.6"})), "10.0.0.5")                       # 기본은 소켓 주소만
+
+
+    def test_38_deploy_check_script(self):
+        """38. 배포 점검 스크립트: 올바른 운영 설정이면 통과(0), 시연용 설정·평문 비밀번호·평문 민감 필드가 있으면 실패(1)."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Lessor, Room, ensure_pool_seeded, use_pool_dir
+        script = os.path.join(ROOT, "scripts", "deploy_check.py")
+        base = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "MASTER_CRYPTO", "RENT2_", "GEMINI"))}
+        base.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+
+        def run(extra, pool):
+            r = subprocess.run([sys.executable, script], env={**base, **extra, "RENT3_POOL_DIR": pool}, capture_output=True, text=True, encoding="utf-8")
+            return r.returncode, r.stdout
+
+        good = {"BASS_SECRET": "s" * 32, "BASS_SEED_PASSWORD": "Seed#Pass99", "RENT3_DEMO_LOGIN": "0", "MASTER_CRYPTO_KEY": "m" * 32,
+                "RENT3_IDENTITY_PROVIDER": "sms", "RENT3_SMS_SENDER": "solapi", "RENT3_SMS_API_KEY": "k", "RENT3_SMS_API_SECRET": "x",
+                "RENT3_SMS_FROM": "0212345678", "RENT3_TRUSTED_PROXY_HOPS": "1", "GEMINI_API_KEY": "g", "RENT3_ALLOW_POOL_IN_APP": "1"}
+        pool_dir = tempfile.mkdtemp(prefix="rent3_chk_")
+        keep = self.temp_pool
+        try:
+            os.environ["MASTER_CRYPTO_KEY"] = good["MASTER_CRYPTO_KEY"]
+            use_pool_dir(pool_dir)
+            ensure_pool_seeded(force=True)           # 암호화 키가 있는 상태로 시드 → 민감 필드 암호화, 비밀번호는 평문이 없도록 비운다
+            from apps.rent_dist._rent3_core import Admin, Tenant
+            for cls in (Admin, Lessor, Tenant):
+                for o in cls.all():
+                    o.password = ""; o.save("t")
+            code, out = run(good, pool_dir)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("m" * 32, out)          # 비밀 값은 출력하지 않는다
+            # 시연용 설정·가짜 인증·날짜 고정은 실패
+            for bad in ({"RENT3_DEMO_LOGIN": "1"}, {"RENT3_FAKE_IDENTITY": "1"}, {"RENT3_TODAY": "2026-01-01"}, {"BASS_SECRET": ""}):
+                code, out = run({**good, **bad}, pool_dir)
+                self.assertEqual(code, 1, (bad, out))
+            # 평문 비밀번호가 남아 있으면 실패
+            Lessor(username="plainpw", name="평문", phone="010-4444-7001", branch="plainb", password="Plain#Pass9").save("t")
+            code, out = run(good, pool_dir)
+            self.assertEqual(code, 1)
+            self.assertIn("평문 비밀번호", out)
+        finally:
+            os.environ.pop("MASTER_CRYPTO_KEY", None)
+            use_pool_dir(keep)
+            shutil.rmtree(pool_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

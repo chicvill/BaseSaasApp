@@ -372,6 +372,10 @@ description: Operational business rules, domain invariants, and verification ins
 27. **등기부 확인 시점은 3번**: ① 계약일 임차인 직접 열람(1단계) ② 서명 후 체결 직전 재열람(필수) ③ **잔금일 임차인 재열람**(`POST /rent3_tenant/myhome/{id}/balance-registry-check`) — **변동 없음으로 확인돼야 임대인이 도어락을 교부**할 수 있고, 변동 신고 시 잠금이 유지되며 임대인 화면에 경고가 뜬다(해소 후 다시 확인). 인앱 등기부 뷰어로 700원 열람을 대체하는 안은 보관본이 오래돼 근저당 설정 시차를 못 잡으므로 채택하지 않았다.
 28. **확정일자 표기 정정**: 앱이 만드는 `FIX-...` 번호는 **내부 계약 접수번호이며 법적 확정일자가 아니다**. 새 앱 화면·인쇄 계약서·체결 메시지는 "계약 접수번호 (확정일자 아님)"로 표시하고, 입주일에 전입신고와 함께 주민센터(또는 등기소)에서 확정일자를 받으라고 안내한다. 레거시 `rent3/frontend`·`rent3/domain.py` 에는 아직 "대법원 확정일자 자동 부여" 문구가 남아 있다(레거시 정리 때 제거).
 
+29. **레거시 제거 완료**: 옛 `rent3` 라우터(`operations`·`public_apps`·`entities`·`tax_expenses`)·`domain.py`·`entities.py`·옛 화면(admin/lessor/tenant/public/home/cosign/login/signup .html, js/)·옛 테스트·`rent3_contract` 의 `* - 복사본` 백업 파일을 삭제했다(코드는 git 이력에 있음). `rent3` 앱에는 **포털**(매물 노출·로그인·가입·문의·비밀번호 재설정·Data Pool 관제)만 남는다. 정식 경로: 장부·가맹 신청·매물 `rent3_lessor` / 마이홈 `rent3_tenant` / 계약 `rent3_contract` / 심사·정산 `rent3_admin`. 5.5-12~14·23·28 의 레거시 관련 서술은 이력이며 해당 경로는 이제 404 이다(`test_26`). 레거시에만 있던 기능(주차 등록·라운지·범용 엔티티 CRUD·공용 경비 등록 화면·8대 엔티티 관제)은 새 앱에 대응 화면이 없다 — 필요하면 새 앱에 다시 만든다. `Rent3_QA_Test_Checklist.pdf`·`scripts/generate_rent3_qa_pdf.py` 는 옛 화면 기준이라 낡았다.
+30. **접속 위치 판정 강화**(`authz.is_local_request`): 프록시 흔적 헤더(`X-Forwarded-For` 등)가 하나라도 있으면 로컬로 보지 않는다 — uvicorn 이 `FORWARDED_ALLOW_IPS=*` 로 헤더를 믿어 주소가 `127.0.0.1` 로 위조돼도 데모 로그인·가짜 본인인증이 열리지 않는다. 로그인 시도 제한의 접속 주소는 `RENT3_TRUSTED_PROXY_HOPS=N`(믿을 수 있는 프록시 단수)이면 `X-Forwarded-For` 오른쪽 N번째 값을, 아니면 소켓 주소를 쓴다 — **프록시(Traefik) 뒤인데 이 값이 0 이면 모든 사용자가 프록시 주소 하나로 보여 30회 실패 시 전원이 잠긴다.**
+31. **배포 점검 스크립트** `py scripts/deploy_check.py [--strict]`: 필수 환경변수·시연 설정 꺼짐·`RENT3_TODAY` 미설정·영구 볼륨·쓰기 권한·평문 비밀번호·평문 민감 필드·본인인증/문자 설정을 점검한다(비밀 값은 출력 안 함). FAIL 이 하나라도 있으면 종료 코드 1. 프록시 헤더(CSP·HSTS)·CORS·볼륨 실제 마운트·백업·문자 실발송·가맹 심사 절차는 스크립트가 확인하지 못한다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|
@@ -380,6 +384,7 @@ description: Operational business rules, domain invariants, and verification ins
 | `RENT3_DEMO_LOGIN=0` | 데모 비밀번호 완전 차단(프록시 뒤에서 loopback 판정이 흐려질 때 명시) |
 | `GEMINI_API_KEY` | 등기부 AI 읽기 |
 | `MASTER_CRYPTO_KEY`(기존) 또는 `RENT3_CRYPTO_KEY` | 도어락·계좌 암호화 키. 기존 마스터 키로 충분. 나중에 전용 키를 추가해도 마스터로 쓴 값은 읽힌다. 백업 필수 |
+| `RENT3_TRUSTED_PROXY_HOPS` | 프록시(Traefik) 뒤라면 1. 로그인 시도 제한이 실제 접속 주소를 쓰게 한다 |
 | `RENT3_POOL_DIR` | 운영 데이터 폴더(영구 볼륨). 저장소에는 데이터가 없다 |
 | `RENT3_IDENTITY_PROVIDER=sms` + `RENT3_SMS_*` | 본인인증(문자). 없으면 배포에서 인증이 막힌다 |
 

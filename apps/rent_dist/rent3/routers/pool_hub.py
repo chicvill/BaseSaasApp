@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, issue_token
 from core.auth import require_role
-from apps.rent_dist._rent3_core.authz import api_headers, contract_scope, lessor_token, not_revoked, tenant_token
+from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
@@ -61,8 +61,7 @@ def demo_login_allowed(request: Request) -> bool:
         return True
     if env in ("0", "false", "no"):
         return False
-    host = request.client.host if request.client else ""
-    return host in ("127.0.0.1", "::1", "localhost", "testclient")
+    return is_local_request(request)
 
 
 class PortalRegisterReq(BaseModel):
@@ -353,11 +352,11 @@ def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
 
 
 def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_ip(request)
 
 
 def _is_loopback(request: Request) -> bool:
-    return _client_ip(request) in ("127.0.0.1", "::1", "localhost", "testclient")
+    return is_local_request(request)
 
 
 @router.post("/auth/login")

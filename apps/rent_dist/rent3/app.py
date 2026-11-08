@@ -7,7 +7,6 @@ import os
 from fastapi import APIRouter
 from core import BaseSaaSApp
 from .api import router
-from .domain import RentalListing
 
 
 class Rent3App(BaseSaaSApp):
@@ -32,44 +31,9 @@ class Rent3App(BaseSaaSApp):
         return router
 
     def on_startup(self) -> None:
-        """기동 시 기본 공개 매물 시드 데이터 및 공동 JSON Data Pool 확인·생성."""
+        """기동 시 공동 JSON Data Pool 을 확인·생성한다."""
         from apps.rent_dist._rent3_core import ensure_pool_seeded
         ensure_pool_seeded()
-        listings = RentalListing.all()
-        if not listings:
-            # 시크빌 203호 샘플 매물
-            RentalListing(
-                id="listing_chic_203",
-                branch="main",
-                room_id="203",
-                title="[시크빌 본점] 햇살 가득 남향 풀옵션 분리형 원룸 (즉시입주)",
-                deposit=5000000,
-                monthly_rent=520000,
-                maintenance_fee=50000,
-                fee_includes=["초고속 인터넷", "공용전기/청소", "수도세"],
-                options=["천장형 시스템에어컨", "드럼세탁기", "빌트인냉장고", "전자레인지", "디지털도어락"],
-                available_from="2026-11-01",
-                floor=2,
-                area_sqm=23.5,
-                images=["https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800"]
-            ).save("seeded")
-
-            # 선호아트빌 302호 샘플 매물
-            RentalListing(
-                id="listing_sunho_302",
-                branch="sunho",
-                room_id="302",
-                title="[선호아트빌] 역세권 조용한 주택가 깔끔한 원룸 (보증금 조절 가능)",
-                deposit=3000000,
-                monthly_rent=450000,
-                maintenance_fee=40000,
-                fee_includes=["인터넷", "유선방송", "수도세"],
-                options=["벽걸이에어컨", "통돌이세탁기", "냉장고", "가스쿡탑"],
-                available_from="즉시입주",
-                floor=3,
-                area_sqm=19.8,
-                images=["https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800"]
-            ).save("seeded")
 
     def health_check(self):
         return {

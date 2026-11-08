@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import franchise as fr
-from apps.rent_dist._rent3_core.authz import api_headers, claims_from, public_room, contract_scope, is_admin, session_party_ok
+from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_local_request, public_room, contract_scope, is_admin, session_party_ok
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -268,7 +268,7 @@ def _tenant_of(request: Request) -> Tenant:
 
 
 def _loopback(request: Request) -> bool:
-    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+    return is_local_request(request)
 
 
 @router.get("/identity")
