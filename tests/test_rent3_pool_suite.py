@@ -1825,5 +1825,58 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(c.get("/api/rent3_contract/participants", headers=chic).json()["tenants"])
 
 
+    def test_31_sensitive_fields_encrypted_at_rest(self):
+        """31. 도어락·공동현관·계좌번호는 키가 있으면 디스크에 암호화되어 남고, 앱에서는 평문으로 보이며, 키 교체·키 없음·변조를 처리한다."""
+        import glob, os
+        from apps.rent_dist._rent3_core import Lessor, Room, fieldcrypto as fc
+
+        def disk():
+            return "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(self.temp_pool, "**", "*.json"), recursive=True))
+
+        os.environ["RENT3_CRYPTO_KEY"] = "test-key-A-" + "x" * 30
+        try:
+            Lessor(id="lessor_enc", username="enc1", name="암호", phone="010-4444-9001", branch="encb",
+                   account_number="신한 110-999-ENC-777").save("t")
+            room = Room(id="room_encb_1", branch="encb", room_no="1", doorlock_pwd="9876*ENC").save("t")
+            raw = disk()
+            self.assertNotIn("ENC-777", raw)
+            self.assertNotIn("9876*ENC", raw)
+            self.assertIn("enc:v1:", raw)
+            # 앱에서는 평문으로 읽힌다
+            self.assertEqual(Lessor.get("lessor_enc").account_number, "신한 110-999-ENC-777")
+            self.assertEqual(Room.get("room_encb_1").doorlock_pwd, "9876*ENC")
+
+            # 같은 값도 매번 다르게 암호화(nonce), 다른 필드로 옮겨 붙이면 복호화 실패(AAD)
+            a, b = fc.encrypt_value("doorlock_pwd", "same"), fc.encrypt_value("doorlock_pwd", "same")
+            self.assertNotEqual(a, b)
+            with self.assertRaises(Exception):
+                fc.decrypt_value("account_number", a)
+
+            # 키 교체: 새 키 + 옛 키(PREVIOUS)로 읽히고, 다시 저장하면 새 키로 바뀐다
+            os.environ["RENT3_CRYPTO_KEY_PREVIOUS"] = os.environ["RENT3_CRYPTO_KEY"]
+            os.environ["RENT3_CRYPTO_KEY"] = "test-key-B-" + "y" * 30
+            self.assertEqual(Room.get("room_encb_1").doorlock_pwd, "9876*ENC")
+            Room.get("room_encb_1").save("rekey")
+            os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS")
+            self.assertEqual(Room.get("room_encb_1").doorlock_pwd, "9876*ENC")           # 새 키만으로 읽힘
+            # 엉뚱한 키로는 명확한 오류
+            os.environ["RENT3_CRYPTO_KEY"] = "wrong-key-" + "z" * 30
+            with self.assertRaises(Exception) as cm:
+                Room.get("room_encb_1")
+            self.assertIn("복호화", str(cm.exception))
+            # 키가 없으면 평문 저장(로컬 개발)이지만 암호문을 읽으려 하면 안내 오류
+            os.environ.pop("RENT3_CRYPTO_KEY")
+            with self.assertRaises(Exception) as cm:
+                Room.get("room_encb_1")
+            self.assertIn("RENT3_CRYPTO_KEY", getattr(cm.exception, "hint", "") + str(cm.exception))
+            Room(id="room_encb_2", branch="encb", room_no="2", doorlock_pwd="plain-dev").save("t")
+            self.assertIn("plain-dev", disk())
+        finally:
+            os.environ.pop("RENT3_CRYPTO_KEY", None)
+            os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS", None)
+            for o in (Room.get("room_encb_2"),):
+                if o: o.delete()
+
+
 if __name__ == "__main__":
     unittest.main()

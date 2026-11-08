@@ -23,6 +23,8 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.errors import NotFound
+
+from . import fieldcrypto
 from core.kernel import actor
 
 T = TypeVar("T", bound="PoolObj")
@@ -449,7 +451,7 @@ class PoolObj(BaseModel):
 
     def save(self: T, action: str = "saved", app_source: str = "") -> T:
         self.updated_at = now_iso()
-        payload = self.model_dump()
+        payload = fieldcrypto.seal(self.model_dump())  # 도어락·계좌 등은 디스크에 암호화되어 남는다
         pool().put(
             collection=self.collection,
             kind=self.kind_name(),
@@ -473,7 +475,7 @@ class PoolObj(BaseModel):
 
     @classmethod
     def _clean(cls, raw: Dict[str, Any]) -> Dict[str, Any]:
-        d = dict(raw)
+        d = fieldcrypto.unseal(dict(raw))
         d.pop("_kind", None)
         return d
 

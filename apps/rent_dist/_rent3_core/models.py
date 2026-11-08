@@ -23,6 +23,7 @@ from uuid import uuid4
 from pydantic import Field
 
 from core.errors import Conflict, DomainError, Mismatch
+from . import fieldcrypto
 from .pool import PoolObj, now_iso, pool
 
 BRANCH_ALIASES = {
@@ -362,7 +363,7 @@ class Room(PoolObj):
     def save(self, action: str = "updated", app_source: str = "rent3") -> "Room":
         res = super().save(action=action, app_source=app_source)
         try:
-            pool().save_room_partition(self.model_dump())
+            pool().save_room_partition(fieldcrypto.seal(self.model_dump()))
         except Exception:
             pass
         return res
