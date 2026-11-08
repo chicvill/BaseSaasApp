@@ -45,6 +45,7 @@
   }
 
   function clearSession() {
+    try { if (Bass.token()) fetch("/api/rent3/pool/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + Bass.token() }, keepalive: true }); } catch (_) {}
     Bass.setToken("");
     window.localStorage.removeItem(SESSION_KEY);
   }

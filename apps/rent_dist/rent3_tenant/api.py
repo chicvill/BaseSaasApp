@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.errors import DomainError, NotFound
-from apps.rent_dist._rent3_core.authz import any_user, staff_only, tenant_scope
+from apps.rent_dist._rent3_core.authz import any_user, api_headers, staff_only, tenant_scope
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -29,7 +29,7 @@ from apps.rent_dist._rent3_core import (
     pool,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(api_headers)])
 APP_SRC = "rent3_tenant"
 
 

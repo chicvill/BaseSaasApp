@@ -13,11 +13,11 @@ from pydantic import BaseModel
 
 from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, issue_token
 from core.auth import require_role
-from apps.rent_dist._rent3_core.authz import contract_scope, lessor_token, tenant_token
+from apps.rent_dist._rent3_core.authz import api_headers, contract_scope, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
-ADMIN_ONLY = [Depends(require_role("superadmin", "admin"))]
+ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
 from core.errors import Conflict, DomainError, NotFound
 from apps.rent_dist._rent3_core import (
     POOL_COLLECTIONS,
@@ -34,7 +34,7 @@ from apps.rent_dist._rent3_core import (
     pool,
 )
 
-router = APIRouter(prefix="/pool", tags=["rent3-pool-hub"])
+router = APIRouter(prefix="/pool", tags=["rent3-pool-hub"], dependencies=[Depends(api_headers)])
 
 DEFAULT_ROOM_IMAGES = (
     "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80",
@@ -372,6 +372,8 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         ratelimit.fail("login", keys)
         raise
     ratelimit.clear("login", keys[:1])
+    from apps.rent_dist._rent3_core.authz import unrevoke_token
+    unrevoke_token(out.get("token", ""))
     return out
 
 
@@ -607,6 +609,14 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         "일치하는 사용자 계정을 찾을 수 없습니다.",
         hint="아이디·휴대폰 번호·성명을 다시 확인하거나 '회원가입' 탭에서 간편 본인인증 가입 후 이용해 주세요.",
     )
+
+
+@router.post("/auth/logout")
+def portal_logout(request: Request) -> Dict[str, Any]:
+    """로그아웃: 이 토큰을 폐기한다(만료 전에도 더는 쓸 수 없다)."""
+    from apps.rent_dist._rent3_core.authz import raw_token, revoke_token
+    revoke_token(raw_token(request))
+    return {"success": True, "message": "로그아웃되었습니다."}
 
 
 class PasswordResetReq(BaseModel):

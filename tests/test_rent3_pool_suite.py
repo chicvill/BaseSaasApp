@@ -1697,5 +1697,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             os.environ.pop("RENT3_FAKE_IDENTITY", None)
 
 
+    def test_27_logout_revokes_token_and_api_headers(self):
+        """27. 로그아웃하면 토큰이 즉시 무효(임대인·관리자 모두), API 응답에 보안 헤더."""
+        c = self.client
+        chic = self._login("chic")
+        r = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("no-store", r.headers.get("cache-control", ""))
+        self.assertEqual(r.headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(c.post("/api/rent3/pool/auth/logout", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).status_code, 401)
+
+        adm = self._login("admin")
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=adm).status_code, 200)
+        c.post("/api/rent3/pool/auth/logout", headers=adm)
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=adm).status_code, 401)
+        # 다시 로그인하면 새 토큰은 정상
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=self._login("admin")).status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

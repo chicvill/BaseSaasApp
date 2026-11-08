@@ -12,6 +12,7 @@ from core.auth import require_role
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import franchise as fr
+from apps.rent_dist._rent3_core.authz import api_headers, not_revoked
 from apps.rent_dist._rent3_core import (
     Admin,
     Building,
@@ -28,10 +29,10 @@ from apps.rent_dist._rent3_core import (
     pool,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(api_headers)])
 APP_SRC = "rent3_admin"
 # 가맹 심사·정산은 본사 관리자만 (토큰 필요). 지점 관리자(branch_admin)는 자기 지점 가맹을 스스로 승인할 수 없다.
-ADMIN_ONLY = [Depends(require_role("superadmin", "admin"))]
+ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
 
 
 class DecisionReq(BaseModel):
@@ -213,7 +214,7 @@ def decide_lessor(lessor_id: str, req: DecisionReq):
 
 
 @router.post("/lessors/{lessor_id}/registry-verify")
-def verify_franchise_registry(lessor_id: str, req: RegistryVerifyReq, admin=Depends(require_role("superadmin", "admin"))):
+def verify_franchise_registry(lessor_id: str, req: RegistryVerifyReq, admin=Depends(require_role("superadmin", "admin")), _nr=Depends(not_revoked)):
     """관리자가 인터넷등기소에서 발급확인번호로 원본을 대조했음을 기록한다 (누가·언제·어떤 번호로). 승인의 근거가 된다."""
     lessor = Lessor.require(lessor_id)
     docs = lessor.franchise_docs or {}

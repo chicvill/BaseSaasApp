@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import franchise as fr
-from apps.rent_dist._rent3_core.authz import claims_from, contract_scope, is_admin, session_party_ok
+from apps.rent_dist._rent3_core.authz import api_headers, claims_from, contract_scope, is_admin, session_party_ok
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -24,7 +24,7 @@ from apps.rent_dist._rent3_core import (
     registry_ai,
 )
 
-router = APIRouter(dependencies=[Depends(contract_scope)])
+router = APIRouter(dependencies=[Depends(api_headers), Depends(contract_scope)])
 APP_SRC = "rent3_contract"
 
 

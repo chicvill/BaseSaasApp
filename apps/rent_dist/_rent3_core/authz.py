@@ -12,11 +12,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
+import threading
 import time
 from typing import Any, Dict, Optional
 
-from fastapi import Request
+from fastapi import Request, Response
 
 from core.auth import TOKEN_TTL_SECONDS, _b64, _secret, verify_token
 from core.errors import Forbidden, NotFound
@@ -43,11 +45,83 @@ def tenant_token(tenant: Any) -> str:
 
 
 # ── 토큰 읽기 ──
-def claims_from(request: Request) -> Optional[Dict[str, Any]]:
-    raw = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+# ── 토큰 폐기(로그아웃) ──
+# 로그아웃한 토큰은 만료 전에도 쓸 수 없게 서명 부분의 해시를 풀 폴더의 파일에 보관한다(만료된 항목은 정리).
+_rev_lock = threading.Lock()
+
+
+def _rev_path() -> str:
+    from .pool import pool
+    return os.path.join(pool().pool_dir, "_revoked_tokens.json")
+
+
+def _tok_key(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+
+def _load_revoked() -> Dict[str, int]:
+    try:
+        with open(_rev_path(), encoding="utf-8") as fp:
+            data = json.load(fp)
+        now = time.time()
+        return {k: v for k, v in data.items() if v > now}
+    except (OSError, ValueError):
+        return {}
+
+
+def revoke_token(raw: str) -> None:
+    data = verify_token(raw) if raw else None
+    if not data:
+        return
+    with _rev_lock:
+        cur = _load_revoked()
+        cur[_tok_key(raw)] = int(data.get("exp", 0))
+        tmp = _rev_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fp:
+            json.dump(cur, fp)
+        os.replace(tmp, _rev_path())
+
+
+def unrevoke_token(raw: str) -> None:
+    """같은 초에 다시 로그인하면 같은 토큰이 발급될 수 있으므로, 새 로그인이 발급한 토큰은 폐기 목록에서 뺀다."""
     if not raw:
-        raw = (request.query_params.get("token") or "").strip()
-    return verify_token(raw) if raw else None
+        return
+    with _rev_lock:
+        cur = _load_revoked()
+        if cur.pop(_tok_key(raw), None) is not None:
+            with open(_rev_path() + ".tmp", "w", encoding="utf-8") as fp:
+                json.dump(cur, fp)
+            os.replace(_rev_path() + ".tmp", _rev_path())
+
+
+def is_revoked(raw: str) -> bool:
+    return bool(raw) and _tok_key(raw) in _load_revoked()
+
+
+def raw_token(request: Request) -> str:
+    raw = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    return raw or (request.query_params.get("token") or "").strip()
+
+
+def not_revoked(request: Request) -> None:
+    """관리자 API 등 코어 인증(require_role)에 덧붙여, 로그아웃한 토큰을 거부한다."""
+    if is_revoked(raw_token(request)):
+        raise Unauthorized("로그아웃된 로그인입니다. 다시 로그인해 주세요.")
+
+
+def api_headers(response: Response) -> None:
+    """API 응답에 보안 헤더: 개인정보가 캐시에 남지 않게 하고, 형식 추측·프레임 삽입을 막는다."""
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+
+def claims_from(request: Request) -> Optional[Dict[str, Any]]:
+    raw = raw_token(request)
+    if not raw or is_revoked(raw):
+        return None
+    return verify_token(raw)
 
 
 def need_claims(request: Request) -> Dict[str, Any]:

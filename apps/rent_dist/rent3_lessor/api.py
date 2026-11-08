@@ -4,7 +4,7 @@ apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
-from apps.rent_dist._rent3_core.authz import lessor_scope
+from apps.rent_dist._rent3_core.authz import api_headers, lessor_scope
 from apps.rent_dist._rent3_core import franchise as fr, registry_ai
 from apps.rent_dist._rent3_core.pool import now_iso
 from fastapi.responses import FileResponse, Response
@@ -35,7 +35,7 @@ from apps.rent_dist._rent3_core import (
     pool,
 )
 
-router = APIRouter(dependencies=[Depends(lessor_scope)])
+router = APIRouter(dependencies=[Depends(api_headers), Depends(lessor_scope)])
 APP_SRC = "rent3_lessor"
 
 
