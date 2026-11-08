@@ -16,6 +16,9 @@ class TestRent3ModularApi(unittest.TestCase):
         app = FastAPI()
         app.include_router(router, prefix="/api/rent3")
         cls.client = TestClient(app)
+        # 레거시 라우터는 로그인이 필요하다 — 본사 관리자 토큰으로 호출한다(접근 통제 자체는 tests/test_rent3_pool_suite.py 가 검증)
+        from apps.rent_dist._rent3_core.authz import issue_claims_token
+        cls.client.headers["Authorization"] = "Bearer " + issue_claims_token("admin", "superadmin", None)
         seed_default_entities_if_empty()
 
     def test_01_public_listings(self):

@@ -5,7 +5,8 @@
 import secrets
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Response
+from apps.rent_dist._rent3_core.authz import legacy_ops_scope
 from pydantic import BaseModel, Field
 
 from ..domain import (
@@ -20,7 +21,7 @@ try:
 except ImportError:
     Building = None
 
-router = APIRouter(tags=["rent3_operations"])
+router = APIRouter(tags=["rent3_operations"], dependencies=[Depends(legacy_ops_scope)])
 
 class ChatSendReq(BaseModel):
     branch: str = "main"

@@ -1647,5 +1647,55 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+    def test_26_legacy_rent3_routers_access_control(self):
+        """26. 레거시 rent3 API: 범용 CRUD·관리 기능은 관리자만, 임대인은 자기 지점만, 임차인은 허용된 경로의 자기 호실만. 가짜 신원확인·임대인 가입 경로 폐쇄."""
+        import os
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "레거시임차", "phone": "01066660301", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"])
+
+        # 범용 엔티티 CRUD·관리자 기능: 관리자만
+        for u in ("/api/rent3/entities/summary/dashboard", "/api/rent3/admin/overview", "/api/rent3/admin/applications"):
+            self.assertEqual(c.get(u, headers=self.NOAUTH).status_code, 401, u)
+            self.assertEqual(c.get(u, headers=chic).status_code, 403, u)
+            self.assertEqual(c.get(u, headers=ten).status_code, 403, u)
+            self.assertEqual(c.get(u).status_code, 200, u)
+        self.assertEqual(c.delete("/api/rent3/entities/customers/x", headers=chic).status_code, 403)
+
+        # 세무·경비: 지점이 명시된 자기 지점만 (지점 없는 전체 조회는 관리자만)
+        t = "/api/rent3/tax/annual-statement?year=2026&branch="
+        self.assertEqual(c.get(t + "main", headers=chic).status_code, 200)
+        self.assertEqual(c.get(t + "main", headers=sunho).status_code, 403)
+        self.assertEqual(c.get("/api/rent3/tax/annual-statement?year=2026", headers=chic).status_code, 403)
+        self.assertEqual(c.get(t + "main", headers=ten).status_code, 403)
+
+        # 운영(채팅·퇴실·재계약·A/S): 임대인=자기 지점, 임차인=허용 경로의 자기 호실만
+        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=sunho).status_code, 403)
+        self.assertEqual(c.get("/api/rent3/chat/main/205", headers=ten).status_code, 403)       # 남의 호실
+        self.assertEqual(c.get("/api/rent3/checkout/list", headers=ten).status_code, 403)       # 임대인 전용 기능
+        self.assertEqual(c.get("/api/rent3/checkout/list", headers=chic).status_code, 403)      # 지점 미지정
+        self.assertEqual(c.get("/api/rent3/checkout/list?branch=main", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3/checkout/list", headers=self.NOAUTH).status_code, 401)
+
+        # 공개 앱: 매물 목록만 공개, 신청·구 계약방은 로그인 필요
+        self.assertEqual(c.get("/api/rent3/public/listings", headers=self.NOAUTH).status_code, 200)
+        self.assertEqual(c.post("/api/rent3/cosign/start", headers=self.NOAUTH, json={"branch": "main", "room_id": "205", "deposit": 1, "monthly_rent": 1}).status_code, 401)
+        self.assertEqual(c.post("/api/rent3/public/apply", headers=self.NOAUTH, json={}).status_code, 401)
+
+        # 구 가입·신원확인 경로: 임대인(지점 관리자) 계정 생성 금지, 배포 환경에서는 가짜 인증·가입 전체 폐쇄
+        land = {"username": "evil", "password": "Evil#Pass9", "name": "침입자", "phone": "01099990909", "role": "landlord", "branch": "main"}
+        self.assertEqual(c.post("/api/rent3/auth/signup", headers=self.NOAUTH, json=land).status_code, 403)
+        os.environ["RENT3_FAKE_IDENTITY"] = "0"
+        try:
+            self.assertEqual(c.post("/api/rent3/auth/verify-phone/send", headers=self.NOAUTH, json={"name": "a", "phone": "01011112222"}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3/auth/social-verify", headers=self.NOAUTH, json={"provider": "kakao"}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3/auth/signup", headers=self.NOAUTH, json={**land, "role": "tenant", "branch": ""}).status_code, 403)
+        finally:
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+
+
 if __name__ == "__main__":
     unittest.main()

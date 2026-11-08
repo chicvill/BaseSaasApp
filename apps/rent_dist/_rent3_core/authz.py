@@ -155,6 +155,77 @@ def session_party_ok(c: Dict[str, Any], session: Any) -> bool:
     return False
 
 
+def admin_only(request: Request) -> Dict[str, Any]:
+    """본사 관리자 전용 (토큰의 역할만 본다)."""
+    c = need_claims(request)
+    if not is_admin(c):
+        raise Forbidden("본사 관리자만 사용할 수 있습니다.", hint="관리자 계정으로 로그인해 주세요.")
+    return c
+
+
+def _req_branch(request: Request, body: Dict[str, Any]) -> Optional[str]:
+    p = request.path_params
+    return (p.get("branch") or p.get("branch_id") or request.query_params.get("branch")
+            or request.query_params.get("branch_id") or _branch_of_path(p) or body.get("branch") or body.get("branch_id"))
+
+
+async def staff_branch_scope(request: Request) -> Dict[str, Any]:
+    """임대인 관리 기능(세무·경비 등): 관리자, 또는 '지점이 요청에 명시된' 자기 지점 임대인만."""
+    c = need_claims(request)
+    if is_admin(c):
+        return c
+    if c.get("r") not in LESSOR_ROLES:
+        raise Forbidden("임대인 또는 관리자만 사용할 수 있습니다.")
+    branch = _req_branch(request, await _body(request))
+    if not branch:
+        raise Forbidden("지점을 지정해야 합니다.", hint="전체 지점 자료는 본사 관리자만 볼 수 있습니다.")
+    if _norm_branch(branch) != _norm_branch(c.get("b")):
+        raise Forbidden("다른 지점의 자료에는 접근할 수 없습니다.")
+    return c
+
+
+# 임차인이 쓸 수 있는 레거시 운영 API (그 밖의 운영 API 는 임대인·관리자 전용)
+import re as _re  # noqa: E402
+
+_TENANT_OK = tuple(_re.compile(p) for p in (
+    r"/tenant/", r"/chat/[^/]+/[^/]+$", r"/chat/[^/]+/[^/]+/(send|read)$",
+    r"/maintenance/tickets$", r"/checkout/[^/]+/[^/]+$", r"/checkout/[^/]+/[^/]+/(tenant-agree|receipt)$",
+    r"/renewals$", r"/renewals/[^/]+/(sign|tacit-confirm)$",
+))
+
+
+async def legacy_ops_scope(request: Request) -> Dict[str, Any]:
+    """레거시 운영 API: 로그인 필수. /admin/* 은 본사 관리자 전용, 임대인은 자기 지점만, 임차인은 허용된 경로에서 자기 호실만."""
+    c = need_claims(request)
+    if is_admin(c):
+        return c
+    path = request.url.path.rstrip("/")
+    if "/admin/" in path + "/":
+        raise Forbidden("본사 관리자만 사용할 수 있습니다.", hint="관리자 계정으로 로그인해 주세요.")
+    body = await _body(request)
+    branch = _req_branch(request, body)
+    role = c.get("r")
+    if role in LESSOR_ROLES:
+        if not branch:
+            # 지점을 알 수 없는 조회·작업은 막는다 (다른 지점 자료가 섞여 나갈 수 있음)
+            raise Forbidden("지점을 지정해야 합니다.", hint="요청에 지점(branch)을 포함해 주세요.")
+        if _norm_branch(branch) != _norm_branch(c.get("b")):
+            raise Forbidden("다른 지점의 자료에는 접근할 수 없습니다.")
+        return c
+    if role == "tenant":
+        from .models import Tenant
+        t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+        if t is None or not any(rx.search(path) for rx in _TENANT_OK):
+            raise Forbidden("이 기능은 임대인 또는 관리자만 사용할 수 있습니다.")
+        room = request.path_params.get("room_id") or body.get("room_id") or body.get("room_no") or request.query_params.get("room_id")
+        if branch and _norm_branch(branch) != _norm_branch(t.branch):
+            raise Forbidden("본인 호실의 정보만 볼 수 있습니다.")
+        if room and str(room) != str(t.room_no):
+            raise Forbidden("본인 호실의 정보만 볼 수 있습니다.")
+        return c
+    raise Forbidden("권한이 없습니다.")
+
+
 PUBLIC_CONTRACT_PATHS = ("/verify", "/status")
 IDENTITY_GATED_SUFFIXES = ("/sessions/call", "/respond", "/step4/sign")
 

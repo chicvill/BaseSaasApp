@@ -4,7 +4,8 @@
 """
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from apps.rent_dist._rent3_core.authz import admin_only
 from pydantic import BaseModel
 
 from ..entities import (
@@ -12,7 +13,7 @@ from ..entities import (
     Pay, Outlay, Rent3EntityManager, Rent3WorkflowEngine, seed_default_entities_if_empty
 )
 
-router = APIRouter(tags=["rent3_entities"])
+router = APIRouter(tags=["rent3_entities"], dependencies=[Depends(admin_only)])  # 범용 CRUD(수정·삭제 포함)는 본사 관리자 전용
 
 # 17. 8대 표준 엔티티 (Admin, Lessor, Tenant, Building, Room, Contract, Pay, Outlay) CRUD & 검색 API
 # ─────────────────────────────────────────────────────────────

@@ -346,6 +346,10 @@ description: Operational business rules, domain invariants, and verification ins
 10. **비밀번호 재설정**: 본인인증을 마친 임대인·임차인은 실명·생년월일·휴대폰 + 인증번호로 직접 재설정(`/pool/auth/password-reset/start|confirm`, 계정 존재 여부는 응답으로 알리지 않음). 인증 이력이 없는 계정은 관리자가 임시 비밀번호를 발급(`POST /rent3_admin/accounts/reset-password`, 응답에서 한 번만 보이고 해시로 저장). 관리자(admin) 비밀번호는 `BASS_SEED_PASSWORD`/서버 도구로만 바꾼다.
 11. 배포 환경에서는 포털이 데모 계정 목록·공통 비밀번호 안내·입력칸 미리 채움을 내려주지 않는다(`demo_accounts` 가 빈 배열).
 
+12. **레거시 `rent3` 라우터 접근 통제** (`authz.py`): `entities`(범용 CRUD·수정·삭제)와 모든 `/admin/*` 은 **본사 관리자만**. 세무·경비(`tax_expenses`)는 관리자 또는 **지점이 요청에 명시된** 자기 지점 임대인. 운영(`operations`: 채팅·퇴실정산·재계약·A/S·수납)은 로그인 필수 — 임대인은 자기 지점(지점 미지정 요청은 거부), 임차인은 허용 경로(`_TENANT_OK`)에서 **자기 호실만**. 공개 앱(`public_apps`)은 `GET /public/listings` 만 공개, 신청·구 공동계약방(`/cosign/*`)은 로그인 필요.
+13. **구 가입·가짜 신원확인 경로 폐쇄**: `/auth/verify-phone/*`·`/auth/social-verify`·`/auth/signup` 은 시뮬레이션(누구나 "인증 완료")이므로 서버 PC 또는 `RENT3_FAKE_IDENTITY=1` 에서만 열리고, **임대인(지점 관리자) 계정은 이 경로로 절대 만들 수 없다**(지점을 골라 남의 건물 관리자가 되는 권한 상승 경로였음). 임대인은 포털 가입 → 가맹 심사로만 생긴다.
+14. fetch 를 직접 쓰는 옛 화면은 `shared_ui/auth_fetch.js` 가 `/api/` 호출에 로그인 토큰을 자동으로 붙인다. 새 화면은 `Bass.api` 를 쓴다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|
@@ -356,7 +360,7 @@ description: Operational business rules, domain invariants, and verification ins
 
 ### 5.7 알려진 미해결 위험 (착수 전 확인)
 - 저장소(git)에 올라간 `data/rent3_pool/users.json` 에는 **예전 평문 비밀번호가 남아 있다** — 배포 서버에서 `scripts/hash_passwords.py` 를 실행하고, 저장소의 데이터 파일은 정리할 것.
-- 레거시 `rent3` 앱 라우터(`operations`·`public_apps`·`entities`·`tax_expenses`, 변경성 엔드포인트 40여 개)는 **인증이 없다**.
+- 레거시 `rent3` 화면(`rent3/frontend/*.html`)은 서버가 접근을 통제하게 되면서 일부 기능이 로그인·권한 때문에 막힐 수 있다(임대인 화면이 지점을 안 보내는 호출 등). 새 앱(`rent3_lessor`·`rent3_tenant`·`rent3_contract`)이 정식 경로다.
 - CORS·보안 헤더 미적용. 토큰 폐기(로그아웃 무효화) 불가, 12시간 유효. 로그인 잠금은 메모리 기반이라 다중 서버에서 공유되지 않는다.
 - `1212` 로 저장된 기존 계정은 배포 환경에서 로그인 불가 → 본인인증 기반 재설정 또는 관리자 임시 비밀번호로 복구(5.5-10).
 - 실제 본인인증 업체 미연동(임대인·임차인 모두 가짜 인증만) — **업체 연동 전에는 배포하지 말 것**. 위임장·사업자등록증 업로드, 엑셀 일괄 등록은 미구현. 신규 임대인 등록 마법사는 가맹 신청 패널(건물 주소·가치 입력)로 일부 대체.

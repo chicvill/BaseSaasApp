@@ -4,7 +4,8 @@
 """
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Query, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Response
+from apps.rent_dist._rent3_core.authz import staff_branch_scope
 from pydantic import BaseModel, Field
 
 from ..domain import (
@@ -15,7 +16,7 @@ from ..domain import (
     ChatMessage
 )
 
-router = APIRouter(tags=["rent3_tax_expenses"])
+router = APIRouter(tags=["rent3_tax_expenses"], dependencies=[Depends(staff_branch_scope)])
 
 # 16. 지점별(시크빌/선호아트빌/신비주택) 통합 세무·수익률 분석 API
 # ─────────────────────────────────────────────────────────────

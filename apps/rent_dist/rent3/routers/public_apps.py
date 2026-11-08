@@ -4,7 +4,8 @@
 """
 import secrets
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from apps.rent_dist._rent3_core.authz import need_claims
 from pydantic import BaseModel, Field
 
 from ..domain import (
@@ -12,7 +13,25 @@ from ..domain import (
     CoSigningSession
 )
 
-router = APIRouter(tags=["rent3_public"])
+def _legacy_public_scope(request: Request):
+    """공개 매물 조회(GET /public/listings...)와 로컬 시연용 가짜 신원확인 경로만 로그인 없이 연다."""
+    path = request.url.path
+    if request.method == "GET" and "/public/listings" in path:
+        return None
+    if "/auth/" in path:
+        return None  # 각 핸들러가 직접 막는다(_require_fake_identity)
+    return need_claims(request)
+
+
+def _require_fake_identity(request: Request) -> None:
+    """이 경로의 신원확인은 시뮬레이션(가짜)이다. 서버 PC 또는 RENT3_FAKE_IDENTITY=1 에서만 쓴다."""
+    from apps.rent_dist._rent3_core import franchise as fr
+    loop = bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+    if not fr.fake_allowed(loop):
+        raise HTTPException(status_code=403, detail="이 가입·신원확인 경로는 사용할 수 없습니다. 포털에서 가입하고 휴대폰 본인인증을 진행해 주세요.")
+
+
+router = APIRouter(tags=["rent3_public"], dependencies=[Depends(_legacy_public_scope)])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -401,8 +420,9 @@ def pay_cosign(session_id: str, req: CoSignPayReq):
 # 5. Identity Verification & Social SignUp APIs (신원확인 & 가입)
 # ─────────────────────────────────────────────────────────────
 @router.post("/auth/verify-phone/send")
-def send_phone_verification(req: PhoneVerifySendReq):
+def send_phone_verification(req: PhoneVerifySendReq, request: Request):
     """휴대폰 본인인증 6자리 SMS 발송 (시뮬레이션)."""
+    _require_fake_identity(request)
     code = "123456"
     _phone_verify_codes[req.phone] = code
     return {
@@ -413,8 +433,9 @@ def send_phone_verification(req: PhoneVerifySendReq):
 
 
 @router.post("/auth/verify-phone/confirm")
-def confirm_phone_verification(req: PhoneVerifyConfirmReq):
+def confirm_phone_verification(req: PhoneVerifyConfirmReq, request: Request):
     """휴대폰 본인인증 6자리 확인 -> 본인확인 토큰 발급."""
+    _require_fake_identity(request)
     stored_code = _phone_verify_codes.get(req.phone, "123456")
     if req.code != stored_code and req.code != "123456":
         raise HTTPException(status_code=400, detail="인증번호가 일치하지 않습니다. 다시 입력해주세요.")
@@ -429,8 +450,9 @@ def confirm_phone_verification(req: PhoneVerifyConfirmReq):
 
 
 @router.post("/auth/social-verify")
-def social_verification(req: SocialVerifyReq):
+def social_verification(req: SocialVerifyReq, request: Request):
     """카카오 / 구글 간편 신원인증 연동."""
+    _require_fake_identity(request)
     profile = {
         "provider": req.provider.upper(),
         "is_verified": True,
@@ -447,8 +469,11 @@ def social_verification(req: SocialVerifyReq):
 
 
 @router.post("/auth/signup")
-def register_user(req: SignUpReq):
-    """신원확인이 완료된 사용자 회원가입 (임대인 또는 임차인)."""
+def register_user(req: SignUpReq, request: Request):
+    """신원확인이 완료된 사용자 회원가입 (시연용). 임대인(지점 관리자) 계정은 이 경로로 만들 수 없다 — 가맹 신청·심사를 거친다."""
+    _require_fake_identity(request)
+    if req.role == "landlord":
+        raise HTTPException(status_code=403, detail="임대인 계정은 포털에서 가입하고 가맹 심사를 거쳐야 합니다.")
     try:
         from core.auth import User
         existing = [u for u in User.all() if getattr(u, "username", "") == req.username]
