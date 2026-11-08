@@ -362,6 +362,8 @@ description: Operational business rules, domain invariants, and verification ins
 
 21. **저장 필드 암호화** (`_rent3_core/fieldcrypto.py`): 도어락·공동현관 비밀번호·계좌번호(`doorlock_pwd`·`common_entrance_pwd`·`account_number`·`lessor_account`)는 `RENT3_CRYPTO_KEY` 또는 **이미 Coolify 에 있는 `MASTER_CRYPTO_KEY`**(전용 키가 없을 때, 라벨을 섞어 도출한 별도 키 — `.env.encrypted` 용 키와 바이트가 다름; 내 PC 의 `.env.key` 는 읽지 않아 로컬은 평문)가 있으면 AES-256-GCM 으로 암호화해 디스크에 저장(풀 JSON·호실 분할 파일 모두, `PoolObj.save`/`_clean` 에서 투명 처리 — 앱 코드·해시는 평문 기준 그대로). 필드 이름을 AAD 로 묶어 다른 필드로 옮긴 값은 복호화 불가. 키가 없으면 평문(로컬 개발). **키를 잃으면 복구 불가 — Coolify 외 안전한 곳에 백업.** 처음 켤 때·키 교체 때 `py scripts/encrypt_fields.py [--pool-dir 경로]`(교체 시 옛 키는 `RENT3_CRYPTO_KEY_PREVIOUS`). 이 암호화는 파일·백업·볼륨 유출을 막을 뿐, 서버 프로세스가 장악되면 키도 함께 노출되며 API 노출 규칙(5.5-20)을 대체하지 못한다. 관리자 Data Pool 탐색기에는 암호문이 보인다.
 
+22. **잔금 확인 전 출입 정보 잠금**: 새로 체결한 계약은 `keys_released=False` — 임차인 마이홈 API 가 `doorlock_pwd`(임차인·호실)·`common_entrance_pwd` 를 "입주 당일 잔금 완납 후 공개"로 **서버에서 마스킹**하고 `keys{locked, balance_due, move_in_date}` 만 준다. 임대인이 `POST /rent3_lessor/rooms/{id}/release-keys`(`balance_checked: true` = 본인 은행 앱의 실제 입금 내역 직접 확인, 해당 지점 임대인·관리자만)로 교부하면 즉시 열린다(교부자·시각 기록). 체결 화면은 잔금액·납부일·계좌와 "교부 후 공개" 안내만 보여 준다. `keys_released=None`(예전 계약)은 기존대로 공개. 입주일 도래 자체로 자동 공개하지는 않는다(임대인 확인이 필수). 한계: 임대인이 입금을 확인하지 않고 교부할 수 있다(책임 소재 기록용).
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

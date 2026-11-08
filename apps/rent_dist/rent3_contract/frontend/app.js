@@ -1505,6 +1505,13 @@
         <div><strong>당일 계약금:</strong> ${fmtWon(t.contract_deposit)} / <strong>보증금 총액:</strong> ${fmtWon(t.deposit)} / <strong>월세+관리비:</strong> ${fmtWon(Number(t.monthly_rent || 0) + Number(t.maintenance_fee || 0))} (${Bass.escapeHtml(t.pay_timing)})</div>
         ${s.fixed_date_no ? `<div style="margin-top:6px;color:var(--ok);font-weight:700;">🏛️ 대법원 확정일자 자동 부여 완료: ${Bass.escapeHtml(s.fixed_date_no)}</div>` : ""}
       </div>
+      ${done ? `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--warn);font-size:13px;line-height:1.7;">
+        <strong>💰 잔금 안내</strong><br>
+        잔금 <strong>${fmtWon(Math.max(Number(t.deposit || 0) - Number(t.contract_deposit || 0), 0))}</strong> (보증금 ${fmtWon(t.deposit)} − 계약금 ${fmtWon(t.contract_deposit)}) ·
+        납부일(입주일) <strong>${Bass.escapeHtml(t.move_in_date || "-")}</strong><br>
+        입금 계좌: ${Bass.escapeHtml(s.lessor_account)} (예금주 ${Bass.escapeHtml(s.lessor_name)})<br>
+        🔒 <strong>도어락·공동현관 번호는 입주 당일 잔금 입금을 임대인이 확인한 뒤 임차인 마이홈에 공개됩니다.</strong>
+      </div>` : ""}
       ${done ? `
         <div class="bass-row">
           <button onclick="window.print()" class="bass-btn bass-btn--primary" type="button">🖨️ 표준 임대차 전자계약서 A4 인쇄 / PDF 저장</button>

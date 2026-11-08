@@ -905,6 +905,7 @@ class CoSignSession(PoolObj):
             vat_target=bool(t_info.get("vat_target", False)),
             vat_separate=bool(t_info.get("vat_separate", True)),
             contract_deposit=int(t_info.get("contract_deposit", 300000)),
+            keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다
             deposit=int(t_info.get("deposit", room.deposit)),
             monthly_rent=int(t_info.get("monthly_rent", room.monthly_rent)),
             maintenance_fee=int(t_info.get("maintenance_fee", room.maintenance_fee)),

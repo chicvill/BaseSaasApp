@@ -241,6 +241,7 @@
                   ? `<span class="bass-badge ${lg && lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg && lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "완납(정상)"}</span>
                      <button class="bass-btn bass-btn--sm btn-toggle-expiry" data-room="${r.room_no}" data-default-open="${defaultExpOpen}" type="button">${isExpiryOpen ? "📅 만기예고 접기" : "📅 전출확인·연장예고"}</button>
                      ${hasPhoto ? `<button class="bass-btn bass-btn--sm btn-toggle-photo" data-room="${r.room_no}" type="button">${isPhotoOpen ? "🖼️ 계약서 닫기" : "📸 첨부 계약서 보기"}</button>` : ""}
+                     ${ct && ct.keys_released === false ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-release-keys" data-id="${r.id}" data-room="${r.room_no}" data-bal="${Math.max(Number(ct.deposit || 0) - Number(ct.contract_deposit || 0), 0)}" data-movein="${Bass.escapeHtml(ct.move_in_date || "")}" type="button">🔑 잔금 확인 & 도어락 교부</button>` : ""}
                      <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개 재계약 등록</button>
                      <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
                   : `<span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 매물 공개중" : "공실 비공개"}</span>
@@ -420,6 +421,20 @@
         });
         Bass.updateAppAlert(res.level || "success", res.message);
         await refresh();
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-release-keys").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const ok = window.confirm(`${btn.dataset.room}호 입주일(${btn.dataset.movein || "-"})의 잔금 ${fmtWon(Number(btn.dataset.bal))}이 내 은행 앱의 실제 입금 내역에 들어온 것을 직접 확인했습니까?
+
+확인하면 도어락·공동현관 정보가 임차인 화면에 바로 열립니다. (임차인이 보여 주는 이체 완료 화면은 위조될 수 있습니다)`);
+          if (!ok) return;
+          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/release-keys`, { method: "POST", body: { balance_checked: true } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+        });
       });
     });
 

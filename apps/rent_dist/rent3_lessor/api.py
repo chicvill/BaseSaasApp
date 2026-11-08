@@ -450,6 +450,27 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     }
 
 
+class ReleaseKeysReq(BaseModel):
+    balance_checked: bool = False   # 임대인이 본인 계좌의 실제 입금 내역에서 잔금을 직접 확인함
+
+
+@router.post("/rooms/{room_id}/release-keys")
+def release_keys(room_id: str, req: ReleaseKeysReq, request: Request):
+    """입주일 잔금 입금을 확인하고 도어락·공동현관 정보를 임차인에게 교부한다 (임차인 화면에서 즉시 열림)."""
+    room = Room.require(room_id)
+    ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+    if ct is None or ct.keys_released is not False:
+        raise DomainError("교부 대기 중인 계약이 없습니다.", hint="이미 교부했거나 잠금 대상이 아닌 계약입니다.")
+    if not req.balance_checked:
+        raise DomainError("본인 계좌의 실제 입금 내역에서 잔금을 직접 확인해야 교부할 수 있습니다.",
+                          hint="임차인이 보여 주는 이체 완료 화면은 위조될 수 있습니다.")
+    from apps.rent_dist._rent3_core.authz import claims_from
+    who = (claims_from(request) or {}).get("u", "")
+    ct.keys_released, ct.keys_released_at, ct.keys_released_by = True, now_iso(), who
+    ct.save(action="keys_released", app_source=APP_SRC)
+    return {"success": True, "message": f"{room.room_no}호 도어락·공동현관 정보를 임차인에게 교부했습니다 (임차인 화면에 즉시 열립니다).", "contract": ct.model_dump()}
+
+
 @router.post("/rooms/{room_id}/doorlock")
 def change_doorlock(room_id: str, req: DoorlockReq):
     room = Room.require(room_id)

@@ -140,6 +140,7 @@
         <div class="field-grid" style="margin-top:14px;">
           <div class="listing-card" style="margin:0;">
             <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
+            ${(data.keys && data.keys.locked) ? `<div style="margin:6px 0;padding:8px 10px;border-left:4px solid var(--warn);font-size:12.5px;line-height:1.6;">🔒 <strong>도어락·공동현관은 입주 당일 잔금 완납 후 공개됩니다.</strong><br>잔금 ${fmtWon(data.keys.balance_due)} · 입주일 ${Bass.escapeHtml(data.keys.move_in_date || "-")}<br>임대인이 잔금 입금을 확인하면 이 화면에 바로 열립니다.</div>` : ""}
             <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
               <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
             </div>

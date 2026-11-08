@@ -399,6 +399,10 @@ class Contract(PoolObj):
     vat_separate: bool = True                # 과세 시 10% 별도 청구 여부
     contract_deposit: int = 300000           # 계약금
     deposit: int = 5000000                   # 보증금
+    # 출입 정보(도어락·공동현관) 교부 여부: None=예전 계약(공개), False=잠금(잔금 확인 전), True=임대인이 잔금 입금을 확인하고 교부
+    keys_released: Optional[bool] = None
+    keys_released_at: str = ""
+    keys_released_by: str = ""
     monthly_rent: int = 500000               # 월 임차료
     maintenance_fee: int = 50000             # 월 관리비
     vat: int = 0                             # 월 부가세

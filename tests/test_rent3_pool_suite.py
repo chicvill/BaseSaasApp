@@ -47,6 +47,27 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         with open(p, "r", encoding="utf-8") as fp:
             return json.load(fp)
 
+    def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
+        """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": room_no, "mode": "NEW",
+                                                     "tenant_name": name, "tenant_phone": phone, "id_tenant": tid}).json()["session"]["id"]
+        c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": name, "responder_phone": phone, "id_tenant": tid})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True,
+                                                     "registry_updates": {"owner_name": "김종심", "mortgage_amount": 0}})
+        self._tenant_direct_registry(sid)
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": f"{role}서명", "expected_revision": rev})
+        self._tenant_recheck_ok(sid)
+        r = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        assert r.status_code == 200, r.text
+        return sid
+
     def _tenant_direct_registry(self, sid):
         """임차인이 인터넷등기소에서 직접 열람한 결과를 임대인 제시값과 같게 입력 (1단계 필수)."""
         sess = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
@@ -1833,7 +1854,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         def disk():
             return "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(self.temp_pool, "**", "*.json"), recursive=True))
 
-        os.environ.pop("MASTER_CRYPTO_KEY", None)
+        orig_master = os.environ.pop("MASTER_CRYPTO_KEY", None)   # 개발 PC·서버에 이미 설정돼 있을 수 있다 — 끝나면 되돌린다
         os.environ["RENT3_CRYPTO_KEY"] = "test-key-A-" + "x" * 30
         try:
             Lessor(id="lessor_enc", username="enc1", name="암호", phone="010-4444-9001", branch="encb",
@@ -1887,13 +1908,51 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         finally:
             os.environ.pop("RENT3_CRYPTO_KEY", None)
             os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS", None)
-            os.environ.pop("MASTER_CRYPTO_KEY", None)
-            for rid in ("room_encb_2", "room_encb_3"):
-                try:
-                    o = Room.get(rid)
-                except Exception:
-                    o = None
-                if o: o.delete()
+            if orig_master is None:
+                os.environ.pop("MASTER_CRYPTO_KEY", None)
+            else:
+                os.environ["MASTER_CRYPTO_KEY"] = orig_master
+            # 키 없이는 읽을 수 없는 암호문 레코드가 다른 테스트에 남지 않도록 id 로 직접 지운다
+            for rid in ("room_encb_1", "room_encb_2", "room_encb_3"):
+                Room(id=rid).delete()
+            Lessor(id="lessor_enc").delete()
+
+
+    def test_32_keys_locked_until_lessor_confirms_balance(self):
+        """32. 체결 직후 도어락·공동현관은 잠금(API 마스킹) → 임대인이 잔금 입금 확인 후 교부해야 임차인에게 열린다. 예전 계약은 그대로 공개."""
+        c = self.client
+        LOCK = "입주 당일 잔금 완납 후 공개"
+        chic = self._login("chic")
+        # 예전 계약(플래그 없음)은 그대로 열려 있다
+        legacy = c.get("/api/rent3_tenant/myhome/tenant_201").json()
+        self.assertFalse(legacy["keys"]["locked"])
+        self.assertNotEqual(legacy["room"]["doorlock_pwd"], LOCK)
+
+        # 새 계약 체결
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "914", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "잔금임차", "phone": "01066660601", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        sid = self._complete_contract(chic, th, tid, "914", "잔금임차", "010-6666-0601")
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertTrue(home["keys"]["locked"])
+        self.assertEqual(home["tenant"]["doorlock_pwd"], LOCK)
+        self.assertEqual(home["room"]["doorlock_pwd"], LOCK)
+        self.assertEqual(home["building"]["common_entrance_pwd"], LOCK)
+        self.assertGreater(home["keys"]["balance_due"], 0)
+
+        room = Room.first(branch="main", room_no="914")
+        rel = f"/api/rent3_lessor/rooms/{room.id}/release-keys"
+        self.assertEqual(c.post(rel, headers=th, json={"balance_checked": True}).status_code, 403)          # 임차인은 못 연다
+        self.assertEqual(c.post(rel, headers=self._login("sunho"), json={"balance_checked": True}).status_code, 403)  # 다른 지점도
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": False}).status_code, 400)        # 입금 확인 표시 필수
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 이미 교부
+
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertFalse(home["keys"]["locked"])
+        self.assertEqual(home["room"]["doorlock_pwd"], room.doorlock_pwd)
+        self.assertEqual(home["keys"]["released_at"][:4], "2026")
 
 
 if __name__ == "__main__":

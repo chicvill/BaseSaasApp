@@ -30,6 +30,7 @@ from apps.rent_dist._rent3_core import (
 )
 
 router = APIRouter(dependencies=[Depends(api_headers)])
+LOCKED_TEXT = "입주 당일 잔금 완납 후 공개"
 APP_SRC = "rent3_tenant"
 
 
@@ -178,12 +179,27 @@ def get_myhome(tenant_id: str):
     )[:20]
     payments = sorted(Pay.find(id_tenant=t.id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
 
+    tenant_d = t.model_dump()
+    bldg_d = bldg.model_dump() if bldg else None
+    room_d = room.model_dump() if room else None
+    keys_locked = bool(ct and ct.keys_released is False)  # 잔금 확인 전: 출입 정보를 API 단계에서 가린다
+    if keys_locked:
+        tenant_d["doorlock_pwd"] = LOCKED_TEXT
+        if room_d is not None:
+            room_d["doorlock_pwd"] = LOCKED_TEXT
+        if bldg_d is not None:
+            bldg_d["common_entrance_pwd"] = LOCKED_TEXT
+    balance = max(int(ct.deposit) - int(ct.contract_deposit), 0) if ct else 0
+
     return {
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
-        "tenant": t.model_dump(),
-        "building": bldg.model_dump() if bldg else None,
-        "room": room.model_dump() if room else None,
+        "tenant": tenant_d,
+        "keys": {"locked": keys_locked, "message": LOCKED_TEXT if keys_locked else "",
+                 "balance_due": balance if keys_locked else 0,
+                 "move_in_date": ct.move_in_date if ct else "", "released_at": ct.keys_released_at if ct else ""},
+        "building": bldg_d,
+        "room": room_d,
         "contract": ct.model_dump() if ct else None,
         "expiry_window": exp_win,
         "expiry_check": exp_chk.model_dump() if exp_chk else None,
