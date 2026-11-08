@@ -6,7 +6,7 @@
   "data": {
     "id": "room_main_203",
     "created_at": "2026-10-29T19:17:01",
-    "updated_at": "2026-11-08T11:39:10",
+    "updated_at": "2026-11-08T15:30:45",
     "branch": "main",
     "id_building": "bldg_main",
     "building_name": "",
@@ -104,7 +104,7 @@
     "registry_checked": true,
     "registry_info": {
       "issue_number": "1101-2026-884920",
-      "owner_name": "김임대",
+      "owner_name": "김종심",
       "mortgage_amount": 0,
       "clean_title": true,
       "verified_at": "2026-10-29"
@@ -147,5 +147,5 @@
     "is_published": false,
     "images": []
   },
-  "updated_at": "2026-11-08T11:39:10"
+  "updated_at": "2026-11-08T15:30:45"
 }

@@ -1,0 +1,88 @@
+{
+  "file_name": "건물-401-00000000.json",
+  "building_name": "",
+  "room_no": "401",
+  "move_in_date": null,
+  "data": {
+    "id": "room_main_401",
+    "created_at": "2026-10-31T07:33:29",
+    "updated_at": "2026-11-08T15:30:45",
+    "branch": "main",
+    "id_building": "bldg_main",
+    "building_name": "",
+    "room_no": "401",
+    "move_in_date": null,
+    "payments": [
+      [
+        202601,
+        "2026.1.15",
+        290000,
+        150000,
+        0
+      ],
+      [
+        202610,
+        "2026.10.15",
+        290000,
+        150000,
+        0
+      ]
+    ],
+    "name": "401호",
+    "floor": 4,
+    "area_sqm": 23.0,
+    "total_floors": 0,
+    "direction": "",
+    "room_category": "주거용 원룸",
+    "vat_applicable": false,
+    "id_tenant": "",
+    "active_contract_id": "",
+    "doorlock_pwd": "2580*",
+    "registry_checked": true,
+    "registry_info": {
+      "issue_number": "1101-2026-884920",
+      "owner_name": "김종심",
+      "mortgage_amount": 0,
+      "clean_title": true,
+      "verified_at": "2026-10-31"
+    },
+    "status_description": "남향 풀옵션, 도배·장판 클린 완료",
+    "option_list": [
+      {
+        "item": "시스템 에어컨",
+        "quantity": 1,
+        "condition": "정상(최상)"
+      },
+      {
+        "item": "드럼 세탁기",
+        "quantity": 1,
+        "condition": "정상(양호)"
+      },
+      {
+        "item": "빌트인 냉장고",
+        "quantity": 1,
+        "condition": "정상(최상)"
+      },
+      {
+        "item": "인덕션 쿡탑",
+        "quantity": 1,
+        "condition": "정상"
+      },
+      {
+        "item": "디지털 도어락",
+        "quantity": 1,
+        "condition": "신규 교체"
+      }
+    ],
+    "lease_type": "월세",
+    "pay_timing": "후불",
+    "deposit": 5000000,
+    "monthly_rent": 290000,
+    "maintenance_fee": 150000,
+    "available_from": "즉시입주",
+    "pre_moveout_notice": false,
+    "is_published": false,
+    "images": []
+  },
+  "updated_at": "2026-11-08T15:30:45"
+}

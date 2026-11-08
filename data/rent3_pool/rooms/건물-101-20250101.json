@@ -6,7 +6,7 @@
   "data": {
     "id": "room_main_101",
     "created_at": "2026-10-30T18:33:19",
-    "updated_at": "2026-11-04T07:10:18",
+    "updated_at": "2026-11-08T15:30:45",
     "branch": "main",
     "id_building": "bldg_main",
     "building_name": "",
@@ -31,6 +31,8 @@
     "name": "101호 (채광 우수 1층 분리형)",
     "floor": 1,
     "area_sqm": 26.0,
+    "total_floors": 0,
+    "direction": "",
     "room_category": "주거용 원룸",
     "vat_applicable": false,
     "id_tenant": "tenant_201",
@@ -39,7 +41,7 @@
     "registry_checked": true,
     "registry_info": {
       "issue_number": "1101-2026-884920",
-      "owner_name": "김임대",
+      "owner_name": "김종심",
       "mortgage_amount": 0,
       "clean_title": true,
       "verified_at": "2026-10-30"
@@ -82,5 +84,5 @@
     "is_published": false,
     "images": []
   },
-  "updated_at": "2026-11-04T07:10:18"
+  "updated_at": "2026-11-08T15:30:45"
 }

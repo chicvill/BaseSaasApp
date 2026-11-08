@@ -5,6 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
+from core.errors import DomainError
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -17,6 +18,7 @@ from apps.rent_dist._rent3_core import (
     ensure_pool_seeded,
     normalize_branch_id,
     pool,
+    registry_ai,
 )
 
 router = APIRouter()
@@ -89,6 +91,11 @@ class TenantRegistryReq(BaseModel):
     registry: Dict[str, Any] = Field(default_factory=dict)
     attachment_data_url: str = ""
     attachment_name: str = ""
+
+
+class RegistryAiReq(BaseModel):
+    attachment_data_url: str
+    consent: bool = False
 
 
 class RecheckReq(BaseModel):
@@ -359,6 +366,53 @@ def submit_tenant_registry(session_id: str, req: TenantRegistryReq):
     return {
         "success": True,
         "message": "직접 열람한 등기부 확인 내용이 기록되었습니다.",
+        "session": s.model_dump(),
+    }
+
+
+REGISTRY_AI_MAX_CALLS = 5  # 계약 1건당 Gemini 호출 상한 (비용 보호)
+
+
+@router.post("/sessions/{session_id}/registry-ai")
+def read_registry_with_ai(session_id: str, req: RegistryAiReq):
+    """임차인이 올린 등기사항증명서를 Gemini 로 읽어 항목을 추출하고, 위험 신호는 코드로 계산한다.
+
+    - 전송 동의가 있어야 한다. 올린 파일은 분석에 쓰고 서버에 저장하지 않는다.
+    - 결과는 참고용이다. AI 는 서류의 진위를 가리지 못한다.
+    """
+    s = CoSignSession.by_code_or_id(session_id)
+    s._ensure_ready_for_steps()
+    if not req.consent:
+        raise DomainError(
+            "등기부 내용이 Google Gemini 로 전송되는 것에 동의해야 합니다.",
+            hint="동의하지 않으면 AI 읽기 없이 직접 입력해 주세요.",
+        )
+    if s.registry_ai_calls >= REGISTRY_AI_MAX_CALLS:
+        raise DomainError(
+            f"이 계약의 AI 읽기 횟수({REGISTRY_AI_MAX_CALLS}회)를 모두 썼습니다.",
+            hint="직접 입력해 주세요.",
+        )
+    binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
+    bldg = Building.get(s.id_building)
+    t = s.terms or {}
+    result = registry_ai.analyze(
+        binary, mime,
+        lessor_names=[n for n in (s.lessor_name, (s.registry_data or {}).get("owner_name")) if n],
+        deposit=int(t.get("deposit") or 0),
+        property_value=int(getattr(bldg, "property_value", 0) or 0) if bldg else 0,
+    )
+    if result["status"] == "ok":
+        s.registry_ai_calls += 1
+        s.registry_ai_result = result
+        s.save(action="registry_ai_read", app_source=APP_SRC)
+    return {
+        "success": result["status"] == "ok",
+        "level": "success" if result["status"] == "ok" else "warning",
+        "message": ("AI가 등기부를 읽었습니다. 참고용이니 원본과 꼭 대조하세요." if result["status"] == "ok"
+                    else result["message"]),
+        "available": result["status"] != "unavailable",
+        "result": result,
+        "calls_left": max(REGISTRY_AI_MAX_CALLS - s.registry_ai_calls, 0),
         "session": s.model_dump(),
     }
 

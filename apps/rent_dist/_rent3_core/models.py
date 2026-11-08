@@ -333,6 +333,7 @@ class Room(PoolObj):
 # 3. 계약 & 수납 & 경비 객체군 (contracts.json, payments.json, outlays.json)
 # ─────────────────────────────────────────────────────────────
 class Contract(PoolObj):
+    normalize_phones = False  # 장부 대조(진위 확인) 대상: 원문 보존
     """임대차 계약 원장 객체 — rent2의 후불 비과세·가짜체납 방지·FIFO 청구 계산 규칙 내장."""
     collection: ClassVar[str] = "contracts"
     label: ClassVar[str] = "임대계약"

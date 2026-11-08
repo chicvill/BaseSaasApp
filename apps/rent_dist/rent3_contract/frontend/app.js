@@ -718,9 +718,40 @@
     return out;
   }
 
+  const RISK_STYLE = {
+    high: { icon: "🚨", color: "var(--err)" },
+    caution: { icon: "⚠️", color: "var(--warn)" },
+    info: { icon: "ℹ️", color: "var(--ok)" },
+  };
+
+  function aiResultHtml(res) {
+    if (!res || res.status !== "ok" || !res.extracted) return "";
+    const e = res.extracted;
+    return `
+      <div style="margin-top:10px;">
+        <div style="font-size:12.5px;line-height:1.7;">
+          <strong>AI가 읽은 값</strong> (틀릴 수 있어요)<br>
+          소유자: ${esc(e.owner_name || "-")}${e.owners.length > 1 ? ` (공동 ${e.owners.length}명)` : ""}<br>
+          유효한 근저당: ${e.mortgage_count}건 · 채권최고액 합계 ${fmtWon(e.mortgage_total)}<br>
+          압류·가압류·가처분·신탁: ${esc(e.seizure_or_trust)}<br>
+          발급확인번호: ${esc(e.issue_number || "-")}
+        </div>
+        <div style="margin-top:8px;display:grid;gap:6px;">
+          ${(res.risks || []).map((r) => {
+            const st = RISK_STYLE[r.level] || RISK_STYLE.info;
+            return `<div style="border-left:4px solid ${st.color};padding:6px 10px;font-size:12.5px;line-height:1.55;background:hsl(232 30% 12% / .55);border-radius:8px;">${st.icon} ${esc(r.text)}</div>`;
+          }).join("")}
+        </div>
+        ${e.notes ? `<div class="bass-muted" style="font-size:12px;margin-top:6px;">AI 메모: ${esc(e.notes)}</div>` : ""}
+        <div class="bass-muted" style="font-size:11.5px;margin-top:6px;">※ 위험 신호의 기준(담보 비율 등)은 참고용입니다. AI는 서류의 진위를 가리지 못하니, 인터넷등기소 원본과 직접 대조하세요.</div>
+      </div>`;
+  }
+
   function renderStep1Tenant(s) {
     const lr = s.registry_data || {};
     const done = s.tenant_registry || {};
+    const aiRes = s.registry_ai_result || {};
+    const aiEx = (!done.submitted && aiRes.extracted) ? aiRes.extracted : null;
     const jeonse = isJeonseSession(s);
     const address = `${s.building_address || ""} ${s.building_name || ""} ${s.room_no}호`.trim();
 
@@ -761,18 +792,18 @@
       </label>
       <div class="field-grid" style="margin:8px 0;">
         <div><label class="bass-label">열람 일시</label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || nowLocalInput())}"></div>
-        <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || "")}" placeholder="등기부에 적힌 이름"></div>
-        <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : ""}" placeholder="없으면 0"></div>
+        <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || (aiEx ? aiEx.owner_name : ""))}" placeholder="등기부에 적힌 이름"></div>
+        <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : (aiEx ? aiEx.mortgage_total : "")}" placeholder="없으면 0"></div>
         <div><label class="bass-label">압류·가압류·가처분·신탁등기</label>
           <select id="trSeize" class="bass-select">
             <option value="">선택</option>
-            <option value="없음" ${done.seizure_or_trust === "없음" ? "selected" : ""}>없음</option>
-            <option value="있음" ${done.seizure_or_trust === "있음" ? "selected" : ""}>있음</option>
+            <option value="없음" ${(done.seizure_or_trust || (aiEx && aiEx.seizure_or_trust)) === "없음" ? "selected" : ""}>없음</option>
+            <option value="있음" ${(done.seizure_or_trust || (aiEx && aiEx.seizure_or_trust)) === "있음" ? "selected" : ""}>있음</option>
           </select>
         </div>
       </div>
       <div class="field-grid" style="margin:8px 0;">
-        <div><label class="bass-label">발급확인번호 (선택)</label><input id="trIssue" class="bass-input" value="${esc(done.issue_number || "")}" placeholder="등기부 하단 번호"></div>
+        <div><label class="bass-label">발급확인번호 (선택)</label><input id="trIssue" class="bass-input" value="${esc(done.issue_number || (aiEx ? aiEx.issue_number : ""))}" placeholder="등기부 하단 번호"></div>
       </div>
       <label class="check-row">
         <span style="font-size:12.5px;">임대인이 준 서류의 발급확인번호를 인터넷등기소 '발급확인'으로 대조해 일치함 (선택)</span>
@@ -782,6 +813,19 @@
       <div style="margin:10px 0;">
         <label class="bass-label">열람 결과 첨부 — PDF 또는 캡처 (선택, 10MB 이하)${s.registry_attachment_file ? " · 이미 첨부됨" : ""}</label>
         <input id="trFile" type="file" accept="image/*,application/pdf" class="bass-input">
+      </div>
+
+      <div class="bass-card" style="padding:12px;margin:10px 0;">
+        <div style="font-weight:800;">🤖 AI로 등기부 읽기 <span class="bass-muted" style="font-weight:400;">(선택 · 참고용)</span></div>
+        <div class="bass-muted" style="font-size:12.5px;margin:4px 0 8px;line-height:1.55;">
+          인터넷등기소에서 <strong>직접 받은</strong> PDF나 캡처를 위에서 고른 뒤 누르면, AI(Google Gemini)가 소유자·근저당·압류 여부를 읽어 아래 칸을 채우고 위험 신호를 알려 줍니다.
+        </div>
+        <label class="check-row">
+          <span style="font-size:12.5px;">등기부 내용(소유자 이름 등)이 Google Gemini로 전송되는 것에 동의합니다. 전송한 파일은 분석에만 쓰고 서버에 저장하지 않습니다.</span>
+          <input type="checkbox" id="aiConsent">
+        </label>
+        <button id="btnAiRead" class="bass-btn" style="width:100%;" type="button">🤖 위에서 고른 파일을 AI로 읽기</button>
+        <div id="aiResult">${aiResultHtml(aiRes)}</div>
       </div>
 
       ${jeonse ? `
@@ -852,6 +896,37 @@
         fr.readAsDataURL(file);
       });
     }
+
+    $("btnAiRead").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const f = $("trFile").files[0];
+        if (!f) { Bass.updateAppAlert("warning", "먼저 위의 '열람 결과 첨부'에서 PDF나 캡처 파일을 골라 주세요."); return; }
+        if (f.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+        if (!$("aiConsent").checked) { Bass.updateAppAlert("warning", "Gemini 전송에 동의해야 AI로 읽을 수 있습니다."); return; }
+        const dataUrl = await readFile(f);
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/registry-ai`, {
+          method: "POST",
+          body: { attachment_data_url: dataUrl, consent: true },
+        });
+        // 이 호출로 세션이 갱신되어도 입력 중인 폼이 지워지지 않게, 최신 상태로 맞춰 둔다.
+        if (res.session) {
+          activeSession = res.session;
+          lastStamp = `${res.session.updated_at || ""}:${res.session.revision}`;
+        }
+        $("aiResult").innerHTML = aiResultHtml(res.result) ||
+          `<div class="bass-muted" style="font-size:12.5px;margin-top:8px;">${esc(res.message)}</div>`;
+        const ex = res.result && res.result.extracted;
+        if (ex) {
+          $("trOwner").value = ex.owner_name || "";
+          $("trMort").value = ex.mortgage_total;
+          $("trSeize").value = ex.seizure_or_trust;
+          if (ex.issue_number) $("trIssue").value = ex.issue_number;
+          ["trOwner", "trMort", "trSeize", "trIssue"].forEach((id) => $(id).dispatchEvent(new Event("input", { bubbles: true })));
+        }
+        Bass.updateAppAlert(res.level === "success" ? "success" : "warning", res.message,
+          ex ? `AI 읽기 남은 횟수: ${res.calls_left}회` : "");
+      });
+    });
 
     $("btnStep1Confirm").addEventListener("click", function () {
       Bass.withLock(this, async () => {

@@ -988,5 +988,111 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()["result"], "ALTERED")
 
 
+    def test_13_registry_ai_reads_and_scores_risk(self):
+        """13. Gemini 등기부 읽기: 동의 필수·호출 상한·키 없음 처리, 합계와 위험 신호는 코드가 계산한다."""
+        import base64, json
+        from datetime import date
+        from apps.rent_dist._rent3_core import registry_ai
+
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "905", "is_published": True, "deposit": 5000000})
+        sid = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "905",
+            "tenant_name": "AI읽기", "tenant_phone": "010-5555-0005", "mode": "NEW"}).json()["session"]["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "AI읽기", "responder_phone": "010-5555-0005"})
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+        url = f"{base}/sessions/{sid}/registry-ai"
+
+        class FakeGemini:
+            is_available = True
+            reply = {}
+            calls = 0
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                FakeGemini.calls += 1
+                return "```json\n" + json.dumps(FakeGemini.reply, ensure_ascii=False) + "\n```"
+
+        class NoKey:
+            is_available = False
+
+        orig = registry_ai._client
+        try:
+            # (a) 동의 없으면 거부, AI 호출도 없음
+            registry_ai._client = lambda: FakeGemini()
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": False})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(FakeGemini.calls, 0)
+
+            # (b) 키가 없으면 오류가 아니라 '직접 입력' 안내
+            registry_ai._client = lambda: NoKey()
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 200)
+            self.assertFalse(r.json()["available"])
+            self.assertFalse(r.json()["success"])
+
+            # (c) 정상: 말소된 근저당은 빼고, AI 가 준 합계(999)는 쓰지 않고 목록에서 코드로 합산
+            registry_ai._client = lambda: FakeGemini()
+            FakeGemini.reply = {
+                "document_type": "registry", "readable": True, "issue_number": "1101-2026-777777",
+                "owners": [{"name": "김임대", "share": None}],
+                "mortgages": [
+                    {"creditor": "A은행", "amount": "1,000,000,000", "registered_date": "2024-01-02", "cancelled": False},
+                    {"creditor": "B은행", "amount": 300000000, "registered_date": "2020-01-02", "cancelled": True},
+                ],
+                "restrictions": [], "ownership_transfers": [{"date": "2019-05-01", "cause": "매매"}],
+                "mortgage_total": 999,
+            }
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).json()
+            self.assertTrue(r["success"])
+            ex = r["result"]["extracted"]
+            self.assertEqual(ex["mortgage_total"], 1000000000)
+            self.assertEqual(ex["mortgage_count"], 1)
+            self.assertEqual(ex["seizure_or_trust"], "없음")
+            self.assertIn("LTV_OK", [x["code"] for x in r["result"]["risks"]])  # (10억+500만)/18.5억 ≈ 54%
+
+            # (d) AI 읽기 뒤 직접 열람 제출하면 'AI 보조' 로 기록된다
+            self.client.post(f"{base}/sessions/{sid}/step1", json={
+                "role": "lessor", "checked_counterparty_id": True,
+                "registry_updates": {"owner_name": "김임대", "mortgage_amount": 1000000000}})
+            rr = self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {
+                "viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+                "mortgage_amount": 1000000000, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}}).json()
+            self.assertTrue(rr["session"]["tenant_registry"]["ai_assisted"])
+
+            # (e) 호출 상한: 총 5회까지, 그 뒤는 거부
+            for _ in range(3):
+                self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 200)
+            self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 200)
+            self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 400)
+        finally:
+            registry_ai._client = orig
+
+        # (f) 위험 계산은 순수 코드 — 각 신호가 올바르게 켜지는지
+        def ex(**kw):
+            base_ex = {"document_type": "registry", "readable": True, "owners": [{"name": "김임대", "share": ""}],
+                       "owner_name": "김임대", "mortgage_total": 0, "restrictions": [], "ownership_transfers": []}
+            base_ex.update(kw)
+            return base_ex
+
+        def codes(e, **kw):
+            args = {"lessor_names": ["김임대 (시크빌 대표)"], "deposit": 5000000, "property_value": 1850000000,
+                    "today": date(2026, 11, 8)}
+            args.update(kw)
+            return [x["code"] for x in registry_ai.assess_risks(e, **args)]
+
+        self.assertIn("LTV_HIGH", codes(ex(mortgage_total=1500000000)))           # (15억+500만)/18.5억 ≈ 81%
+        self.assertIn("LTV_CAUTION", codes(ex(mortgage_total=1150000000)))        # ≈ 62%
+        self.assertIn("RESTRICTION", codes(ex(restrictions=[{"type": "가압류", "detail": "", "cancelled": False}])))
+        self.assertNotIn("RESTRICTION", codes(ex(restrictions=[{"type": "가압류", "detail": "", "cancelled": True}])))
+        self.assertIn("OWNER_MISMATCH", codes(ex(owners=[{"name": "박사기", "share": ""}], owner_name="박사기")))
+        self.assertIn("MULTI_OWNER", codes(ex(owners=[{"name": "김임대", "share": "1/2"}, {"name": "이공동", "share": "1/2"}])))
+        self.assertIn("RECENT_TRANSFER", codes(ex(ownership_transfers=[{"date": "2026-09-01", "cause": "매매"}])))
+        self.assertNotIn("RECENT_TRANSFER", codes(ex(ownership_transfers=[{"date": "2020-09-01", "cause": "매매"}])))
+        self.assertEqual(codes(ex(document_type="other")), ["NOT_REGISTRY"])
+        self.assertIn("NO_FLAG", codes(ex()))
+        self.assertIn("NO_VALUE", codes(ex(mortgage_total=100000000), property_value=0))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -44,6 +44,7 @@ from .pool import PoolObj, now_iso, pool
 
 
 class CoSignSession(PoolObj):
+    normalize_phones = False  # 무결성 해시 대상: 입력 원문 보존
     """임대인·임차인 실시간 호출·응답 및 상호 신분·등기 확인 기반 공동 임대계약 세션 객체."""
     collection: ClassVar[str] = "cosign_sessions"
     label: ClassVar[str] = "공동 임대계약 세션"
@@ -91,6 +92,8 @@ class CoSignSession(PoolObj):
     registry_attachment_name: str = ""
     registry_attachment_sha256: str = ""
     tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
+    registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
+    registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
 
     # Step 2: 호실 옵션 및 시설 공동 점검표
     option_checks: List[Dict[str, Any]] = Field(default_factory=list)
@@ -215,6 +218,7 @@ class CoSignSession(PoolObj):
             "seizure_or_trust": data["seizure_or_trust"],
             "guarantee_status": str(data.get("guarantee_status", "")).strip(),
             "mismatch_ack": bool(data.get("mismatch_ack")),
+            "ai_assisted": bool(self.registry_ai_result),
             "submitted_at": now_iso(),
         }
         self.tenant_registry = rec

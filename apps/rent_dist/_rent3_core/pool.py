@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime
@@ -401,6 +402,16 @@ def use_pool_dir(path: str) -> JsonDataPool:
 POOL_REGISTRY: Dict[str, Type["PoolObj"]] = {}
 
 
+def format_phone(value: str) -> str:
+    """01012345678 · 010 1234 5678 → 010-1234-5678. 형식이 아니면 원문 그대로."""
+    d = re.sub(r"\D", "", value or "")
+    if len(d) == 11 and d.startswith("01"):
+        return f"{d[:3]}-{d[3:7]}-{d[7:]}"
+    if len(d) == 10 and d.startswith("01"):
+        return f"{d[:3]}-{d[3:6]}-{d[6:]}"
+    return value
+
+
 class PoolObj(BaseModel):
     """공동 JSON Data Pool에 실시간으로 직렬화·저장되는 모든 도메인 객체의 부모 클래스."""
 
@@ -412,6 +423,17 @@ class PoolObj(BaseModel):
 
     collection: ClassVar[str] = "ops"
     label: ClassVar[str] = ""
+    # 전화번호 필드(phone, *_phone)를 010-1111-1111 형식으로 저장한다.
+    # 무결성 해시/장부 대조에 쓰이는 계약·세션 객체는 원문 보존을 위해 끈다.
+    normalize_phones: ClassVar[bool] = True
+
+    def model_post_init(self, __context: Any) -> None:
+        if self.normalize_phones:
+            for name in type(self).model_fields:
+                if name == "phone" or name.endswith("_phone"):
+                    v = getattr(self, name, None)
+                    if isinstance(v, str) and v:
+                        self.__dict__[name] = format_phone(v)
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
