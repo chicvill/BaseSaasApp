@@ -4,6 +4,7 @@ apps/rent3_contract/api.py — 공동 임대계약 전용 API 라우터 (호출�
 import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -82,6 +83,16 @@ class Step4SignReq(BaseModel):
     role: str = "tenant"
     signature: str
     expected_revision: Optional[int] = None
+
+
+class TenantRegistryReq(BaseModel):
+    registry: Dict[str, Any] = Field(default_factory=dict)
+    attachment_data_url: str = ""
+    attachment_name: str = ""
+
+
+class RecheckReq(BaseModel):
+    changed: bool = False
 
 
 class Step5CompleteReq(BaseModel):
@@ -333,6 +344,43 @@ def confirm_step1(session_id: str, req: Step1ConfirmReq):
         "message": msg,
         "session": s.model_dump(),
     }
+
+
+@router.post("/sessions/{session_id}/tenant-registry")
+def submit_tenant_registry(session_id: str, req: TenantRegistryReq):
+    """임차인이 인터넷등기소에서 직접 열람한 결과(+선택 첨부)를 기록한다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    s.submit_tenant_registry(
+        req.registry,
+        attachment_data_url=req.attachment_data_url,
+        attachment_name=req.attachment_name,
+        app_source=APP_SRC,
+    )
+    return {
+        "success": True,
+        "message": "직접 열람한 등기부 확인 내용이 기록되었습니다.",
+        "session": s.model_dump(),
+    }
+
+
+@router.post("/sessions/{session_id}/recheck")
+def recheck_registry(session_id: str, req: RecheckReq):
+    """체결 직전 임차인의 등기부 재열람 결과. 변동이 있으면 계약을 중단한다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    s.recheck_registry(changed=req.changed, app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": ("등기부에 변동이 확인되어 계약이 중단되었습니다." if req.changed
+                    else "체결 직전 재열람 확인이 기록되었습니다."),
+        "session": s.model_dump(),
+    }
+
+
+@router.get("/sessions/{session_id}/registry-attachment")
+def get_registry_attachment(session_id: str):
+    s = CoSignSession.by_code_or_id(session_id)
+    path, mime, name = s.registry_attachment_path()
+    return FileResponse(path, media_type=mime, filename=name)
 
 
 @router.post("/sessions/{session_id}/step2")

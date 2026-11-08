@@ -48,6 +48,7 @@
   let lessorDash = null;      // 임대인: 호실별 미납 현황
   let homeSig = "";
   let modalKey = "";
+  let lastStamp = "";
   let modalAnimating = false;
   let modalTimer = null;
 
@@ -365,6 +366,7 @@
     lastRevision = null;
     lastCallStatus = null;
     modalKey = "";
+    lastStamp = "";
     modalAnimating = false;
     clearTimeout(modalTimer);
     elCard.classList.remove("is-open", "is-closing");
@@ -437,11 +439,17 @@
   }
 
   function planModal(s) {
+    if (s.status === "CANCELLED") {
+      return { key: `${s.id}:cancelled`, render: () => renderCancelled(s) };
+    }
     if (s.call_status === "CALLING") {
       const callee = currentRole !== s.initiated_by_role;
       return { key: `${s.id}:call:${callee ? "respond" : "wait"}`, render: () => renderCallHandshake(s) };
     }
     const step = viewStep;
+    if (step === 5 && s.current_step === 5 && currentRole === "tenant" && !s.tenant_recheck_at) {
+      return { key: `${s.id}:s5:recheck`, render: () => renderRecheckTenant(s) };
+    }
     if (step === s.current_step) {
       const prog = stepProgress(s, step);
       const mine = prog[currentRole];
@@ -495,7 +503,12 @@
     const plan = planModal(s);
     elModal.hidden = false;
     positionModal();
-    if (plan.key === modalKey) { plan.render(); return; }
+    const stamp = `${s.updated_at || ""}:${s.revision}`;
+    if (plan.key === modalKey) {
+      if (stamp !== lastStamp) { lastStamp = stamp; plan.render(); }
+      return;
+    }
+    lastStamp = stamp;
     const first = modalKey === "";
     modalKey = plan.key;
     if (first) { plan.render(); openCardAnim(); return; }
@@ -615,7 +628,245 @@
     }
   }
 
+  // ───────────── 등기부 직접 확인 (임차인) ─────────────
+  const IROS_URL = "https://www.iros.go.kr";
+
+  function isJeonseSession(s) {
+    const t = s.terms || {};
+    return t.lease_type === "전세" || Number(t.monthly_rent || 0) === 0;
+  }
+
+  function nowLocalInput() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }
+
+  function registryMismatches(s, tr) {
+    const lr = s.registry_data || {};
+    const out = [];
+    const norm = (v) => String(v || "").replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
+    if (lr.owner_name && tr.owner_name && norm(lr.owner_name) !== norm(tr.owner_name)) {
+      out.push(`소유자가 다릅니다 — 임대인 제시: ${lr.owner_name} / 내가 열람: ${tr.owner_name}`);
+    }
+    if (tr.mortgage_amount !== "" && Number(lr.mortgage_amount || 0) !== Number(tr.mortgage_amount || 0)) {
+      out.push(`근저당 채권최고액이 다릅니다 — 임대인 제시: ${fmtWon(lr.mortgage_amount)} / 내가 열람: ${fmtWon(tr.mortgage_amount)}`);
+    }
+    if (lr.issue_number && tr.issue_number && norm(lr.issue_number) !== norm(tr.issue_number)) {
+      out.push("발급확인번호가 다릅니다");
+    }
+    if (tr.seizure_or_trust === "있음") out.push("압류·가압류·가처분·신탁등기가 있습니다");
+    return out;
+  }
+
+  function renderStep1Tenant(s) {
+    const lr = s.registry_data || {};
+    const done = s.tenant_registry || {};
+    const jeonse = isJeonseSession(s);
+    const address = `${s.building_address || ""} ${s.building_name || ""} ${s.room_no}호`.trim();
+
+    elStepPanel.innerHTML = `
+      <h3 style="margin:0 0 8px;">① 신분증 확인 · 등기부 직접 확인</h3>
+
+      <div class="call-banner" style="margin-bottom:12px;">
+        <div style="font-weight:800;margin-bottom:4px;">⚠️ 임대인이 보여준 사진·PDF만 믿지 마세요</div>
+        <div style="font-size:12.5px;line-height:1.55;">
+          서류는 위조되거나, 진본이어도 발급 뒤에 바뀌었을 수 있습니다.
+          <strong>인터넷등기소에서 직접</strong> 아래 주소로 열람한 결과를 입력해 주세요. 열람은 소유자 동의 없이 누구나 할 수 있습니다.
+        </div>
+        <div style="font-size:12.5px;margin-top:6px;">열람할 부동산: <strong>${esc(address)}</strong></div>
+        <a class="bass-btn bass-btn--primary" style="margin-top:8px;display:block;text-align:center;text-decoration:none;" href="${IROS_URL}" target="_blank" rel="noopener">🏛️ 인터넷등기소 열기 (새 창)</a>
+      </div>
+
+      <div class="id-card-box ${s.tenant_checked_lessor_id ? "is-verified" : ""}" style="margin-bottom:12px;">
+        <strong>🪪 임대인 신분증 확인</strong>
+        <div style="font-size:13px;margin:4px 0 8px;">성명: <strong>${esc(s.lessor_name)}</strong> · 연락처: ${esc(s.lessor_phone || "-")}</div>
+        <label class="check-row" style="margin-bottom:0;">
+          <span style="font-size:12.5px;">임대인의 실물 신분증을 보고 본인임을 확인함</span>
+          <input type="checkbox" id="chkTenantVerifiedLessorId" ${s.tenant_checked_lessor_id ? "checked" : ""}>
+        </label>
+      </div>
+
+      <div class="bass-card" style="padding:12px;margin-bottom:12px;">
+        <div style="font-weight:800;margin-bottom:6px;">🏢 임대인이 제시한 등기 정보 <span class="bass-muted" style="font-weight:400;">(참고용)</span></div>
+        <div style="font-size:12.5px;line-height:1.7;">
+          발급확인번호: ${esc(lr.issue_number || "-")}<br>
+          갑구 소유자: ${esc(lr.owner_name || "-")}<br>
+          을구 채권최고액: ${fmtWon(lr.mortgage_amount)}
+        </div>
+      </div>
+
+      <div style="font-weight:800;margin-bottom:6px;">🔎 내가 직접 열람한 결과</div>
+      <label class="check-row">
+        <span style="font-size:12.5px;"><strong>인터넷등기소에서 제가 직접 열람했습니다</strong></span>
+        <input type="checkbox" id="trViewed" ${done.viewed_directly ? "checked" : ""}>
+      </label>
+      <div class="field-grid" style="margin:8px 0;">
+        <div><label class="bass-label">열람 일시</label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || nowLocalInput())}"></div>
+        <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || "")}" placeholder="등기부에 적힌 이름"></div>
+        <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : ""}" placeholder="없으면 0"></div>
+        <div><label class="bass-label">압류·가압류·가처분·신탁등기</label>
+          <select id="trSeize" class="bass-select">
+            <option value="">선택</option>
+            <option value="없음" ${done.seizure_or_trust === "없음" ? "selected" : ""}>없음</option>
+            <option value="있음" ${done.seizure_or_trust === "있음" ? "selected" : ""}>있음</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-grid" style="margin:8px 0;">
+        <div><label class="bass-label">발급확인번호 (선택)</label><input id="trIssue" class="bass-input" value="${esc(done.issue_number || "")}" placeholder="등기부 하단 번호"></div>
+      </div>
+      <label class="check-row">
+        <span style="font-size:12.5px;">임대인이 준 서류의 발급확인번호를 인터넷등기소 '발급확인'으로 대조해 일치함 (선택)</span>
+        <input type="checkbox" id="trIssueOk" ${done.issue_number_verified ? "checked" : ""}>
+      </label>
+
+      <div style="margin:10px 0;">
+        <label class="bass-label">열람 결과 첨부 — PDF 또는 캡처 (선택, 10MB 이하)${s.registry_attachment_file ? " · 이미 첨부됨" : ""}</label>
+        <input id="trFile" type="file" accept="image/*,application/pdf" class="bass-input">
+      </div>
+
+      ${jeonse ? `
+        <div class="bass-card" style="padding:12px;margin-bottom:10px;border-color:var(--warn);">
+          <div style="font-weight:800;margin-bottom:4px;">🛡️ 전세 · 보증금 반환보증</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">HUG·SGI 등 보증보험 가입이 가능한지 계약 전에 확인하세요. 가입이 안 되는 집은 보증금을 돌려받지 못할 위험이 큽니다.</div>
+          <select id="trGuar" class="bass-select">
+            <option value="">가입 여부 선택</option>
+            ${["가입 완료", "가입 예정", "가입 안 함"].map((v) => `<option value="${v}" ${done.guarantee_status === v ? "selected" : ""}>${v}</option>`).join("")}
+          </select>
+        </div>` : ""}
+
+      <div id="trMismatchBox"></div>
+
+      <button id="btnStep1Confirm" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
+        ✅ 직접 확인 완료 · 신분증 확인 저장
+      </button>
+    `;
+
+    const $ = (id) => document.getElementById(id);
+    elStepPanel.querySelectorAll("input, select").forEach((el) => {
+      el.addEventListener("focus", () => { isEditingForm = true; });
+      el.addEventListener("blur", () => { setTimeout(() => { isEditingForm = false; }, 400); });
+    });
+
+    function collect() {
+      return {
+        viewed_directly: $("trViewed").checked,
+        viewed_at: $("trAt").value,
+        owner_name: $("trOwner").value.trim(),
+        mortgage_amount: $("trMort").value === "" ? "" : Number($("trMort").value),
+        seizure_or_trust: $("trSeize").value,
+        issue_number: $("trIssue").value.trim(),
+        issue_number_verified: $("trIssueOk").checked,
+        guarantee_status: jeonse ? $("trGuar").value : "",
+      };
+    }
+
+    let ackChecked = false;
+    function refreshMismatch() {
+      const d = collect();
+      const list = registryMismatches(s, d);
+      const box = $("trMismatchBox");
+      if (!list.length) { box.innerHTML = ""; ackChecked = false; return; }
+      box.innerHTML = `
+        <div class="call-banner" style="border-color:var(--err);background:hsl(0 80% 50% / .12);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:4px;">🚨 확인이 필요한 항목</div>
+          <ul style="margin:0 0 8px 18px;padding:0;font-size:12.5px;line-height:1.6;">${list.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>
+          <label class="check-row" style="margin-bottom:0;">
+            <span style="font-size:12.5px;"><strong>위 내용을 확인했고, 그래도 계약을 계속합니다</strong></span>
+            <input type="checkbox" id="trAck" ${ackChecked ? "checked" : ""}>
+          </label>
+        </div>`;
+      $("trAck").addEventListener("change", (e) => { ackChecked = e.target.checked; });
+    }
+    ["trOwner", "trMort", "trSeize", "trIssue"].forEach((id) => {
+      $(id).addEventListener("input", refreshMismatch);
+      $(id).addEventListener("change", refreshMismatch);
+    });
+    refreshMismatch();
+
+    function readFile(file) {
+      return new Promise((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result);
+        fr.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
+        fr.readAsDataURL(file);
+      });
+    }
+
+    $("btnStep1Confirm").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        if (!$("chkTenantVerifiedLessorId").checked) {
+          Bass.updateAppAlert("warning", "임대인의 신분증을 확인한 뒤 체크해 주세요.");
+          return;
+        }
+        const reg = collect();
+        reg.mismatch_ack = ackChecked;
+        let dataUrl = "";
+        const f = $("trFile").files[0];
+        if (f) {
+          if (f.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "첨부 파일은 10MB 이하만 가능합니다."); return; }
+          dataUrl = await readFile(f);
+        }
+        await Bass.api(APP_ID, `/sessions/${s.id}/tenant-registry`, {
+          method: "POST",
+          body: { registry: reg, attachment_data_url: dataUrl, attachment_name: f ? f.name : "" },
+        });
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/step1`, {
+          method: "POST",
+          body: { role: "tenant", checked_counterparty_id: true },
+        });
+        activeSession = res.session;
+        viewStep = activeSession.current_step;
+        isEditingForm = false;
+        Bass.updateAppAlert("success", res.message);
+        renderWorkspace();
+      });
+    });
+  }
+
+  // ───────────── 체결 직전 재열람 (임차인) ─────────────
+  function renderRecheckTenant(s) {
+    const address = `${s.building_address || ""} ${s.building_name || ""} ${s.room_no}호`.trim();
+    const tr = s.tenant_registry || {};
+    elStepPanel.innerHTML = `
+      <h3 style="margin:0 0 8px;">⑤ 체결 직전 마지막 확인 — 등기부 다시 열람</h3>
+      <div class="call-banner" style="margin-bottom:12px;">
+        <div style="font-size:12.5px;line-height:1.6;">
+          처음 열람한 뒤 <strong>근저당이 새로 잡히거나 소유자가 바뀌는 사고</strong>가 가장 흔합니다.
+          체결 전에 인터넷등기소에서 한 번 더 열람해 처음 확인한 내용과 같은지 보세요.
+        </div>
+        <div style="font-size:12.5px;margin-top:6px;">열람할 부동산: <strong>${esc(address)}</strong></div>
+        <div style="font-size:12.5px;margin-top:4px;">처음 확인한 내용: 소유자 ${esc(tr.owner_name || "-")} · 채권최고액 ${fmtWon(tr.mortgage_amount)} · 압류/신탁 ${esc(tr.seizure_or_trust || "-")}</div>
+        <a class="bass-btn bass-btn--primary" style="margin-top:8px;display:block;text-align:center;text-decoration:none;" href="${IROS_URL}" target="_blank" rel="noopener">🏛️ 인터넷등기소 열기 (새 창)</a>
+      </div>
+      <button id="btnRecheckOk" class="bass-btn bass-btn--primary" style="width:100%;margin-bottom:8px;" type="button">✅ 다시 열람했고, 변동 없음을 확인했습니다</button>
+      <button id="btnRecheckChanged" class="bass-btn" style="width:100%;border-color:var(--err);color:var(--err);" type="button">🚨 변동이 있습니다 — 계약 중단</button>
+    `;
+    const send = (btn, changed) => Bass.withLock(btn, async () => {
+      if (changed && !window.confirm("등기부에 변동이 있어 계약을 중단합니다. 되돌릴 수 없습니다. 계속할까요?")) return;
+      const res = await Bass.api(APP_ID, `/sessions/${s.id}/recheck`, { method: "POST", body: { changed } });
+      activeSession = res.session;
+      Bass.updateAppAlert(changed ? "warning" : "success", res.message);
+      renderWorkspace();
+    });
+    document.getElementById("btnRecheckOk").addEventListener("click", function () { send(this, false); });
+    document.getElementById("btnRecheckChanged").addEventListener("click", function () { send(this, true); });
+  }
+
+  function renderCancelled(s) {
+    const why = (s.tenant_registry || {}).recheck_changed
+      ? "임차인이 체결 직전 등기부에서 변동을 확인해 계약이 중단되었습니다."
+      : "이 계약은 중단되었습니다.";
+    elStepPanel.innerHTML = `
+      <h3 style="margin:0 0 6px;">⛔ 계약이 중단되었습니다</h3>
+      <p class="bass-muted" style="font-size:13px;margin:0 0 12px;">${esc(why)} 필요하면 홈에서 새로 계약을 시작할 수 있습니다.</p>
+      <button id="btnCancelledHome" class="bass-btn bass-btn--primary" style="width:100%;" type="button">← 홈으로</button>`;
+    document.getElementById("btnCancelledHome").addEventListener("click", goHome);
+  }
+
   function renderStep1(s) {
+    if (currentRole === "tenant") { renderStep1Tenant(s); return; }
     const r = s.registry_data || {};
     const step1AllDone =
       s.lessor_login_verified &&
@@ -627,6 +878,7 @@
 
     elStepPanel.innerHTML = `
       <h3>① 로그인 본인인증 · 상호 신분증 확인 체크 & 등기부등본 확인</h3>
+      <div class="bass-card" style="padding:10px 12px;margin:8px 0;font-size:12.5px;border-color:var(--warn);">🔎 임차인이 <strong>인터넷등기소에서 등기부를 직접 열람</strong>해 아래 내용과 대조합니다. 실제 등기와 다르게 입력하면 계약이 진행되지 않을 수 있으니 열람한 그대로 입력해 주세요.</div>
       <p class="bass-muted" style="font-size:13px;">
         임대인과 임차인은 로그인 본인인증을 완료했으며, <strong>서로 상대방의 신분증을 확인하여 본인 확인 체크</strong>를 완료하고 <strong>등기부등본</strong>을 확인해야 서명 자격이 부여됩니다.
       </p>
@@ -1083,7 +1335,9 @@
             </select>
           </div>
         </div>
-        <button id="btnCompleteSeal" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
+        ${s.tenant_recheck_at ? "" : `<div class="bass-card" style="padding:10px 12px;margin-bottom:10px;font-size:12.5px;border-color:var(--warn);">
+          ⏳ 임차인이 체결 직전 등기부 재열람을 확인하면 체결 버튼이 열립니다.</div>`}
+        <button id="btnCompleteSeal" class="bass-btn bass-btn--primary" style="width:100%;" type="button" ${s.tenant_recheck_at ? "" : "disabled"}>
           🎉 계약금 입금 확인 & 임대차 계약 최종 체결 봉인
         </button>
       `}
@@ -1123,6 +1377,7 @@
     }
     const c = sealedContract;
     const regSnap = c.registry_snapshot || {};
+    const tdr = regSnap.tenant_direct_registry || {};
     elSealedView.style.display = "block";
     elSealedView.innerHTML = `
       <div class="no-print" style="margin-top:14px;">
@@ -1130,7 +1385,7 @@
           <div style="font-weight:800;margin-bottom:4px;">🎉 계약이 체결되었습니다</div>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">
             행정복지센터(주민센터) 확정일자·전입신고 제출용으로 인쇄하거나 PDF로 저장하세요.
-            인쇄 창에서 "PDF로 저장"을 고르면 파일로 보관됩니다.
+            인쇄 창에서 "PDF로 저장"을 고르면 파일로 보관됩니다.<br>            <strong>잔금을 보내기 전과 입주 당일에도 인터넷등기소에서 한 번 더 열람</strong>하고, 전입신고·확정일자는 입주 당일 바로 받으세요.
           </div>
           <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
             <button id="btnPrintContract" class="bass-btn bass-btn--primary" style="flex:2;min-width:180px;" type="button">🖨️ 계약서 인쇄 / PDF 저장 (A4)</button>
@@ -1155,6 +1410,7 @@
           <tr><th>월 임차료</th><td>${fmtWon(c.monthly_rent)} (${Bass.escapeHtml(c.pay_timing)})</td><th>월 관리비 / 부가세</th><td>${fmtWon(c.maintenance_fee)} / ${fmtWon(c.vat)}</td></tr>
           <tr><th>임대차 기간</th><td colspan="3">${Bass.escapeHtml(c.move_in_date)} ~ ${Bass.escapeHtml(c.expiry_date)} (${c.lease_term_months}개월)</td></tr>
           <tr><th>본인인증 및 신분증·등기 확인</th><td colspan="3">양측 로그인 본인인증 완료 · 임대인↔임차인 상호 신분증 대조 본인 확인 체크 완료 · 등기부등본(${Bass.escapeHtml(regSnap.issue_number || "-")}, 소유자 ${Bass.escapeHtml(regSnap.owner_name || c.lessor_name)}) 열람 확인 필</td></tr>
+          ${tdr.submitted ? `<tr><th>임차인 직접 열람 확인</th><td colspan="3">인터넷등기소 직접 열람 (${Bass.escapeHtml(tdr.viewed_at || "-")}) · 소유자 ${Bass.escapeHtml(tdr.owner_name || "-")} · 근저당 채권최고액 ${fmtWon(tdr.mortgage_amount)} · 압류/신탁 ${Bass.escapeHtml(tdr.seizure_or_trust || "-")}${tdr.guarantee_status ? ` · 보증금 반환보증 ${Bass.escapeHtml(tdr.guarantee_status)}` : ""}${regSnap.tenant_recheck_at ? ` · 체결 직전 재열람 확인 ${Bass.escapeHtml(String(regSnap.tenant_recheck_at).slice(0, 16).replace("T", " "))}` : ""}${regSnap.registry_attachment_sha256 ? `<br><span style="font-family:monospace;font-size:10.5px;">첨부 SHA-256 ${Bass.escapeHtml(regSnap.registry_attachment_sha256)}</span>` : ""}</td></tr>` : ""}
           <tr><th>특약사항</th><td colspan="3" style="white-space:pre-line;">${Bass.escapeHtml(c.special_terms)}</td></tr>
           <tr><th>임대인(갑) 서명</th><td>${Bass.escapeHtml(c.lessor_name)} &nbsp; ${renderSigCell(c.lessor_signature)}</td><th>임차인(을) 서명</th><td>${Bass.escapeHtml(c.tenant_name)} (${Bass.escapeHtml(c.tenant_phone)}) &nbsp; ${renderSigCell(c.tenant_signature)}</td></tr>
           <tr><th>무결성 해시(SHA-256)</th><td colspan="3" style="font-family:monospace;font-size:11px;word-break:break-all;">${Bass.escapeHtml(c.integrity_hash)}</td></tr>

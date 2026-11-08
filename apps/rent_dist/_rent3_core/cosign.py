@@ -16,6 +16,9 @@ apps/_rent3_core/cosign.py — 임대인·임차인이 각각 로그인 후 매�
 """
 from __future__ import annotations
 
+import base64
+import hashlib
+import os
 import random
 import re
 from typing import Any, ClassVar, Dict, List, Optional
@@ -36,7 +39,8 @@ from .models import (
     normalize_branch_id,
 )
 from .ops import DirectChat, RtmsReport
-from .pool import PoolObj, now_iso
+from .broker import ALLOWED_MIME_TO_EXT, EXT_TO_MIME, MAX_PHOTO_BYTES
+from .pool import PoolObj, now_iso, pool
 
 
 class CoSignSession(PoolObj):
@@ -81,6 +85,12 @@ class CoSignSession(PoolObj):
     registry_data: Dict[str, Any] = Field(default_factory=dict)
     step1_lessor_confirmed: bool = False     # 임대인 등기부등본 제시/확인
     step1_tenant_locked: bool = False        # 임차인 등기부등본 열람/확인 잠금
+    # 임차인이 인터넷등기소에서 '직접' 열람해 확인한 내용 (임대인이 제시한 서류와는 별개로 검증)
+    tenant_registry: Dict[str, Any] = Field(default_factory=dict)
+    registry_attachment_file: str = ""       # uploads/registry/<session>.<ext>
+    registry_attachment_name: str = ""
+    registry_attachment_sha256: str = ""
+    tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
 
     # Step 2: 호실 옵션 및 시설 공동 점검표
     option_checks: List[Dict[str, Any]] = Field(default_factory=list)
@@ -112,6 +122,146 @@ class CoSignSession(PoolObj):
     def summary(self) -> str:
         c_tag = "호출중" if self.call_status == "CALLING" else f"Step {self.current_step}/5"
         return f"공동계약 [{self.room_no}호] {c_tag} ({self.status}, rev={self.revision})"
+
+    def is_jeonse(self) -> bool:
+        t = self.terms or {}
+        return t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
+
+    def registry_mismatches(self) -> List[str]:
+        """임대인이 제시한 등기 정보와 임차인이 직접 열람한 결과의 불일치·위험 항목."""
+        tr = self.tenant_registry or {}
+        if not tr.get("submitted"):
+            return []
+        lr = self.registry_data or {}
+        out: List[str] = []
+
+        def norm(v: Any) -> str:
+            # 괄호 안 직함(예: "김임대 (시크빌 대표)")과 공백은 비교에서 제외
+            return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(v or "")))
+
+        if lr.get("owner_name") and norm(lr.get("owner_name")) != norm(tr.get("owner_name")):
+            out.append(f"소유자가 다릅니다 (임대인 제시: {lr.get('owner_name')} / 직접 열람: {tr.get('owner_name')})")
+        if int(lr.get("mortgage_amount") or 0) != int(tr.get("mortgage_amount") or 0):
+            out.append(
+                f"근저당 채권최고액이 다릅니다 (임대인 제시: {int(lr.get('mortgage_amount') or 0):,}원 / "
+                f"직접 열람: {int(tr.get('mortgage_amount') or 0):,}원)"
+            )
+        if lr.get("issue_number") and tr.get("issue_number") and norm(lr["issue_number"]) != norm(tr["issue_number"]):
+            out.append("발급확인번호가 다릅니다")
+        if tr.get("seizure_or_trust") == "있음":
+            out.append("압류·가압류·가처분·신탁등기가 있다고 확인되었습니다")
+        return out
+
+    def submit_tenant_registry(
+        self,
+        data: Dict[str, Any],
+        attachment_data_url: str = "",
+        attachment_name: str = "",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임차인이 인터넷등기소에서 직접 열람한 결과를 기록한다 (필수 항목·불일치 확인 검증)."""
+        self._ensure_ready_for_steps()
+        if not self.step1_lessor_confirmed:
+            raise DomainError("임대인이 등기부 정보를 먼저 제시해야 대조할 수 있습니다.")
+        if not data.get("viewed_directly"):
+            raise DomainError(
+                "인터넷등기소에서 직접 열람했다는 확인이 필요합니다.",
+                hint="임대인이 준 사진·PDF가 아니라, 본인이 인터넷등기소(iros.go.kr)에서 직접 열람한 결과를 입력해 주세요.",
+            )
+        if not str(data.get("viewed_at", "")).strip():
+            raise DomainError("열람 일시를 입력해 주세요.")
+        if not str(data.get("owner_name", "")).strip():
+            raise DomainError("직접 열람한 등기부의 갑구 소유자 성명을 입력해 주세요.")
+        try:
+            mortgage = int(data.get("mortgage_amount"))
+            if mortgage < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise DomainError("을구 근저당 채권최고액을 숫자로 입력해 주세요 (없으면 0).")
+        if data.get("seizure_or_trust") not in ("없음", "있음"):
+            raise DomainError("압류·가압류·가처분·신탁등기 여부를 선택해 주세요.")
+        if self.is_jeonse() and data.get("guarantee_status") not in ("가입 완료", "가입 예정", "가입 안 함"):
+            raise DomainError(
+                "전세 계약은 보증금 반환보증 가입 여부를 선택해야 합니다.",
+                hint="HUG·SGI 등 보증 가입 가능 여부를 계약 전에 확인해 주세요.",
+            )
+
+        rec = {
+            "submitted": True,
+            "viewed_directly": True,
+            "viewed_at": str(data["viewed_at"]).strip(),
+            "issue_number": str(data.get("issue_number", "")).strip(),
+            "issue_number_verified": bool(data.get("issue_number_verified")),
+            "owner_name": str(data["owner_name"]).strip(),
+            "mortgage_amount": mortgage,
+            "seizure_or_trust": data["seizure_or_trust"],
+            "guarantee_status": str(data.get("guarantee_status", "")).strip(),
+            "mismatch_ack": bool(data.get("mismatch_ack")),
+            "submitted_at": now_iso(),
+        }
+        self.tenant_registry = rec
+        mism = self.registry_mismatches()
+        if mism and not rec["mismatch_ack"]:
+            self.tenant_registry = {}
+            raise DomainError(
+                "임대인이 제시한 내용과 직접 열람한 내용이 다르거나 위험 항목이 있습니다.",
+                hint=" / ".join(mism) + " — 내용을 확인했다면 '차이를 확인하고 계속' 항목에 체크해 주세요.",
+            )
+
+        if attachment_data_url:
+            self.registry_attachment_file, self.registry_attachment_sha256 = self._save_registry_attachment(
+                self.id, attachment_data_url
+            )
+            self.registry_attachment_name = (attachment_name or "").strip()[:120]
+        return self.save(action="tenant_registry_submitted", app_source=app_source)
+
+    @staticmethod
+    def _save_registry_attachment(session_id: str, data_url: str):
+        m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", data_url.strip(), re.DOTALL)
+        if not m or m.group(1).lower() not in ALLOWED_MIME_TO_EXT:
+            raise DomainError("첨부 형식이 올바르지 않습니다.", hint="허용 형식: JPG, PNG, WEBP, GIF, PDF")
+        try:
+            binary = base64.b64decode(m.group(2), validate=False)
+        except Exception:
+            raise DomainError("첨부 파일을 읽지 못했습니다. 다시 선택해 주세요.")
+        if not binary:
+            raise DomainError("비어 있는 첨부 파일입니다.")
+        if len(binary) > MAX_PHOTO_BYTES:
+            raise DomainError("첨부 파일은 최대 10MB 이하만 허용됩니다.")
+        ext = ALLOWED_MIME_TO_EXT[m.group(1).lower()][0]
+        abs_dir = os.path.join(pool().pool_dir, "uploads", "registry")
+        os.makedirs(abs_dir, exist_ok=True)
+        filename = f"{session_id}.{ext}"
+        target = os.path.join(abs_dir, filename)
+        tmp = f"{target}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fp:
+            fp.write(binary)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp, target)
+        return f"uploads/registry/{filename}", hashlib.sha256(binary).hexdigest()
+
+    def registry_attachment_path(self):
+        if not self.registry_attachment_file:
+            raise NotFound("첨부된 등기부 열람 자료가 없습니다.")
+        root = os.path.abspath(pool().pool_dir)
+        cand = os.path.abspath(os.path.join(root, self.registry_attachment_file))
+        if not cand.startswith(root + os.sep) or not os.path.isfile(cand):
+            raise NotFound("첨부 파일을 찾을 수 없습니다.")
+        mime = EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
+        return cand, mime, self.registry_attachment_name or os.path.basename(cand)
+
+    def recheck_registry(self, changed: bool, app_source: str = "rent3_contract") -> "CoSignSession":
+        """체결 직전 임차인이 등기부를 다시 열람한 결과. 변동이 있으면 계약을 중단한다."""
+        self._ensure_in_progress()
+        if self.current_step < 4:
+            raise DomainError("서명 단계 이후에 체결 직전 재열람을 확인할 수 있습니다.")
+        if changed:
+            self.status = "CANCELLED"
+            self.tenant_registry = {**self.tenant_registry, "recheck_changed": True}
+            return self.save(action="cosign_cancelled_registry_changed", app_source=app_source)
+        self.tenant_recheck_at = now_iso()
+        return self.save(action="tenant_registry_rechecked", app_source=app_source)
 
     def is_step1_fully_verified(self) -> bool:
         return (
@@ -275,6 +425,21 @@ class CoSignSession(PoolObj):
                 hint="가입된 임차인 목록에서 선택하거나 연락처를 입력하면 해당 임차인에게 호출이 전송됩니다.",
             )
 
+        # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
+        # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)
+        b_id = normalize_branch_id(branch)
+        live = next(
+            (x for x in cls.find(branch=b_id, room_no=str(room_no), status="IN_PROGRESS") if x.mode == mode),
+            None,
+        )
+        if live:
+            if id_tenant and live.id_tenant and id_tenant.strip() != live.id_tenant:
+                raise DomainError(
+                    f"{room_no}호는 다른 임차인과 계약이 진행 중입니다.",
+                    hint="진행 중인 계약이 끝나거나 취소된 뒤에 다시 시도해 주세요.",
+                )
+            return live
+
         return cls.open_session(
             branch=branch,
             room_no=room_no,
@@ -402,6 +567,11 @@ class CoSignSession(PoolObj):
         else:
             if not self.step1_lessor_confirmed:
                 raise DomainError("먼저 임대인의 등기부등본 정보 제시가 완료되어야 합니다.")
+            if not (self.tenant_registry or {}).get("submitted"):
+                raise DomainError(
+                    "임차인이 인터넷등기소에서 직접 열람한 결과를 먼저 입력해야 합니다.",
+                    hint="임대인이 보여준 서류만으로는 확인 완료 처리할 수 없습니다.",
+                )
             self.step1_tenant_locked = True
 
         if self.is_step1_fully_verified() and self.current_step < 2:
@@ -574,6 +744,11 @@ class CoSignSession(PoolObj):
         self._ensure_ready_for_steps()
         if not (self.lessor_signature and self.tenant_signature):
             raise DomainError("임대인과 임차인 양측 전자서명이 모두 완료되어야 최종 체결할 수 있습니다.")
+        if not self.tenant_recheck_at:
+            raise DomainError(
+                "임차인의 체결 직전 등기부 재열람 확인이 필요합니다.",
+                hint="계약 후 잔금 전에 근저당·소유자가 바뀌는 사고를 막기 위해, 임차인이 인터넷등기소에서 다시 열람한 뒤 확인해야 체결할 수 있습니다.",
+            )
 
         room = Room.require(self.id_room)
         t_info = self.terms
@@ -654,6 +829,9 @@ class CoSignSession(PoolObj):
                 "lessor_id_checked_at": self.lessor_id_checked_at,
                 "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
                 "tenant_id_checked_at": self.tenant_id_checked_at,
+                "tenant_direct_registry": self.tenant_registry,
+                "tenant_recheck_at": self.tenant_recheck_at,
+                "registry_attachment_sha256": self.registry_attachment_sha256,
             },
             lessor_signature=self.lessor_signature,
             tenant_signature=self.tenant_signature,

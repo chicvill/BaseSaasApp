@@ -1,10 +1,10 @@
 {
   "pool_name": "rent3_pool",
   "pool_dir": "C:\\Users\\USER\\Desktop\\Workstation\\BaseSaasApp\\data\\rent3_pool",
-  "total_revision": 2694,
-  "total_objects": 149,
+  "total_revision": 3519,
+  "total_objects": 151,
   "last_updated_collection": "",
-  "updated_at": "2026-11-08T10:30:45",
+  "updated_at": "2026-11-08T11:15:18",
   "collections": {
     "users": {
       "file": "users.json",
@@ -34,9 +34,9 @@
       "file": "cosign_sessions.json",
       "exists": true,
       "count": 4,
-      "revision": 28,
-      "size_bytes": 28866,
-      "updated_at": "2026-11-08T09:51:10"
+      "revision": 32,
+      "size_bytes": 28920,
+      "updated_at": "2026-11-08T10:46:50"
     },
     "contracts": {
       "file": "contracts.json",
@@ -65,10 +65,10 @@
     "ops": {
       "file": "ops.json",
       "exists": true,
-      "count": 15,
-      "revision": 16,
-      "size_bytes": 9825,
-      "updated_at": "2026-11-08T09:51:10"
+      "count": 17,
+      "revision": 18,
+      "size_bytes": 10943,
+      "updated_at": "2026-11-08T10:38:29"
     }
   }
 }

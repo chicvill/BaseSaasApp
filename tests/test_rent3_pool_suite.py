@@ -43,6 +43,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         with open(p, "r", encoding="utf-8") as fp:
             return json.load(fp)
 
+    def _tenant_direct_registry(self, sid):
+        """임차인이 인터넷등기소에서 직접 열람한 결과를 임대인 제시값과 같게 입력 (1단계 필수)."""
+        sess = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        rd = sess.get("registry_data") or {}
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": {
+            "viewed_directly": True, "viewed_at": "2026-11-08T10:00",
+            "owner_name": rd.get("owner_name") or "김임대", "mortgage_amount": int(rd.get("mortgage_amount") or 0),
+            "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
+        }})
+
+    def _tenant_recheck_ok(self, sid):
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/recheck", json={"changed": False})
+
     def test_01_immutable_core_zero_changes(self):
         """1. 불변의 BaseSaasApp 코어(core/, run.py)가 단 1줄도 수정되지 않았음을 검증."""
         git_root = os.path.abspath(os.path.join(os.path.realpath(os.path.join(ROOT, "core")), ".."))
@@ -152,6 +165,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         # Step 1 상호 신분증 본인 확인 체크 & 등기부등본 확인 잠금 + Step 2 옵션 점검
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True})
+        self._tenant_direct_registry(sid)
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", json={"role": "tenant"})
 
@@ -183,6 +197,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         r_sig = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={"role": "tenant", "signature": "박신규(전자서명)", "expected_revision": new_rev}).json()
         self.assertTrue(bool(r_sig["session"]["integrity_hash"]))
 
+        self._tenant_recheck_ok(sid)
         r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
         self.assertEqual(r_seal.status_code, 200)
         sealed = r_seal.json()
@@ -805,6 +820,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_no_reg.status_code, 400)
 
         # [F] 등기부등본 확인 잠금 + 옵션 확인 완료 -> 이제 비로소 양측 서명 통과 및 SHA-256 무결성 해시 봉인 성공!
+        self._tenant_direct_registry(sid)
         r_reg_ok = self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant"})
         self.assertEqual(r_reg_ok.status_code, 200)
         self.assertTrue(r_reg_ok.json()["session"]["step1_tenant_locked"])
@@ -827,6 +843,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(bool(r_sig2.json()["session"]["integrity_hash"]))
 
         # [G] 최종 계약 체결 봉인 -> 생성된 계약서 스냅샷에 상호 신분증 확인 증적이 영구 박제되었는지 검증
+        self._tenant_recheck_ok(sid)
         r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
         self.assertEqual(r_seal.status_code, 200)
         snap = r_seal.json()["contract"]["registry_snapshot"]
@@ -834,6 +851,81 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(snap["tenant_login_verified"])
         self.assertTrue(snap["lessor_checked_tenant_id"])
         self.assertTrue(snap["tenant_checked_lessor_id"])
+
+
+    def test_10_tenant_must_verify_registry_directly(self):
+        """10. 임차인은 등기부를 직접 열람한 결과를 입력해야 1단계를 마칠 수 있고, 불일치는 확인 체크 없이는 막힌다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "901", "is_published": True})
+        s = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "901",
+            "tenant_name": "직접열람", "tenant_phone": "010-5555-0001", "mode": "NEW"}).json()["session"]
+        sid = s["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "직접열람", "responder_phone": "010-5555-0001"})
+        self.client.post(f"{base}/sessions/{sid}/step1", json={
+            "role": "lessor", "checked_counterparty_id": True,
+            "registry_updates": {"issue_number": "1101-2026-000001", "owner_name": "김임대", "mortgage_amount": 0}})
+
+        # (a) 직접 열람 입력 없이 임차인 확인 잠금 시도 -> 400
+        r = self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        self.assertEqual(r.status_code, 400)
+
+        def reg(**kw):
+            d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+                 "mortgage_amount": 0, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+            d.update(kw)
+            return self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": d})
+
+        # (b) 직접 열람하지 않았다고 하면 거부
+        self.assertEqual(reg(viewed_directly=False).status_code, 400)
+        # (c) 소유자·근저당이 다르면 확인 체크 없이는 거부, 체크하면 통과
+        self.assertEqual(reg(owner_name="박사기", mortgage_amount=300000000).status_code, 400)
+        self.assertEqual(reg(owner_name="박사기", mortgage_amount=300000000, mismatch_ack=True).status_code, 200)
+        # (d) 압류·신탁 있음도 확인 체크 필요
+        self.assertEqual(reg(seizure_or_trust="있음").status_code, 400)
+        # (e) 일치하는 정상 입력 -> 1단계 완료
+        self.assertEqual(reg().status_code, 200)
+        r_ok = self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        self.assertEqual(r_ok.status_code, 200)
+        self.assertTrue(r_ok.json()["session"]["step1_tenant_locked"])
+
+    def test_11_final_recheck_required_and_change_cancels(self):
+        """11. 체결 전 임차인 재열람 확인이 없으면 체결 불가, 변동이 있다고 하면 계약이 중단된다."""
+        base = "/api/rent3_contract"
+        for room, changed in (("902", False), ("903", True)):
+            self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room, "is_published": True})
+            s = self.client.post(f"{base}/sessions/call", json={
+                "caller_role": "lessor", "branch": "main", "room_no": room,
+                "tenant_name": "재열람", "tenant_phone": "010-5555-0002", "mode": "NEW"}).json()["session"]
+            sid = s["id"]
+            self.client.post(f"{base}/sessions/{sid}/respond", json={
+                "responder_role": "tenant", "responder_name": "재열람", "responder_phone": "010-5555-0002"})
+            self.client.post(f"{base}/sessions/{sid}/step1", json={
+                "role": "lessor", "checked_counterparty_id": True,
+                "registry_updates": {"owner_name": "김임대", "mortgage_amount": 0}})
+            self._tenant_direct_registry(sid)
+            self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step2", json={"role": role})
+            rev = self.client.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
+
+            r_no = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+            self.assertEqual(r_no.status_code, 400, "재열람 확인 없이는 체결할 수 없어야 한다")
+
+            r_rc = self.client.post(f"{base}/sessions/{sid}/recheck", json={"changed": changed})
+            self.assertEqual(r_rc.status_code, 200)
+            if changed:
+                self.assertEqual(r_rc.json()["session"]["status"], "CANCELLED")
+                r_after = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+                self.assertIn(r_after.status_code, (400, 409))  # 중단된 계약은 체결 불가
+            else:
+                r_ok = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+                self.assertEqual(r_ok.status_code, 200)
 
 
 if __name__ == "__main__":
