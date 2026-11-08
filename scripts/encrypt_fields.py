@@ -25,7 +25,7 @@ def main() -> None:
     ap.add_argument("--pool-dir", default="")
     args = ap.parse_args()
     if not fieldcrypto.enabled():
-        sys.exit("RENT3_CRYPTO_KEY 환경변수가 없습니다. 키를 설정한 뒤 다시 실행하세요.")
+        sys.exit("RENT3_CRYPTO_KEY 또는 MASTER_CRYPTO_KEY 환경변수가 없습니다. 키를 설정한 뒤 다시 실행하세요.")
     if args.pool_dir:
         use_pool_dir(args.pool_dir)
     ensure_pool_seeded()

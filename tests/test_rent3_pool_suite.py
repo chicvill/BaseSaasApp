@@ -1833,6 +1833,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         def disk():
             return "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(self.temp_pool, "**", "*.json"), recursive=True))
 
+        os.environ.pop("MASTER_CRYPTO_KEY", None)
         os.environ["RENT3_CRYPTO_KEY"] = "test-key-A-" + "x" * 30
         try:
             Lessor(id="lessor_enc", username="enc1", name="암호", phone="010-4444-9001", branch="encb",
@@ -1871,10 +1872,27 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn("RENT3_CRYPTO_KEY", getattr(cm.exception, "hint", "") + str(cm.exception))
             Room(id="room_encb_2", branch="encb", room_no="2", doorlock_pwd="plain-dev").save("t")
             self.assertIn("plain-dev", disk())
+
+            # 서버 마스터 키(MASTER_CRYPTO_KEY, Coolify 에 이미 있는 키)만 있어도 암호화되고, 그 키로 읽힌다
+            os.environ["MASTER_CRYPTO_KEY"] = "coolify-master-" + "m" * 20
+            Room(id="room_encb_3", branch="encb", room_no="3", doorlock_pwd="MASTER-SECRET-1").save("t")
+            self.assertNotIn("MASTER-SECRET-1", disk())
+            self.assertEqual(Room.get("room_encb_3").doorlock_pwd, "MASTER-SECRET-1")
+            # 나중에 전용 키(RENT3_CRYPTO_KEY)를 추가해도 마스터 키로 쓴 값은 계속 읽힌다
+            os.environ["RENT3_CRYPTO_KEY"] = "dedicated-key-" + "d" * 20
+            self.assertEqual(Room.get("room_encb_3").doorlock_pwd, "MASTER-SECRET-1")
+            # 마스터 키로 도출한 키는 .env.encrypted 용 키(SHA-256(마스터))와 같지 않다
+            import hashlib
+            self.assertNotEqual(fc._master_derived(), hashlib.sha256(os.environ["MASTER_CRYPTO_KEY"].encode()).digest())
         finally:
             os.environ.pop("RENT3_CRYPTO_KEY", None)
             os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS", None)
-            for o in (Room.get("room_encb_2"),):
+            os.environ.pop("MASTER_CRYPTO_KEY", None)
+            for rid in ("room_encb_2", "room_encb_3"):
+                try:
+                    o = Room.get(rid)
+                except Exception:
+                    o = None
                 if o: o.delete()
 
 

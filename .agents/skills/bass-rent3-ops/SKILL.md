@@ -360,7 +360,7 @@ description: Operational business rules, domain invariants, and verification ins
 
 20. **민감 필드 노출 금지(발견·수정된 누출)**: 공개 매물 목록(`/rent3_tenant/listings`)과 계약 앱 `/rooms` 가 호실 전체(`model_dump`)를 내려 **도어락 비밀번호·등기 정보·입주자 ID·계약 ID·입주자 연락처·진행 중 계약 세션 전체**가 비로그인/타 지점에 노출되고 있었다. 이제 `authz.public_room()` 이 `ROOM_PRIVATE_FIELDS` 를 빼고, 입주자 정보와 도어락은 해당 지점 임대인·관리자에게만, 진행 계약은 `id`·`session_code` 만 내려준다. `/participants`(가입자 연락처)는 임대인·관리자에게만. **새 목록 API 를 만들 때는 `model_dump()` 를 그대로 내려주지 말고 허용 필드만 고를 것.**
 
-21. **저장 필드 암호화** (`_rent3_core/fieldcrypto.py`): 도어락·공동현관 비밀번호·계좌번호(`doorlock_pwd`·`common_entrance_pwd`·`account_number`·`lessor_account`)는 `RENT3_CRYPTO_KEY`(Coolify 비밀 환경변수)가 있으면 AES-256-GCM 으로 암호화해 디스크에 저장(풀 JSON·호실 분할 파일 모두, `PoolObj.save`/`_clean` 에서 투명 처리 — 앱 코드·해시는 평문 기준 그대로). 필드 이름을 AAD 로 묶어 다른 필드로 옮긴 값은 복호화 불가. 키가 없으면 평문(로컬 개발). **키를 잃으면 복구 불가 — Coolify 외 안전한 곳에 백업.** 처음 켤 때·키 교체 때 `py scripts/encrypt_fields.py [--pool-dir 경로]`(교체 시 옛 키는 `RENT3_CRYPTO_KEY_PREVIOUS`). 이 암호화는 파일·백업·볼륨 유출을 막을 뿐, 서버 프로세스가 장악되면 키도 함께 노출되며 API 노출 규칙(5.5-20)을 대체하지 못한다. 관리자 Data Pool 탐색기에는 암호문이 보인다.
+21. **저장 필드 암호화** (`_rent3_core/fieldcrypto.py`): 도어락·공동현관 비밀번호·계좌번호(`doorlock_pwd`·`common_entrance_pwd`·`account_number`·`lessor_account`)는 `RENT3_CRYPTO_KEY` 또는 **이미 Coolify 에 있는 `MASTER_CRYPTO_KEY`**(전용 키가 없을 때, 라벨을 섞어 도출한 별도 키 — `.env.encrypted` 용 키와 바이트가 다름; 내 PC 의 `.env.key` 는 읽지 않아 로컬은 평문)가 있으면 AES-256-GCM 으로 암호화해 디스크에 저장(풀 JSON·호실 분할 파일 모두, `PoolObj.save`/`_clean` 에서 투명 처리 — 앱 코드·해시는 평문 기준 그대로). 필드 이름을 AAD 로 묶어 다른 필드로 옮긴 값은 복호화 불가. 키가 없으면 평문(로컬 개발). **키를 잃으면 복구 불가 — Coolify 외 안전한 곳에 백업.** 처음 켤 때·키 교체 때 `py scripts/encrypt_fields.py [--pool-dir 경로]`(교체 시 옛 키는 `RENT3_CRYPTO_KEY_PREVIOUS`). 이 암호화는 파일·백업·볼륨 유출을 막을 뿐, 서버 프로세스가 장악되면 키도 함께 노출되며 API 노출 규칙(5.5-20)을 대체하지 못한다. 관리자 Data Pool 탐색기에는 암호문이 보인다.
 
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
@@ -369,7 +369,7 @@ description: Operational business rules, domain invariants, and verification ins
 | `BASS_SEED_PASSWORD` | 본사 관리자(admin) 등 기본 계정의 비밀번호. 없으면 무작위로 만들고 서버 로그에 한 번만 출력 |
 | `RENT3_DEMO_LOGIN=0` | 데모 비밀번호 완전 차단(프록시 뒤에서 loopback 판정이 흐려질 때 명시) |
 | `GEMINI_API_KEY` | 등기부 AI 읽기 |
-| `RENT3_CRYPTO_KEY` | 도어락·계좌 암호화 키(긴 임의 문자열, 백업 필수) |
+| `MASTER_CRYPTO_KEY`(기존) 또는 `RENT3_CRYPTO_KEY` | 도어락·계좌 암호화 키. 기존 마스터 키로 충분. 나중에 전용 키를 추가해도 마스터로 쓴 값은 읽힌다. 백업 필수 |
 | `RENT3_POOL_DIR` | 운영 데이터 폴더(영구 볼륨). 저장소에는 데이터가 없다 |
 | `RENT3_IDENTITY_PROVIDER=sms` + `RENT3_SMS_*` | 본인인증(문자). 없으면 배포에서 인증이 막힌다 |
 
