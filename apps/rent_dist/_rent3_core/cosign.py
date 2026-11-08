@@ -98,6 +98,7 @@ class CoSignSession(PoolObj):
     registry_attachment_sha256: str = ""
     tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
     cancel_reason: str = ""                  # 취소 사유(자동 해제 등)
+    registry_ai_times: List[str] = Field(default_factory=list)  # AI 읽기 호출 시각(월별 집계용)
     registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
     registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
 
@@ -456,10 +457,25 @@ class CoSignSession(PoolObj):
         return n
 
     @classmethod
+    def ai_calls_this_month(cls, branch: str) -> int:
+        ym = now_iso()[:7]
+        return sum(1 for x in cls.find(branch=normalize_branch_id(branch)) for t in x.registry_ai_times if t.startswith(ym))
+
+    @classmethod
     def live_for_room(cls, branch: str, room_no: str) -> Optional["CoSignSession"]:
         """해당 호실에 진행 중(IN_PROGRESS)인 계약 세션. 없으면 None. (무응답 세션은 먼저 해제)"""
         cls.expire_idle(branch, room_no)
         return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=str(room_no), status="IN_PROGRESS")), None)
+
+    def _tenant_identity_evidence(self) -> Dict[str, Any]:
+        """봉인 때 남기는 임차인 본인인증 증거 (업체·시각·가짜 여부). 생년월일 등 개인정보는 싣지 않는다."""
+        t = Tenant.get(self.id_tenant) if self.id_tenant else None
+        if t is None:
+            ph = re.sub(r"\D", "", str((self.terms or {}).get("tenant_phone") or ""))
+            t = next((x for x in Tenant.all() if ph and re.sub(r"\D", "", x.phone) == ph), None)
+        idn = (t.identity if t else {}) or {}
+        return {"verified": bool(idn.get("verified")), "provider": idn.get("provider", ""),
+                "fake": bool(idn.get("fake")), "verified_at": idn.get("verified_at", "")}
 
     def is_tenant_party(self, id_tenant: str = "", phone: str = "") -> bool:
         """이 계약의 임차인 당사자인지(계정 ID 또는 연락처 일치)."""
@@ -492,6 +508,12 @@ class CoSignSession(PoolObj):
             raise DomainError(
                 "호출할 임차인(예비 세입자)을 선택하거나 성명·연락처를 입력해 주세요.",
                 hint="가입된 임차인 목록에서 선택하거나 연락처를 입력하면 해당 임차인에게 호출이 전송됩니다.",
+            )
+
+        if not Lessor.franchise_open(normalize_branch_id(branch)):
+            raise DomainError(
+                "가맹 승인된 건물만 직거래 계약을 시작할 수 있습니다.",
+                hint="이 건물은 가맹 심사 중이거나 이용이 정지되었습니다.",
             )
 
         # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
@@ -887,6 +909,7 @@ class CoSignSession(PoolObj):
                 "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
                 "tenant_id_checked_at": self.tenant_id_checked_at,
                 "tenant_direct_registry": self.tenant_registry,
+                "tenant_identity": self._tenant_identity_evidence(),
                 "tenant_recheck_at": self.tenant_recheck_at,
                 "registry_attachment_sha256": self.registry_attachment_sha256,
             },

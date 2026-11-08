@@ -149,15 +149,53 @@ class Lessor(PoolObj):
     app_fee_status: str = "PAID"             # PAID / PENDING / OVERDUE
     last_fee_paid_at: str = ""
     joined_at: str = Field(default_factory=lambda: date_today().isoformat())
-    status: str = "ACTIVE"                   # PENDING_APPROVAL / ACTIVE / SUSPENDED
+    status: str = "ACTIVE"                   # PENDING_APPROVAL(심사 대기) / ACTIVE(가맹) / SUSPENDED(정지) / REJECTED(반려)
+    status_note: str = ""                    # 반려·정지 사유(임대인에게 표시)
+    room_limit: int = 30                     # 가맹점당 등록 가능 호실 수 상한 (운영 비용 보호)
+    ai_monthly_limit: int = 100              # 가맹점당 월 Gemini 등기부 읽기 호출 상한 (운영 비용 보호)
+    decided_at: str = ""
+    identity: Dict[str, Any] = Field(default_factory=dict)        # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
+    franchise_docs: Dict[str, Any] = Field(default_factory=dict)  # 제출한 등기부(파일 해시)·AI 읽기·소유자 대조 결과
+    applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
+    franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
     password: str = "1212"
 
     def summary(self) -> str:
         return f"임대인 {self.name} ({self.branch}, 상태={self.status})"
 
+    STATUS_LABELS: ClassVar[Dict[str, str]] = {
+        "PENDING_APPROVAL": "가맹 심사 중", "ACTIVE": "가맹 승인", "SUSPENDED": "이용 정지", "REJECTED": "가맹 반려",
+    }
+
+    @classmethod
+    def for_branch(cls, branch: str) -> Optional["Lessor"]:
+        return cls.first(branch=branch)
+
+    @classmethod
+    def franchise_open(cls, branch: str) -> bool:
+        """이 지점이 매물 공개·직거래 계약을 할 수 있는 승인 가맹점인가. (임대인 정보가 없는 기존 지점은 허용)"""
+        lsr = cls.first(branch=branch)
+        return lsr is None or lsr.status == "ACTIVE"
+
+    def decide(self, decision: str, note: str = "", app_source: str = "rent3_admin") -> "Lessor":
+        """관리자 심사 결과 반영. approve | reject | suspend. 반려·정지 시 해당 지점의 공개 매물은 모두 내린다."""
+        mapping = {"approve": "ACTIVE", "reject": "REJECTED", "suspend": "SUSPENDED"}
+        if decision not in mapping:
+            raise DomainError("decision 은 approve / reject / suspend 중 하나여야 합니다.")
+        if decision != "approve" and not note.strip():
+            raise DomainError("반려·정지 사유를 입력해 주세요.", hint="임대인에게 그대로 표시됩니다.")
+        self.status = mapping[decision]
+        self.status_note = "" if decision == "approve" else note.strip()
+        self.decided_at = now_iso()
+        if decision != "approve":
+            for r in Room.find(branch=self.branch):
+                if r.is_published:
+                    r.is_published = False
+                    r.save(action="room_unpublished_by_franchise_decision", app_source=app_source)
+        return self.save(action=f"lessor_{decision}", app_source=app_source)
+
     def approve(self, app_source: str = "rent3_admin") -> "Lessor":
-        self.status = "ACTIVE"
-        return self.save(action="lessor_approved", app_source=app_source)
+        return self.decide("approve", app_source=app_source)
 
     def settle_app_fee(self, paid_date: Optional[str] = None, app_source: str = "rent3_admin") -> "Lessor":
         self.app_fee_status = "PAID"
@@ -187,6 +225,7 @@ class Tenant(PoolObj):
     checked_in_at: str = ""
     checkin_memo: str = ""
     status: str = "ACTIVE"                   # PROSPECT / ACTIVE / MOVED_OUT
+    identity: Dict[str, Any] = Field(default_factory=dict)  # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
     password: str = "1212"
 
     def summary(self) -> str:

@@ -3,9 +3,12 @@ apps/rent3_contract/api.py — 공동 임대계약 전용 API 라우터 (호출�
 """
 import re
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from core.errors import DomainError
+from apps.rent_dist._rent3_core.pool import now_iso
+from apps.rent_dist._rent3_core import franchise as fr
+from apps.rent_dist._rent3_core.authz import claims_from, contract_scope, is_admin, session_party_ok
 from pydantic import BaseModel, Field
 
 from apps.rent_dist._rent3_core import (
@@ -21,7 +24,7 @@ from apps.rent_dist._rent3_core import (
     registry_ai,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(contract_scope)])
 APP_SRC = "rent3_contract"
 
 
@@ -91,6 +94,13 @@ class TenantRegistryReq(BaseModel):
     registry: Dict[str, Any] = Field(default_factory=dict)
     attachment_data_url: str = ""
     attachment_name: str = ""
+
+
+class TenantIdentityReq(BaseModel):
+    name: str
+    phone: str
+    birth: str
+    code: str = ""
 
 
 class RegistryAiReq(BaseModel):
@@ -225,11 +235,67 @@ def list_incoming_calls(
     }
 
 
+def _tenant_of(request: Request) -> Tenant:
+    c = claims_from(request) or {}
+    if c.get("r") != "tenant":
+        raise DomainError("임차인 계정으로 로그인했을 때만 쓸 수 있습니다.", hint="임대인은 가맹 신청 단계에서 본인인증을 합니다.")
+    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+    if t is None:
+        raise DomainError("임차인 정보를 찾을 수 없습니다. 다시 로그인해 주세요.")
+    return t
+
+
+def _loopback(request: Request) -> bool:
+    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
+@router.get("/identity")
+def my_identity(request: Request):
+    """로그인한 임차인의 본인인증 상태 (생년월일은 가려서 돌려준다)."""
+    c = claims_from(request) or {}
+    if c.get("r") != "tenant":
+        return {"success": True, "applies": False, "identity": {"verified": True}}
+    t = _tenant_of(request)
+    return {"success": True, "applies": True, "identity": fr.mask_identity(t.identity),
+            "provider": fr.provider(_loopback(request)).name}
+
+
+@router.post("/identity/start")
+def tenant_identity_start(req: TenantIdentityReq, request: Request):
+    t = _tenant_of(request)
+    p = fr.provider(_loopback(request))
+    out = p.start(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth))
+    return {"success": True, "message": "인증번호를 보냈습니다.", "provider": p.name, **out}
+
+
+@router.post("/identity/confirm")
+def tenant_identity_confirm(req: TenantIdentityReq, request: Request):
+    """인증번호 확인. 인증된 휴대폰은 가입한 번호와 같아야 하고, 같은 사람(이름+생년월일)은 한 계정만 쓸 수 있다."""
+    t = _tenant_of(request)
+    p = fr.provider(_loopback(request))
+    birth6 = fr.normalize_birth(req.birth)
+    res = p.confirm(req.name.strip(), req.phone.strip(), birth6, req.code)
+    if re.sub(r"\D", "", res["phone"]) != re.sub(r"\D", "", t.phone):
+        raise DomainError("인증한 휴대폰 번호가 가입한 번호와 다릅니다.", hint="가입할 때 입력한 본인 명의 휴대폰으로 인증해 주세요.")
+    for other in Tenant.all():
+        oi = other.identity or {}
+        if other.id != t.id and oi.get("verified") and oi.get("name") == res["name"] and oi.get("birth6") == res["birth6"]:
+            raise DomainError("이미 다른 계정에서 인증된 본인입니다.", hint="한 사람이 여러 계정으로 계약할 수 없습니다. 기존 계정으로 로그인해 주세요.")
+    t.identity = fr.verify_identity_record(res)
+    t.name = res["name"]  # 실명으로 확정
+    t.save(action="tenant_identity_verified", app_source=APP_SRC)
+    return {"success": True, "message": "본인인증이 완료되었습니다." + (" (시연용 가짜 인증)" if res.get("fake") else ""),
+            "identity": fr.mask_identity(t.identity)}
+
+
 @router.get("/sessions")
-def list_sessions(branch: Optional[str] = None):
+def list_sessions(request: Request, branch: Optional[str] = None):
     ensure_pool_seeded()
     CoSignSession.expire_idle()
     sessions = CoSignSession.find(branch=normalize_branch_id(branch)) if branch else CoSignSession.all()
+    c = claims_from(request) or {}
+    if not is_admin(c):  # 본인이 당사자인 계약만 보인다
+        sessions = [x for x in sessions if session_party_ok(c, x)]
     sessions_sorted = sorted(sessions, key=lambda s: s.updated_at, reverse=True)
     return {
         "success": True,
@@ -396,6 +462,12 @@ def read_registry_with_ai(session_id: str, req: RegistryAiReq):
             f"이 계약의 AI 읽기 횟수({REGISTRY_AI_MAX_CALLS}회)를 모두 썼습니다.",
             hint="직접 입력해 주세요.",
         )
+    lsr = Lessor.for_branch(s.branch)
+    if lsr and CoSignSession.ai_calls_this_month(s.branch) >= lsr.ai_monthly_limit:
+        raise DomainError(
+            f"이 건물의 이번 달 AI 읽기 한도({lsr.ai_monthly_limit}회)를 모두 썼습니다.",
+            hint="직접 입력해 주세요. 한도는 본사 관리자에게 문의할 수 있습니다.",
+        )
     binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
     bldg = Building.get(s.id_building)
     t = s.terms or {}
@@ -407,6 +479,7 @@ def read_registry_with_ai(session_id: str, req: RegistryAiReq):
     )
     if result["status"] == "ok":
         s.registry_ai_calls += 1
+        s.registry_ai_times = [*s.registry_ai_times, now_iso()]
         s.registry_ai_result = result
         s.save(action="registry_ai_read", app_source=APP_SRC)
     return {

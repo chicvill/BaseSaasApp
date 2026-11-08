@@ -40,10 +40,109 @@
     return Number(n || 0).toLocaleString("ko-KR") + "원";
   }
 
+  // ── 가맹 신청 패널: 본인인증 → 건물 정보 → 등기부 대조 → 제출 ──
+  const CHECK_STYLE = { ok: "var(--ok)", caution: "var(--warn)", high: "var(--err)" };
+
+  async function renderApplication(box, f) {
+    const data = await Bass.api(APP_ID, `/franchise/application?branch=${encodeURIComponent(currentBranch)}`);
+    const a = data.application, st = a.steps, idn = a.identity, chk = a.registry.check;
+    const done = (ok) => (ok ? "✅" : "⬜");
+    const esc = Bass.escapeHtml;
+    box.innerHTML = `
+      <div class="bass-card" style="margin-top:10px;border-left:4px solid var(--warn);padding:12px;font-size:13px;line-height:1.6;">
+        <strong>${esc(f.label || "")}</strong> — 매물 공개와 직거래 계약은 가맹 승인 후에 가능합니다. 아래 4단계를 마치고 제출해 주세요.
+        ${f.note ? `<div>사유: ${esc(f.note)}</div>` : ""}
+        <div style="margin-top:8px;">
+          <div><strong>${done(st.identity)} 1. 휴대폰 본인인증</strong>${idn.verified ? ` — ${esc(idn.name)} · ${esc(idn.phone)} ${idn.fake ? "<span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}` : ""}</div>
+          ${idn.verified ? "" : `
+          <div class="field-grid" style="margin:6px 0;">
+            <input id="fiName" class="bass-input" placeholder="실명">
+            <input id="fiPhone" class="bass-input" placeholder="휴대폰 010-0000-0000">
+            <input id="fiBirth" class="bass-input" placeholder="생년월일 6자리(650312) 또는 8자리">
+          </div>
+          <button id="btnIdStart" class="bass-btn bass-btn--sm" type="button">인증번호 받기</button>
+          <input id="fiCode" class="bass-input" style="width:140px;display:inline-block;" placeholder="인증번호">
+          <button id="btnIdConfirm" class="bass-btn bass-btn--sm bass-btn--primary" type="button">인증 확인</button>`}
+        </div>
+        <div style="margin-top:8px;">
+          <div><strong>${done(st.building)} 2. 건물 정보</strong> — 등기부 소재지와 대조하는 기준입니다 (번지 포함).</div>
+          <div class="field-grid" style="margin:6px 0;">
+            <input id="fbName" class="bass-input" placeholder="건물명" value="${esc(a.building.building_name)}">
+            <input id="fbAddr" class="bass-input" placeholder="실제 주소 (예: 인천 서해구 석남동 507-34)" value="${esc(a.building.address)}">
+            <input id="fbValue" type="number" class="bass-input" placeholder="건물 가치(원, 선택)" value="${a.building.property_value || ""}">
+          </div>
+          <button id="btnBldgSave" class="bass-btn bass-btn--sm" type="button">건물 정보 저장</button>
+        </div>
+        <div style="margin-top:8px;">
+          <div><strong>${done(st.registry)} 3. 등기부 대조</strong> — 인터넷등기소에서 받은 PDF·캡처를 올리세요.</div>
+          <input id="frFile" type="file" accept="image/*,application/pdf" class="bass-input" ${st.identity ? "" : "disabled"}>
+          <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">등기부 내용이 Google Gemini로 전송되어 자동 대조되는 것에 동의합니다 (미동의 시 관리자가 직접 확인).</span><input type="checkbox" id="frConsent"></label>
+          <button id="btnRegUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button" ${st.identity ? "" : "disabled"}>올리고 대조하기</button>
+          ${chk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[chk.level] || "var(--warn)"};padding:6px 10px;background:hsl(232 30% 12% / .55);border-radius:8px;">${esc(chk.message)}${chk.auto_pass ? "" : "<br><span class='bass-muted'>관리자가 원본을 직접 확인한 뒤 결정합니다.</span>"}</div>` : ""}
+        </div>
+        <div style="margin-top:10px;">
+          <div><strong>${done(st.submitted)} 4. 가맹 신청 제출</strong>${a.applied_at ? ` — ${esc(String(a.applied_at).slice(0, 16).replace("T", " "))} 접수, 심사 대기 중` : ""}</div>
+          <button id="btnApply" class="bass-btn bass-btn--primary" type="button" ${a.ready_to_submit ? "" : "disabled"} style="margin-top:4px;">${a.applied_at ? "다시 제출" : "가맹 신청 제출"}</button>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">호실 ${f.room_count}/${f.room_limit}실 등록 · 호실 정보는 승인 전에도 미리 준비할 수 있습니다.</div>
+      </div>`;
+    const $q = (id) => document.getElementById(id);
+    const who = () => ({ branch: currentBranch, name: $q("fiName").value.trim(), phone: $q("fiPhone").value.trim(), birth: $q("fiBirth").value.trim() });
+    const act = (id, fn, rerender = true) => {
+      const el = $q(id);
+      if (el) el.addEventListener("click", function () { Bass.withLock(this, async () => { await fn(); if (rerender) await renderFranchiseBanner(); }); });
+    };
+    act("btnIdStart", async () => {  // 입력 중인 이름·번호가 지워지지 않도록 다시 그리지 않는다
+      const r = await Bass.api(APP_ID, "/franchise/identity/start", { method: "POST", body: who() });
+      Bass.updateAppAlert("success", r.message, r.hint || "");
+    }, false);
+    act("btnIdConfirm", async () => {
+      const r = await Bass.api(APP_ID, "/franchise/identity/confirm", { method: "POST", body: { ...who(), code: $q("fiCode").value.trim() } });
+      Bass.updateAppAlert("success", r.message);
+    });
+    act("btnBldgSave", async () => {
+      const r = await Bass.api(APP_ID, "/franchise/building", { method: "POST", body: {
+        branch: currentBranch, building_name: $q("fbName").value.trim(), address: $q("fbAddr").value.trim(), property_value: Number($q("fbValue").value || 0) } });
+      Bass.updateAppAlert("success", r.message);
+    });
+    act("btnRegUpload", async () => {
+      const file = $q("frFile").files[0];
+      if (!file) { Bass.updateAppAlert("warning", "등기부 파일(PDF·캡처)을 먼저 골라 주세요."); return; }
+      if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+      const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+      const r = await Bass.api(APP_ID, "/franchise/registry", { method: "POST", body: { branch: currentBranch, attachment_data_url: dataUrl, consent: $q("frConsent").checked } });
+      Bass.updateAppAlert(r.level === "success" ? "success" : "warning", r.message);
+    });
+    act("btnApply", async () => {
+      const r = await Bass.api(APP_ID, "/franchise/submit", { method: "POST", body: { branch: currentBranch } });
+      Bass.updateAppAlert("success", r.message);
+    });
+  }
+
+  async function renderFranchiseBanner() {
+    const box = document.getElementById("franchiseBanner");
+    if (!box) return;
+    try {
+      const st = await Bass.api(APP_ID, `/status?branch=${encodeURIComponent(currentBranch)}`);
+      const f = st.franchise || {};
+      if (f.open) { box.innerHTML = ""; return; }
+      if (f.status === "PENDING_APPROVAL" || f.status === "REJECTED") { await renderApplication(box, f); return; }
+      const msg = {
+        PENDING_APPROVAL: "가맹 심사 중입니다. 승인되기 전에는 호실 정보를 미리 준비할 수 있고, 매물 공개와 직거래 계약은 승인 후에 가능합니다.",
+        SUSPENDED: "이용이 정지되었습니다. 매물이 모두 비공개로 바뀌었고 새 계약을 시작할 수 없습니다.",
+        REJECTED: "가맹 심사가 반려되었습니다.",
+      }[f.status] || "가맹 승인 후에 매물을 공개할 수 있습니다.";
+      box.innerHTML = `<div class="bass-card" style="margin-top:10px;border-left:4px solid var(--warn);padding:10px 12px;font-size:13px;line-height:1.6;">
+        <strong>${Bass.escapeHtml(f.label || "")}</strong> — ${msg}${f.note ? `<br>사유: ${Bass.escapeHtml(f.note)}` : ""}
+        <br><span class="bass-muted">호실 ${f.room_count}/${f.room_limit}실 등록</span></div>`;
+    } catch (e) { box.innerHTML = ""; }
+  }
+
   async function refresh() {
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
     dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
     document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
+    renderFranchiseBanner();
 
     elBranch.innerHTML = (dash.branches || []).map((b) =>
       `<option value="${b.branch}" ${b.branch === dash.branch ? "selected" : ""}>🏢 ${Bass.escapeHtml(b.building_name)} (${b.branch})</option>`
@@ -123,7 +222,7 @@
         const propTerm = (ec && ec.proposed_term_months) ? ec.proposed_term_months : 12;
 
         const hasPhoto = Boolean(ct && ct.contract_photo_file);
-        const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo` : "";
+        const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}` : "";
         const isPhotoOpen = openPhotoRooms.has(r.room_no);
         const isPdfPhoto = hasPhoto && String(ct.contract_photo_file).toLowerCase().endsWith(".pdf");
         const brokerAgency = (ct && ct.broker_info && ct.broker_info.agency_name) || "공인중개사사무소";
@@ -787,7 +886,7 @@
             <h3>📊 ${fin.year}년 공용 운영비 실결산 & 순운영이익(NOI)</h3>
             <div class="bass-muted" style="font-size:13px;">총수입 ${fmtWon(fin.gross_revenue)} − 필요경비 ${fmtWon(fin.total_operating_expense)} = <strong>순이익 ${fmtWon(fin.noi)}</strong> (15.4% 분리과세 예상세액 ${fmtWon(fin.estimated_separate_tax)})</div>
           </div>
-          <a class="bass-btn bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${fin.year}">📥 5월 종소세 홈택스 CSV 다운로드</a>
+          <a class="bass-btn bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${fin.year}&token=${encodeURIComponent(Bass.token())}">📥 5월 종소세 홈택스 CSV 다운로드</a>
         </div>
         <div class="field-grid" style="margin-top:12px;">
           ${(fin.expenses_by_category || []).map((c) => `

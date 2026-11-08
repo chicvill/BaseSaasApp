@@ -8,10 +8,15 @@ import os
 import re
 from typing import Any, Dict, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, issue_token
+from core.auth import require_role
+from apps.rent_dist._rent3_core.authz import contract_scope, lessor_token, tenant_token
+
+# 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
+ADMIN_ONLY = [Depends(require_role("superadmin", "admin"))]
 from core.errors import Conflict, DomainError, NotFound
 from apps.rent_dist._rent3_core import (
     POOL_COLLECTIONS,
@@ -45,6 +50,18 @@ class PortalLoginReq(BaseModel):
     target_hint: str = ""                # "" | "pool" | "add_listing" | "broker" | "contract" | "contract:{branch}:{room_no}"
     session_code: str = ""
     cosign_role: str = "tenant"          # lessor | tenant
+
+
+def demo_login_allowed(request: Request) -> bool:
+    """공통 데모 비밀번호(1212·0202·전화 뒷자리)는 로컬 개발에서만 허용한다.
+    환경변수 RENT3_DEMO_LOGIN=1/0 으로 강제 지정할 수 있고, 지정이 없으면 서버 자신(loopback)에서 온 요청만 허용한다."""
+    env = os.getenv("RENT3_DEMO_LOGIN", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1", "localhost", "testclient")
 
 
 class PortalRegisterReq(BaseModel):
@@ -100,7 +117,7 @@ def _build_contract_target_url(
     return f"/rent3_contract/?{'&'.join(q)}"
 
 
-@router.get("/overview")
+@router.get("/overview", dependencies=ADMIN_ONLY)
 def pool_overview() -> Dict[str, Any]:
     ensure_pool_seeded()
     p = pool()
@@ -119,7 +136,7 @@ def pool_overview() -> Dict[str, Any]:
     }
 
 
-@router.get("/files/{collection}")
+@router.get("/files/{collection}", dependencies=ADMIN_ONLY)
 def pool_file_raw(collection: str) -> Dict[str, Any]:
     ensure_pool_seeded()
     return {
@@ -143,10 +160,11 @@ def portal_landing() -> Dict[str, Any]:
     bldg_by_branch: Dict[str, Building] = {b.branch: b for b in buildings}
     lessor_by_branch: Dict[str, Lessor] = {l.branch: l for l in lessors}
 
+    franchise_ok = {l.branch: l.status == "ACTIVE" for l in lessors}
     listings: List[Dict[str, Any]] = []
     for idx, r in enumerate(sorted(rooms, key=lambda x: (x.branch, x.room_no))):
         is_public_vacancy = (not r.is_occupied and r.is_published) or r.pre_moveout_notice
-        if not is_public_vacancy:
+        if not is_public_vacancy or not franchise_ok.get(r.branch, True):
             continue
         b = bldg_by_branch.get(r.branch)
         lsr = lessor_by_branch.get(r.branch)
@@ -299,7 +317,7 @@ def create_portal_inquiry(req: PortalInquiryReq) -> Dict[str, Any]:
     }
 
 
-@router.post("/cosign-open")
+@router.post("/cosign-open", dependencies=[Depends(contract_scope)])
 def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
     """OpenRent 'Rent Now' 버튼 — 로그인한 당사자가 매물을 선택하여 상대방을 호출(CALLING)하고 공동계약 앱 URL을 반환."""
     ensure_pool_seeded()
@@ -334,7 +352,7 @@ def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
 
 
 @router.post("/auth/login")
-def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
+def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     """통합 본인인증 로그인 — 계정 역할(관리인/임대인/입주임차인/예비임차인) 및 공동계약 호출 목적에 맞춰 전용 URL을 반환."""
     ensure_pool_seeded()
     ensure_default_admins()
@@ -384,6 +402,7 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
     ident_num = _digits(ident)
     pw = req.password.strip()
     is_contract_hint = (req.target_hint or "").startswith("contract")
+    demo = demo_login_allowed(request)
 
     if not ident or not pw:
         raise DomainError("아이디(또는 휴대폰 번호/성명)와 비밀번호를 모두 입력해 주세요.")
@@ -402,10 +421,8 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
     if matched_admin:
         core_u = CoreUser.by_username(matched_admin.username)
         admin_pw = matched_admin.password or "0202"
-        valid_pw = (
-            pw in ("0202", "1212")
-            or pw == admin_pw
-            or (core_u.check_password(pw) if core_u else False)
+        valid_pw = (core_u.check_password(pw) if core_u else False) or (
+            demo and (pw in ("0202", "1212") or pw == admin_pw)
         )
         if not valid_pw:
             raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호(0202)를 확인해 주세요.")
@@ -453,15 +470,14 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
         core_u = CoreUser.by_username(matched_lessor.username) if matched_lessor.username else None
         phone_tail = _digits(matched_lessor.phone)[-4:] if len(_digits(matched_lessor.phone)) >= 4 else ""
         custom_pw = matched_lessor.password
-        valid_pw = (
-            pw == "1212"
-            or (bool(custom_pw) and pw == custom_pw)
-            or (bool(phone_tail) and pw == phone_tail)
-            or (core_u.check_password(pw) if core_u else False)
+        valid_pw = (core_u.check_password(pw) if core_u else False) or (
+            bool(custom_pw) and custom_pw != "1212" and pw == custom_pw
+        ) or (
+            demo and (pw == "1212" or (bool(custom_pw) and pw == custom_pw) or (bool(phone_tail) and pw == phone_tail))
         )
         if not valid_pw:
-            raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="기본 비밀번호(1212) 또는 설정한 비밀번호를 확인해 주세요.")
-        tok = issue_token(core_u) if core_u else ""
+            raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="가입할 때 설정한 비밀번호를 확인해 주세요.")
+        tok = lessor_token(matched_lessor)
         if is_contract_hint:
             target_url = _build_contract_target_url("lessor", req.target_hint, branch=matched_lessor.branch)
             dest_msg = "공동계약 호출·응답 화면으로 이동합니다."
@@ -509,15 +525,13 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
     if matched_tenant:
         phone_tail = _digits(matched_tenant.phone)[-4:] if len(_digits(matched_tenant.phone)) >= 4 else ""
         custom_pw = matched_tenant.password
-        valid_pw = (
-            pw == "1212"
-            or (bool(custom_pw) and pw == custom_pw)
-            or (bool(phone_tail) and pw == phone_tail)
+        valid_pw = (bool(custom_pw) and custom_pw != "1212" and pw == custom_pw) or (
+            demo and (pw == "1212" or (bool(custom_pw) and pw == custom_pw) or (bool(phone_tail) and pw == phone_tail))
         )
         if not valid_pw:
             raise Unauthorized(
                 "임차인 비밀번호가 올바르지 않습니다.",
-                hint="비밀번호(1212) 또는 본인 휴대폰 번호 뒷 4자리를 입력해 주세요.",
+                hint="가입할 때 설정한 비밀번호를 확인해 주세요.",
             )
         is_active_resident = matched_tenant.status == "ACTIVE" and bool(matched_tenant.current_room_id or matched_tenant.room_no)
         if is_active_resident:
@@ -541,7 +555,7 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
             "role": role_key,
             "role_label": role_lbl,
             "redirect_url": target_url,
-            "token": "",
+            "token": tenant_token(matched_tenant),
             "user": {
                 "id": matched_tenant.id,
                 "username": matched_tenant.id,
@@ -565,13 +579,15 @@ def portal_role_login(req: PortalLoginReq) -> Dict[str, Any]:
 
 
 @router.post("/auth/register")
-def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
+def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
     """OpenRent 포털 간편 본인인증 회원가입 — 예비임차인 또는 신규 임대인을 Data Pool에 등록하고 해당 역할 페이지로 즉시 연결."""
     ensure_pool_seeded()
     name = req.name.strip()
     phone = req.phone.strip()
     pw = req.password.strip() or "1212"
     is_contract_hint = (req.target_hint or "").startswith("contract")
+    if not demo_login_allowed(request) and (len(pw) < 6 or pw in ("1212", "0202", "123456", "000000")):
+        raise DomainError("비밀번호는 6자 이상이어야 하며 흔한 숫자(1212 등)는 쓸 수 없습니다.", hint="영문·숫자를 섞어 설정해 주세요.")
     if not name or not phone:
         raise DomainError("성명과 휴대폰 번호는 필수 입력 항목입니다.")
 
@@ -593,7 +609,7 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
             phone=phone,
             email=req.email.strip(),
             branch=branch_code,
-            status="ACTIVE",
+            status="PENDING_APPROVAL",  # 가맹 심사 통과 전에는 매물 공개·직거래 불가
             password=pw,
         ).save("portal_lessor_registered", app_source="rent3_portal")
 
@@ -616,7 +632,7 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
             "role": "lessor",
             "role_label": f"임대인 ({branch_code})",
             "redirect_url": target_url,
-            "token": "",
+            "token": lessor_token(lsr),
             "user": {
                 "id": lsr.id,
                 "username": lsr.username,
@@ -628,7 +644,7 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
                 "login_auth_verified": True,
                 "redirect_url": target_url,
             },
-            "message": f"임대인 본인인증 가입이 완료되었습니다! [{b_name}] 전용 화면으로 이동합니다.",
+            "message": f"임대인 가입이 접수되었습니다. [{b_name}] 가맹 심사가 끝나면 매물을 공개할 수 있어요. 그동안 호실 정보를 미리 준비해 두세요.",
         }
 
     # 예비임차인 (prospect) 가입
@@ -654,7 +670,7 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
         "role": "prospect",
         "role_label": "예비임차인",
         "redirect_url": target_url,
-        "token": "",
+        "token": tenant_token(new_t),
         "user": {
             "id": new_t.id,
             "username": new_t.id,
@@ -672,7 +688,7 @@ def portal_register(req: PortalRegisterReq) -> Dict[str, Any]:
     }
 
 
-@router.get("/rooms/files")
+@router.get("/rooms/files", dependencies=ADMIN_ONLY)
 def list_room_partition_files() -> Dict[str, Any]:
     """분리 보관된 개별 호실 JSON 파일 목록 조회."""
     p = pool()
@@ -697,7 +713,7 @@ def list_room_partition_files() -> Dict[str, Any]:
     return {"count": len(files), "files": files}
 
 
-@router.get("/rooms/files/{file_name}")
+@router.get("/rooms/files/{file_name}", dependencies=ADMIN_ONLY)
 def get_room_partition_file(file_name: str) -> Dict[str, Any]:
     """개별 호실 분리 JSON 파일 단건 직접 조회 (O(1))."""
     p = pool()

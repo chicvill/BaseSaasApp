@@ -242,11 +242,11 @@
                 · 특약: ${Bass.escapeHtml(ct.special_terms || "-")}
               </div>
             </div>
-            <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo" target="_blank" rel="noopener">🔍 계약서 원본 열기/다운로드</a>
+            <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}" target="_blank" rel="noopener">🔍 계약서 원본 열기/다운로드</a>
           </div>
           ${String(ct.contract_photo_file).toLowerCase().endsWith(".pdf")
             ? `<div class="bass-muted" style="margin-top:8px;font-size:13px;">PDF 스캔본 계약서가 보관되어 있습니다. 우측 상단 버튼으로 확인하세요.</div>`
-            : `<img src="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:block;">`
+            : `<img src="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:block;">`
           }
         </div>
       ` : ""}

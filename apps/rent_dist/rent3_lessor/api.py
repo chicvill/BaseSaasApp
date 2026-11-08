@@ -2,7 +2,11 @@
 apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 """
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
+from core.errors import DomainError, Forbidden
+from apps.rent_dist._rent3_core.authz import lessor_scope
+from apps.rent_dist._rent3_core import franchise as fr, registry_ai
+from apps.rent_dist._rent3_core.pool import now_iso
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -31,7 +35,7 @@ from apps.rent_dist._rent3_core import (
     pool,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(lessor_scope)])
 APP_SRC = "rent3_lessor"
 
 
@@ -115,6 +119,165 @@ class ChatReplyReq(BaseModel):
     message: str
 
 
+def _franchise_info(branch: str) -> Dict[str, Any]:
+    lsr = Lessor.for_branch(branch)
+    if lsr is None:
+        return {"status": "ACTIVE", "label": "가맹 승인", "open": True, "note": "", "room_limit": 0, "room_count": Room.count(branch=branch)}
+    return {
+        "status": lsr.status,
+        "label": Lessor.STATUS_LABELS.get(lsr.status, lsr.status),
+        "open": lsr.status == "ACTIVE",
+        "note": lsr.status_note,
+        "room_limit": lsr.room_limit,
+        "room_count": Room.count(branch=branch),
+    }
+
+
+# ── 가맹 신청: 본인인증 → 건물 정보 → 등기부 대조 → 제출 ───────────────────────────
+FRANCHISE_AI_MAX_CALLS = 3  # 신청 1건당 등기부 AI 읽기 상한 (남용·비용 방지)
+
+
+def _my_lessor(branch: str) -> Lessor:
+    lsr = Lessor.for_branch(normalize_branch_id(branch))
+    if lsr is None:
+        raise DomainError("이 지점의 임대인 정보를 찾을 수 없습니다.")
+    return lsr
+
+
+def _is_loopback(request: Request) -> bool:
+    return bool(request.client) and request.client.host in ("127.0.0.1", "::1", "localhost", "testclient")
+
+
+class IdentityStartReq(BaseModel):
+    branch: str = "main"
+    name: str
+    phone: str
+    birth: str
+
+
+class IdentityConfirmReq(IdentityStartReq):
+    code: str
+
+
+class FranchiseBuildingReq(BaseModel):
+    branch: str = "main"
+    building_name: str = ""
+    address: str = ""
+    property_value: int = 0
+
+
+class FranchiseRegistryReq(BaseModel):
+    branch: str = "main"
+    attachment_data_url: str
+    consent: bool = False
+
+
+class FranchiseSubmitReq(BaseModel):
+    branch: str = "main"
+
+
+@router.get("/franchise/application")
+def franchise_application(request: Request, branch: str = "main"):
+    lsr = _my_lessor(branch)
+    return {"success": True, "franchise": _franchise_info(lsr.branch),
+            "application": fr.application_summary(lsr, Building.first(branch=lsr.branch)),
+            "identity_provider": fr.provider(_is_loopback(request)).name}
+
+
+@router.post("/franchise/building")
+def franchise_building(req: FranchiseBuildingReq):
+    """임대인이 자기 건물의 이름·실제 주소·건물 가치를 입력한다 (등기부 대조의 기준)."""
+    lsr = _my_lessor(req.branch)
+    b = Building.first(branch=lsr.branch)
+    if b is None:
+        raise DomainError("건물 정보를 찾을 수 없습니다.")
+    if req.building_name.strip():
+        b.building_name = req.building_name.strip()
+    if req.address.strip():
+        b.address = req.address.strip()
+    if req.property_value < 0:
+        raise DomainError("건물 가치는 0 이상이어야 합니다.")
+    if req.property_value:
+        b.property_value = req.property_value
+    b.save(action="franchise_building_updated", app_source=APP_SRC)
+    return {"success": True, "message": "건물 정보를 저장했습니다.", "application": fr.application_summary(lsr, b)}
+
+
+@router.post("/franchise/identity/start")
+def franchise_identity_start(req: IdentityStartReq, request: Request):
+    _my_lessor(req.branch)
+    p = fr.provider(_is_loopback(request))
+    out = p.start(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth))
+    return {"success": True, "message": "인증번호를 보냈습니다.", "provider": p.name, **out}
+
+
+@router.post("/franchise/identity/confirm")
+def franchise_identity_confirm(req: IdentityConfirmReq, request: Request):
+    lsr = _my_lessor(req.branch)
+    p = fr.provider(_is_loopback(request))
+    res = p.confirm(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth), req.code)
+    lsr.identity = fr.verify_identity_record(res)
+    # 본인인증이 바뀌면 이전 대조 결과는 무효 → 다시 대조
+    if lsr.franchise_docs.get("ai"):
+        ai = lsr.franchise_docs["ai"]
+        b0 = Building.first(branch=lsr.branch)
+        lsr.franchise_docs = {**lsr.franchise_docs, "check": fr.check_ownership(
+            lsr.identity, ai.get("extracted"), b0.address if b0 else "")}
+    lsr.applied_at = ""  # 신원이 바뀌었으니 제출은 다시
+    lsr.save(action="franchise_identity_verified", app_source=APP_SRC)
+    return {"success": True, "message": "본인인증이 완료되었습니다." + (" (시연용 가짜 인증)" if res.get("fake") else ""),
+            "application": fr.application_summary(lsr, Building.first(branch=lsr.branch))}
+
+
+@router.post("/franchise/registry")
+def franchise_registry(req: FranchiseRegistryReq):
+    """등기부를 올리면 보관하고(심사용), 동의 시 Gemini 로 읽어 본인인증 값과 대조한다."""
+    lsr = _my_lessor(req.branch)
+    if not lsr.identity.get("verified"):
+        raise DomainError("먼저 휴대폰 본인인증을 해 주세요.")
+    bldg = Building.first(branch=lsr.branch)
+    saved = fr.save_registry_file(lsr.id, req.attachment_data_url)
+    ai: Dict[str, Any] = {"status": "skipped"}
+    if req.consent:
+        if lsr.franchise_ai_calls >= FRANCHISE_AI_MAX_CALLS:
+            raise DomainError(f"가맹 신청 중 AI 읽기 횟수({FRANCHISE_AI_MAX_CALLS}회)를 모두 썼습니다.",
+                              hint="AI 없이 제출하면 관리자가 원본을 직접 확인합니다.")
+        binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
+        ai = registry_ai.analyze(binary, mime, lessor_names=[lsr.identity.get("name", "")], deposit=0,
+                                 property_value=int(getattr(bldg, "property_value", 0) or 0))
+        if ai["status"] == "ok":
+            lsr.franchise_ai_calls += 1
+    check = fr.check_ownership(lsr.identity, (ai or {}).get("extracted"), getattr(bldg, "address", ""))
+    lsr.franchise_docs = {
+        "registry_file": saved["file"], "registry_sha256": saved["sha256"], "registry_mime": saved["mime"],
+        "uploaded_at": now_iso(), "ai": {"status": ai["status"], "message": ai.get("message", ""),
+                                         "extracted": ai.get("extracted")},
+        "check": check,
+    }
+    lsr.applied_at = ""
+    lsr.save(action="franchise_registry_uploaded", app_source=APP_SRC)
+    return {"success": True, "message": check["message"], "level": "success" if check["auto_pass"] else "warning",
+            "application": fr.application_summary(lsr, bldg)}
+
+
+@router.post("/franchise/submit")
+def franchise_submit(req: FranchiseSubmitReq):
+    lsr = _my_lessor(req.branch)
+    summ = fr.application_summary(lsr, Building.first(branch=lsr.branch))
+    if not summ["ready_to_submit"]:
+        missing = [k for k, v in (("본인인증", summ["steps"]["identity"]), ("건물 주소(번지 포함)", summ["steps"]["building"]),
+                                  ("등기부", summ["steps"]["registry"])) if not v]
+        raise DomainError(f"아직 입력하지 않은 항목이 있습니다: {', '.join(missing)}")
+    if lsr.status not in ("PENDING_APPROVAL", "REJECTED"):
+        raise DomainError("이미 심사가 끝났거나 이용이 정지된 계정입니다.")
+    lsr.status = "PENDING_APPROVAL"
+    lsr.status_note = ""
+    lsr.applied_at = now_iso()
+    lsr.save(action="franchise_applied", app_source=APP_SRC)
+    return {"success": True, "message": "가맹 신청이 제출되었습니다. 본사 심사 후 결과를 알려 드립니다.",
+            "application": fr.application_summary(lsr, Building.first(branch=lsr.branch))}
+
+
 @router.get("/status")
 def get_status(branch: str = "main"):
     ensure_pool_seeded()
@@ -126,6 +289,7 @@ def get_status(branch: str = "main"):
         "status": "HEALTHY",
         "branch": b_id,
         "building_name": bldg.building_name if bldg else b_id,
+        "franchise": _franchise_info(b_id),
         "pool_revision": pool().overview()["total_revision"],
     }
 
@@ -218,6 +382,15 @@ def create_or_update_room(req: RoomCreateReq):
     b_id = normalize_branch_id(req.branch)
     bldg = Building.first(branch=b_id)
     existing = Room.first(branch=b_id, room_no=req.room_no)
+    # 승인된 가맹점만 매물을 공개할 수 있다. 심사 중에는 호실을 미리 준비(비공개)만 가능.
+    lsr = Lessor.for_branch(b_id)
+    if not Lessor.franchise_open(b_id):
+        req.is_published = False
+    if not existing and lsr and Room.count(branch=b_id) >= lsr.room_limit:
+        raise DomainError(
+            f"가맹점당 등록 가능 호실 수({lsr.room_limit}실)를 넘었습니다.",
+            hint="더 등록하려면 관리자에게 한도 상향을 요청해 주세요.",
+        )
     if existing:
         existing.name = req.name or existing.name
         existing.floor = req.floor
@@ -262,6 +435,11 @@ def create_or_update_room(req: RoomCreateReq):
 @router.post("/rooms/{room_id}/publish")
 def toggle_room_publish(room_id: str, req: PublishToggleReq):
     room = Room.require(room_id)
+    if req.is_published and not Lessor.franchise_open(room.branch):
+        raise Forbidden(
+            "가맹 승인 후에 매물을 공개할 수 있습니다.",
+            hint="관리자의 가맹 심사가 끝나면 공개할 수 있어요. 심사 상태는 임대인 화면 상단에서 확인하세요.",
+        )
     room.is_published = req.is_published
     room.save(action="room_publish_toggled", app_source=APP_SRC)
     state_label = "직거래 매물 공개" if room.is_published else "매물 비공개"

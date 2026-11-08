@@ -81,7 +81,18 @@
     participantTenants = partData.tenants || [];
   }
 
+  let myIdentity = null; // 임차인 휴대폰 본인인증 상태 (null = 아직 모름 / 해당 없음)
+
+  async function loadIdentity() {
+    if (currentRole !== "tenant") { myIdentity = null; return; }
+    try {
+      const d = await Bass.api(APP_ID, "/identity");
+      myIdentity = d && d.applies ? d.identity : null;
+    } catch (_) { myIdentity = null; }
+  }
+
   async function loadRoleExtras() {
+    await loadIdentity();
     try {
       if (currentRole === "tenant" && loggedUser.role === "tenant" && myTenantId) {
         const d = await Bass.api("rent3_tenant", `/myhome/${encodeURIComponent(myTenantId)}`);
@@ -136,6 +147,7 @@
     const sig = JSON.stringify([
       mySessions().map((s) => [s.id, s.call_status, s.current_step, s.status]),
       candidateRooms.map((r) => `${r.room_no}${r.is_occupied ? 1 : 0}${r.is_published ? 1 : 0}`).join(), myhome ? myhome.pool_revision : 0, lessorDash ? lessorDash.pool_revision : 0,
+      myIdentity ? !!myIdentity.verified : null,
     ]);
     if (!force && sig === homeSig) return;
     if (elDlgHost.firstChild) return; // 입력 중인 창을 지우지 않는다
@@ -183,6 +195,31 @@
       b.addEventListener("click", () => openLessorCallDialog(b.dataset.room)));
     const tBtn = document.getElementById("btnTenantContract");
     if (tBtn) tBtn.addEventListener("click", () => openTenantPickerDialog());
+    bindIdentityCard();
+  }
+
+  function bindIdentityCard() {
+    const startBtn = document.getElementById("btnIdStart");
+    if (!startBtn) return;
+    const body = () => ({
+      name: document.getElementById("idName").value.trim(),
+      phone: document.getElementById("idPhone").value.trim(),
+      birth: document.getElementById("idBirth").value.trim(),
+    });
+    startBtn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/identity/start", { method: "POST", body: body() });
+        Bass.updateAppAlert("success", r.message, r.hint || "");
+      });
+    });
+    document.getElementById("btnIdConfirm").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/identity/confirm", { method: "POST", body: { ...body(), code: document.getElementById("idCode").value.trim() } });
+        Bass.updateAppAlert("success", r.message);
+        await loadIdentity();
+        renderHome(true);
+      });
+    });
   }
 
   function homeLessorHtml() {
@@ -233,11 +270,27 @@
     const label = incoming.length ? "🔔 임대인 요청 확인하기"
       : ongoing.length ? "▶ 진행 중인 계약 이어서 하기"
       : "📝 임대계약";
-    return `${pay}
+    const needId = myIdentity && !myIdentity.verified;
+    const idDone = myIdentity && myIdentity.verified
+      ? `<div class="bass-muted" style="font-size:12px;margin-bottom:8px;">✅ 본인인증 완료 — ${esc(myIdentity.name)}${myIdentity.fake ? " <span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}</div>` : "";
+    const idCard = needId ? `<div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
+        <h3 style="margin:0 0 4px;">🔐 휴대폰 본인인증이 필요합니다</h3>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;line-height:1.55;">명의 도용 사기를 막기 위해, 계약을 시작·응답·서명하기 전에 <strong>가입한 본인 명의 휴대폰</strong>으로 인증해야 합니다.</div>
+        <input id="idName" class="bass-input" placeholder="실명" style="margin-bottom:6px;">
+        <input id="idPhone" class="bass-input" placeholder="가입한 휴대폰 010-0000-0000" style="margin-bottom:6px;">
+        <input id="idBirth" class="bass-input" placeholder="생년월일 6자리(900101) 또는 8자리" style="margin-bottom:6px;">
+        <div class="bass-row" style="gap:6px;">
+          <button id="btnIdStart" class="bass-btn bass-btn--sm" type="button">인증번호 받기</button>
+          <input id="idCode" class="bass-input" placeholder="인증번호" style="flex:1;min-width:0;">
+          <button id="btnIdConfirm" class="bass-btn bass-btn--sm bass-btn--primary" type="button">인증 확인</button>
+        </div>
+      </div>` : "";
+    return `${idCard}${pay}
       <div class="bass-card">
         <h3 style="margin:0 0 6px;">새 집 계약</h3>
+        ${idDone}
         <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;">공개된 매물을 고르면 임대인에게 계약 요청이 전달됩니다.</div>
-        <button id="btnTenantContract" class="bass-btn bass-btn--primary big-cta" type="button">${label}</button>
+        <button id="btnTenantContract" class="bass-btn bass-btn--primary big-cta" type="button" ${needId ? "disabled" : ""}>${needId ? "🔒 본인인증 후 계약할 수 있어요" : label}</button>
       </div>`;
   }
 

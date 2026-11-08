@@ -2,11 +2,12 @@
 apps/rent3_tenant/api.py — 임차인 및 예비 세입자 전용 API 라우터.
 """
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from core.errors import DomainError, NotFound
+from apps.rent_dist._rent3_core.authz import any_user, staff_only, tenant_scope
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -92,6 +93,8 @@ def list_open_listings(branch: Optional[str] = None):
     for r in sorted(rooms, key=lambda x: (x.branch, x.room_no)):
         if (r.is_occupied and not r.pre_moveout_notice) or not r.is_published:
             continue
+        if not Lessor.franchise_open(r.branch):
+            continue
         b = bldgs.get(r.id_building)
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)
@@ -132,7 +135,7 @@ def submit_inquiry(req: InquiryReq):
     }
 
 
-@router.get("/tenants")
+@router.get("/tenants", dependencies=[Depends(staff_only)])
 def list_tenants():
     ensure_pool_seeded()
     tenants = Tenant.find(status="ACTIVE")
@@ -149,7 +152,7 @@ def list_tenants():
     }
 
 
-@router.get("/myhome/{tenant_id}")
+@router.get("/myhome/{tenant_id}", dependencies=[Depends(tenant_scope)])
 def get_myhome(tenant_id: str):
     ensure_pool_seeded()
     t = Tenant.get(tenant_id) or Tenant.first(phone=tenant_id)
@@ -195,7 +198,7 @@ def get_myhome(tenant_id: str):
     }
 
 
-@router.post("/myhome/{tenant_id}/pay")
+@router.post("/myhome/{tenant_id}/pay", dependencies=[Depends(tenant_scope)])
 def pay_monthly_rent(tenant_id: str, req: OnlinePayReq):
     t = Tenant.require(tenant_id)
     if not t.room_no:
@@ -211,7 +214,7 @@ def pay_monthly_rent(tenant_id: str, req: OnlinePayReq):
     return {"success": True, **res}
 
 
-@router.post("/myhome/{tenant_id}/vehicle")
+@router.post("/myhome/{tenant_id}/vehicle", dependencies=[Depends(tenant_scope)])
 def update_vehicle(tenant_id: str, req: VehicleReq):
     t = Tenant.require(tenant_id)
     t.register_vehicle(req.car_number, req.car_model, app_source=APP_SRC)
@@ -222,7 +225,7 @@ def update_vehicle(tenant_id: str, req: VehicleReq):
     }
 
 
-@router.post("/myhome/{tenant_id}/checkin")
+@router.post("/myhome/{tenant_id}/checkin", dependencies=[Depends(tenant_scope)])
 def confirm_checkin(tenant_id: str, req: CheckinReq):
     t = Tenant.require(tenant_id)
     t.confirm_checkin(req.memo, app_source=APP_SRC)
@@ -233,7 +236,7 @@ def confirm_checkin(tenant_id: str, req: CheckinReq):
     }
 
 
-@router.post("/myhome/{tenant_id}/tickets")
+@router.post("/myhome/{tenant_id}/tickets", dependencies=[Depends(tenant_scope)])
 def create_ticket(tenant_id: str, req: TicketSubmitReq):
     t = Tenant.require(tenant_id)
     tk = MaintenanceTicket(
@@ -255,7 +258,7 @@ def create_ticket(tenant_id: str, req: TicketSubmitReq):
     }
 
 
-@router.post("/checkout/{settlement_id}/agree")
+@router.post("/checkout/{settlement_id}/agree", dependencies=[Depends(any_user)])
 def agree_checkout(settlement_id: str, req: CheckoutAgreeReq):
     s = CheckOutSettlement.require(settlement_id)
     s.tenant_agree(req.bank_account, req.signature, app_source=APP_SRC)
@@ -266,7 +269,7 @@ def agree_checkout(settlement_id: str, req: CheckoutAgreeReq):
     }
 
 
-@router.get("/contracts/{contract_id}/photo")
+@router.get("/contracts/{contract_id}/photo", dependencies=[Depends(any_user)])
 def get_tenant_contract_photo(contract_id: str):
     ensure_pool_seeded()
     abs_path, mime, filename = BrokerContractOnboarding.resolve_photo_file(contract_id)
@@ -284,7 +287,7 @@ class TenantAckRenewalReq(BaseModel):
     tenant_memo: str = ""
 
 
-@router.post("/myhome/{tenant_id}/expiry-plan")
+@router.post("/myhome/{tenant_id}/expiry-plan", dependencies=[Depends(tenant_scope)])
 def submit_tenant_expiry_plan(tenant_id: str, req: TenantMoveoutPlanReq):
     ensure_pool_seeded()
     t = Tenant.require(tenant_id)
@@ -308,7 +311,7 @@ def submit_tenant_expiry_plan(tenant_id: str, req: TenantMoveoutPlanReq):
     return {"success": True, "level": "success", "message": msg, "check": chk.model_dump()}
 
 
-@router.post("/myhome/{tenant_id}/acknowledge-renewal")
+@router.post("/myhome/{tenant_id}/acknowledge-renewal", dependencies=[Depends(tenant_scope)])
 def acknowledge_tenant_renewal_preview(tenant_id: str, req: TenantAckRenewalReq):
     ensure_pool_seeded()
     t = Tenant.require(tenant_id)
@@ -328,7 +331,7 @@ def acknowledge_tenant_renewal_preview(tenant_id: str, req: TenantAckRenewalReq)
     }
 
 
-@router.post("/myhome/{tenant_id}/billing-notices/{notice_id}/acknowledge")
+@router.post("/myhome/{tenant_id}/billing-notices/{notice_id}/acknowledge", dependencies=[Depends(tenant_scope)])
 def acknowledge_tenant_billing_notice(tenant_id: str, notice_id: str):
     ensure_pool_seeded()
     t = Tenant.require(tenant_id)

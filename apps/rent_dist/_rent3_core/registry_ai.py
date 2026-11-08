@@ -43,7 +43,7 @@ PROMPT = """당신은 한국 등기사항증명서(등기부등본) 문서를 �
   "readable": true 또는 false,
   "issue_number": "발급확인번호(없으면 null)",
   "property_address": "부동산 소재지",
-  "owners": [{"name": "소유자 성명", "share": "지분(없으면 null)"}],
+  "owners": [{"name": "소유자 성명", "share": "지분(없으면 null)", "id_front": "소유자 주민등록번호 앞 6자리(YYMMDD)만. 뒷자리는 절대 옮기지 마세요. 없으면 null"}],
   "mortgages": [{"creditor": "근저당권자", "amount": 채권최고액 숫자, "registered_date": "접수일", "cancelled": true/false}],
   "restrictions": [{"type": "압류|가압류|가처분|신탁|경매개시결정|임차권등기|기타", "detail": "요약", "cancelled": true/false}],
   "ownership_transfers": [{"date": "접수일", "cause": "원인(매매, 상속 등)"}],
@@ -121,7 +121,8 @@ def read_registry(binary: bytes, mime: str) -> Dict[str, Any]:
 def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
     """AI 가 준 값을 형식을 맞춰 정리하고, 합계·여부는 AI 의 말이 아니라 목록에서 코드로 계산한다."""
     owners = [
-        {"name": str(o.get("name") or "").strip(), "share": (str(o.get("share")).strip() if o.get("share") else "")}
+        {"name": str(o.get("name") or "").strip(), "share": (str(o.get("share")).strip() if o.get("share") else ""),
+         "id_front": "".join(ch for ch in str(o.get("id_front") or "") if ch.isdigit())[:6]}
         for o in (raw.get("owners") or []) if isinstance(o, dict) and str(o.get("name") or "").strip()
     ]
     mortgages = []
