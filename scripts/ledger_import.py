@@ -165,13 +165,14 @@ def import_ledger(lessor, bldg, spec: dict, base_dir: str) -> dict:
         start = rec["move_in"].strftime("%Y-%m")
         settle = rec["overrides"].get("settle_through")
         # 이월 입금: 장부에 없는 과거 입금 — 어디까지 낸 것으로 볼지
+        # 이월 입금의 날짜는 2025-12-31(입주가 2026년이면 입주일)로 둔다 — 올해 '연간 수납액'에 과거 누적이 섞이지 않게
+        carry_when = max(date(2025, 12, 31), rec["move_in"])
         if settle:
-            carry_end, carry_when = settle, today
+            carry_end = settle
         elif fmt == "sunho":
-            carry_end, carry_when = "2025-12", date(2025, 12, 31)
+            carry_end = "2025-12"
         else:
             carry_end = _ym_add("2026-09" if not rec["unpaid_n"] else "2026-10", -(rec["unpaid_n"] or 0))
-            carry_when = date(2026, 9, 30)
         total = 0
         ym = start
         while ym <= carry_end:
