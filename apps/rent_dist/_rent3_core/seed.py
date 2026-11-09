@@ -15,13 +15,43 @@ from .pool import pool
 
 _seeded_dirs: Set[str] = set()
 
+_bootstrapping = False
+
+
+def _bootstrap_if_empty(p) -> None:
+    """비어 있는 Data Pool 을 설정 파일(scripts/fresh_pool.py 형식)로 채운다. 이미 건물이 있으면 아무것도 하지 않는다(덮어쓰지 않음)."""
+    global _bootstrapping
+    cfg_path = os.getenv("RENT3_BOOTSTRAP_CONFIG", "").strip()
+    if _bootstrapping or not cfg_path or not os.path.isfile(cfg_path) or Building.count() > 0 or Lessor.count() > 0:
+        return
+    import importlib.util
+    import json
+    _bootstrapping = True
+    try:
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        for name in ("fresh_pool", "ledger_import"):
+            spec = importlib.util.spec_from_file_location(name, os.path.join(root, "scripts", name + ".py"))
+            mod = importlib.util.module_from_spec(spec)
+            import sys
+            sys.modules[name] = mod
+            spec.loader.exec_module(mod)
+        with open(cfg_path, encoding="utf-8-sig") as f:
+            cfg = json.load(f)
+        res = sys.modules["fresh_pool"].build(cfg, os.path.dirname(os.path.abspath(cfg_path)))
+        print(f"[bootstrap] 빈 Data Pool 을 설정 파일로 채웠습니다: {res}", flush=True)
+    finally:
+        _bootstrapping = False
+
 
 def ensure_pool_seeded(force: bool = False) -> None:
     p = pool()
     p.ensure_all_files_initialized()
 
     if not force and os.getenv("RENT3_DEMO_SEED", "1").strip() == "0":
-        return   # 운영: 시험용 기본 시드(chic/1212 등)를 만들지 않는다 (scripts/fresh_pool.py 로 실제 정보만 넣는다)
+        # 운영: 시험용 기본 시드(chic/1212 등)를 만들지 않는다 (scripts/fresh_pool.py 로 실제 정보만 넣는다).
+        # 저장소가 비어 있고 RENT3_BOOTSTRAP_CONFIG(설정 파일 경로)가 있으면 그 설정으로 한 번만 만든다 — 터미널 없이 서버를 채우는 길.
+        _bootstrap_if_empty(p)
+        return
     if not force and p.pool_dir in _seeded_dirs:
         return
     if not force and Building.count() > 0:

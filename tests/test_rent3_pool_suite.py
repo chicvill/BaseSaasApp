@@ -2559,5 +2559,37 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
 
 
+    def test_48_bootstrap_from_config_only_when_empty(self):
+        """48. RENT3_DEMO_SEED=0 + RENT3_BOOTSTRAP_CONFIG: 비어 있는 Data Pool 은 설정 파일로 한 번 채워지고, 이미 데이터가 있으면 덮어쓰지 않는다."""
+        import tempfile
+        from apps.rent_dist._rent3_core import Building, Lessor, ensure_pool_seeded, use_pool_dir
+        work = tempfile.mkdtemp(prefix="bootstrap_")
+        keep = self.temp_pool
+        saved = {k: os.environ.get(k) for k in ("RENT3_DEMO_SEED", "RENT3_BOOTSTRAP_CONFIG")}
+        try:
+            cfg = {"lessors": [{"username": "bootlessor", "password": "Boot#Pass999", "name": "부트", "phone": "01055550009", "branch": "bt",
+                                "building": {"name": "부트빌", "address": "x", "rooms": [{"room_no": "101", "deposit": 1000000, "monthly_rent": 100000}]}}]}
+            cfgp = os.path.join(work, "boot.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            os.environ["RENT3_DEMO_SEED"] = "0"
+            os.environ["RENT3_BOOTSTRAP_CONFIG"] = cfgp
+            use_pool_dir(os.path.join(work, "pool"))
+            ensure_pool_seeded()
+            self.assertEqual(Building.first(branch="bt").building_name, "부트빌")
+            self.assertIsNotNone(Lessor.first(username="bootlessor"))
+            self.assertIsNone(Lessor.first(username="chic"))                  # 시험용 시드는 만들지 않는다
+            lessor = Lessor.first(username="bootlessor"); lessor.name = "수정됨"; lessor.save("t")
+            ensure_pool_seeded()                                              # 두 번째 기동: 이미 있으므로 덮어쓰지 않는다
+            self.assertEqual(Lessor.first(username="bootlessor").name, "수정됨")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
