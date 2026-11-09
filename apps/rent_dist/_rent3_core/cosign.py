@@ -46,6 +46,20 @@ from .pool import PoolObj, now_iso, pool
 
 # 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다.
 IDLE_EXPIRE = timedelta(hours=24)
+# ── 등기부 위험 차단 정책 ──────────────────────────────────────────────
+HIGH_DEPOSIT = 50_000_000            # 고액 보증금 기준(초과): 선순위 근저당이 있으면 보증보험 또는 말소 특약이 필요
+LOW_DEPOSIT = 20_000_000             # 소액 월세 기준(이하): 근저당이 있으면 강한 위험 확인이 필요
+INSURED_STATUS = ("가입 완료",)       # 보증보험으로 인정하는 상태 ('가입 예정'은 인정하지 않는다)
+CLEANUP_CLAUSE = ("임대인은 잔금일까지 선순위 근저당권을 전액 말소하고, 말소된 등기사항증명서를 임차인에게 제시한다. "
+                  "말소되지 않으면 임차인은 잔금 지급을 거절하고 계약을 해제할 수 있으며, 임대인은 받은 계약금을 즉시 반환한다.")
+
+
+class RegistryBlocked(DomainError):
+    """등기부 확인 결과 계약을 더는 진행할 수 없는 경우(소유자 불일치·압류 등). 체크로 넘어갈 수 없고 계약이 중단된다."""
+    status_code = 409
+    level = "error"
+
+
 IDLE_EXPIRE_DRAFT = timedelta(hours=72)  # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
 MAX_LIVE_PER_TENANT = 2  # 한 임차인이 동시에 진행할 수 있는 계약 수 (호실 선점·잠금 악용 방지)
 
@@ -161,6 +175,65 @@ class CoSignSession(PoolObj):
         t = self.terms or {}
         return t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
 
+    @staticmethod
+    def _norm_name(v: Any) -> str:
+        # 괄호 안 직함(예: "김임대 (시크빌 대표)")과 공백은 비교에서 제외
+        return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(v or "")))
+
+    @staticmethod
+    def _sync_cleanup_clause(terms: Dict[str, Any]) -> Dict[str, Any]:
+        """'잔금 시 근저당 말소 특약' 체크와 특약사항 본문을 맞춘다(체크하면 표준 문구가 들어가고, 풀면 빠진다)."""
+        out = dict(terms)
+        text = str(out.get("special_terms") or "")
+        has = CLEANUP_CLAUSE in text
+        if out.get("mortgage_cleanup_clause") and not has:
+            out["special_terms"] = (text.rstrip() + "\n" if text.strip() else "") + "5. " + CLEANUP_CLAUSE
+        elif not out.get("mortgage_cleanup_clause") and has:
+            out["special_terms"] = text.replace("5. " + CLEANUP_CLAUSE, "").replace(CLEANUP_CLAUSE, "").rstrip()
+        return out
+
+    def deposit_amount(self) -> int:
+        return int((self.terms or {}).get("deposit") or 0)
+
+    def needs_guarantee_info(self) -> bool:
+        """전세이거나 보증금이 고액(5천만 원 초과)이면 보증보험 가입 여부를 확인해야 한다."""
+        return self.is_jeonse() or self.deposit_amount() > HIGH_DEPOSIT
+
+    def is_low_deposit_monthly(self) -> bool:
+        return (not self.is_jeonse()) and self.deposit_amount() <= LOW_DEPOSIT
+
+    def mortgage_exposure(self, tenant_rec: Optional[Dict[str, Any]] = None) -> int:
+        """임대인이 제시한 값과 임차인이 직접 본 값(저장된 값 또는 방금 제출한 값) 중 큰 근저당 채권최고액."""
+        mine = tenant_rec if tenant_rec is not None else (self.tenant_registry or {})
+        return max(int((self.registry_data or {}).get("mortgage_amount") or 0), int(mine.get("mortgage_amount") or 0))
+
+    def hard_block_reasons(self, rec: Dict[str, Any]) -> List[str]:
+        """확인 체크로도 넘어갈 수 없는 절대 차단 사유: 소유자 불일치, 압류·가압류·신탁·경매개시·임차권등기."""
+        out: List[str] = []
+        lr = self.registry_data or {}
+        if lr.get("owner_name") and self._norm_name(lr["owner_name"]) != self._norm_name(rec.get("owner_name")):
+            out.append(f"등기부 소유자({rec.get('owner_name')})가 임대인이 제시한 소유자({lr['owner_name']})와 다릅니다")
+        if rec.get("seizure_or_trust") == "있음":
+            out.append("압류·가압류·가처분·신탁·경매개시결정·임차권등기가 등기부에 있습니다")
+        return out
+
+    def risk_blockers(self) -> List[str]:
+        """진행 차단 사유(조건을 갖추면 풀린다): 선순위 근저당이 있는 전세·고액 보증금에 보증보험도 말소 특약도 없는 경우."""
+        out: List[str] = []
+        if not (self.tenant_registry or {}).get("submitted"):
+            return out
+        if self.needs_guarantee_info() and self.mortgage_exposure() > 0:
+            insured = (self.tenant_registry or {}).get("guarantee_status") in INSURED_STATUS
+            clause = bool((self.terms or {}).get("mortgage_cleanup_clause"))
+            if not (insured or clause):
+                out.append("선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다")
+        return out
+
+    def _ensure_risk_ok(self) -> None:
+        blockers = self.risk_blockers()
+        if blockers:
+            raise DomainError(blockers[0], hint="임대인이 계약 조건에서 '잔금 시 근저당 말소 특약'을 넣거나, 임차인이 보증보험 가입을 완료한 뒤 등기부 확인 값을 다시 제출해 주세요.")
+
     def registry_mismatches(self) -> List[str]:
         """임대인이 제시한 등기 정보와 임차인이 직접 열람한 결과의 불일치·위험 항목."""
         tr = self.tenant_registry or {}
@@ -169,9 +242,7 @@ class CoSignSession(PoolObj):
         lr = self.registry_data or {}
         out: List[str] = []
 
-        def norm(v: Any) -> str:
-            # 괄호 안 직함(예: "김임대 (시크빌 대표)")과 공백은 비교에서 제외
-            return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(v or "")))
+        norm = self._norm_name
 
         if lr.get("owner_name") and norm(lr.get("owner_name")) != norm(tr.get("owner_name")):
             out.append(f"소유자가 다릅니다 (임대인 제시: {lr.get('owner_name')} / 직접 열람: {tr.get('owner_name')})")
@@ -214,9 +285,9 @@ class CoSignSession(PoolObj):
             raise DomainError("을구 근저당 채권최고액을 숫자로 입력해 주세요 (없으면 0).")
         if data.get("seizure_or_trust") not in ("없음", "있음"):
             raise DomainError("압류·가압류·가처분·신탁등기 여부를 선택해 주세요.")
-        if self.is_jeonse() and data.get("guarantee_status") not in ("가입 완료", "가입 예정", "가입 안 함"):
+        if self.needs_guarantee_info() and data.get("guarantee_status") not in ("가입 완료", "가입 예정", "가입 안 함"):
             raise DomainError(
-                "전세 계약은 보증금 반환보증 가입 여부를 선택해야 합니다.",
+                "전세 또는 고액 보증금(5천만 원 초과) 계약은 보증금 반환보증 가입 여부를 선택해야 합니다.",
                 hint="HUG·SGI 등 보증 가입 가능 여부를 계약 전에 확인해 주세요.",
             )
 
@@ -231,9 +302,28 @@ class CoSignSession(PoolObj):
             "seizure_or_trust": data["seizure_or_trust"],
             "guarantee_status": str(data.get("guarantee_status", "")).strip(),
             "mismatch_ack": bool(data.get("mismatch_ack")),
+            "low_deposit_risk_ack": bool(data.get("low_deposit_risk_ack")),
             "ai_assisted": bool(self.registry_ai_result),
             "submitted_at": now_iso(),
         }
+        hard = self.hard_block_reasons(rec)
+        if hard:
+            # 절대 차단: 확인 체크로 넘어갈 수 없다. 근거(임차인이 본 값)를 남기고 계약을 즉시 중단한다.
+            self.tenant_registry = {**rec, "blocked": hard}
+            self.status = "CANCELLED"
+            self.cancel_reason = "등기부 확인 결과 계약을 진행할 수 없어 중단되었습니다: " + " / ".join(hard)
+            self.cancelled_by, self.cancelled_at = "system", now_iso()
+            self.save(action="cosign_blocked_by_registry_policy", app_source=app_source)
+            raise RegistryBlocked(
+                "등기부 확인 결과 계약을 더는 진행할 수 없어 중단했습니다: " + " / ".join(hard),
+                hint="임차인 보호를 위해 이 항목은 확인 체크로 넘어갈 수 없습니다. 문제가 해소된 뒤 임대인이 새로 계약을 호출해 주세요.",
+            )
+        if self.is_low_deposit_monthly() and self.mortgage_exposure(rec) > 0 and not rec["low_deposit_risk_ack"]:
+            self.tenant_registry = {}
+            raise DomainError(
+                "⚠️ 위험: 소액 보증금에 선순위 근저당이 있습니다. 경매가 되면 보증금을 돌려받지 못할 수 있습니다.",
+                hint="위험을 이해했다면 '소액 보증금 위험을 확인하고 계속' 항목에 체크해 다시 제출해 주세요.",
+            )
         self.tenant_registry = rec
         mism = self.registry_mismatches()
         if mism and not rec["mismatch_ack"]:
@@ -726,7 +816,7 @@ class CoSignSession(PoolObj):
         return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
 
     PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
-                                            "contract_deposit", "pay_timing", "lease_type", "special_terms")
+                                            "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause")
     PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number")
     MAX_FACILITY_PHOTOS: ClassVar[int] = 12
     FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
@@ -764,6 +854,7 @@ class CoSignSession(PoolObj):
             if k == "lease_type" and v not in ("월세", "전세"):
                 raise DomainError("임대 유형은 월세 또는 전세여야 합니다.")
             merged[k] = v
+        merged = self._sync_cleanup_clause(merged)
         if int(merged.get("contract_deposit", 0)) > int(merged.get("deposit", 0)):
             raise DomainError("계약금은 보증금보다 클 수 없습니다.")
         if self.mode == "RENEWAL" and self.prev_contract_id and role == "lessor":
@@ -848,7 +939,7 @@ class CoSignSession(PoolObj):
         merged = {**self.terms}
         changed = False
         int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
-        bool_fields = {"vat_target", "vat_separate"}
+        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause"}
 
         for k, v in updates.items():
             if v is None:
@@ -862,6 +953,10 @@ class CoSignSession(PoolObj):
             if merged.get(k) != v:
                 merged[k] = v
                 changed = True
+
+        merged = self._sync_cleanup_clause(merged)
+        if merged != self.terms:
+            changed = True
 
         # 재계약(RENEWAL) 시 법정 5% 상한 실시간 검증
         if self.mode == "RENEWAL" and self.prev_contract_id:
@@ -888,6 +983,7 @@ class CoSignSession(PoolObj):
 
     def agree_step3(self, role: str, expected_revision: Optional[int] = None, app_source: str = "rent3_contract") -> "CoSignSession":
         self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
         if expected_revision is not None and expected_revision != self.revision:
             raise Conflict(
                 f"계약 조건이 방금 수정되었습니다 (현재 리비전 v{self.revision}).",
@@ -914,6 +1010,7 @@ class CoSignSession(PoolObj):
     ) -> "CoSignSession":
         """Step 4 자필 전자서명 — 본인인증·상호 신분증 확인·등기부등본 확인·계약조건 합의가 모두 완료된 뒤에만 허용!"""
         self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
         if not (self.lessor_login_verified and self.tenant_login_verified):
             raise DomainError(
                 "임대인과 임차인 모두 로그인 본인인증이 완료되어야 전자서명할 수 있습니다.",
@@ -964,6 +1061,7 @@ class CoSignSession(PoolObj):
             return {"session": self.model_dump(), "contract": ct.model_dump(), "already_completed": True}
 
         self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
         if not (self.lessor_signature and self.tenant_signature):
             raise DomainError("임대인과 임차인 양측 전자서명이 모두 완료되어야 최종 체결할 수 있습니다.")
         if not self.tenant_recheck_at:
@@ -1039,6 +1137,7 @@ class CoSignSession(PoolObj):
             vat_separate=bool(t_info.get("vat_separate", True)),
             contract_deposit=int(t_info.get("contract_deposit", 300000)),
             keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다
+            mortgage_cleanup_required=bool(t_info.get("mortgage_cleanup_clause")),  # 잔금 시 근저당 말소 특약 — 잔금일에 말소 확인이 있어야 교부
             deposit=int(t_info.get("deposit", room.deposit)),
             monthly_rent=int(t_info.get("monthly_rent", room.monthly_rent)),
             maintenance_fee=int(t_info.get("maintenance_fee", room.maintenance_fee)),

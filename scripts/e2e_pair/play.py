@@ -161,11 +161,11 @@ def do_prepare(c: Ctx) -> str:
     tk = c.lessor_token()
     room_no = "9" + str(secrets.randbelow(100000)).zfill(5)   # 이전 시험의 호실과 겹치지 않게 무작위
     st, res = call("POST", "/api/rent3_lessor/rooms", {
-        "branch": BRANCH, "room_no": room_no, "is_published": True, "deposit": 7000000, "monthly_rent": 450000,
+        "branch": BRANCH, "room_no": room_no, "is_published": True, "deposit": c.s.get("deposit", 7000000), "monthly_rent": c.s.get("monthly_rent", 450000),
         "maintenance_fee": 50000, "area_sqm": 21.5, "floor": 9, "status_description": "공동 계약 시험 호실"}, tk)
     room = ok(st, res, "시험 호실 등록")["room"]
     c.s.update(room_no=room_no, room_id=room["id"])
-    return f"시험 호실 {room_no}호 공개 (보증금 700만 / 월세 45만)"
+    return f"시험 호실 {room_no}호 공개 (보증금 {c.s.get('deposit', 7000000):,}원 / 월세 {c.s.get('monthly_rent', 450000):,}원)"
 
 
 def do_signup(c: Ctx) -> str:
@@ -214,9 +214,9 @@ def do_step1_lessor(c: Ctx) -> str:
     tk = c.lessor_token()
     st, res = call("POST", f"/api/rent3_contract/sessions/{c.sid}/step1", {
         "role": "lessor", "checked_counterparty_id": True,
-        "registry_updates": {"owner_name": OWNER, "mortgage_amount": 0}}, tk)
+        "registry_updates": {"owner_name": OWNER, "mortgage_amount": c.s.get("mortgage", 0)}}, tk)
     ok(st, res, "① 임대인 확인")
-    return f"등기부 제시(소유자 {OWNER}, 근저당 0원) + 임차인 신분증 확인"
+    return f"등기부 제시(소유자 {OWNER}, 근저당 {c.s.get('mortgage', 0):,}원) + 임차인 신분증 확인"
 
 
 def do_step1_tenant(c: Ctx) -> str:
@@ -225,7 +225,8 @@ def do_step1_tenant(c: Ctx) -> str:
     st, res = call("POST", f"/api/rent3_contract/sessions/{c.sid}/tenant-registry", {"registry": {
         "viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"),
         "owner_name": rd.get("owner_name") or OWNER, "mortgage_amount": int(rd.get("mortgage_amount") or 0),
-        "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}}, tk)
+        "seizure_or_trust": "없음", "guarantee_status": c.s.get("guarantee", "가입 예정"),
+        "low_deposit_risk_ack": bool(c.s.get("low_ack", False))}}, tk)
     ok(st, res, "임차인 등기부 직접 열람 제출")
     st, res = call("POST", f"/api/rent3_contract/sessions/{c.sid}/step1", {"role": "tenant", "checked_counterparty_id": True}, tk)
     ok(st, res, "① 임차인 확인")
@@ -421,8 +422,8 @@ def cmd_auto() -> int:
 
 
 # ───────────────────────── 공격 시험 ─────────────────────────
-def drive_to(index: int) -> Dict[str, Any]:
-    s = {"next": 0, "log": []}
+def drive_to(index: int, init: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    s = {"next": 0, "log": [], **(init or {})}
     for role, name, _d in STEPS[:index]:
         IMPL[(role, name)](Ctx(s))
         s["next"] += 1
@@ -442,7 +443,7 @@ def cmd_attack() -> int:
         results.append((good, label))
         print(f"  {'✅ 막힘' if good else '❌ 뚫림'}  {label}  (HTTP {status}{', ' + note if note else ''})")
 
-    print("공격 시험 — 공격 20개가 모두 '막힘'이어야 합니다 (집계에는 정상 체결 준비 확인 1개가 더 들어갑니다)\n")
+    print("공격 시험 — '막힘' 항목은 모두 막혀야 하고, '(정상)' 항목은 허용되어야 합니다\n")
     other_lessor = login("sunho", LESSOR_PW)
 
     # ── 계약 호출 전후 ──
@@ -488,10 +489,10 @@ def cmd_attack() -> int:
 
     # ── 등기부 불일치 ──
     call("POST", f"/api/rent3_contract/sessions/{sid}/step1", {"role": "lessor", "checked_counterparty_id": True, "registry_updates": {"owner_name": OWNER, "mortgage_amount": 0}}, lt)
-    bad = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": "박사기", "mortgage_amount": 900000000,
-           "seizure_or_trust": "있음", "guarantee_status": "가입 예정"}
+    bad = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": OWNER, "mortgage_amount": 900000000,
+           "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
     st12, _r = call("POST", f"/api/rent3_contract/sessions/{sid}/tenant-registry", {"registry": bad}, tt)
-    expect("임대인 제시와 다른 등기부 값을 확인 없이 제출", st12, (400,))
+    expect("임대인 제시와 다른 근저당 값을 확인 없이 제출", st12, (400,))
     st13, _r = call("POST", f"/api/rent3_contract/sessions/{sid}/tenant-registry", {"registry": {**bad, "viewed_directly": False}}, tt)
     expect("직접 열람하지 않고 등기부 제출", st13, (400,))
     st14, _r = call("POST", f"/api/rent3_contract/sessions/{sid}/step1", {"role": "tenant", "checked_counterparty_id": True}, tt)
@@ -529,8 +530,77 @@ def cmd_attack() -> int:
     st23, _r = call("POST", f"/api/rent3_contract/sessions/{c2.sid}/facility-photos", {"role": "lessor", "photo_data_url": PNG}, lt2)
     expect("체결 뒤 시설 점검 사진 추가", st23, (400, 409))
 
+
+    # ── 등기부 차단 정책 ──
+    print("\n[등기부 차단 정책]")
+    def registry_body(rec_s: Dict[str, Any], **kw: Any) -> Dict[str, Any]:
+        d = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": OWNER,
+             "mortgage_amount": int(rec_s.get("mortgage", 0)), "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+        d.update(kw)
+        return {"registry": d}
+
+    for label, extra in (("소유자 불일치", {"owner_name": "박사기"}), ("압류·신탁·경매개시·임차권등기 있음", {"seizure_or_trust": "있음"})):
+        sp = drive_to(idx("tenant", "step1"))                      # 임대인이 등기부를 제시한 직후
+        cp = Ctx(sp)
+        tp = cp.tenant_token()
+        st, res = call("POST", f"/api/rent3_contract/sessions/{cp.sid}/tenant-registry",
+                       registry_body(sp, mismatch_ack=True, low_deposit_risk_ack=True, **extra), tp)
+        expect(f"{label} — 모든 확인 체크를 해도 진행 불가", st, (409,))
+        ss = cp.session(tp)
+        results.append((ss["status"] == "CANCELLED" and bool(ss.get("cancel_reason")), f"{label} — 계약이 즉시 중단되고 사유가 남는다"))
+        print(f"  {'✅ 막힘' if results[-1][0] else '❌ 뚫림'}  {label} — 계약이 즉시 중단되고 사유가 남는다")
+        st, _r = call("POST", f"/api/rent3_contract/sessions/{cp.sid}/step1", {"role": "tenant", "checked_counterparty_id": True}, tp)
+        expect(f"{label} — 중단된 계약의 1단계를 다시 통과", st, (409,))
+
+    # 소액 월세 + 선순위 근저당: 강한 위험 확인이 있어야만
+    sl = drive_to(idx("tenant", "step1"), {"deposit": 10000000, "mortgage": 500000000})
+    cl = Ctx(sl)
+    tl = cl.tenant_token()
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{cl.sid}/tenant-registry", registry_body(sl), tl)
+    expect("소액 월세(보증금 2천만 이하) + 선순위 근저당 — 위험 확인 없이 진행", st, (400,))
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{cl.sid}/tenant-registry", registry_body(sl, low_deposit_risk_ack=True), tl)
+    results.append((st == 200, "(정상) 소액 월세 + 근저당도 강한 위험 확인을 하면 진행된다"))
+    print(f"  {'✅ 허용' if st == 200 else '❌ 막힘(오류)'}  (정상) 소액 월세 + 근저당도 강한 위험 확인을 하면 진행된다  (HTTP {st})")
+
+    # 전세·고액 보증금 + 선순위 근저당: 보증보험 가입 완료 또는 말소 특약이 필요
+    for label, init in (("전세(보증금 1억, 월세 0)", {"deposit": 100000000, "monthly_rent": 0, "mortgage": 300000000, "guarantee": "가입 예정"}),
+                        ("고액 월세(보증금 6천만)", {"deposit": 60000000, "monthly_rent": 400000, "mortgage": 200000000, "guarantee": "가입 예정"})):
+        sj = drive_to(idx("lessor", "agree"), init)                 # 1단계·점검까지 끝난 상태
+        cj = Ctx(sj)
+        lj, tj = cj.lessor_token(), cj.tenant_token()
+        rev = cj.session(lj)["revision"]
+        st, _r = call("POST", f"/api/rent3_contract/sessions/{cj.sid}/step3/agree", {"role": "lessor", "expected_revision": rev}, lj)
+        expect(f"{label} + 근저당 + 보증보험 '가입 예정' + 말소 특약 없음 — 조건 합의", st, (400,))
+        st, _r = call("POST", f"/api/rent3_contract/sessions/{cj.sid}/step3/agree", {"role": "tenant", "expected_revision": rev}, tj)
+        expect(f"{label} — 임차인도 합의할 수 없다", st, (400,))
+        if "전세" in label:
+            st, res = call("POST", f"/api/rent3_contract/sessions/{cj.sid}/terms", {"role": "lessor", "updates": {"mortgage_cleanup_clause": True}}, lj)
+            clause_ok = st == 200 and "전액 말소" in res.get("session", {}).get("terms", {}).get("special_terms", "")
+            results.append((clause_ok, "(정상) 임대인이 말소 특약을 넣으면 특약사항에 문구가 들어간다"))
+            print(f"  {'✅ 허용' if clause_ok else '❌ 막힘(오류)'}  (정상) 임대인이 말소 특약을 넣으면 특약사항에 문구가 들어간다")
+            for role, name, _d in STEPS[idx("lessor", "agree"):idx("tenant", "balance_check")]:
+                IMPL[(role, name)](Ctx(sj))                          # 합의·서명·재열람·체결까지 정상 진행
+            tb = Ctx(sj).tenant_token()
+            lb = Ctx(sj).lessor_token()
+            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False}, tb)
+            expect("말소 특약 계약 — 근저당 말소 확인 없이 잔금일 확인 기록", st, (400,))
+            st, _r = call("POST", f"/api/rent3_lessor/rooms/{sj['room_id']}/release-keys", {"balance_checked": True}, lb)
+            expect("말소 특약 계약 — 말소 확인 전에 도어락 교부", st, (400,))
+            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False, "mortgage_cleared": True}, tb)
+            st2, _r2 = call("POST", f"/api/rent3_lessor/rooms/{sj['room_id']}/release-keys", {"balance_checked": True}, lb)
+            results.append((st == 200 and st2 == 200, "(정상) 말소를 확인하면 도어락이 교부된다"))
+            print(f"  {'✅ 허용' if st == 200 and st2 == 200 else '❌ 막힘(오류)'}  (정상) 말소를 확인하면 도어락이 교부된다  (HTTP {st}/{st2})")
+
+    # 보증보험 '가입 완료'면 말소 특약 없이도 진행
+    si = drive_to(idx("lessor", "agree"), {"deposit": 100000000, "monthly_rent": 0, "mortgage": 300000000, "guarantee": "가입 완료"})
+    ci = Ctx(si)
+    li = ci.lessor_token()
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{ci.sid}/step3/agree", {"role": "lessor", "expected_revision": ci.session(li)["revision"]}, li)
+    results.append((st == 200, "(정상) 보증보험 '가입 완료'면 말소 특약 없이도 합의할 수 있다"))
+    print(f"  {'✅ 허용' if st == 200 else '❌ 막힘(오류)'}  (정상) 보증보험 '가입 완료'면 말소 특약 없이도 합의할 수 있다  (HTTP {st})")
+
     good = sum(1 for g, _l in results if g)
-    print(f"\n결과: {good}/{len(results)} 항목이 기대대로 막혔습니다. (공격 {len(results) - 1}개 + 정상 체결 준비 확인 1개)")
+    print(f"\n결과: {good}/{len(results)} 항목이 기대대로 막혔습니다. (막혀야 하는 공격 + 허용돼야 하는 정상 항목 + 준비 확인)")
     for g, label in results:
         if not g:
             print(f"  ❌ 뚫림: {label}")
@@ -686,6 +756,8 @@ def cmd_fail() -> int:
     st, _r = call("POST", f"/api/rent3_contract/sessions/{c5.sid}/tenant-registry", {"registry": diff}, tt5)
     check(st == 400, "차이가 있는데 확인 체크 없이는 제출되지 않는다", f"HTTP {st}")
     st, _r = call("POST", f"/api/rent3_contract/sessions/{c5.sid}/tenant-registry", {"registry": {**diff, "mismatch_ack": True}}, tt5)
+    check(st == 400, "(보증금 700만 소액 월세) 불일치 확인만으로는 부족 — 소액 보증금 위험 확인도 필요하다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c5.sid}/tenant-registry", {"registry": {**diff, "mismatch_ack": True, "low_deposit_risk_ack": True}}, tt5)
     rec = (c5.session(tt5).get("tenant_registry") or {})
     check(st == 200 and rec.get("mismatch_ack") is True and int(rec.get("mortgage_amount", 0)) == 150000000,
           "확인 체크를 하면 진행되고, 임차인이 본 근저당(1.5억)과 확인 표시가 기록으로 남는다")

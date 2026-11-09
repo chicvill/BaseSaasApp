@@ -842,6 +842,31 @@
     return t.lease_type === "전세" || Number(t.monthly_rent || 0) === 0;
   }
 
+  // ── 등기부 위험 정책 (서버 cosign.py 와 같은 기준. 화면은 미리 알려 주는 용도이고 최종 판단은 서버) ──
+  const HIGH_DEPOSIT = 50000000;   // 초과: 선순위 근저당이 있으면 보증보험 가입 완료 또는 말소 특약 필요
+  const LOW_DEPOSIT = 20000000;    // 이하 월세: 근저당이 있으면 강한 위험 확인 필요
+  const normName = (v) => String(v || "").replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
+  function needsGuarantee(s) { return isJeonseSession(s) || Number((s.terms || {}).deposit || 0) > HIGH_DEPOSIT; }
+  function isLowDepositMonthly(s) { return !isJeonseSession(s) && Number((s.terms || {}).deposit || 0) <= LOW_DEPOSIT; }
+  function mortgageExposure(s, d) {
+    const mine = d && d.mortgage_amount !== "" && d.mortgage_amount != null ? d.mortgage_amount : (s.tenant_registry || {}).mortgage_amount;
+    return Math.max(Number((s.registry_data || {}).mortgage_amount || 0), Number(mine || 0));
+  }
+  function hardBlocks(s, tr) {   // 확인 체크로도 넘어갈 수 없는 항목 → 제출하면 계약이 즉시 중단된다
+    const out = [];
+    const lr = s.registry_data || {};
+    if (lr.owner_name && tr.owner_name && normName(lr.owner_name) !== normName(tr.owner_name)) out.push(`등기부 소유자(${tr.owner_name})가 임대인이 제시한 소유자(${lr.owner_name})와 다릅니다`);
+    if (tr.seizure_or_trust === "있음") out.push("압류·가압류·가처분·신탁·경매개시결정·임차권등기가 등기부에 있습니다");
+    return out;
+  }
+  function riskBlock(s) {        // 서명 전 진행 차단 사유 (전세·고액 + 선순위 근저당 + 보증보험도 말소 특약도 없음)
+    const tr = s.tenant_registry || {};
+    if (!tr.submitted || !needsGuarantee(s) || mortgageExposure(s) <= 0) return "";
+    const insured = tr.guarantee_status === "가입 완료";
+    if (insured || (s.terms || {}).mortgage_cleanup_clause) return "";
+    return "선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다.";
+  }
+
   function nowLocalInput() {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -899,7 +924,7 @@
     const done = s.tenant_registry || {};
     const aiRes = s.registry_ai_result || {};
     const aiEx = (!done.submitted && aiRes.extracted) ? aiRes.extracted : null;
-    const jeonse = isJeonseSession(s);
+    const jeonse = needsGuarantee(s);   // 전세 또는 고액 보증금(5천만 원 초과)이면 보증보험 가입 여부를 묻는다
     const address = `${s.building_address || ""} ${s.building_name || ""} ${s.room_no}호`.trim();
 
     elStepPanel.innerHTML = `
@@ -941,7 +966,7 @@
         <div><label class="bass-label">열람 일시</label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || nowLocalInput())}"></div>
         <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || (aiEx ? aiEx.owner_name : ""))}" placeholder="등기부에 적힌 이름"></div>
         <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : (aiEx ? aiEx.mortgage_total : "")}" placeholder="없으면 0"></div>
-        <div><label class="bass-label">압류·가압류·가처분·신탁등기</label>
+        <div><label class="bass-label">압류·가압류·가처분·신탁·경매개시·임차권등기</label>
           <select id="trSeize" class="bass-select">
             <option value="">선택</option>
             <option value="없음" ${(done.seizure_or_trust || (aiEx && aiEx.seizure_or_trust)) === "없음" ? "selected" : ""}>없음</option>
@@ -977,7 +1002,8 @@
 
       ${jeonse ? `
         <div class="bass-card" style="padding:12px;margin-bottom:10px;border-color:var(--warn);">
-          <div style="font-weight:800;margin-bottom:4px;">🛡️ 전세 · 보증금 반환보증</div>
+          <div style="font-weight:800;margin-bottom:4px;">🛡️ 전세·고액 보증금 · 보증금 반환보증</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;color:var(--err);">선순위 근저당이 있으면 <strong>'가입 완료'</strong>이거나 임대인이 <strong>'잔금 시 근저당 말소 특약'</strong>을 넣어야 계약을 진행할 수 있습니다. ('가입 예정'은 인정되지 않습니다)</div>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">HUG·SGI 등 보증보험 가입이 가능한지 계약 전에 확인하세요. 가입이 안 되는 집은 보증금을 돌려받지 못할 위험이 큽니다.</div>
           <select id="trGuar" class="bass-select">
             <option value="">가입 여부 선택</option>
@@ -1013,12 +1039,40 @@
     }
 
     let ackChecked = false;
+    let lowAck = false;
     function refreshMismatch() {
       const d = collect();
-      const list = registryMismatches(s, d);
+      const hard = hardBlocks(s, d);
       const box = $("trMismatchBox");
-      if (!list.length) { box.innerHTML = ""; ackChecked = false; return; }
-      box.innerHTML = `
+      if (hard.length) {
+        ackChecked = false; lowAck = false;
+        box.innerHTML = `
+          <div class="call-banner" style="border:2px solid var(--err);background:hsl(0 80% 50% / .18);margin-bottom:10px;">
+            <div style="font-weight:800;margin-bottom:4px;">🛑 이 계약은 진행할 수 없습니다</div>
+            <ul style="margin:0 0 6px 18px;padding:0;font-size:12.5px;line-height:1.6;">${hard.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>
+            <div style="font-size:12.5px;line-height:1.6;">소유자 불일치, 압류·가압류·신탁·경매개시·임차권등기는 <strong>확인 체크로 넘어갈 수 없고, 제출하면 계약이 즉시 중단</strong>됩니다. 입력을 잘못한 것이 아니라면 제출하지 마세요.</div>
+          </div>`;
+        return;
+      }
+      const list = registryMismatches(s, d);
+      const lowRisk = isLowDepositMonthly(s) && mortgageExposure(s, d) > 0;
+      const lowHtml = lowRisk ? `
+        <div class="call-banner" style="border:2px solid var(--err);background:hsl(0 80% 50% / .18);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:4px;">🚨 강한 위험 경고 — 소액 보증금에 선순위 근저당이 있습니다</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">경매가 되면 근저당권자가 먼저 배당받아 <strong>보증금을 한 푼도 돌려받지 못할 수 있습니다.</strong> 위험을 이해한 경우에만 계속하세요.</div>
+          <label class="check-row" style="margin-bottom:0;">
+            <span style="font-size:12.5px;"><strong>소액 보증금 위험을 확인했고, 그래도 계속합니다</strong></span>
+            <input type="checkbox" id="trLowAck" ${lowAck ? "checked" : ""}>
+          </label>
+        </div>` : "";
+      if (!list.length) {
+        ackChecked = false;
+        if (!lowRisk) lowAck = false;
+        box.innerHTML = lowHtml;
+        const lc = $("trLowAck"); if (lc) lc.addEventListener("change", (e) => { lowAck = e.target.checked; });
+        return;
+      }
+      box.innerHTML = lowHtml + `
         <div class="call-banner" style="border-color:var(--err);background:hsl(0 80% 50% / .12);margin-bottom:10px;">
           <div style="font-weight:800;margin-bottom:4px;">🚨 확인이 필요한 항목</div>
           <ul style="margin:0 0 8px 18px;padding:0;font-size:12.5px;line-height:1.6;">${list.map((m) => `<li>${esc(m)}</li>`).join("")}</ul>
@@ -1028,6 +1082,7 @@
           </label>
         </div>`;
       $("trAck").addEventListener("change", (e) => { ackChecked = e.target.checked; });
+      const lc2 = $("trLowAck"); if (lc2) lc2.addEventListener("change", (e) => { lowAck = e.target.checked; });
     }
     ["trOwner", "trMort", "trSeize", "trIssue"].forEach((id) => {
       $(id).addEventListener("input", refreshMismatch);
@@ -1083,6 +1138,9 @@
         }
         const reg = collect();
         reg.mismatch_ack = ackChecked;
+        reg.low_deposit_risk_ack = lowAck;
+        const hardNow = hardBlocks(s, reg);
+        if (hardNow.length && !window.confirm("🛑 " + hardNow.join("\n") + "\n\n제출하면 이 계약은 즉시 중단되고 되돌릴 수 없습니다. 정말 제출할까요?")) return;
         let dataUrl = "";
         const f = $("trFile").files[0];
         if (f) {
@@ -1467,6 +1525,21 @@
         <div><label class="bass-label">월 관리비(원)</label><input id="tMaint" type="number" class="bass-input term-input" value="${Number(t.maintenance_fee || 0)}"></div>
         <div><label class="bass-label">당일 계약금(원)</label><input id="tConDep" type="number" class="bass-input term-input" value="${Number(t.contract_deposit || 0)}"></div>
       </div>
+      ${(() => {
+        const need = needsGuarantee(s) && (s.tenant_registry || {}).submitted && mortgageExposure(s) > 0;
+        if (!need) return "";
+        const insured = (s.tenant_registry || {}).guarantee_status === "가입 완료";
+        const blocked = riskBlock(s);
+        return `<div class="call-banner" style="border:2px solid ${blocked ? "var(--err)" : "var(--ok)"};margin:10px 0;">
+          <div style="font-weight:800;margin-bottom:4px;">${blocked ? "🛑 선순위 근저당이 있어 이대로는 진행할 수 없습니다" : "✅ 선순위 근저당 위험 조치가 있습니다"}</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;">근저당 채권최고액 ${fmtWon(mortgageExposure(s))} · 보증금 ${fmtWon(t.deposit)} · 보증보험 ${insured ? "가입 완료" : "미가입(" + Bass.escapeHtml((s.tenant_registry || {}).guarantee_status || "-") + ")"}</div>
+          <label class="check-row" style="margin-bottom:0;">
+            <span style="font-size:12.5px;"><strong>잔금 시 선순위 근저당 전액 말소 특약</strong>을 넣는다 (임대인이 체크 · 잔금일에 말소가 확인돼야 도어락이 교부됩니다)</span>
+            <input type="checkbox" id="tCleanup" class="term-input" ${t.mortgage_cleanup_clause ? "checked" : ""} ${currentRole === "lessor" ? "" : "disabled"}>
+          </label>
+          ${blocked ? `<div style="font-size:12px;margin-top:6px;">${Bass.escapeHtml(blocked)} 임차인은 보증보험 가입을 완료하거나, 임대인이 위 특약을 넣어야 합의할 수 있습니다.</div>` : ""}
+        </div>`;
+      })()}
       <div>
         <label class="bass-label">상호 합의 특약사항</label>
         <textarea id="tSpecial" rows="4" class="bass-input term-input">${Bass.escapeHtml(t.special_terms || "")}</textarea>
@@ -1500,6 +1573,7 @@
       maintenance_fee: Number(document.getElementById("tMaint").value || 0),
       contract_deposit: Number(document.getElementById("tConDep").value || 0),
       special_terms: document.getElementById("tSpecial").value,
+      ...(document.getElementById("tCleanup") && !document.getElementById("tCleanup").disabled ? { mortgage_cleanup_clause: document.getElementById("tCleanup").checked } : {}),
     });
 
     document.getElementById("btnSaveTerms").addEventListener("click", function () {

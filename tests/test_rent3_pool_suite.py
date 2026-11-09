@@ -909,11 +909,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         # (b) 직접 열람하지 않았다고 하면 거부
         self.assertEqual(reg(viewed_directly=False).status_code, 400)
-        # (c) 소유자·근저당이 다르면 확인 체크 없이는 거부, 체크하면 통과
-        self.assertEqual(reg(owner_name="박사기", mortgage_amount=300000000).status_code, 400)
-        self.assertEqual(reg(owner_name="박사기", mortgage_amount=300000000, mismatch_ack=True).status_code, 200)
-        # (d) 압류·신탁 있음도 확인 체크 필요
-        self.assertEqual(reg(seizure_or_trust="있음").status_code, 400)
+        # (c) 근저당이 다르면 확인 체크 없이는 거부, 체크하면 통과 (보증금 500만 월세 = 소액 월세라 소액 보증금 위험 확인도 필요)
+        self.assertEqual(reg(mortgage_amount=300000000).status_code, 400)
+        self.assertEqual(reg(mortgage_amount=300000000, mismatch_ack=True).status_code, 400)
+        self.assertEqual(reg(mortgage_amount=300000000, mismatch_ack=True, low_deposit_risk_ack=True).status_code, 200)
         # (e) 일치하는 정상 입력 -> 1단계 완료
         self.assertEqual(reg().status_code, 200)
         r_ok = self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
@@ -1087,7 +1086,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 "registry_updates": {"owner_name": "김임대", "mortgage_amount": 1000000000}})
             rr = self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {
                 "viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
-                "mortgage_amount": 1000000000, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}}).json()
+                "mortgage_amount": 1000000000, "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
+                "low_deposit_risk_ack": True}}).json()
             self.assertTrue(rr["session"]["tenant_registry"]["ai_assisted"])
 
             # (e) 호출 상한: 총 5회까지, 그 뒤는 거부
@@ -2123,6 +2123,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 "RENT3_SMS_FROM": "0212345678", "RENT3_TRUSTED_PROXY_HOPS": "1", "GEMINI_API_KEY": "g", "RENT3_ALLOW_POOL_IN_APP": "1"}
         pool_dir = tempfile.mkdtemp(prefix="rent3_chk_")
         keep = self.temp_pool
+        orig_master = os.environ.get("MASTER_CRYPTO_KEY")   # 개발 PC·서버에 이미 있을 수 있다 — 끝나면 되돌린다
         try:
             os.environ["MASTER_CRYPTO_KEY"] = good["MASTER_CRYPTO_KEY"]
             use_pool_dir(pool_dir)
@@ -2144,7 +2145,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("평문 비밀번호", out)
         finally:
-            os.environ.pop("MASTER_CRYPTO_KEY", None)
+            if orig_master is None:
+                os.environ.pop("MASTER_CRYPTO_KEY", None)
+            else:
+                os.environ["MASTER_CRYPTO_KEY"] = orig_master
             use_pool_dir(keep)
             shutil.rmtree(pool_dir, ignore_errors=True)
 
@@ -2185,7 +2189,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn("전체 19단계 성공", auto.stdout)
             attack = run("attack")
             self.assertEqual(attack.returncode, 0, attack.stdout + attack.stderr)
-            self.assertIn("21/21", attack.stdout)
+            import re as _re
+            m = _re.search(r"결과: (\d+)/(\d+) 항목이 기대대로 막혔습니다", attack.stdout)
+            self.assertTrue(m and m.group(1) == m.group(2) and int(m.group(2)) >= 38, attack.stdout[-400:])   # 기존 공격 + 등기부 차단 정책 항목
+            self.assertIn("[등기부 차단 정책]", attack.stdout)
             # 두 AI 가 각자 한 줄(run)만 실행해도 번갈아 끝까지 진행된다 (임차인이 먼저 시작해도 기다린다)
             self.assertEqual(run("reset").returncode, 0)
             procs = {r: subprocess.Popen([sys.executable, script("play.py"), "run", r, "--timeout", "120"], env=env,
@@ -2232,7 +2239,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.fail("시험 서버가 뜨지 않았습니다")
             r = subprocess.run([sys.executable, script("play.py"), "fail"], env=env, capture_output=True, text=True, encoding="utf-8", timeout=240)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertIn("29/29", r.stdout)
+            import re as _re
+            m = _re.search(r"결과: (\d+)/(\d+) 항목 통과", r.stdout)
+            self.assertTrue(m and m.group(1) == m.group(2) and int(m.group(2)) >= 30, r.stdout[-400:])
             self.assertNotIn("건너뜀", r.stdout)
         finally:
             srv.terminate()
@@ -2241,6 +2250,110 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             except Exception:
                 srv.kill()
             shutil.rmtree(runtime, ignore_errors=True)
+
+
+    def _policy_session(self, room_no, deposit, rent, lessor_mortgage=0):
+        """정책 시험용: 호실을 만들고 계약을 연결해 임대인 등기부 제시까지 마친 세션 id 를 돌려준다."""
+        c, base = self.client, "/api/rent3_contract"
+        c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room_no, "is_published": True, "deposit": deposit, "monthly_rent": rent})
+        made = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": room_no, "mode": "NEW",
+                                                    "tenant_name": "정책시험", "tenant_phone": "010-5555-9" + room_no[-3:]})
+        self.assertEqual(made.status_code, 200, made.text)
+        sid = made.json()["session"]["id"]
+        c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": "정책시험", "responder_phone": "010-5555-9" + room_no[-3:]})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True,
+                                                    "registry_updates": {"owner_name": "김종심", "mortgage_amount": lessor_mortgage}})
+        return sid
+
+    def _reg(self, sid, **kw):
+        d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김종심", "mortgage_amount": 0,
+             "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+        d.update(kw)
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": d})
+
+    def test_41_registry_block_policy(self):
+        """41. 등기부 차단 정책: 소유자 불일치·압류는 절대 차단(즉시 중단), 전세·고액+근저당은 보증보험 또는 말소 특약 필요, 소액 월세+근저당은 강한 위험 확인."""
+        c, base = self.client, "/api/rent3_contract"
+
+        # (a) 소유자 불일치: 확인 체크를 해도 계약이 즉시 중단된다
+        sid = self._policy_session("931", 80000000, 450000)
+        r = self._reg(sid, owner_name="박사기", mismatch_ack=True, low_deposit_risk_ack=True)
+        self.assertEqual(r.status_code, 409)
+        ss = c.get(f"{base}/sessions/{sid}").json()["session"]
+        self.assertEqual(ss["status"], "CANCELLED")
+        self.assertIn("소유자", ss["cancel_reason"])
+        self.assertTrue(ss["tenant_registry"]["blocked"])                      # 임차인이 본 값이 근거로 남는다
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True}).status_code, 409)
+
+        # (b) 압류·신탁 등 있음: 역시 절대 차단
+        sid = self._policy_session("932", 80000000, 450000)
+        self.assertEqual(self._reg(sid, seizure_or_trust="있음", mismatch_ack=True).status_code, 409)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["status"], "CANCELLED")
+
+        # (c) 소액 월세(보증금 2천만 이하) + 선순위 근저당: 강한 위험 확인이 있어야만 진행
+        sid = self._policy_session("933", 10000000, 450000, lessor_mortgage=500000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000).status_code, 400)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000, low_deposit_risk_ack=True).status_code, 200)
+        # 2천만 원 초과 월세(보증금 3천만)는 이 확인이 필요 없다
+        sid = self._policy_session("934", 30000000, 450000, lessor_mortgage=500000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000).status_code, 200)
+
+        # (d) 전세 + 선순위 근저당 + 보증보험 '가입 예정' + 말소 특약 없음 → 합의·서명 차단
+        sid = self._policy_session("935", 100000000, 0, lessor_mortgage=300000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000).status_code, 200)
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        blocked = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("근저당", blocked.json()["message"])
+        # 고액 월세(보증금 6천만)도 같다
+        sid_hi = self._policy_session("936", 60000000, 400000, lessor_mortgage=200000000)
+        self._reg(sid_hi, mortgage_amount=200000000)
+        rev_hi = c.get(f"{base}/sessions/{sid_hi}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_hi}/step3/agree", json={"role": "tenant", "expected_revision": rev_hi}).status_code, 400)
+        # 고액인데 근저당이 없으면 막지 않는다
+        sid_ok = self._policy_session("937", 100000000, 0, lessor_mortgage=0)
+        self._reg(sid_ok)
+        rev_ok = c.get(f"{base}/sessions/{sid_ok}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_ok}/step3/agree", json={"role": "lessor", "expected_revision": rev_ok}).status_code, 200)
+
+        # (e) 말소 특약을 넣으면 풀리고, 특약 문구가 특약사항에 들어간다 — 해제하면 문구가 빠진다
+        on = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": True}}).json()["session"]
+        self.assertIn("전액 말소", on["terms"]["special_terms"])
+        rev = on["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev}).status_code, 200)
+        off = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": False}}).json()["session"]
+        self.assertNotIn("전액 말소", off["terms"]["special_terms"])
+        c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": True}})
+
+        # (f) 보증보험 '가입 완료'면 말소 특약 없이도 진행된다
+        sid_ins = self._policy_session("938", 100000000, 0, lessor_mortgage=300000000)
+        self._reg(sid_ins, mortgage_amount=300000000, guarantee_status="가입 완료")
+        rev_ins = c.get(f"{base}/sessions/{sid_ins}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_ins}/step3/agree", json={"role": "lessor", "expected_revision": rev_ins}).status_code, 200)
+
+        # (g) 말소 특약 계약은 잔금일에 근저당 말소가 확인돼야 도어락이 교부된다 (끝까지 진행)
+        sid = sid  # 말소 특약이 들어간 (d) 세션
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "lessor"})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev}).status_code, 200)
+        self._tenant_recheck_ok(sid)
+        done = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        self.assertEqual(done.status_code, 200, done.text)
+        ct = done.json()["contract"]
+        self.assertTrue(ct["mortgage_cleanup_required"])
+        tid = ct["id_tenant"]
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
+        self.assertEqual(c.post(chk, json={"changed": False}).status_code, 400)                          # 말소 확인 없이는 기록 불가
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)
+        self.assertEqual(c.post(chk, json={"changed": False, "mortgage_cleared": True}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
 
 
 if __name__ == "__main__":
