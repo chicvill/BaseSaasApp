@@ -2517,5 +2517,47 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
 
 
+    def test_47_chic_ledger_two_year_blocks(self):
+        """47. 시크빌형 장부(2025·2026 두 덩어리): 공실·전입 표시로 새 세입자 입주일을 잡고, 이전 세입자 입금은 버리며, 날짜가 이상한 칸은 금액이 있으면 입금으로 센다."""
+        import csv as _csv, io, subprocess, tempfile
+        from apps.rent_dist._rent3_core import Contract, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="chic_ledger_")
+        keep = self.temp_pool
+        try:
+            def room(no, name, move, rent, fee, cells2025, cells2026, deposit="5,000,000", kind="월세"):
+                def block(cells):
+                    row = []
+                    for c in (cells + [""] * 12)[:12]:
+                        row += [c, ("%s" % format(rent, ",")) if c and "공실" not in c else "", ("%s" % format(fee, ",")) if c and "공실" not in c else ""]
+                    return row
+                head = [no, name, "******", "010-1000-%04d" % int(no), move, "", kind, "후불", deposit]
+                return head + block(cells2025), head + block(cells2026)
+            r1a, r1b = room("101", "가나", "2025. 6. 4", 150000, 100000, ["2. 3", "공실", "공실", "공실", "공실", "전입6/3", "7. 3", "8. 3", "9. 2", "10. 3", "11. 3", "12. 3"], ["1. 3", "2. 3", "3. 3", "4. 3", "5. 3", "6. 3", "7. 2", "8. 3", "9. 2"])
+            r2a, r2b = room("201", "다라", "2022. 3. 19", 290000, 150000, ["1. 15", "2. 19", "3. 27", "4. 23", "5. 26", "6. 25", "7. 27", "8. 29", "9. 15", "10. 23", "11. 21", "11.25"], ["1. 22", "2. 23", "3. 13", "4. 19", "5. 15", "6. 17", "7. 20", "8. 21", "9. 18", "10. 21"])
+            buf = io.StringIO(); w = _csv.writer(buf)
+            for yr, (x, y) in ((2025, (r1a, r2a)), (2026, (r1b, r2b))):
+                w.writerow(["%d년도" % yr]); w.writerow(["호실", "세입자명"]); w.writerow([""])
+                w.writerow(x); w.writerow(y); w.writerow(["701", "주인세대"])
+            open(os.path.join(work, "c.csv"), "w", encoding="utf-8").write(buf.getvalue())
+            cfg = {"lessors": [{"username": "lchic", "password": "Chic#Pass999", "name": "시크", "phone": "01011110003", "branch": "ch",
+                                "building": {"name": "시크빌", "address": "c", "ledger": {"format": "chic", "csv": "c.csv"}}}]}
+            cfgp = os.path.join(work, "c.json"); json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "fresh_pool.py"), "--config", cfgp, "--pool-dir", os.path.join(work, "pool")],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            use_pool_dir(os.path.join(work, "pool"))
+            c1, c2 = Contract.get("ct_ch_101"), Contract.get("ct_ch_201")
+            self.assertEqual(c1.move_in_date, "2025-06-04")                  # '전입6/3' 표시 달의 전입일 칸 날짜
+            self.assertEqual(c1.expiry_date, "2027-06-04")                   # 계약일 + 1년 자동 연장
+            self.assertEqual(c1.ledger(up_to_ym="2026-09")["total_unpaid"], 0)   # 이전 세입자의 1·2월 입금은 버리고 6월 이후 낸 것만 센다
+            self.assertEqual(c1.ledger(up_to_ym="2026-10")["total_unpaid"], 250_000)  # 10월칸 비어 있음 = 미납
+            self.assertEqual(c2.ledger(up_to_ym="2026-10")["total_unpaid"], 0)    # 2025-12 칸 '11.25'(이상한 날짜)도 금액이 있어 입금으로 센다
+            self.assertIsNone(Tenant.get("tenant_ch_701"))                       # 주인세대는 임대 대상이 아님
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()
