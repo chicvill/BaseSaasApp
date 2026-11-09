@@ -191,6 +191,37 @@
   }
 
   // ── 수납 현황 탭: 호실 풀다운 하나 + 버튼 네 개(수납내역·계약내용·만기통보·전출). 자세한 설명은 이용 매뉴얼에 둔다. ──
+  // 호실 카드·모달 스타일: index.html 이 브라우저에 캐시돼도 화면이 깨지지 않도록 app.js 가 직접 넣는다
+  (function () {
+    const st = document.createElement("style");
+    st.textContent = `
+    .r3-lbl { display: block; font-size: 13px; font-weight: 700; margin: 2px 0 4px; }
+    .r3-fld { display: grid; gap: 3px; font-size: 12.5px; }
+    .r3-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .r3-msg { width: 100%; font-size: 13px; line-height: 1.5; }
+    .rc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .rc-title { font-size: 17px; }
+    .rc-title span { font-size: 15px; margin-left: 4px; }
+    .rc-unpaid { font-weight: 800; font-size: 14px; color: var(--ok); }
+    .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
+    .rc-btns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+    .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
+    .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
+    .rc-info { font-size: 13px; line-height: 1.7; }
+    .r3-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; justify-content: center; }
+    .r3-modal__box { width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #17172e; color: #eceaf7; border: 1px solid var(--border); border-radius: 16px 16px 0 0; padding: 14px 14px 22px; }
+    @media (min-width: 640px) { .r3-modal { align-items: center; } .r3-modal__box { border-radius: 16px; } }
+    .r3-modal__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 15px; }
+    .r3-modal__x { min-width: 40px; min-height: 40px; font-size: 18px; }
+    .pr { display: grid; grid-template-columns: 44px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 40px; }
+    .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
+    .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
+    .pr--un, .pr--ok { grid-template-columns: 44px 1fr; }
+    .pr--un .pr__un { color: var(--err); font-weight: 800; }
+    .pr-list { max-height: 205px; overflow-y: auto; border-bottom: 1px solid var(--border); }
+    `;
+    document.head.appendChild(st);
+  })();
   let selRoomNo = "";
   const receiptMsg = {};   // 호실 → 임차인에게 보낼 문자 초안(수납 직후 영수 문구)
 
