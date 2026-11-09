@@ -4,6 +4,7 @@ scripts/e2e_pair/play.py — 임대인·임차인 두 역할이 번갈아 진행
     py scripts/e2e_pair/play.py status                 # 지금 누구 차례이고 무엇을 해야 하는지
     py scripts/e2e_pair/play.py lessor <단계>          # 임대인 역할로 한 단계 실행 (내 차례일 때만)
     py scripts/e2e_pair/play.py tenant <단계>          # 임차인 역할로 한 단계 실행 (내 차례일 때만)
+    py scripts/e2e_pair/play.py run lessor|tenant      # 내 차례마다 알아서 진행하고, 상대 차례에는 기다린다 (한 줄로 끝까지)
     py scripts/e2e_pair/play.py auto                   # 두 역할을 한 번에 끝까지 (사람·AI 없이 전체 흐름 검증)
     py scripts/e2e_pair/play.py attack                 # 보안 장치가 막는지 확인하는 공격 시험
     py scripts/e2e_pair/play.py reset                  # 진행 상태 초기화 (서버 데이터는 그대로)
@@ -379,6 +380,33 @@ def run_step(role: str, name: str, force_state: Optional[Dict[str, Any]] = None)
     return 0
 
 
+def cmd_run(role: str, timeout: int, interval: float = 2.0) -> int:
+    """내 역할의 단계를 차례가 올 때마다 실행하고, 상대 차례에는 기다린다. 끝나거나 실패하거나 timeout 이 되면 멈춘다."""
+    started = time.time()
+    last_wait_note = 0.0
+    print(f"[run] {role} 역할로 시작합니다 (최대 {timeout}초 기다림). 서버: {base_url()}", flush=True)
+    while True:
+        s = load_state()
+        i = s["next"]
+        if i >= len(STEPS):
+            done = [e for e in s["log"] if e["role"] == role]
+            print(f"\n✅ [run] 모든 단계가 끝났습니다. {role} 역할로 {len(done)}단계를 실행했습니다.")
+            return 0
+        want_role, want_name, _ = STEPS[i]
+        if want_role == role:
+            rc = run_step(role, want_name)
+            if rc:
+                return rc
+            continue
+        if time.time() - started > timeout:
+            print(f"\n⏱ [run] {timeout}초 동안 상대({want_role})의 `{want_name}` 단계가 진행되지 않아 멈춥니다. 사람에게 알려 주세요.")
+            return 3
+        if time.time() - last_wait_note > 20:
+            print(f"[run] {want_role} 의 `{want_name}` 단계를 기다리는 중…", flush=True)
+            last_wait_note = time.time()
+        time.sleep(interval)
+
+
 def cmd_auto() -> int:
     s = {"next": 0, "log": []}
     for role, name, _d in STEPS:
@@ -511,9 +539,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="임대인·임차인 번갈아 공동 계약 시험")
     ap.add_argument("role", help="status | auto | attack | reset | lessor | tenant")
     ap.add_argument("step", nargs="?", default="")
+    ap.add_argument("--timeout", type=int, default=600, help="run 모드에서 상대를 기다리는 최대 시간(초)")
     a = ap.parse_args()
     if a.role == "status":
         return cmd_status()
+    if a.role == "run":
+        if a.step not in ("lessor", "tenant"):
+            print("사용법: play.py run lessor  또는  play.py run tenant")
+            return 2
+        return cmd_run(a.step, a.timeout)
     if a.role == "auto":
         return cmd_auto()
     if a.role == "attack":

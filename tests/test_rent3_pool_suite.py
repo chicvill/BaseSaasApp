@@ -2186,6 +2186,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             attack = run("attack")
             self.assertEqual(attack.returncode, 0, attack.stdout + attack.stderr)
             self.assertIn("21/21", attack.stdout)
+            # 두 AI 가 각자 한 줄(run)만 실행해도 번갈아 끝까지 진행된다 (임차인이 먼저 시작해도 기다린다)
+            self.assertEqual(run("reset").returncode, 0)
+            procs = {r: subprocess.Popen([sys.executable, script("play.py"), "run", r, "--timeout", "120"], env=env,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8") for r in ("tenant", "lessor")}
+            outs = {r: p.communicate(timeout=180)[0] for r, p in procs.items()}
+            for r, p in procs.items():
+                self.assertEqual(p.returncode, 0, f"{r}: {outs[r]}")
+            self.assertIn("모든 단계가 끝났습니다", outs["lessor"])
+            self.assertEqual(run("status").stdout.count("모든 단계"), 1)
+            # 상대가 오지 않으면 시간 안에 멈추고 종료 코드 3
+            self.assertEqual(run("reset").returncode, 0)
+            lonely = subprocess.run([sys.executable, script("play.py"), "run", "tenant", "--timeout", "3"], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(lonely.returncode, 3, lonely.stdout)
         finally:
             srv.terminate()
             try:
