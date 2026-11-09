@@ -2388,5 +2388,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn("가입이 거절되면 이 계약은 무효", c.get(f"{base}/sessions/{small}").json()["session"]["terms"]["special_terms"])
 
 
+    def test_43_frontends_do_not_call_staff_only_apis_as_tenant(self):
+        """43. 회귀 방지: 임차인 마이홈 화면이 직원 전용 API(/tenants)를 세입자 본인 로그인으로 부르면 화면이 비어 버린다(실제로 있었던 사고). 세입자 본인은 목록을 부르지 않는다."""
+        src = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn("const isTenantUser", src)
+        self.assertIn("if (!tenantList.length && !isTenantUser) await loadTenants();", src)
+        # 서버 쪽 약속: 임차인 토큰으로 /tenants 는 403, 본인 마이홈은 200
+        reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "마이홈본인", "phone": "01066661201", "password": "Pw123456"}).json()
+        th = self._as(reg["token"])
+        self.assertEqual(self.client.get("/api/rent3_tenant/tenants", headers=th).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/rent3_tenant/myhome/{reg['user']['id']}", headers=th).status_code, 200)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,9 @@
   let mode = params.get("view") === "listings" || (!params.get("view") && savedSession && savedSession.role === "prospect")
     ? "listings"
     : "myhome";
-  let selectedTenantId = params.get("tenant") || (savedSession && savedSession.tenant_id ? savedSession.tenant_id : "");
+  // 세입자 본인 로그인이면 본인 계정만 본다. 전체 세입자 목록(/tenants)은 임대인·관리자 전용이라 세입자는 부를 수 없다.
+  const isTenantUser = Boolean(savedSession && (savedSession.role === "tenant" || savedSession.role === "prospect"));
+  let selectedTenantId = (isTenantUser ? (savedSession.tenant_id || savedSession.id) : "") || params.get("tenant") || (savedSession && savedSession.tenant_id ? savedSession.tenant_id : "");
   let tenantList = [];
   let showDoorlock = false;
 
@@ -51,7 +53,7 @@
   }
 
   async function loadMyhome() {
-    if (!tenantList.length) await loadTenants();
+    if (!tenantList.length && !isTenantUser) await loadTenants();
     if (!selectedTenantId) {
       elMyhome.innerHTML = `<div class="bass-card">현재 활성 입주 세입자가 없습니다. '빈 집 찾기'에서 계약을 진행해 보세요.</div>`;
       return;
@@ -73,15 +75,30 @@
     const activeBns = bns.filter((x) => x.status !== "RESOLVED_PAID");
     const showExpiryCard = Boolean((ew && ew.in_6_to_2_months_window) || ec);
 
+    // 잔금 전에는 도어락·공동현관이 잠긴다 — 잔금일 등기부 확인 버튼이 있어 접힌 메뉴가 아니라 맨 위에 보여 준다
+    const keysLockHtml = (data.keys && data.keys.locked) ? `<div class="bass-card no-print" style="margin-bottom:14px;border:2px solid var(--warn);"><div style="margin:6px 0;padding:8px 10px;border-left:4px solid var(--warn);font-size:12.5px;line-height:1.6;">🔒 <strong>도어락·공동현관은 입주 당일 잔금 완납 후 공개됩니다.</strong><br>잔금 ${fmtWon(data.keys.balance_due)} · 입주일 ${Bass.escapeHtml(data.keys.move_in_date || "-")}<br>임대인이 잔금 입금을 확인하면 이 화면에 바로 열립니다.
+              <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
+                <strong>잔금을 보내기 전에 등기부를 직접 열람하세요.</strong> 계약 이후 근저당·압류가 새로 생겼는지 확인하는 마지막 기회입니다.<br>
+                ${data.keys.registry_check && data.keys.registry_check.checked_at
+                  ? (data.keys.registry_check.changed ? "⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요." : "✅ 잔금일 등기부 확인 완료 (" + Bass.escapeHtml(String(data.keys.registry_check.checked_at).slice(0, 16).replace("T", " ")) + ")")
+                  : "아직 확인하지 않았습니다."}
+                <div class="bass-row" style="margin-top:6px;gap:6px;">
+                  <a class="bass-btn bass-btn--sm" href="https://www.iros.go.kr" target="_blank" rel="noopener">인터넷등기소 열기 ↗</a>
+                  <button class="bass-btn bass-btn--sm bass-btn--primary btn-bal-reg" data-changed="false" type="button">변동 없음 확인</button>
+                  <button class="bass-btn bass-btn--sm btn-bal-reg" data-changed="true" type="button">변동 있음 신고</button>
+                </div>
+              </div></div></div>` : "";
+
     elMyhome.innerHTML = `
+      ${keysLockHtml}
       <div class="bass-card no-print" style="margin-bottom:14px;">
         <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
-          <div>
+          ${isTenantUser ? `<div><strong>${Bass.escapeHtml(t.name)}</strong> 님의 마이홈 · ${Bass.escapeHtml(b.building_name || "")} ${Bass.escapeHtml(r.room_no || "")}호</div>` : `<div>
             <label class="bass-label">현재 조회 중인 입주 세입자 선택</label>
             <select id="tenantSel" class="bass-select">
               ${tenantList.map((item) => `<option value="${item.id}" ${item.id === t.id ? "selected" : ""}>[${Bass.escapeHtml(item.building_name)} ${Bass.escapeHtml(item.room_no)}호] ${Bass.escapeHtml(item.name)} (${Bass.escapeHtml(item.phone)})</option>`).join("")}
             </select>
-          </div>
+          </div>`}
           <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
             <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
             ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
@@ -130,7 +147,7 @@
             <option value="CARD">신용/체크카드</option>
             <option value="TRANSFER">계좌이체</option>
           </select>
-          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부 (payments.json 반영)</button>
+          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부</button>
         </div>
       </div>
 
@@ -140,18 +157,7 @@
         <div class="field-grid" style="margin-top:14px;">
           <div class="listing-card" style="margin:0;">
             <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
-            ${(data.keys && data.keys.locked) ? `<div style="margin:6px 0;padding:8px 10px;border-left:4px solid var(--warn);font-size:12.5px;line-height:1.6;">🔒 <strong>도어락·공동현관은 입주 당일 잔금 완납 후 공개됩니다.</strong><br>잔금 ${fmtWon(data.keys.balance_due)} · 입주일 ${Bass.escapeHtml(data.keys.move_in_date || "-")}<br>임대인이 잔금 입금을 확인하면 이 화면에 바로 열립니다.
-              <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);">
-                <strong>잔금을 보내기 전에 등기부를 직접 열람하세요.</strong> 계약 이후 근저당·압류가 새로 생겼는지 확인하는 마지막 기회입니다.<br>
-                ${data.keys.registry_check && data.keys.registry_check.checked_at
-                  ? (data.keys.registry_check.changed ? "⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요." : "✅ 잔금일 등기부 확인 완료 (" + Bass.escapeHtml(String(data.keys.registry_check.checked_at).slice(0, 16).replace("T", " ")) + ")")
-                  : "아직 확인하지 않았습니다."}
-                <div class="bass-row" style="margin-top:6px;gap:6px;">
-                  <a class="bass-btn bass-btn--sm" href="https://www.iros.go.kr" target="_blank" rel="noopener">인터넷등기소 열기 ↗</a>
-                  <button class="bass-btn bass-btn--sm bass-btn--primary btn-bal-reg" data-changed="false" type="button">변동 없음 확인</button>
-                  <button class="bass-btn bass-btn--sm btn-bal-reg" data-changed="true" type="button">변동 있음 신고</button>
-                </div>
-              </div></div>` : ""}
+            ${(data.keys && data.keys.locked) ? `<div class="bass-muted" style="font-size:12.5px;margin:6px 0;">🔒 도어락은 잠겨 있습니다. 화면 맨 위의 안내를 확인하세요.</div>` : ""}
             <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
               <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
             </div>
@@ -315,7 +321,8 @@
       </details>
     `;
 
-    document.getElementById("tenantSel").addEventListener("change", (ev) => {
+    const tenantSel = document.getElementById("tenantSel");
+    if (tenantSel) tenantSel.addEventListener("change", (ev) => {
       selectedTenantId = ev.target.value;
       loadMyhome().catch(Bass.showError);
     });
@@ -481,7 +488,7 @@
     elListings.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>📢 지금 계약 가능한 빈 집 (${list.length}실)</h3>
-        <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실(<code>rooms.json</code>)이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
+        <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
       </div>
       ${list.map((r) => `
         <div class="listing-card">

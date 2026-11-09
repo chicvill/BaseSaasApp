@@ -133,7 +133,7 @@ def submit_inquiry(req: InquiryReq):
     ).save(action="prospect_inquiry_sent", app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"{req.room_no}호 임대인에게 1:1 방문투어/문의 메시지가 실시간 전달되었습니다 (ops.json 반영).",
+        "message": f"{req.room_no}호 임대인에게 1:1 방문투어/문의 메시지가 실시간 전달되었습니다 .",
         "chat": chat.model_dump(),
     }
 
@@ -268,7 +268,7 @@ def update_vehicle(tenant_id: str, req: VehicleReq):
     t.register_vehicle(req.car_number, req.car_model, app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"차량번호 '{t.car_number}'가 건물 주차 대장(users.json)에 등록되었습니다.",
+        "message": f"차량번호 '{t.car_number}'가 건물 주차 대장에 등록되었습니다.",
         "tenant": t.model_dump(),
     }
 
@@ -301,7 +301,7 @@ def create_ticket(tenant_id: str, req: TicketSubmitReq):
     ).save(action="ticket_submitted_by_tenant", app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"하자보수(A/S) 요청이 접수되어 임대인 관제 대장(ops.json)에 실시간 전달되었습니다.",
+        "message": f"하자보수(A/S) 요청이 접수되어 임대인 화면에 실시간 전달되었습니다.",
         "ticket": tk.model_dump(),
     }
 

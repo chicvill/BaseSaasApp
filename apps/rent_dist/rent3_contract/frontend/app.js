@@ -982,6 +982,8 @@
         <input type="checkbox" id="trIssueOk" ${done.issue_number_verified ? "checked" : ""}>
       </label>
 
+      <div id="trMismatchBox"></div>
+
       <div style="margin:10px 0;">
         <label class="bass-label">열람 결과 첨부 — PDF 또는 캡처 (선택, 10MB 이하)${s.registry_attachment_file ? " · 이미 첨부됨" : ""}</label>
         <input id="trFile" type="file" accept="image/*,application/pdf" class="bass-input">
@@ -1011,7 +1013,6 @@
           </select>
         </div>` : ""}
 
-      <div id="trMismatchBox"></div>
 
       <button id="btnStep1Confirm" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
         ✅ 직접 확인 완료 · 신분증 확인 저장
@@ -1743,7 +1744,7 @@
     const done = s.status === "COMPLETED";
     elStepPanel.innerHTML = `
       <h3>⑤ 계약금 입금 확인 & 공동 Data Pool 원장 일괄 생성</h3>
-      <p class="bass-muted" style="font-size:13px;">체결 완료 즉시 <code>contracts.json</code>, <code>rooms.json</code>, <code>users.json</code>, <code>payments.json</code>, <code>ops.json(RTMS 확정일자)</code>가 실시간 업데이트됩니다.</p>
+      <p class="bass-muted" style="font-size:13px;">체결이 끝나면 계약·호실·입주자·수납 정보가 한꺼번에 반영됩니다.</p>
       <div class="bass-card" style="padding:14px;margin:12px 0;">
         <div><strong>입금 계좌:</strong> ${Bass.escapeHtml(s.lessor_account)} (예금주: ${Bass.escapeHtml(s.lessor_name)})</div>
         <div><strong>당일 계약금:</strong> ${fmtWon(t.contract_deposit)} / <strong>보증금 총액:</strong> ${fmtWon(t.deposit)} / <strong>월세+관리비:</strong> ${fmtWon(Number(t.monthly_rent || 0) + Number(t.maintenance_fee || 0))} (${Bass.escapeHtml(t.pay_timing)})</div>

@@ -1,0 +1,22 @@
+/* Rent3 스마트폰 화면 보정 (너비 520px 이하): 어르신도 누르고 읽기 쉽게
+   - 한글을 단어 단위로 줄바꿈(글자 중간에서 끊기지 않게), 긴 문자열은 화면 밖으로 넘치지 않게
+   - 버튼·체크박스 터치 영역을 키우고, 작은 보조 글자를 12.5px 이상으로 */
+@media (max-width: 520px) {
+  body { word-break: keep-all; overflow-wrap: anywhere; }
+  .bass-btn { min-height: 44px; }
+  .bass-btn--sm { min-height: 40px; padding-left: 12px; padding-right: 12px; }
+  .bass-badge { font-size: 12.5px; }
+  .step-pill { font-size: 12.5px; padding-left: 4px; padding-right: 4px; }
+  #wsMeta { font-size: 12.5px !important; }
+  .check-row input[type="checkbox"], .opt-chk { width: 22px; height: 22px; flex: none; }
+  .or-navlink, .or-btn { min-height: 40px; }
+  .or-brand__tag { font-size: 12px; }
+}
+/* 아래 값은 각 앱의 인라인 스타일보다 우선해야 한다 */
+@media (max-width: 520px) {
+  .step-pill { font-size: 12.5px !important; }
+  .or-brand__tag { font-size: 12px !important; }
+  .r3-drawer__group { font-size: 12.5px !important; }
+  .r3-drawer__close { min-width: 40px; min-height: 40px; }
+  .bass-btn { line-height: 1.3; }
+}

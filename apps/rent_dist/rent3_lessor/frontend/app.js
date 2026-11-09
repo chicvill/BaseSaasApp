@@ -199,7 +199,7 @@
         <p class="bass-muted" style="font-size:13px;">가장 오래된 미납월부터 순차 상계하며, 동일 입금 재등록은 자동 차단(황색 배너)됩니다.</p>
         <div class="bass-row" style="margin-top:8px;">
           <input id="smsInput" class="bass-input" style="flex:1;" value="[신한은행] 10/28 202호 정서연 570,000원 입금 잔액 15,200,000원">
-          <button id="btnPasteSms" class="bass-btn bass-btn--primary" type="button">⚡ 문자 파싱 & 즉시 수납 (payments.json 갱신)</button>
+          <button id="btnPasteSms" class="bass-btn bass-btn--primary" type="button">⚡ 문자 읽기 & 즉시 수납</button>
         </div>
       </div>
 
@@ -303,7 +303,7 @@
                       <div class="bass-row" style="justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px;">
                         <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer;">
                           <input type="checkbox" class="exp-cosign" data-room="${r.room_no}" checked>
-                          예고 조건으로 실시간 공동 재계약방(<code>cosign.json</code>) 동시 개설하여 임차인 마이홈에 전달
+                          예고 조건으로 공동 재계약을 함께 열어 임차인 마이홈에 전달
                         </label>
                         <div class="bass-row" style="gap:6px;">
                           ${ec && ec.cosign_session_id ? `
@@ -742,7 +742,7 @@
           </div>
           <div style="margin-top:8px;">
             <label style="font-size:13px;cursor:pointer;">
-              <input id="brkDepReceived" type="checkbox" checked> 계약금 수령 완료 (체크 시 <code>payments.json</code>에 CONTRACT_DEPOSIT 즉시 등재)
+              <input id="brkDepReceived" type="checkbox" checked> 계약금 수령 완료 (체크하면 계약금 수납으로 바로 기록됩니다)
             </label>
           </div>
         </div>
@@ -911,7 +911,7 @@
       </div>
 
       <div class="bass-card">
-        <h3>🧾 신규 공용 운영비 지출 등재 (outlays.json 실시간 반영)</h3>
+        <h3>🧾 신규 공용 운영비 지출 등록</h3>
         <div class="field-grid" style="margin:10px 0;">
           <div>
             <label class="bass-label">8대 표준 분류</label>
@@ -964,7 +964,7 @@
             ${t.status === "RECEIVED" ? `
               <button class="bass-btn bass-btn--sm bass-btn--primary btn-assign-as" data-id="${t.id}" type="button">👷 협력 설비기사 즉시 배정 (채팅 자동안내)</button>
             ` : t.status === "ASSIGNED" ? `
-              <button class="bass-btn bass-btn--sm bass-btn--primary btn-done-as" data-id="${t.id}" type="button">✅ 수리 완료 & 임대인 필요경비(outlays.json) 자동 등재</button>
+              <button class="bass-btn bass-btn--sm bass-btn--primary btn-done-as" data-id="${t.id}" type="button">✅ 수리 완료 & 필요경비 자동 등록</button>
             ` : `<div style="font-size:12.5px;color:var(--ok);">완료 내역: ${fmtWon(t.repair_cost)} (${t.cost_burden})</div>`}
           </div>
         `).join("") : `<p class="bass-muted">접수된 A/S 티켓이 없습니다.</p>`}

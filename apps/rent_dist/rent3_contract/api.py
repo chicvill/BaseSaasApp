@@ -655,7 +655,7 @@ def complete_step5(session_id: str, req: Step5CompleteReq):
     return {
         "success": True,
         "message": (
-            f"계약 체결 완료! 공동 Data Pool(contracts.json, rooms.json, users.json, payments.json)이 "
+            f"계약 체결 완료! 계약·호실·입주자·수납 정보가 "
             f"즉시 업데이트되었습니다. 계약 접수번호는 {result['contract']['fixed_date_no']} 입니다 (법적 확정일자는 주민센터·등기소에서 별도로 받아야 합니다)."
         ),
         **result,

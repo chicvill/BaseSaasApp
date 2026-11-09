@@ -407,7 +407,7 @@ def create_or_update_room(req: RoomCreateReq):
         existing.status_description = req.status_description
         existing.is_published = req.is_published
         existing.save(action="room_updated", app_source=APP_SRC)
-        return {"success": True, "message": f"{req.room_no}호 정보가 rooms.json에 즉시 업데이트되었습니다.", "room": existing.model_dump()}
+        return {"success": True, "message": f"{req.room_no}호 정보가 저장되었습니다.", "room": existing.model_dump()}
 
     room = Room(
         id=f"room_{b_id}_{req.room_no}",
@@ -429,7 +429,7 @@ def create_or_update_room(req: RoomCreateReq):
         status_description=req.status_description,
         is_published=req.is_published,
     ).save(action="room_created", app_source=APP_SRC)
-    return {"success": True, "message": f"신규 {room.room_no}호가 rooms.json에 등록되었습니다.", "room": room.model_dump()}
+    return {"success": True, "message": f"신규 {room.room_no}호가 등록되었습니다.", "room": room.model_dump()}
 
 
 @router.post("/rooms/{room_id}/publish")
@@ -487,7 +487,7 @@ def change_doorlock(room_id: str, req: DoorlockReq):
     room.update_doorlock(req.new_pwd, app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"{room.room_no}호 도어락 비밀번호가 변경되어 rooms.json 및 입주자 정보에 동기화되었습니다.",
+        "message": f"{room.room_no}호 도어락 비밀번호가 변경되어 입주자 정보에도 반영되었습니다.",
         "room": room.model_dump(),
     }
 
@@ -537,7 +537,7 @@ def create_outlay(req: OutlayCreateReq):
     ).save(action="outlay_recorded", app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"공용 운영비 '{item.title}' ({item.amount:,}원)가 outlays.json에 반영되었습니다.",
+        "message": f"공용 운영비 '{item.title}' ({item.amount:,}원)가 등록되었습니다.",
         "outlay": item.model_dump(),
     }
 
@@ -571,7 +571,7 @@ def complete_ticket(ticket_id: str, req: TicketCompleteReq):
         resolution_note=req.resolution_note,
         app_source=APP_SRC,
     )
-    return {"success": True, "message": f"{t.room_no}호 A/S 완료 및 필요경비(outlays.json) 자동 등재가 완료되었습니다.", "ticket": t.model_dump()}
+    return {"success": True, "message": f"{t.room_no}호 A/S 완료 및 필요경비 자동 등록이 완료되었습니다.", "ticket": t.model_dump()}
 
 
 @router.post("/checkout/calculate")
@@ -694,7 +694,7 @@ def register_broker_contract_photo(req: BrokerContractPhotoReq):
     level = "warning" if rtms_status == "PENDING" else "success"
     msg = (
         f"📸 {req.room_no}호 공인중개사 계약서 사진 보관 및 계약 원장 적용 완료! "
-        f"(contracts.json · rooms.json · users.json 실시간 동기화)"
+        f"(계약·호실·입주자 정보 동시 반영)"
     )
     hint = (
         "주의: 중개사 전월세 미신고 상태이므로 체결일로부터 30일 이내 RTMS 신고 마감을 확인해 주세요."
@@ -849,7 +849,7 @@ def send_room_billing_notice(req: SendBillingNoticeReq):
             if is_overdue
             else f"🔔 {bn.room_no}호({bn.tenant_name}) 납입일({bn.due_date}) 사전 안내 발송 완료 — 예정액 {bn.amount_due:,}원"
         ),
-        "hint": "임차인 마이홈 상단 알림 배너 및 1:1 인앱 메시지(ops.json)에 실시간 전달되었습니다.",
+        "hint": "임차인 마이홈 상단 알림 배너와 1:1 메시지로 실시간 전달되었습니다.",
         "notice": bn.model_dump(),
     }
 
