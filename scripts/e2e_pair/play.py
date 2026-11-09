@@ -563,14 +563,14 @@ def cmd_attack() -> int:
     print(f"  {'✅ 허용' if st == 200 else '❌ 막힘(오류)'}  (정상) 소액 월세 + 근저당도 강한 위험 확인을 하면 진행된다  (HTTP {st})")
 
     # 전세·고액 보증금 + 선순위 근저당: 보증보험 가입 완료 또는 말소 특약이 필요
-    for label, init in (("전세(보증금 1억, 월세 0)", {"deposit": 100000000, "monthly_rent": 0, "mortgage": 300000000, "guarantee": "가입 예정"}),
-                        ("고액 월세(보증금 6천만)", {"deposit": 60000000, "monthly_rent": 400000, "mortgage": 200000000, "guarantee": "가입 예정"})):
+    for label, init in (("전세(보증금 1억, 월세 0)", {"deposit": 100000000, "monthly_rent": 0, "mortgage": 300000000, "guarantee": "가입 안 함"}),
+                        ("고액 월세(보증금 6천만)", {"deposit": 60000000, "monthly_rent": 400000, "mortgage": 200000000, "guarantee": "가입 안 함"})):
         sj = drive_to(idx("lessor", "agree"), init)                 # 1단계·점검까지 끝난 상태
         cj = Ctx(sj)
         lj, tj = cj.lessor_token(), cj.tenant_token()
         rev = cj.session(lj)["revision"]
         st, _r = call("POST", f"/api/rent3_contract/sessions/{cj.sid}/step3/agree", {"role": "lessor", "expected_revision": rev}, lj)
-        expect(f"{label} + 근저당 + 보증보험 '가입 예정' + 말소 특약 없음 — 조건 합의", st, (400,))
+        expect(f"{label} + 근저당 + 보증보험 '가입 안 함' + 말소 특약 없음 — 조건 합의", st, (400,))
         st, _r = call("POST", f"/api/rent3_contract/sessions/{cj.sid}/step3/agree", {"role": "tenant", "expected_revision": rev}, tj)
         expect(f"{label} — 임차인도 합의할 수 없다", st, (400,))
         if "전세" in label:
@@ -598,6 +598,22 @@ def cmd_attack() -> int:
     st, _r = call("POST", f"/api/rent3_contract/sessions/{ci.sid}/step3/agree", {"role": "lessor", "expected_revision": ci.session(li)["revision"]}, li)
     results.append((st == 200, "(정상) 보증보험 '가입 완료'면 말소 특약 없이도 합의할 수 있다"))
     print(f"  {'✅ 허용' if st == 200 else '❌ 막힘(오류)'}  (정상) 보증보험 '가입 완료'면 말소 특약 없이도 합의할 수 있다  (HTTP {st})")
+
+    # 보증보험 '가입 예정': 허용하되 '가입 거절 시 계약 무효·계약금 반환' 특약이 자동 필수 삽입된다
+    sp = drive_to(idx("lessor", "agree"), {"deposit": 100000000, "monthly_rent": 0, "mortgage": 300000000, "guarantee": "가입 예정"})
+    cp2 = Ctx(sp)
+    lp = cp2.lessor_token()
+    ses = cp2.session(lp)
+    auto = "가입이 거절되면 이 계약은 무효" in ses["terms"].get("special_terms", "")
+    results.append((auto, "(정상) 보증보험 '가입 예정'이면 '가입 거절 시 계약 무효·계약금 반환' 특약이 자동으로 들어간다"))
+    print(f"  {'✅ 허용' if auto else '❌ 막힘(오류)'}  (정상) 보증보험 '가입 예정'이면 '가입 거절 시 계약 무효·계약금 반환' 특약이 자동으로 들어간다")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{cp2.sid}/step3/agree", {"role": "lessor", "expected_revision": ses["revision"]}, lp)
+    results.append((st == 200, "(정상) 근저당이 있어도 보증보험 '가입 예정' + 거절 특약이면 합의할 수 있다"))
+    print(f"  {'✅ 허용' if st == 200 else '❌ 막힘(오류)'}  (정상) 근저당이 있어도 보증보험 '가입 예정' + 거절 특약이면 합의할 수 있다  (HTTP {st})")
+    st, res = call("POST", f"/api/rent3_contract/sessions/{cp2.sid}/terms", {"role": "lessor", "updates": {"special_terms": "1. 반려동물 불가"}}, lp)
+    kept = st == 200 and "가입이 거절되면 이 계약은 무효" in res["session"]["terms"]["special_terms"]
+    results.append((kept, "임대인이 자동 삽입된 거절 특약을 본문에서 지움"))
+    print(f"  {'✅ 막힘' if kept else '❌ 뚫림'}  임대인이 자동 삽입된 거절 특약을 본문에서 지움 — 다시 들어간다")
 
     good = sum(1 for g, _l in results if g)
     print(f"\n결과: {good}/{len(results)} 항목이 기대대로 막혔습니다. (막혀야 하는 공격 + 허용돼야 하는 정상 항목 + 준비 확인)")

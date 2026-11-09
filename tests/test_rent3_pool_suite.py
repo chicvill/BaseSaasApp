@@ -2255,7 +2255,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def _policy_session(self, room_no, deposit, rent, lessor_mortgage=0):
         """정책 시험용: 호실을 만들고 계약을 연결해 임대인 등기부 제시까지 마친 세션 id 를 돌려준다."""
         c, base = self.client, "/api/rent3_contract"
-        c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room_no, "is_published": True, "deposit": deposit, "monthly_rent": rent})
+        c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})   # 시험 호실이 쌓여 가맹점당 한도(30실)에 걸리지 않게
+        mk = c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room_no, "is_published": True, "deposit": deposit, "monthly_rent": rent})
+        self.assertEqual(mk.status_code, 200, mk.text)
         made = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": room_no, "mode": "NEW",
                                                     "tenant_name": "정책시험", "tenant_phone": "010-5555-9" + room_no[-3:]})
         self.assertEqual(made.status_code, 200, made.text)
@@ -2298,16 +2300,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         sid = self._policy_session("934", 30000000, 450000, lessor_mortgage=500000000)
         self.assertEqual(self._reg(sid, mortgage_amount=500000000).status_code, 200)
 
-        # (d) 전세 + 선순위 근저당 + 보증보험 '가입 예정' + 말소 특약 없음 → 합의·서명 차단
+        # (d) 전세 + 선순위 근저당 + 보증보험 '가입 안 함' + 말소 특약 없음 → 합의·서명 차단
         sid = self._policy_session("935", 100000000, 0, lessor_mortgage=300000000)
-        self.assertEqual(self._reg(sid, mortgage_amount=300000000).status_code, 200)
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 안 함").status_code, 200)
         rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
         blocked = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev})
         self.assertEqual(blocked.status_code, 400)
         self.assertIn("근저당", blocked.json()["message"])
         # 고액 월세(보증금 6천만)도 같다
         sid_hi = self._policy_session("936", 60000000, 400000, lessor_mortgage=200000000)
-        self._reg(sid_hi, mortgage_amount=200000000)
+        self._reg(sid_hi, mortgage_amount=200000000, guarantee_status="가입 안 함")
         rev_hi = c.get(f"{base}/sessions/{sid_hi}").json()["session"]["revision"]
         self.assertEqual(c.post(f"{base}/sessions/{sid_hi}/step3/agree", json={"role": "tenant", "expected_revision": rev_hi}).status_code, 400)
         # 고액인데 근저당이 없으면 막지 않는다
@@ -2354,6 +2356,36 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)
         self.assertEqual(c.post(chk, json={"changed": False, "mortgage_cleared": True}).status_code, 200)
         self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
+
+
+    def test_42_insurance_pending_allowed_with_auto_refusal_clause(self):
+        """42. 보증보험 '가입 예정'은 허용하되, '가입 거절 시 계약 무효·계약금 전액 반환' 특약이 자동 필수 삽입되고 지워도 다시 들어간다."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("941", 100000000, 0, lessor_mortgage=300000000)
+        r = self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 예정")
+        self.assertEqual(r.status_code, 200, r.text)
+        sp = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]["special_terms"]
+        self.assertIn("가입이 거절되면 이 계약은 무효", sp)                      # 자동 삽입
+        self.assertIn("계약금 전액을 즉시 반환", sp)
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev}).status_code, 200)  # 근저당이 있어도 합의 가능
+
+        # 임대인이 특약사항 본문에서 지워도 다시 들어간다 (필수)
+        edited = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"special_terms": "1. 반려동물 불가"}}).json()["session"]["terms"]["special_terms"]
+        self.assertIn("반려동물 불가", edited)
+        self.assertIn("가입이 거절되면 이 계약은 무효", edited)
+
+        # 임차인이 '가입 안 함'으로 바꾸면 특약이 빠지고 진행이 막힌다
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 안 함").status_code, 200)
+        t2 = c.get(f"{base}/sessions/{sid}").json()["session"]
+        self.assertNotIn("가입이 거절되면 이 계약은 무효", t2["terms"]["special_terms"])
+        blocked = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "tenant", "expected_revision": t2["revision"]})
+        self.assertEqual(blocked.status_code, 400)
+
+        # 근저당이 없거나 보증금이 작은 월세는 특약을 넣지 않는다
+        small = self._policy_session("942", 30000000, 450000, lessor_mortgage=0)
+        self._reg(small, guarantee_status="가입 예정")
+        self.assertNotIn("가입이 거절되면 이 계약은 무효", c.get(f"{base}/sessions/{small}").json()["session"]["terms"]["special_terms"])
 
 
 if __name__ == "__main__":

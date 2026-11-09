@@ -862,9 +862,9 @@
   function riskBlock(s) {        // 서명 전 진행 차단 사유 (전세·고액 + 선순위 근저당 + 보증보험도 말소 특약도 없음)
     const tr = s.tenant_registry || {};
     if (!tr.submitted || !needsGuarantee(s) || mortgageExposure(s) <= 0) return "";
-    const insured = tr.guarantee_status === "가입 완료";
+    const insured = tr.guarantee_status === "가입 완료" || tr.guarantee_status === "가입 예정";   // 가입 예정은 '가입 거절 시 계약 무효' 특약이 자동으로 들어간다
     if (insured || (s.terms || {}).mortgage_cleanup_clause) return "";
-    return "선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다.";
+    return "선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료·가입 예정' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다. ('가입 안 함'으로는 진행할 수 없습니다)";
   }
 
   function nowLocalInput() {
@@ -1003,7 +1003,7 @@
       ${jeonse ? `
         <div class="bass-card" style="padding:12px;margin-bottom:10px;border-color:var(--warn);">
           <div style="font-weight:800;margin-bottom:4px;">🛡️ 전세·고액 보증금 · 보증금 반환보증</div>
-          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;color:var(--err);">선순위 근저당이 있으면 <strong>'가입 완료'</strong>이거나 임대인이 <strong>'잔금 시 근저당 말소 특약'</strong>을 넣어야 계약을 진행할 수 있습니다. ('가입 예정'은 인정되지 않습니다)</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;color:var(--err);">선순위 근저당이 있으면 <strong>'가입 완료'·'가입 예정'</strong>이거나 임대인이 <strong>'잔금 시 근저당 말소 특약'</strong>을 넣어야 계약을 진행할 수 있습니다. <strong>'가입 예정'</strong>을 고르면 <strong>"가입이 거절되면 계약 무효·계약금 전액 반환"</strong> 특약이 계약서에 자동으로 들어갑니다. ('가입 안 함'은 진행할 수 없습니다)</div>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">HUG·SGI 등 보증보험 가입이 가능한지 계약 전에 확인하세요. 가입이 안 되는 집은 보증금을 돌려받지 못할 위험이 큽니다.</div>
           <select id="trGuar" class="bass-select">
             <option value="">가입 여부 선택</option>
@@ -1528,11 +1528,12 @@
       ${(() => {
         const need = needsGuarantee(s) && (s.tenant_registry || {}).submitted && mortgageExposure(s) > 0;
         if (!need) return "";
-        const insured = (s.tenant_registry || {}).guarantee_status === "가입 완료";
+        const gs = (s.tenant_registry || {}).guarantee_status;
+        const insured = gs === "가입 완료" || gs === "가입 예정";
         const blocked = riskBlock(s);
         return `<div class="call-banner" style="border:2px solid ${blocked ? "var(--err)" : "var(--ok)"};margin:10px 0;">
           <div style="font-weight:800;margin-bottom:4px;">${blocked ? "🛑 선순위 근저당이 있어 이대로는 진행할 수 없습니다" : "✅ 선순위 근저당 위험 조치가 있습니다"}</div>
-          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;">근저당 채권최고액 ${fmtWon(mortgageExposure(s))} · 보증금 ${fmtWon(t.deposit)} · 보증보험 ${insured ? "가입 완료" : "미가입(" + Bass.escapeHtml((s.tenant_registry || {}).guarantee_status || "-") + ")"}</div>
+          <div style="font-size:12.5px;line-height:1.6;margin-bottom:6px;">근저당 채권최고액 ${fmtWon(mortgageExposure(s))} · 보증금 ${fmtWon(t.deposit)} · 보증보험 ${insured ? Bass.escapeHtml(gs) + (gs === "가입 예정" ? " (거절 시 계약 무효 특약 자동 삽입)" : "") : "미가입(" + Bass.escapeHtml(gs || "-") + ")"}</div>
           <label class="check-row" style="margin-bottom:0;">
             <span style="font-size:12.5px;"><strong>잔금 시 선순위 근저당 전액 말소 특약</strong>을 넣는다 (임대인이 체크 · 잔금일에 말소가 확인돼야 도어락이 교부됩니다)</span>
             <input type="checkbox" id="tCleanup" class="term-input" ${t.mortgage_cleanup_clause ? "checked" : ""} ${currentRole === "lessor" ? "" : "disabled"}>

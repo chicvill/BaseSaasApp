@@ -49,7 +49,9 @@ IDLE_EXPIRE = timedelta(hours=24)
 # ── 등기부 위험 차단 정책 ──────────────────────────────────────────────
 HIGH_DEPOSIT = 50_000_000            # 고액 보증금 기준(초과): 선순위 근저당이 있으면 보증보험 또는 말소 특약이 필요
 LOW_DEPOSIT = 20_000_000             # 소액 월세 기준(이하): 근저당이 있으면 강한 위험 확인이 필요
-INSURED_STATUS = ("가입 완료",)       # 보증보험으로 인정하는 상태 ('가입 예정'은 인정하지 않는다)
+INSURED_STATUS = ("가입 완료", "가입 예정")   # 보증보험으로 인정하는 상태. 보증보험은 계약서 체결 뒤에야 발급되므로 '가입 예정'도 인정하되 아래 거절 특약이 자동으로 필수 삽입된다
+INSURANCE_CLAUSE = ("임차인이 보증금 반환보증(보증보험)에 가입하지 못하거나 가입이 거절되면 이 계약은 무효로 하고, "
+                    "임대인은 받은 계약금 전액을 즉시 반환한다.")
 CLEANUP_CLAUSE = ("임대인은 잔금일까지 선순위 근저당권을 전액 말소하고, 말소된 등기사항증명서를 임차인에게 제시한다. "
                   "말소되지 않으면 임차인은 잔금 지급을 거절하고 계약을 해제할 수 있으며, 임대인은 받은 계약금을 즉시 반환한다.")
 
@@ -180,16 +182,29 @@ class CoSignSession(PoolObj):
         # 괄호 안 직함(예: "김임대 (시크빌 대표)")과 공백은 비교에서 제외
         return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(v or "")))
 
-    @staticmethod
-    def _sync_cleanup_clause(terms: Dict[str, Any]) -> Dict[str, Any]:
-        """'잔금 시 근저당 말소 특약' 체크와 특약사항 본문을 맞춘다(체크하면 표준 문구가 들어가고, 풀면 빠진다)."""
+    def needs_insurance_refusal_clause(self, terms: Optional[Dict[str, Any]] = None) -> bool:
+        """전세·고액 보증금 계약에서 임차인이 보증보험을 '가입 예정'이라고 했으면 '가입 거절 시 계약 무효·계약금 전액 반환' 특약이 필수다."""
+        t = terms if terms is not None else (self.terms or {})
+        jeonse = t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
+        needs = jeonse or int(t.get("deposit") or 0) > HIGH_DEPOSIT
+        return needs and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"
+
+    def _sync_cleanup_clause(self, terms: Dict[str, Any]) -> Dict[str, Any]:
+        """자동 특약을 특약사항 본문과 맞춘다.
+        ① '잔금 시 근저당 말소 특약': 임대인이 체크하면 표준 문구가 들어가고 풀면 빠진다.
+        ② '보증보험 가입 거절 시 계약 무효·계약금 반환': 임차인이 '가입 예정'이면 **자동 필수 삽입** — 사용자가 본문에서 지워도 다시 들어간다."""
         out = dict(terms)
         text = str(out.get("special_terms") or "")
-        has = CLEANUP_CLAUSE in text
-        if out.get("mortgage_cleanup_clause") and not has:
-            out["special_terms"] = (text.rstrip() + "\n" if text.strip() else "") + "5. " + CLEANUP_CLAUSE
-        elif not out.get("mortgage_cleanup_clause") and has:
-            out["special_terms"] = text.replace("5. " + CLEANUP_CLAUSE, "").replace(CLEANUP_CLAUSE, "").rstrip()
+        for clause, wanted in ((CLEANUP_CLAUSE, bool(out.get("mortgage_cleanup_clause"))),
+                               (INSURANCE_CLAUSE, self.needs_insurance_refusal_clause(out))):
+            has = clause in text
+            if wanted and not has:
+                n = len([ln for ln in text.splitlines() if ln.strip()]) + 1
+                text = (text.rstrip() + "\n" if text.strip() else "") + f"{n}. " + clause
+            elif not wanted and has:
+                text = text.replace(clause, "")
+                text = "\n".join(ln for ln in text.splitlines() if ln.strip() not in {f"{i}." for i in range(1, 30)}).rstrip()
+        out["special_terms"] = text
         return out
 
     def deposit_amount(self) -> int:
@@ -223,10 +238,11 @@ class CoSignSession(PoolObj):
         if not (self.tenant_registry or {}).get("submitted"):
             return out
         if self.needs_guarantee_info() and self.mortgage_exposure() > 0:
-            insured = (self.tenant_registry or {}).get("guarantee_status") in INSURED_STATUS
+            status = (self.tenant_registry or {}).get("guarantee_status")
+            insured = status in INSURED_STATUS and (status != "가입 예정" or INSURANCE_CLAUSE in str((self.terms or {}).get("special_terms") or ""))
             clause = bool((self.terms or {}).get("mortgage_cleanup_clause"))
             if not (insured or clause):
-                out.append("선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다")
+                out.append("선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료·가입 예정(거절 시 계약 무효 특약 포함)' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다")
         return out
 
     def _ensure_risk_ok(self) -> None:
@@ -325,6 +341,9 @@ class CoSignSession(PoolObj):
                 hint="위험을 이해했다면 '소액 보증금 위험을 확인하고 계속' 항목에 체크해 다시 제출해 주세요.",
             )
         self.tenant_registry = rec
+        synced = self._sync_cleanup_clause(self.terms or {})   # 보증보험 '가입 예정'이면 거절 특약을 자동으로 넣는다
+        if synced != self.terms:
+            self.terms = synced
         mism = self.registry_mismatches()
         if mism and not rec["mismatch_ack"]:
             self.tenant_registry = {}
