@@ -99,7 +99,9 @@ class CoSignSession(PoolObj):
     registry_attachment_name: str = ""
     registry_attachment_sha256: str = ""
     tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
-    cancel_reason: str = ""                  # 취소 사유(자동 해제 등)
+    cancel_reason: str = ""                  # 취소 사유(당사자 취소·재열람 변동·자동 해제) — 상대방 화면에 그대로 보인다
+    cancelled_by: str = ""                   # lessor / tenant / system
+    cancelled_at: str = ""
     registry_ai_times: List[str] = Field(default_factory=list)  # AI 읽기 호출 시각(월별 집계용)
     registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
     registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
@@ -284,6 +286,18 @@ class CoSignSession(PoolObj):
         mime = EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
         return cand, mime, self.registry_attachment_name or os.path.basename(cand)
 
+    def cancel(self, role: str, reason: str, app_source: str = "rent3_contract") -> "CoSignSession":
+        """체결 전에 당사자가 계약을 취소한다. 사유는 필수이며 상대방 화면에 그대로 보인다. 호실은 즉시 다시 열린다."""
+        self._ensure_in_progress()
+        why = (reason or "").strip()
+        if len(why) < 2:
+            raise DomainError("취소 사유를 입력해 주세요.", hint="상대방 화면에 그대로 표시됩니다.")
+        who = "임대인" if role == "lessor" else "임차인"
+        self.status = "CANCELLED"
+        self.cancel_reason = f"{who}이 계약을 취소했습니다: {why[:200]}"
+        self.cancelled_by, self.cancelled_at = ("lessor" if role == "lessor" else "tenant"), now_iso()
+        return self.save(action=f"cosign_cancelled_by_{self.cancelled_by}", app_source=app_source)
+
     def recheck_registry(self, changed: bool, app_source: str = "rent3_contract") -> "CoSignSession":
         """체결 직전 임차인이 등기부를 다시 열람한 결과. 변동이 있으면 계약을 중단한다."""
         self._ensure_in_progress()
@@ -291,6 +305,8 @@ class CoSignSession(PoolObj):
             raise DomainError("서명 단계 이후에 체결 직전 재열람을 확인할 수 있습니다.")
         if changed:
             self.status = "CANCELLED"
+            self.cancel_reason = "임차인이 체결 직전 등기부에서 변동(근저당·압류 등)을 확인해 계약이 중단되었습니다."
+            self.cancelled_by, self.cancelled_at = "tenant", now_iso()
             self.tenant_registry = {**self.tenant_registry, "recheck_changed": True}
             return self.save(action="cosign_cancelled_registry_changed", app_source=app_source)
         self.tenant_recheck_at = now_iso()
@@ -457,6 +473,7 @@ class CoSignSession(PoolObj):
             if x.is_idle_expired():
                 x.status = "CANCELLED"
                 x.cancel_reason = "24시간 이상 응답이 없어 자동 해제되었습니다."
+                x.cancelled_by, x.cancelled_at = "system", now_iso()
                 x.save(action="cosign_expired_idle", app_source="rent3_contract")
                 n += 1
         return n

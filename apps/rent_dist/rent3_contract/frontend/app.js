@@ -443,6 +443,20 @@
   }
   document.getElementById("btnBackHome").addEventListener("click", goHome);
 
+  // 체결 전 계약 취소: 사유를 적으면 상대방 화면에 그대로 전달되고 호실이 다시 열린다
+  document.getElementById("btnCancelContract").addEventListener("click", function () {
+    Bass.withLock(this, async () => {
+      if (!activeSession) return;
+      const reason = (window.prompt("취소 사유를 입력해 주세요. 상대방 화면에 그대로 표시됩니다.") || "").trim();
+      if (!reason) { Bass.updateAppAlert("warning", "사유를 입력해야 취소할 수 있습니다."); return; }
+      if (!window.confirm("정말 이 계약을 취소할까요? 취소하면 되돌릴 수 없습니다.")) return;
+      const res = await Bass.api(APP_ID, `/sessions/${activeSession.id}/cancel`, { method: "POST", body: { role: currentRole, reason } });
+      activeSession = res.session;
+      Bass.updateAppAlert("success", res.message);
+      renderWorkspace();
+    });
+  });
+
   async function fetchActiveSession(forceRender = false) {
     if (!activeSessionId) return;
     const res = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(activeSessionId)}`);
@@ -590,6 +604,7 @@
     document.getElementById("wsMeta").textContent =
       `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}`;
 
+    document.getElementById("btnCancelContract").hidden = s.status !== "IN_PROGRESS";
     const callBadge = document.getElementById("callStateBadge");
     if (s.status === "COMPLETED") {
       callBadge.className = "bass-badge bass-badge--ok";
@@ -1121,9 +1136,9 @@
   }
 
   function renderCancelled(s) {
-    const why = (s.tenant_registry || {}).recheck_changed
+    const why = s.cancel_reason || ((s.tenant_registry || {}).recheck_changed
       ? "임차인이 체결 직전 등기부에서 변동을 확인해 계약이 중단되었습니다."
-      : (s.cancel_reason || "이 계약은 중단되었습니다.");
+      : "이 계약은 중단되었습니다.");
     elStepPanel.innerHTML = `
       <h3 style="margin:0 0 6px;">⛔ 계약이 중단되었습니다</h3>
       <p class="bass-muted" style="font-size:13px;margin:0 0 12px;">${esc(why)} 필요하면 홈에서 새로 계약을 시작할 수 있습니다.</p>

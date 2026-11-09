@@ -2208,5 +2208,40 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             shutil.rmtree(runtime, ignore_errors=True)
 
 
+    def test_40_e2e_failure_scenarios(self):
+        """40. 실패 시나리오 시험(scripts/e2e_pair fail): 무응답 자동 해제, 체결 직전·잔금일 등기부 변동, 당사자 취소와 사유 전파, 불일치 확인 기록."""
+        import socket, subprocess, tempfile, time as _t, urllib.request
+        runtime = tempfile.mkdtemp(prefix="e2e_fail_")
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "RENT2_"))}
+        env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "E2E_RUNTIME": runtime, "E2E_BASE": f"http://127.0.0.1:{port}",
+                    "E2E_STATE": os.path.join(runtime, "state.json")})
+        script = lambda n: os.path.join(ROOT, "scripts", "e2e_pair", n)
+        srv = subprocess.Popen([sys.executable, script("server.py"), "--fresh", "--port", str(port), "--idle-seconds", "6"], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(60):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2)
+                    break
+                except Exception:
+                    _t.sleep(0.5)
+            else:
+                self.fail("시험 서버가 뜨지 않았습니다")
+            r = subprocess.run([sys.executable, script("play.py"), "fail"], env=env, capture_output=True, text=True, encoding="utf-8", timeout=240)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("29/29", r.stdout)
+            self.assertNotIn("건너뜀", r.stdout)
+        finally:
+            srv.terminate()
+            try:
+                srv.wait(timeout=10)
+            except Exception:
+                srv.kill()
+            shutil.rmtree(runtime, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

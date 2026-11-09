@@ -27,6 +27,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=9070)
     ap.add_argument("--fresh", action="store_true", help="시험 데이터를 지우고 새로 시작")
+    ap.add_argument("--idle-seconds", type=int, default=0,
+                    help="무응답 자동 해제를 이 시간(초)으로 줄인다(사전 작성 계약은 3배). 실패 시나리오 시험 전용 — 번갈아 진행 시험에는 쓰지 말 것")
     args = ap.parse_args()
 
     # 운영 설정이 섞이지 않게: 시연 모드 변수는 로컬 판정에 맡기고, 날짜 고정 변수는 제거
@@ -44,9 +46,14 @@ def main() -> None:
 
     use_pool_dir(pool_dir)
     ensure_pool_seeded()
+    if args.idle_seconds:
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import cosign
+        cosign.IDLE_EXPIRE = timedelta(seconds=args.idle_seconds)
+        cosign.IDLE_EXPIRE_DRAFT = timedelta(seconds=args.idle_seconds * 3)
     app = create_gateway(apps_root=os.path.join(ROOT, "apps"), db_path=":memory:")
     with open(os.path.join(RUNTIME, "server.json"), "w", encoding="utf-8") as fp:
-        json.dump({"base": f"http://127.0.0.1:{args.port}", "pool": pool_dir}, fp)
+        json.dump({"base": f"http://127.0.0.1:{args.port}", "pool": pool_dir, "idle_seconds": args.idle_seconds}, fp)
     print(f"[e2e] 시험 서버: http://127.0.0.1:{args.port}  (데이터: {pool_dir})", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 

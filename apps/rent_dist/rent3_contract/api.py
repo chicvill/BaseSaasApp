@@ -74,6 +74,11 @@ class Step2ConfirmReq(BaseModel):
     facility_notes: Optional[str] = None
 
 
+class CancelReq(BaseModel):
+    role: str = "tenant"
+    reason: str = ""
+
+
 class PrefillReq(BaseModel):
     role: str = "lessor"
     updates: Dict[str, Any] = Field(default_factory=dict)
@@ -550,6 +555,14 @@ def confirm_step2(session_id: str, req: Step2ConfirmReq):
         "message": "Step 2 호실 옵션 및 시설 점검표 상태가 실시간 반영되었습니다.",
         "session": s.model_dump(),
     }
+
+
+@router.post("/sessions/{session_id}/cancel")
+def cancel_session(session_id: str, req: CancelReq):
+    """체결 전 계약 취소(당사자만). 사유가 상대방 화면에 그대로 전달되고 호실이 다시 열린다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    s.cancel(req.role, req.reason, app_source=APP_SRC)
+    return {"success": True, "message": "계약을 취소했습니다. 호실이 다시 열렸습니다.", "session": s.model_dump()}
 
 
 @router.post("/sessions/{session_id}/prefill")

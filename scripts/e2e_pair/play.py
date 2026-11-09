@@ -7,6 +7,7 @@ scripts/e2e_pair/play.py — 임대인·임차인 두 역할이 번갈아 진행
     py scripts/e2e_pair/play.py run lessor|tenant      # 내 차례마다 알아서 진행하고, 상대 차례에는 기다린다 (한 줄로 끝까지)
     py scripts/e2e_pair/play.py auto                   # 두 역할을 한 번에 끝까지 (사람·AI 없이 전체 흐름 검증)
     py scripts/e2e_pair/play.py attack                 # 보안 장치가 막는지 확인하는 공격 시험
+    py scripts/e2e_pair/play.py fail                   # 무응답·변동 신고·취소 같은 실패 시나리오 시험 (무응답 시험은 server.py --idle-seconds 10 필요)
     py scripts/e2e_pair/play.py reset                  # 진행 상태 초기화 (서버 데이터는 그대로)
 
 공유 상태 파일: e2e_runtime/state.json (git 제외). 시험용 비밀번호만 들어 있다.
@@ -536,6 +537,167 @@ def cmd_attack() -> int:
     return 0 if good == len(results) else 1
 
 
+# ───────────────────────── 실패 시나리오 시험 ─────────────────────────
+def server_idle_seconds() -> int:
+    p = os.path.join(RUNTIME, "server.json")
+    return int(json.load(open(p, encoding="utf-8")).get("idle_seconds", 0)) if os.path.exists(p) else 0
+
+
+def room_busy(room_no: str) -> Optional[bool]:
+    """포털 매물 목록에서 이 호실이 '계약 진행 중'으로 잠겨 있는가. 목록에 없으면 None."""
+    st, res = call("GET", "/api/rent3/pool/landing")
+    for l in res.get("listings", []):
+        if l.get("room_no") == room_no and l.get("branch") == BRANCH:
+            return bool(l.get("contract_in_progress"))
+    return None
+
+
+def new_tenant_can_start(room_no: str) -> bool:
+    """다른 임차인이 같은 호실에서 새 계약을 시작할 수 있는가."""
+    st, reg = call("POST", "/api/rent3/pool/auth/register", {"role": "prospect", "name": "새임차", "phone": fresh_phone(), "password": TENANT_PW})
+    if st != 200:
+        return False
+    who = {"name": "새임차", "phone": reg["user"]["phone"], "birth": fresh_birth()}
+    call("POST", "/api/rent3_contract/identity/start", who, reg["token"])
+    call("POST", "/api/rent3_contract/identity/confirm", {**who, "code": "000000"}, reg["token"])
+    st, res = call("POST", "/api/rent3_contract/sessions/call", {
+        "caller_role": "tenant", "branch": BRANCH, "room_no": room_no, "mode": "NEW",
+        "tenant_name": "새임차", "tenant_phone": reg["user"]["phone"], "id_tenant": reg["user"]["id"]}, reg["token"])
+    return st == 200
+
+
+def cmd_fail() -> int:
+    """도중에 마음이 바뀌거나 연락이 끊기는 현실적인 예외 상황이 안전하게 처리되는지 확인한다."""
+    results: List[Tuple[bool, str]] = []
+
+    def check(good: bool, label: str, note: str = "") -> None:
+        results.append((good, label))
+        print(f"  {'✅ 통과' if good else '❌ 실패'}  {label}" + (f"  ({note})" if note else ""))
+
+    def sess(c: Ctx, token: str) -> Dict[str, Any]:
+        return c.session(token)
+
+    print("실패 시나리오 시험 — 모두 '통과'여야 합니다\n")
+    other_lessor = login("sunho", LESSOR_PW)
+
+    # ── F1·F1b. 상대가 응답하지 않으면 자동 해제 (서버를 --idle-seconds 로 켠 경우만) ──
+    idle = server_idle_seconds()
+    if idle:
+        print(f"[F1] 무응답 자동 해제 (이 시험 서버는 {idle}초로 줄여 둠)")
+        sa = drive_to(idx("lessor", "call"))
+        ca = Ctx(sa)
+        lt = ca.lessor_token()
+        st, made = call("POST", "/api/rent3_contract/sessions/call", {
+            "caller_role": "lessor", "branch": BRANCH, "room_no": sa["room_no"], "mode": "NEW",
+            "tenant_name": sa["tenant_name"], "tenant_phone": sa["tenant_phone"], "id_tenant": sa["tenant_id"]}, lt)
+        sa["session_id"] = made["session"]["id"]
+        sb = drive_to(idx("lessor", "call"))
+        cb = Ctx(sb)
+        lt_b = cb.lessor_token()
+        st, made_b = call("POST", "/api/rent3_contract/sessions/call", {
+            "caller_role": "lessor", "branch": BRANCH, "room_no": sb["room_no"], "mode": "NEW",
+            "tenant_name": sb["tenant_name"], "tenant_phone": sb["tenant_phone"], "id_tenant": sb["tenant_id"]}, lt_b)
+        sb["session_id"] = made_b["session"]["id"]
+        call("POST", f"/api/rent3_contract/sessions/{sb['session_id']}/prefill", {"role": "lessor", "updates": {"move_in_date": (date.today() + timedelta(days=9)).isoformat()}}, lt_b)
+        check(room_busy(sa["room_no"]) is True, "호출 직후에는 호실이 '계약 진행 중'으로 잠긴다")
+        time.sleep(idle + 3)
+        tt_a = ca.tenant_token()
+        for who_, tok in (("임대인", ca.lessor_token()), ("임차인", tt_a)):
+            ss = sess(ca, tok)
+            check(ss["status"] == "CANCELLED" and "24시간" in ss.get("cancel_reason", "") and ss.get("cancelled_by") == "system",
+                  f"무응답 자동 해제 — {who_} 화면에 취소 상태와 사유가 보인다", ss.get("cancel_reason", "")[:30])
+        check(room_busy(sa["room_no"]) is False, "자동 해제 뒤 호실이 다시 열린다(포털 매물 잠금 해제)")
+        check(new_tenant_can_start(sa["room_no"]), "다른 임차인이 같은 호실에서 새 계약을 시작할 수 있다")
+        sb_state = sess(cb, cb.lessor_token())
+        check(sb_state["status"] == "IN_PROGRESS", "사전 작성한 계약은 일반 호출보다 오래 보존된다(자동 해제 기한이 3배)")
+        st, _r = call("POST", f"/api/rent3_contract/sessions/{sa['session_id']}/respond", {
+            "responder_role": "tenant", "responder_name": sa["tenant_name"], "responder_phone": sa["tenant_phone"], "id_tenant": sa["tenant_id"]}, tt_a)
+        check(st in (400, 409), "자동 해제된 계약에는 뒤늦게 응답할 수 없다", f"HTTP {st}")
+    else:
+        print("[F1] 건너뜀 — 무응답 자동 해제는 시험 서버를 `py scripts/e2e_pair/server.py --fresh --idle-seconds 10` 으로 켜야 확인할 수 있습니다.\n")
+
+    # ── F2. 체결 직전 등기부 변동 신고 → 계약 즉시 취소 ──
+    print("\n[F2] 체결 직전 재열람에서 변동 발견")
+    s2 = drive_to(idx("tenant", "recheck"))
+    c2 = Ctx(s2)
+    lt2, tt2 = c2.lessor_token(), c2.tenant_token()
+    check(room_busy(s2["room_no"]) is True, "(준비) 서명까지 끝난 계약은 호실을 잠그고 있다")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c2.sid}/recheck", {"changed": True}, tt2)
+    check(st == 200, "임차인이 변동(근저당 추가 등)을 신고한다", f"HTTP {st}")
+    for who_, tok in (("임대인", lt2), ("임차인", tt2)):
+        ss = sess(c2, tok)
+        check(ss["status"] == "CANCELLED" and "변동" in ss.get("cancel_reason", ""), f"계약이 즉시 취소되고 {who_} 화면에 사유가 보인다", ss.get("cancel_reason", "")[:24])
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c2.sid}/step5/complete", {"payment_method": "TRANSFER", "own_account_checked": True}, lt2)
+    check(st in (400, 409), "취소된 계약은 체결할 수 없다", f"HTTP {st}")
+    check(room_busy(s2["room_no"]) is False, "호실이 다시 열린다")
+    check(new_tenant_can_start(s2["room_no"]), "다른 임차인이 같은 호실에서 새 계약을 시작할 수 있다")
+
+    # ── F3. 잔금일 등기부 변동 신고: 계약은 유지되고 도어락만 잠긴 채 해소 뒤 회복 ──
+    print("\n[F3] 잔금일 등기부에서 변동 발견 (계약은 이미 체결됨)")
+    s3 = drive_to(idx("tenant", "balance_check"))
+    c3 = Ctx(s3)
+    lt3, tt3 = c3.lessor_token(), c3.tenant_token()
+    st, _r = call("POST", f"/api/rent3_tenant/myhome/{s3['tenant_id']}/balance-registry-check", {"changed": True, "issue_number": "1101-2026-CHG"}, tt3)
+    home = call("GET", f"/api/rent3_tenant/myhome/{s3['tenant_id']}", token=tt3)[1]
+    check(st == 200 and home["keys"]["locked"] and home["keys"]["registry_check"]["changed"], "변동 신고 → 도어락이 잠긴 채 유지된다")
+    ct = call("GET", f"/api/rent3_contract/contracts/{s3['contract_id']}", token=tt3)[1]
+    check(ct.get("success") is not False and st == 200, "체결된 계약은 자동 취소되지 않는다(임대인·본사가 해소해야 함)")
+    st, _r = call("POST", f"/api/rent3_lessor/rooms/{s3['room_id']}/release-keys", {"balance_checked": True}, lt3)
+    check(st == 400, "변동이 해소되기 전에는 임대인이 도어락을 교부할 수 없다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_tenant/myhome/{s3['tenant_id']}/balance-registry-check", {"changed": False, "issue_number": "1101-2026-OK"}, tt3)
+    st2, _r2 = call("POST", f"/api/rent3_lessor/rooms/{s3['room_id']}/release-keys", {"balance_checked": True}, lt3)
+    home = call("GET", f"/api/rent3_tenant/myhome/{s3['tenant_id']}", token=tt3)[1]
+    check(st == 200 and st2 == 200 and not home["keys"]["locked"], "해소 뒤 임차인이 '변동 없음'으로 다시 확인하면 교부되고 도어락이 열린다")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{s3['session_id']}/cancel", {"role": "lessor", "reason": "이미 체결된 계약 취소 시도"}, lt3)
+    check(st in (400, 409), "체결이 끝난 계약은 취소 기능으로 취소할 수 없다", f"HTTP {st}")
+
+    # ── F4. 진행 중 당사자 직접 취소 → 사유 전파, 호실 복구 ──
+    print("\n[F4] 진행 중 당사자가 계약을 취소")
+    s4 = drive_to(idx("lessor", "step2"))                         # 연결·1단계·사진까지 진행된 계약
+    c4 = Ctx(s4)
+    lt4, tt4 = c4.lessor_token(), c4.tenant_token()
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4.sid}/cancel", {"role": "lessor", "reason": ""}, lt4)
+    check(st == 400, "사유 없이는 취소할 수 없다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4.sid}/cancel", {"role": "lessor", "reason": "다른 분과 계약하기로 했습니다"}, other_lessor)
+    check(st == 403, "다른 지점 임대인은 남의 계약을 취소할 수 없다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4.sid}/cancel", {"role": "lessor", "reason": "다른 분과 계약하기로 했습니다"}, tt4)
+    check(st == 403, "임차인 토큰으로 임대인 이름의 취소는 안 된다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4.sid}/cancel", {"role": "lessor", "reason": "다른 분과 계약하기로 했습니다"}, lt4)
+    check(st == 200, "임대인이 사유를 적고 취소한다", f"HTTP {st}")
+    ss = sess(c4, tt4)
+    check(ss["status"] == "CANCELLED" and "임대인" in ss["cancel_reason"] and "다른 분과 계약하기로 했습니다" in ss["cancel_reason"],
+          "임차인 화면에 취소한 사람과 사유가 그대로 전달된다", ss.get("cancel_reason", "")[:40])
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4.sid}/step2", {"role": "tenant"}, tt4)
+    check(st in (400, 409), "취소된 계약에서는 더 진행할 수 없다", f"HTTP {st}")
+    check(room_busy(s4["room_no"]) is False and new_tenant_can_start(s4["room_no"]), "호실이 다시 열리고 다른 임차인이 시작할 수 있다")
+    s4b = drive_to(idx("lessor", "step2"))
+    c4b = Ctx(s4b)
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c4b.sid}/cancel", {"role": "tenant", "reason": "집이 마음에 들지 않아요"}, c4b.tenant_token())
+    ss = sess(c4b, c4b.lessor_token())
+    check(st == 200 and ss["status"] == "CANCELLED" and "임차인" in ss["cancel_reason"], "임차인이 취소해도 임대인 화면에 사유가 전달된다", ss.get("cancel_reason", "")[:30])
+
+    # ── F5. 등기부가 다른데 '확인하고 계속'을 눌러 진행: 기록이 남는다 ──
+    print("\n[F5] 등기부 불일치를 확인하고 계속 진행")
+    s5 = drive_to(idx("tenant", "step1"))                         # 임대인이 등기부를 제시한 직후
+    c5 = Ctx(s5)
+    tt5 = c5.tenant_token()
+    diff = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": OWNER, "mortgage_amount": 150000000,
+            "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c5.sid}/tenant-registry", {"registry": diff}, tt5)
+    check(st == 400, "차이가 있는데 확인 체크 없이는 제출되지 않는다", f"HTTP {st}")
+    st, _r = call("POST", f"/api/rent3_contract/sessions/{c5.sid}/tenant-registry", {"registry": {**diff, "mismatch_ack": True}}, tt5)
+    rec = (c5.session(tt5).get("tenant_registry") or {})
+    check(st == 200 and rec.get("mismatch_ack") is True and int(rec.get("mortgage_amount", 0)) == 150000000,
+          "확인 체크를 하면 진행되고, 임차인이 본 근저당(1.5억)과 확인 표시가 기록으로 남는다")
+
+    good = sum(1 for g, _l in results if g)
+    print(f"\n결과: {good}/{len(results)} 항목 통과" + ("" if idle else "  (무응답 자동 해제 시험은 건너뜀 — --idle-seconds 서버 필요)"))
+    for g, label in results:
+        if not g:
+            print(f"  ❌ 실패: {label}")
+    return 0 if good == len(results) else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="임대인·임차인 번갈아 공동 계약 시험")
     ap.add_argument("role", help="status | auto | attack | reset | lessor | tenant")
@@ -553,6 +715,8 @@ def main() -> int:
         return cmd_auto()
     if a.role == "attack":
         return cmd_attack()
+    if a.role == "fail":
+        return cmd_fail()
     if a.role == "reset":
         save_state({"next": 0, "log": []})
         print("진행 상태를 초기화했습니다.")
