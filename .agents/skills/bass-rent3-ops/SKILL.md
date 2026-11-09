@@ -398,6 +398,8 @@ description: Operational business rules, domain invariants, and verification ins
 41. **모바일 화면 규칙**(`shared_ui/rent3_mobile.css`, 5개 앱 index.html 에 로드): 520px 이하에서 한글 단어 단위 줄바꿈(`word-break: keep-all`), 버튼 최소 높이 44px(작은 버튼 40px), 체크박스 22px, 보조 글자 12.5px 이상. 알려진 남은 것: 일부 보조 문구(`bass-muted` 인라인 11.5px)·코드 글자 11.25px.
 42. **임차인 마이홈은 잔금·출입 안내를 맨 위에 보여 준다**: 도어락이 잠긴 동안(`keys.locked`)의 잔금 안내와 '잔금일 등기부 확인' 버튼은 접힌 '그 밖의 서비스' 안이 아니라 화면 맨 위 카드에 있다(잔금 송금 전에 반드시 보게 하려는 것). 화면·API 메시지에 `payments.json` 같은 내부 파일 이름을 쓰지 않는다(관리자 Data Pool 탐색기 제외).
 
+43. **'보증보험 가입 예정' 계약은 잔금일 전에 증빙을 낸다**: 계약 체결 시 `Contract.insurance_proof_required=True`. 임차인이 `POST /api/rent3_tenant/myhome/{id}/insurance-proof`(보증기관·증권번호)를 제출해야 `release-keys` 가 통과한다(`test_44`). 제출값의 진위는 시스템이 검증하지 못한다(자기 신고) — 관리자가 보증기관에 확인하는 절차는 운영에서 별도로 둘 것. 거절 시 계약 무효·계약금 반환은 특약 문구로만 보장된다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

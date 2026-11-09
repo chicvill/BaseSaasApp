@@ -1156,6 +1156,7 @@ class CoSignSession(PoolObj):
             vat_separate=bool(t_info.get("vat_separate", True)),
             contract_deposit=int(t_info.get("contract_deposit", 300000)),
             keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다
+            insurance_proof_required=bool(self.needs_insurance_refusal_clause(t_info) and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"),
             mortgage_cleanup_required=bool(t_info.get("mortgage_cleanup_clause")),  # 잔금 시 근저당 말소 특약 — 잔금일에 말소 확인이 있어야 교부
             deposit=int(t_info.get("deposit", room.deposit)),
             monthly_rent=int(t_info.get("monthly_rent", room.monthly_rent)),

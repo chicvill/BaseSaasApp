@@ -468,6 +468,9 @@ def release_keys(room_id: str, req: ReleaseKeysReq, request: Request):
     if ct.mortgage_cleanup_required and not br.get("mortgage_cleared"):
         raise DomainError("잔금 시 근저당 말소 특약이 있는 계약입니다. 근저당 말소가 확인되지 않았습니다.",
                           hint="선순위 근저당을 말소하고, 임차인이 말소된 등기부를 확인한 뒤에 교부할 수 있습니다.")
+    if ct.insurance_proof_required and not (ct.insurance_proof or {}).get("policy_no"):
+        raise DomainError("임차인이 '보증보험 가입 예정'으로 계약했고, 가입 증빙이 아직 제출되지 않았습니다.",
+                          hint="임차인이 보증기관·증권번호를 제출해야 교부할 수 있습니다. 가입이 거절되면 계약서의 특약에 따라 계약은 무효이고 계약금은 반환됩니다.")
     if not br.get("checked_at"):
         raise DomainError("임차인의 잔금일 등기부 확인이 아직 없습니다.",
                           hint="잔금일에 임차인이 인터넷등기소에서 직접 등기부를 열람하고 변동 없음을 확인해야 합니다.")

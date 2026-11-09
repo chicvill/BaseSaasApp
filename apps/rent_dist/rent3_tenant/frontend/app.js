@@ -82,6 +82,7 @@
                 ${data.keys.registry_check && data.keys.registry_check.checked_at
                   ? (data.keys.registry_check.changed ? "⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요." : "✅ 잔금일 등기부 확인 완료 (" + Bass.escapeHtml(String(data.keys.registry_check.checked_at).slice(0, 16).replace("T", " ")) + ")")
                   : "아직 확인하지 않았습니다."}
+                ${data.keys.insurance_proof_required ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"><strong>보증보험 가입 증빙</strong> (가입 예정으로 계약하셨습니다)<br>${data.keys.insurance_proof && data.keys.insurance_proof.policy_no ? "✅ 제출 완료: " + Bass.escapeHtml(data.keys.insurance_proof.issuer) + " " + Bass.escapeHtml(data.keys.insurance_proof.policy_no) : "아직 제출하지 않았습니다. 가입이 거절되면 계약은 무효이고 계약금은 전액 반환됩니다."}<div class="bass-row" style="margin-top:6px;gap:6px;"><button class="bass-btn bass-btn--sm bass-btn--primary btn-ins-proof" type="button">증빙 제출</button></div></div>` : ""}
                 <div class="bass-row" style="margin-top:6px;gap:6px;">
                   <a class="bass-btn bass-btn--sm" href="https://www.iros.go.kr" target="_blank" rel="noopener">인터넷등기소 열기 ↗</a>
                   <button class="bass-btn bass-btn--sm bass-btn--primary btn-bal-reg" data-changed="false" type="button">변동 없음 확인</button>
@@ -326,6 +327,18 @@
       selectedTenantId = ev.target.value;
       loadMyhome().catch(Bass.showError);
     });
+
+    document.querySelectorAll(".btn-ins-proof").forEach((btn) => btn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const issuer = window.prompt("보증기관 (예: HUG, SGI서울보증)");
+        if (!issuer) return;
+        const no = window.prompt("증권번호 또는 가입 접수번호");
+        if (!no) return;
+        const res = await Bass.api(APP_ID, `/myhome/${t.id}/insurance-proof`, { method: "POST", body: { issuer, policy_no: no } });
+        Bass.updateAppAlert("success", res.message);
+        await loadMyhome();
+      });
+    }));
 
     document.querySelectorAll(".btn-bal-reg").forEach((btn) => btn.addEventListener("click", function () {
       Bass.withLock(this, async () => {

@@ -404,6 +404,9 @@ class Contract(PoolObj):
     mortgage_cleanup_required: bool = False   # 잔금 시 근저당 말소 특약이 있는 계약 — 잔금일 등기부에서 말소가 확인돼야 교부
     # 잔금일 등기부 재확인(임차인이 직접 열람): {checked_at, changed, issue_number} — 변동 없음으로 확인돼야 임대인이 출입 정보를 교부할 수 있다
     balance_registry: Dict[str, Any] = Field(default_factory=dict)
+    # '보증보험 가입 예정'으로 진행한 계약: 잔금일 전에 임차인이 보험 증권 정보를 제출해야 교부 가능 {issuer, policy_no, submitted_at}
+    insurance_proof_required: bool = False
+    insurance_proof: Dict[str, Any] = Field(default_factory=dict)
     keys_released_at: str = ""
     keys_released_by: str = ""
     monthly_rent: int = 500000               # 월 임차료

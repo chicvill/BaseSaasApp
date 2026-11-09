@@ -20,3 +20,9 @@
   .r3-drawer__close { min-width: 40px; min-height: 40px; }
   .bass-btn { line-height: 1.3; }
 }
+/* 인라인으로 작게 지정된 보조 글자·코드·링크·알림 닫기 버튼 */
+@media (max-width: 520px) {
+  [style*="font-size:11.5px"], [style*="font-size: 11.5px"], [style*="font-size:11px"], code, kbd { font-size: 12.5px !important; }
+  a.bass-btn, a.or-navlink { display: inline-flex; align-items: center; min-height: 40px; }
+  .bass-alert__close, .bass-alert button { min-width: 40px; min-height: 40px; }
+}

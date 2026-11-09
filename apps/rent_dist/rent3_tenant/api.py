@@ -197,7 +197,8 @@ def get_myhome(tenant_id: str):
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
         "tenant": tenant_d,
-        "keys": {"registry_check": (ct.balance_registry if ct else {}), "locked": keys_locked, "message": LOCKED_TEXT if keys_locked else "",
+        "keys": {"registry_check": (ct.balance_registry if ct else {}), "locked": keys_locked,
+                 "insurance_proof_required": bool(ct and ct.insurance_proof_required), "insurance_proof": (ct.insurance_proof if ct else {}), "message": LOCKED_TEXT if keys_locked else "",
                  "balance_due": balance if keys_locked else 0,
                  "move_in_date": ct.move_in_date if ct else "", "released_at": ct.keys_released_at if ct else ""},
         "building": bldg_d,
@@ -244,6 +245,29 @@ def balance_registry_check(tenant_id: str, req: BalanceRegistryReq):
     msg = ("등기부 변동을 신고했습니다. 임대인·본사 확인 전까지 잔금 납부를 보류하세요." if req.changed
            else "잔금일 등기부 확인을 기록했습니다. 잔금 입금 후 임대인이 확인하면 출입 정보가 열립니다.")
     return {"success": True, "message": msg, "balance_registry": ct.balance_registry}
+
+
+class InsuranceProofReq(BaseModel):
+    issuer: str            # 보증기관 (예: HUG, SGI서울보증, HF)
+    policy_no: str         # 증권번호(또는 가입 접수번호)
+
+
+@router.post("/myhome/{tenant_id}/insurance-proof", dependencies=[Depends(tenant_scope)])
+def insurance_proof(tenant_id: str, req: InsuranceProofReq):
+    """'보증보험 가입 예정'으로 계약한 임차인이 가입 증빙(보증기관·증권번호)을 제출한다. 제출해야 임대인이 출입 정보를 교부할 수 있다."""
+    t = Tenant.get(tenant_id) or Tenant.first(phone=tenant_id)
+    if not t:
+        raise NotFound(f"임차인('{tenant_id}') 정보를 찾을 수 없습니다.")
+    room = Room.get(t.current_room_id) if t.current_room_id else None
+    ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
+    if ct is None or not ct.insurance_proof_required or ct.keys_released is not False:
+        raise DomainError("보증보험 증빙을 제출할 계약이 아닙니다.", hint="'가입 예정'으로 계약하고 아직 출입 정보를 받기 전인 계약에서만 사용합니다.")
+    issuer, no = req.issuer.strip(), req.policy_no.strip()
+    if len(issuer) < 2 or len(no) < 4:
+        raise DomainError("보증기관과 증권번호(접수번호)를 정확히 입력해 주세요.")
+    ct.insurance_proof = {"issuer": issuer, "policy_no": no, "submitted_at": now_iso()}
+    ct.save(action="insurance_proof_submitted", app_source=APP_SRC)
+    return {"success": True, "message": "보증보험 증빙을 제출했습니다. 임대인이 확인한 뒤 잔금일에 출입 정보를 교부합니다.", "insurance_proof": ct.insurance_proof}
 
 
 @router.post("/myhome/{tenant_id}/pay", dependencies=[Depends(tenant_scope)])

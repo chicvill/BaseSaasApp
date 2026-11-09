@@ -2400,6 +2400,39 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(self.client.get("/api/rent3_tenant/tenants", headers=th).status_code, 403)
         self.assertEqual(self.client.get(f"/api/rent3_tenant/myhome/{reg['user']['id']}", headers=th).status_code, 200)
 
+    def test_44_insurance_pending_requires_proof_before_keys(self):
+        """44. '보증보험 가입 예정'으로 계약하면 잔금일 전에 증빙(보증기관·증권번호)을 제출해야 도어락이 교부된다."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("945", 100000000, 0, lessor_mortgage=300000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 예정").status_code, 200)
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "lessor"})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev}).status_code, 200)
+        self._tenant_recheck_ok(sid)
+        done = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        self.assertEqual(done.status_code, 200, done.text)
+        ct = done.json()["contract"]
+        self.assertTrue(ct["insurance_proof_required"])
+        tid = ct["id_tenant"]
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        prf = f"/api/rent3_tenant/myhome/{tid}/insurance-proof"
+        rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
+        self.assertEqual(c.post(chk, json={"changed": False}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)       # 증빙 없이는 교부 불가
+        self.assertEqual(c.post(prf, json={"issuer": "H", "policy_no": "1"}).status_code, 400)  # 너무 짧은 값
+        self.assertEqual(c.post(prf, json={"issuer": "HUG", "policy_no": "2026-123456"}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
+
+        # '가입 완료'로 계약하면 증빙 절차가 없다
+        sid2 = self._policy_session("946", 100000000, 0, lessor_mortgage=300000000)
+        self._reg(sid2, mortgage_amount=300000000, guarantee_status="가입 완료")
+        self.assertFalse(c.get(f"{base}/sessions/{sid2}").json()["session"]["terms"].get("insurance_proof_required", False))
+
 
 if __name__ == "__main__":
     unittest.main()
