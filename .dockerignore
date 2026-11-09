@@ -32,4 +32,5 @@ apps/videobooth/data/*.webm
 *.bat
 *.ps1
 tests/
-.agents/
+.agents/data/private/
+2026년_*수납부.csv

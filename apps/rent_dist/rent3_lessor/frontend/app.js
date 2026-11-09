@@ -337,7 +337,17 @@
                 </div>
               ` : ""}
               <div style="margin-bottom:8px;">
-                ${(lg.months || []).map((m) => `<span class="month-chip month-${m.status}">${m.ym}: ${Bass.escapeHtml(m.note)}</span>`).join("")}
+                ${(() => {
+                  // 오래된 입주자는 달이 수십 개 — 최근 12개월과 미납·부분납부 달만 보이고, 나머지 완납 달은 접어 둔다
+                  const all = lg.months || [];
+                  const chip = (m) => `<span class="month-chip month-${m.status}">${m.ym}: ${Bass.escapeHtml(m.note)}</span>`;
+                  const recent = all.slice(-12);
+                  const older = all.slice(0, Math.max(all.length - 12, 0));
+                  const olderUnpaid = older.filter((m) => m.unpaid > 0);
+                  const olderOk = older.filter((m) => !(m.unpaid > 0));
+                  return olderUnpaid.map(chip).join("") + recent.map(chip).join("") +
+                    (olderOk.length ? `<details style="margin-top:4px;"><summary class="bass-muted" style="font-size:12.5px;cursor:pointer;min-height:32px;">이전 완납 ${olderOk.length}개월 보기</summary>${olderOk.map(chip).join("")}</details>` : "");
+                })()}
               </div>
               <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
                 <div class="bass-row">

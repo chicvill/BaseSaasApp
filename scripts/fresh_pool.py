@@ -103,7 +103,12 @@ def main() -> None:
         if not a.wipe:
             sys.exit(f"'{d}' 에 이미 데이터가 있습니다. 기존 데이터를 백업하고 새로 만들려면 --wipe 를 붙이세요.")
         bak = f"{d}.bak-{datetime.now():%Y%m%d%H%M%S}"
-        shutil.move(d, bak)
+        try:
+            shutil.move(d, bak)
+        except OSError:   # 폴더 자체가 저장소(볼륨) 마운트 지점이면 이름을 바꿀 수 없다 — 복사해 두고 안의 내용만 비운다
+            shutil.copytree(d, bak)
+            for entry in os.scandir(d):
+                shutil.rmtree(entry.path) if entry.is_dir(follow_symlinks=False) else os.remove(entry.path)
         print(f"기존 데이터를 백업했습니다: {bak}")
     os.makedirs(d, exist_ok=True)
     use_pool_dir(d)
