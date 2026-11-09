@@ -2433,6 +2433,42 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self._reg(sid2, mortgage_amount=300000000, guarantee_status="가입 완료")
         self.assertFalse(c.get(f"{base}/sessions/{sid2}").json()["session"]["terms"].get("insurance_proof_required", False))
 
+    def test_45_fresh_pool_tool_builds_real_data_only(self):
+        """45. scripts/fresh_pool.py: 시험용 시드(chic/1212·샘플 계약·수납) 없이 설정한 임대인·건물·호실만 만들고, 기존 폴더는 --wipe 로 백업한다."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Building, Lessor, Pay, Room, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="fresh_pool_")
+        keep = self.temp_pool
+        try:
+            cfg = {"admin": {"username": "admin"}, "lessors": [{
+                "username": "freshlessor", "password": "Fresh#Pass99", "name": "신규임대인", "phone": "01055550001", "branch": "fresh",
+                "building": {"name": "신규빌", "address": "인천 서해구 석남동 1-1", "rooms": [{"room_no": "101", "deposit": 3000000, "monthly_rent": 300000}], "rooms_csv": "r.csv"}}]}
+            open(os.path.join(work, "r.csv"), "w", encoding="utf-8").write("room_no,deposit,monthly_rent,maintenance_fee,pay_timing\n102,5000000,290000,100000,선불\n")
+            cfgp = os.path.join(work, "c.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            pool_dir = os.path.join(work, "pool")
+            script = os.path.join(ROOT, "scripts", "fresh_pool.py")
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            run = lambda *extra: subprocess.run([sys.executable, script, "--config", cfgp, "--pool-dir", pool_dir, *extra], capture_output=True, text=True, encoding="utf-8", env=env)
+            r = run(); self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotEqual(run().returncode, 0)                 # 데이터가 있으면 --wipe 없이는 거부
+            r = run("--wipe"); self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue([d for d in os.listdir(work) if d.startswith("pool.bak-")])   # 기존 폴더는 백업으로 남는다
+            use_pool_dir(pool_dir)
+            self.assertIsNone(Lessor.first(username="chic"))         # 시험용 계정 없음
+            self.assertEqual(Tenant.count(), 0); self.assertEqual(Pay.count(), 0)
+            self.assertEqual(sorted(x.room_no for x in Room.all()), ["101", "102"])
+            ls = Lessor.first(username="freshlessor")
+            self.assertTrue(ls.password.startswith("pbkdf2") or ls.password != "Fresh#Pass99")   # 해시 저장
+            self.assertEqual(Building.first(branch="fresh").address, "인천 서해구 석남동 1-1")
+            ok = self.client.post("/api/rent3/pool/auth/login", headers={"Authorization": ""}, json={"login_mode": "account", "identifier": "freshlessor", "password": "Fresh#Pass99"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            bad = self.client.post("/api/rent3/pool/auth/login", headers={"Authorization": ""}, json={"login_mode": "account", "identifier": "freshlessor", "password": "Wrong#Pass99"})
+            self.assertEqual(bad.status_code, 401)
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

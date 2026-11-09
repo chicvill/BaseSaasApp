@@ -400,6 +400,8 @@ description: Operational business rules, domain invariants, and verification ins
 
 43. **'보증보험 가입 예정' 계약은 잔금일 전에 증빙을 낸다**: 계약 체결 시 `Contract.insurance_proof_required=True`. 임차인이 `POST /api/rent3_tenant/myhome/{id}/insurance-proof`(보증기관·증권번호)를 제출해야 `release-keys` 가 통과한다(`test_44`). 제출값의 진위는 시스템이 검증하지 못한다(자기 신고) — 관리자가 보증기관에 확인하는 절차는 운영에서 별도로 둘 것. 거절 시 계약 무효·계약금 반환은 특약 문구로만 보장된다.
 
+44. **운영 데이터 초기화는 `scripts/fresh_pool.py`**: 시험용 시드(chic/1212·김임대·샘플 계약·수납)를 지우고 설정 파일(`fresh.json`, **저장소에 올리지 않는다**)에 적은 관리자·임대인·건물·호실만 새로 만든다. 기존 폴더는 `--wipe` 시 지우지 않고 `<폴더>.bak-날짜시각` 으로 옮긴다. 서버에는 `RENT3_DEMO_SEED=0` 이 있어야 앱 기동 때 시드가 다시 채워지지 않는다(`test_45`). 관리자 로그인은 플랫폼 DB(`BASS_SEED_PASSWORD`)라 이 도구가 건드리지 않는다. `seed_chicvill_2026.py` 의 호실 표는 엑셀과 맞지 않아 정정 전에는 쓰지 않는다.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

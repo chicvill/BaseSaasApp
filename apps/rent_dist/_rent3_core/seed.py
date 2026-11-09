@@ -5,6 +5,7 @@ apps/_rent3_core/seed.py — 공동 JSON Data Pool 초기 시드 보장기.
 """
 from __future__ import annotations
 
+import os
 from typing import Set
 
 from .cosign import CoSignSession
@@ -19,6 +20,8 @@ def ensure_pool_seeded(force: bool = False) -> None:
     p = pool()
     p.ensure_all_files_initialized()
 
+    if not force and os.getenv("RENT3_DEMO_SEED", "1").strip() == "0":
+        return   # 운영: 시험용 기본 시드(chic/1212 등)를 만들지 않는다 (scripts/fresh_pool.py 로 실제 정보만 넣는다)
     if not force and p.pool_dir in _seeded_dirs:
         return
     if not force and Building.count() > 0:
