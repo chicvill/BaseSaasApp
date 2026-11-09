@@ -380,6 +380,8 @@ description: Operational business rules, domain invariants, and verification ins
 
 33. **오류·경고 알림 자동 닫힘**: Rent3 화면(포털 + 4개 앱)은 `window.BASS_ERROR_TIMEOUT = 2000`(`auth_fetch.js`·`rent3_session_guard.js` 가 지정)이라 오류·경고 알림이 **2초 뒤** 닫히고, 마우스를 올리거나 터치하는 동안은 유지된다. 성공 5초는 그대로. 지정하지 않은 다른 앱은 예전처럼 오류가 닫을 때까지 남는다. 힌트가 긴 메시지(예: 가맹 심사 반려 사유, 로그인 만료 안내)는 2초에 읽기 어려울 수 있으니, 어르신 사용자 반응을 보고 값을 늘릴 것.
 
+34. **공동 계약 시험 도구**(`scripts/e2e_pair/`): 임대인·임차인 두 역할(또는 두 AI)이 번갈아 19단계 공동 계약을 진행하는 로컬 시험. `server.py`(이 PC 전용 임시 서버, 시연 로그인·가짜 인증 허용, 운영 데이터와 분리된 `e2e_runtime/`), `play.py`(`lessor|tenant <단계>` — 차례가 아니면 거부, `auto` — 두 역할 한 번에, `attack` — 21개 보안 공격 시험, `status|reset`), `PLAYBOOK.md`(AI 지시서). 상태 파일 `e2e_runtime/state.json` 이 "누구 차례인가"를 전한다(시험용 계정 정보만, git 제외). **운영 서버에는 쓰지 말 것**. 인터넷등기소·본인인증은 시험값이라 실제 위조·실명 확인은 검증하지 못하고 화면은 보지 않는다. `tests/test_rent3_pool_suite.py::test_39` 가 이 도구 전체를 회귀 시험한다. 공격 시험이 새 보안 규칙을 따라가려면 `attack` 목록에 항목을 추가할 것.
+
 ### 5.6 운영 필수 환경변수 (배포)
 | 변수 | 이유 |
 |---|---|

@@ -2149,5 +2149,51 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             shutil.rmtree(pool_dir, ignore_errors=True)
 
 
+    def test_39_e2e_pair_harness(self):
+        """39. 공동 계약 시험 도구(scripts/e2e_pair): 차례가 아니면 거부하고, 자동 통과 19단계와 공격 시험 21항목이 모두 통과한다."""
+        import socket, subprocess, tempfile, time as _t, urllib.request
+        runtime = tempfile.mkdtemp(prefix="e2e_pair_")
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "RENT2_"))}
+        env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "E2E_RUNTIME": runtime, "E2E_BASE": f"http://127.0.0.1:{port}",
+                    "E2E_STATE": os.path.join(runtime, "state.json")})
+        script = lambda n: os.path.join(ROOT, "scripts", "e2e_pair", n)
+        srv = subprocess.Popen([sys.executable, script("server.py"), "--fresh", "--port", str(port)], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(60):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2)
+                    break
+                except Exception:
+                    _t.sleep(0.5)
+            else:
+                self.fail("시험 서버가 뜨지 않았습니다")
+            run = lambda *a: subprocess.run([sys.executable, script("play.py"), *a], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(run("reset").returncode, 0)
+            out_of_turn = run("tenant", "signup")
+            self.assertEqual(out_of_turn.returncode, 2)
+            self.assertIn("차례가 아닙니다", out_of_turn.stdout)
+            self.assertEqual(run("lessor", "fly").returncode, 2)
+            first = run("lessor", "prepare")
+            self.assertEqual(first.returncode, 0, first.stdout)
+            self.assertIn("다음 차례: [tenant]", first.stdout)
+            auto = run("auto")
+            self.assertEqual(auto.returncode, 0, auto.stdout + auto.stderr)
+            self.assertIn("전체 19단계 성공", auto.stdout)
+            attack = run("attack")
+            self.assertEqual(attack.returncode, 0, attack.stdout + attack.stderr)
+            self.assertIn("21/21", attack.stdout)
+        finally:
+            srv.terminate()
+            try:
+                srv.wait(timeout=10)
+            except Exception:
+                srv.kill()
+            shutil.rmtree(runtime, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

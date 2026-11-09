@@ -43,3 +43,6 @@ data/platform.db
 # 운영 데이터(DB·Data Pool)는 서버에만 둔다 — 저장소에 올리지 않는다
 data/rent3_pool/
 data/platform.db
+
+# 공동 계약 시험(e2e_pair) 임시 데이터·상태 — 시험용 계정 정보가 들어 있다
+e2e_runtime/
