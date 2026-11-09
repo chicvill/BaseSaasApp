@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import sys
 import time
 import urllib.error
@@ -157,7 +158,7 @@ def fresh_birth() -> str:
 
 def do_prepare(c: Ctx) -> str:
     tk = c.lessor_token()
-    room_no = "9" + str(int(time.time()) % 1000).zfill(3)
+    room_no = "9" + str(secrets.randbelow(100000)).zfill(5)   # 이전 시험의 호실과 겹치지 않게 무작위
     st, res = call("POST", "/api/rent3_lessor/rooms", {
         "branch": BRANCH, "room_no": room_no, "is_published": True, "deposit": 7000000, "monthly_rent": 450000,
         "maintenance_fee": 50000, "area_sqm": 21.5, "floor": 9, "status_description": "공동 계약 시험 호실"}, tk)
@@ -440,7 +441,7 @@ def cmd_attack() -> int:
         results.append((good, label))
         print(f"  {'✅ 막힘' if good else '❌ 뚫림'}  {label}  (HTTP {status}{', ' + note if note else ''})")
 
-    print("공격 시험 — 모두 '막힘'이어야 합니다\n")
+    print("공격 시험 — 공격 20개가 모두 '막힘'이어야 합니다 (집계에는 정상 체결 준비 확인 1개가 더 들어갑니다)\n")
     other_lessor = login("sunho", LESSOR_PW)
 
     # ── 계약 호출 전후 ──
@@ -528,7 +529,7 @@ def cmd_attack() -> int:
     expect("체결 뒤 시설 점검 사진 추가", st23, (400, 409))
 
     good = sum(1 for g, _l in results if g)
-    print(f"\n결과: {good}/{len(results)} 항목이 기대대로 막혔습니다.")
+    print(f"\n결과: {good}/{len(results)} 항목이 기대대로 막혔습니다. (공격 {len(results) - 1}개 + 정상 체결 준비 확인 1개)")
     for g, label in results:
         if not g:
             print(f"  ❌ 뚫림: {label}")
