@@ -413,6 +413,7 @@ class Contract(PoolObj):
     maintenance_fee: int = 50000             # 월 관리비
     vat: int = 0                             # 월 부가세
     special_terms: str = ""
+    lessor_memo: str = ""                    # 임대인 메모(연락처·특이사항)
     option_snapshot: List[Dict[str, Any]] = Field(default_factory=list)
     registry_snapshot: Dict[str, Any] = Field(default_factory=dict)
     lessor_signature: str = ""

@@ -15,7 +15,7 @@ if ROOT not in sys.path:
 
 from fastapi.testclient import TestClient
 from core.gateway import create_gateway
-from apps.rent_dist._rent3_core import POOL_COLLECTIONS, Room, ensure_pool_seeded, pool, use_pool_dir
+from apps.rent_dist._rent3_core import POOL_COLLECTIONS, Contract, Pay, Room, ensure_pool_seeded, pool, use_pool_dir
 
 RENT3_SPLIT_APPS = ["rent3", "rent3_admin", "rent3_lessor", "rent3_tenant", "rent3_contract"]
 
@@ -2589,6 +2589,30 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     os.environ[k] = v
             use_pool_dir(keep)
             shutil.rmtree(work, ignore_errors=True)
+
+    def test_49_edit_payment_and_contract(self):
+        """49. 수납 내역(납부일·월세·관리비)과 계약 내용(금액·만기·연락처·메모)을 고칠 수 있고, 다른 지점은 403."""
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        dash = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        card = next(r for r in dash["rooms"] if r.get("pays"))
+        self.assertTrue({"id", "paid_date", "billing_month", "rent", "fee", "total"} <= set(card["pays"][0]))
+        pay = card["pays"][0]
+        body = {"branch": "main", "pay_id": pay["id"], "paid_date": "2026-03-07", "rent_amount": 300000, "maintenance_amount": 20000}
+        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=sunho, json=body).status_code, 403)
+        r = c.post("/api/rent3_lessor/payments/edit", headers=chic, json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(Pay.get(pay["id"]).total_amount, 320000 + Pay.get(pay["id"]).vat_amount)
+        self.assertEqual(Pay.get(pay["id"]).paid_date, "2026-03-07")
+        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=chic, json={**body, "paid_date": "2026-13-45"}).status_code, 400)
+        ct = card["contract"]
+        cbody = {"branch": "main", "contract_id": ct["id"], "deposit": 6000000, "monthly_rent": 310000, "maintenance_fee": 55000,
+                 "move_in_date": ct["move_in_date"], "expiry_date": "2027-03-01", "tenant_phone": "010-1234-5678", "memo": "연락은 문자로"}
+        self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", headers=sunho, json=cbody).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", headers=chic, json=cbody).status_code, 200)
+        ct2 = Contract.get(ct["id"])
+        self.assertEqual((ct2.deposit, ct2.monthly_rent, ct2.expiry_date, ct2.lessor_memo), (6000000, 310000, "2027-03-01", "연락은 문자로"))
+        self.assertEqual(Room.get(ct2.id_room).monthly_rent, 310000)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """
 apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 """
+from datetime import date
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
@@ -319,8 +320,14 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
         bill_sched = ct.billing_notice_schedule(as_of=ref_dt) if ct else None
         bill_notices = [bn.model_dump() for bn in RentBillingNotice.for_contract(ct.id, limit=5)] if ct else []
+        pays = []
+        if ct:
+            pays = sorted((x for x in Pay.find(id_contract=ct.id) if x.payment_kind == "MONTHLY_RENT"),
+                          key=lambda x: (x.paid_date, x.created_at), reverse=True)[:60]
         card = {
             **r.model_dump(),
+            "pays": [{"id": x.id, "paid_date": x.paid_date, "billing_month": x.billing_month, "rent": x.rent_amount,
+                      "fee": x.maintenance_amount, "total": x.total_amount} for x in pays],
             "is_occupied": r.is_occupied,
             "tenant": tenant.model_dump() if tenant else None,
             "contract": ct.model_dump() if ct else None,
@@ -509,6 +516,81 @@ def collect_payment(req: CollectPaymentReq):
         app_source=APP_SRC,
     )
     return {"success": True, **res}
+
+
+class PayEditReq(BaseModel):
+    branch: str = "main"
+    pay_id: str
+    paid_date: str = ""
+    rent_amount: int = 0
+    maintenance_amount: int = 0
+
+
+@router.post("/payments/edit")
+def edit_payment(req: PayEditReq):
+    """수납 내역 한 건의 납부일·임차료·관리비를 고친다 (장부 이관 오류 정정용)."""
+    ensure_pool_seeded()
+    pay = Pay.require(req.pay_id)
+    if normalize_branch_id(pay.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 수납 내역은 고칠 수 없습니다.")
+    try:
+        d = date.fromisoformat(req.paid_date)
+    except ValueError:
+        raise DomainError("납부일 형식이 올바르지 않습니다 (예: 2026-03-15).")
+    if req.rent_amount < 0 or req.maintenance_amount < 0 or req.rent_amount + req.maintenance_amount <= 0:
+        raise DomainError("금액은 0원보다 커야 합니다.")
+    pay.paid_date = d.isoformat()
+    pay.rent_amount = req.rent_amount
+    pay.maintenance_amount = req.maintenance_amount
+    pay.total_amount = req.rent_amount + req.maintenance_amount + pay.vat_amount
+    pay.save(action="payment_edited", app_source=APP_SRC)
+    return {"success": True, "message": f"{pay.room_no}호 수납 내역을 고쳤습니다 ({pay.paid_date}, {pay.total_amount:,}원).", "payment": pay.model_dump()}
+
+
+class ContractEditReq(BaseModel):
+    branch: str = "main"
+    contract_id: str
+    deposit: int
+    monthly_rent: int
+    maintenance_fee: int
+    move_in_date: str = ""
+    expiry_date: str = ""
+    tenant_phone: str = ""
+    memo: str = ""
+
+
+@router.post("/contracts/edit")
+def edit_contract(req: ContractEditReq):
+    """계약 내용(보증금·월세·관리비·전입일·만기·연락처·메모) 수정. 호실 기본 금액과 임차인 연락처도 맞춘다."""
+    ensure_pool_seeded()
+    ct = Contract.require(req.contract_id)
+    if normalize_branch_id(ct.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 계약은 고칠 수 없습니다.")
+    for label, v in (("전입일", req.move_in_date), ("만기일", req.expiry_date)):
+        if v:
+            try:
+                date.fromisoformat(v)
+            except ValueError:
+                raise DomainError(f"{label} 형식이 올바르지 않습니다 (예: 2026-03-15).")
+    if min(req.deposit, req.monthly_rent, req.maintenance_fee) < 0:
+        raise DomainError("금액은 0원 이상이어야 합니다.")
+    ct.deposit, ct.monthly_rent, ct.maintenance_fee = req.deposit, req.monthly_rent, req.maintenance_fee
+    if req.move_in_date:
+        ct.move_in_date = req.move_in_date
+    if req.expiry_date:
+        ct.expiry_date = req.expiry_date
+    ct.tenant_phone = req.tenant_phone.strip()
+    ct.lessor_memo = req.memo.strip()
+    ct.save(action="contract_edited", app_source=APP_SRC)
+    room = Room.get(ct.id_room)
+    if room:
+        room.deposit, room.monthly_rent, room.maintenance_fee = req.deposit, req.monthly_rent, req.maintenance_fee
+        room.save(action="room_terms_synced", app_source=APP_SRC)
+    tenant = Tenant.get(ct.id_tenant) if ct.id_tenant else None
+    if tenant and req.tenant_phone.strip():
+        tenant.phone = req.tenant_phone.strip()
+        tenant.save(action="tenant_phone_edited", app_source=APP_SRC)
+    return {"success": True, "message": f"{ct.room_no}호 계약 내용을 저장했습니다.", "contract": ct.model_dump()}
 
 
 @router.post("/payments/sms-paste")

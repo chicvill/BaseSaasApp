@@ -190,179 +190,468 @@
     else renderRoomsTab();
   }
 
+  // ── 수납 현황 탭: 호실 풀다운 하나 + 버튼 네 개(수납내역·계약내용·만기통보·전출). 자세한 설명은 이용 매뉴얼에 둔다. ──
+  let selRoomNo = "";
+  const receiptMsg = {};   // 호실 → 임차인에게 보낼 문자 초안(수납 직후 영수 문구)
+
+  const roomOf = (no) => (dash.rooms || []).find((x) => x.room_no === no);
+  const digitsOf = (s) => String(s || "").replace(/\D/g, "");
+  const shortYm = (ym) => String(ym).slice(2).replace("-", ".");
+  const dotDate = (s) => String(s || "").replace(/-/g, ".");
+  const bldgName = () => (dash.building && dash.building.building_name) || "";
+
+  // 미납 횟수 = 납부일(매월 전입일)이 이미 지난 달 중 아직 못 낸 달 수
+  function unpaidCount(r) {
+    if (!r.ledger) return 0;
+    const bs = r.billing_schedule;
+    const cur = (dash.today || "").slice(0, 7);
+    const day = Number((dash.today || "").slice(8, 10)) || 0;
+    return (r.ledger.months || []).filter((m) => {
+      if (!(m.unpaid > 0)) return false;
+      if (m.ym === cur && bs && bs.payment_day && day < bs.payment_day) return false;
+      return true;
+    }).length;
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;opacity:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+      ta.remove();
+      return ok;
+    }
+  }
+
+  // 복사 후 휴대폰이면 임차인 문자창을 연다(붙여넣기만 하면 됨)
+  async function copyAndSms(text, phone) {
+    const ok = await copyText(text);
+    Bass.updateAppAlert(ok ? "success" : "warning", ok ? "복사했습니다 — 임차인 문자창에 붙여넣어 보내세요." : "복사에 실패했습니다. 글을 직접 길게 눌러 복사해 주세요.");
+    const d = digitsOf(phone);
+    if (ok && d && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      const a = document.createElement("a");
+      a.href = "sms:" + d;
+      a.click();
+    }
+  }
+
+  function closeModal() {
+    const m = document.getElementById("r3Modal");
+    if (m) m.remove();
+  }
+
+  function openModal(title, html) {
+    closeModal();
+    const bg = document.createElement("div");
+    bg.className = "r3-modal";
+    bg.id = "r3Modal";
+    bg.innerHTML = `<div class="r3-modal__box" role="dialog" aria-modal="true">
+      <div class="r3-modal__head"><strong>${title}</strong><button type="button" class="bass-btn r3-modal__x" aria-label="닫기">✕</button></div>
+      <div class="r3-modal__body">${html}</div></div>`;
+    bg.addEventListener("mousedown", (e) => { if (e.target === bg) closeModal(); });
+    bg.querySelector(".r3-modal__x").addEventListener("click", closeModal);
+    document.body.appendChild(bg);
+    return bg.querySelector(".r3-modal__body");
+  }
+
+  const $m = (id) => document.getElementById(id);
+  const msgOf = (n, v) => `<textarea id="${n}" class="bass-input r3-msg" rows="6">${Bass.escapeHtml(v)}</textarea>`;
+
+  function receiptText(pay, remain) {
+    return `[${bldgName()}] ${pay.room_no}호 ${pay.payer_name || ""}님, ${dotDate(pay.paid_date)} ${fmtWon(pay.total_amount)} 입금 확인했습니다. ` +
+      (remain > 0 ? `현재 남은 미납액은 ${fmtWon(remain)}입니다.` : "미납 없이 정상 납부 상태입니다.") + " 감사합니다.";
+  }
+
+  function unpaidText(r) {
+    const rows = ((r.ledger && r.ledger.months) || []).filter((m) => m.unpaid > 0);
+    const list = rows.map((m) => `${m.ym} ${fmtWon(m.unpaid)}`).join(", ");
+    return `[${bldgName()}] ${r.room_no}호 ${(r.contract && r.contract.tenant_name) || ""}님, 아래 월세가 아직 확인되지 않았습니다.\n${list}\n합계 ${fmtWon(r.ledger.total_unpaid)}. 확인 후 입금 부탁드립니다.`;
+  }
+
+  // ① 수납내역: 알림문자 붙여넣기 · 직접수납 · 월별 납부 내역(날짜·금액 고치기)
+  function showPayModal(no) {
+    const r = roomOf(no);
+    if (!r || !r.ledger) return;
+    const lg = r.ledger;
+    const ct = r.contract || {};
+    const curY = Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    const moveYm = (ct.move_in_date || "").slice(0, 7);
+    const floorYm = `${curY - 1}-01`;
+    const startYm = moveYm > floorYm ? moveYm : floorYm;
+    const byYm = {};
+    (r.pays || []).forEach((p) => { (byYm[p.billing_month] = byYm[p.billing_month] || []).push(p); });
+    const rows = [];
+    [...(lg.months || [])].reverse().forEach((m) => {
+      if (m.ym < startYm) return;
+      if (m.unpaid > 0) {
+        rows.push(`<div class="pr pr--un"><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">미납 ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}</span></div>`);
+      }
+      const ps = byYm[m.ym] || [];
+      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
+        <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
+        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
+        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"></div>`));
+      if (!ps.length && !(m.unpaid > 0)) {
+        rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
+      }
+    });
+    const oldest = (lg.months || []).find((m) => m.unpaid > 0);
+    const defAmt = oldest ? oldest.unpaid : Number(r.monthly_rent || 0) + Number(r.maintenance_fee || 0);
+    const draft = receiptMsg[no] || (lg.total_unpaid > 0 ? unpaidText(r) : "");
+    const body = openModal(`💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역`, `
+      <label class="r3-lbl">입금 알림문자 붙여넣기</label>
+      <textarea id="pmSms" class="bass-input" rows="2" placeholder="[은행] 10/28 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} ${(defAmt).toLocaleString("ko-KR")}원 입금"></textarea>
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px;">
+        <button id="pmParse" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="flex:1 1 100%;">⚡ 문자 읽고 수납</button>
+        <input id="pmAmt" class="bass-input" type="number" style="width:112px;" value="${defAmt}" aria-label="직접 수납액">
+        <button id="pmDirect" class="bass-btn bass-btn--sm" type="button">💰 직접수납</button>
+      </div>
+      <div class="r3-lbl">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span></div>
+      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span></div>
+      <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>
+      <label class="r3-lbl" style="margin-top:12px;">임차인에게 보낼 메시지</label>
+      ${msgOf("pmMsg", draft)}
+      <button id="pmCopy" class="bass-btn bass-btn--sm" type="button" style="margin-top:6px;">📋 복사 → 임차인 문자창</button>`);
+
+    const after = async (res) => {
+      Bass.updateAppAlert(res.level || "success", res.message);
+      const pay = res.payment || {};
+      const rn = pay.room_no || no;
+      receiptMsg[rn] = receiptText(pay, (res.ledger && res.ledger.total_unpaid) || 0);
+      selRoomNo = rn;
+      await refresh();
+      showPayModal(rn);
+    };
+    $m("pmParse").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        let t = $m("pmSms").value.trim();
+        if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
+        if (!/\d{3,4}\s*호/.test(t)) t += ` ${no}호`;
+        await after(await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t } }));
+      });
+    });
+    $m("pmDirect").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: Number($m("pmAmt").value || 0) } }));
+      });
+    });
+    $m("pmCopy").addEventListener("click", () => copyAndSms($m("pmMsg").value, ct.tenant_phone || (r.tenant && r.tenant.phone)));
+    body.querySelectorAll(".pr[data-pay]").forEach((row) => {
+      row.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
+        Bass.withLock(inp, async () => {
+          const res = await Bass.api(APP_ID, "/payments/edit", {
+            method: "POST",
+            body: {
+              branch: currentBranch, pay_id: row.dataset.pay,
+              paid_date: row.querySelector(".pr-date").value,
+              rent_amount: Number(row.querySelector(".pr-rent").value || 0),
+              maintenance_amount: Number(row.querySelector(".pr-fee").value || 0),
+            },
+          });
+          Bass.updateAppAlert("success", res.message);
+          delete receiptMsg[no];
+          await refresh();
+          showPayModal(no);
+        }).catch(() => {});
+      }));
+    });
+  }
+
+  // ② 계약내용: 보기·고치기 + 계약서 사진 + (잔금 확인 전이면) 도어락 교부
+  function showContractModal(no) {
+    const r = roomOf(no);
+    const ct = r && r.contract;
+    if (!ct) return;
+    const hasPhoto = Boolean(ct.contract_photo_file);
+    const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}` : "";
+    const f = (id, label, val, type) => `<label class="r3-fld">${label}<input id="${id}" class="bass-input" type="${type || "text"}" value="${Bass.escapeHtml(String(val ?? ""))}"></label>`;
+    const body = openModal(`📄 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 계약내용`, `
+      <div class="r3-grid">
+        ${f("cmIn", "전입일", ct.move_in_date, "date")}
+        ${f("cmEx", "만기일", ct.expiry_date, "date")}
+        ${f("cmDep", "보증금(원)", ct.deposit, "number")}
+        ${f("cmRent", "월세(원)", ct.monthly_rent, "number")}
+        ${f("cmFee", "관리비(원)", ct.maintenance_fee, "number")}
+        ${f("cmTel", "임차인 전화번호", ct.tenant_phone || (r.tenant && r.tenant.phone) || "", "tel")}
+      </div>
+      <label class="r3-fld" style="margin-top:8px;">메모<textarea id="cmMemo" class="bass-input" rows="3">${Bass.escapeHtml(ct.lessor_memo || "")}</textarea></label>
+      <div class="bass-muted" style="font-size:12.5px;margin:8px 0;">
+        계약일 ${Bass.escapeHtml(ct.contract_date || "-")} · ${Bass.escapeHtml(ct.lease_type || "")} · ${Bass.escapeHtml(ct.pay_timing || "")}
+        ${ct.fixed_date_no ? ` · 접수번호 <code>${Bass.escapeHtml(ct.fixed_date_no)}</code>` : " · 전월세신고 확인 필요"}
+      </div>
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+        <button id="cmSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
+        ${hasPhoto ? `<a class="bass-btn bass-btn--sm" href="${photoUrl}" target="_blank" rel="noopener">📸 계약서 사진 보기</a>` : ""}
+        <button id="cmPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 ${hasPhoto ? "다시 " : ""}등록</button>
+        <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 서식 계약</a>
+      </div>
+      ${ct.keys_released === false ? `<div class="bass-card" style="margin-top:12px;padding:10px;">
+        <div style="font-size:13px;margin-bottom:6px;">🔑 잔금 입금 확인 전입니다. 내 은행 앱에서 직접 확인한 뒤 도어락 정보를 열어 주세요.</div>
+        <button id="cmKeys" class="bass-btn bass-btn--sm bass-btn--primary" type="button">🔑 잔금 확인 & 도어락 교부</button></div>` : ""}`);
+    $m("cmSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/contracts/edit", {
+          method: "POST",
+          body: {
+            branch: currentBranch, contract_id: ct.id,
+            deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
+            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, memo: $m("cmMemo").value,
+          },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+        showContractModal(no);
+      });
+    });
+    $m("cmPhoto").addEventListener("click", () => { closeModal(); brokerTargetRoomNo = no; switchTab("broker"); });
+    const kb = $m("cmKeys");
+    if (kb) {
+      kb.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const bal = Math.max(Number(ct.deposit || 0) - Number(ct.contract_deposit || 0), 0);
+          const ok = window.confirm(`${no}호 입주일(${ct.move_in_date || "-"})의 잔금 ${fmtWon(bal)}이 내 은행 앱의 실제 입금 내역에 들어온 것을 직접 확인했습니까?\n\n확인하면 도어락·공동현관 정보가 임차인 화면에 바로 열립니다. (임차인이 보여 주는 이체 완료 화면은 위조될 수 있습니다)`);
+          if (!ok) return;
+          const res = await Bass.api(APP_ID, `/rooms/${r.id}/release-keys`, { method: "POST", body: { balance_checked: true } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+          showContractModal(no);
+        });
+      });
+    }
+    void body;
+  }
+
+  // ③ 만기통보: 전출계획 확인 문자 → 결과 기록 → (전출 의사 없으면) 5% 이내 갱신 안내 문자
+  function showExpiryModal(no) {
+    const r = roomOf(no);
+    const ct = r && r.contract;
+    if (!ct) return;
+    const ew = r.expiry_window;
+    const ec = r.expiry_check;
+    const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
+    const deadline = ew && ew.notice_deadline_date ? `${dotDate(ew.notice_deadline_date)}까지 ` : "";
+    const msg1 = `[${bldgName()}] ${no}호 ${ct.tenant_name}님 안녕하세요, 임대인입니다.\n계약 만기가 ${dotDate(ct.expiry_date)}입니다. 만기 후 이사(전출) 계획이 있으신지 ${deadline}알려 주시기 바랍니다.\n이사 계획이 없으시면 갱신 조건을 따로 안내드리겠습니다.`;
+    const stay = Boolean(ec && (ec.tenant_plan === "STAY" || /RENEWAL/.test(ec.status || "")));
+    const moveOut = Boolean(ec && ec.tenant_plan === "MOVE_OUT");
+    const dep0 = (ec && ec.proposed_deposit) || r.deposit;
+    const rent0 = (ec && ec.proposed_monthly_rent) || r.monthly_rent;
+    const fee0 = (ec && ec.proposed_maintenance_fee != null && ec.status !== "AWAITING_TENANT") ? ec.proposed_maintenance_fee : r.maintenance_fee;
+    const maxDep = Math.round(Number(r.deposit || 0) * 1.05);
+    const maxRent = Math.round(Number(r.monthly_rent || 0) * 1.05);
+    const body = openModal(`📅 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 만기통보`, `
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">만기 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${ew ? ` · 법정 통지기간 ${Bass.escapeHtml(dotDate(ew.notice_open_date))} ~ ${Bass.escapeHtml(dotDate(ew.notice_deadline_date))}` : ""}
+        ${ec ? `<br>현재 상태: <strong>${Bass.escapeHtml(expiryStatusLabel(ec))}</strong>` : "<br>통보 실적이 없습니다."}</div>
+      <div class="r3-lbl">① 전출계획 확인 메시지</div>
+      ${msgOf("exMsg1", msg1)}
+      <button id="exCopy1" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin:6px 0 12px;">📋 복사 → 임차인 문자창</button>
+      <div class="r3-lbl">② 임차인 답변</div>
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <button id="exStay" class="bass-btn bass-btn--sm" type="button">🏠 전출 의사 없음</button>
+        <input id="exOutDate" class="bass-input" type="date" style="width:150px;" value="${Bass.escapeHtml(ct.expiry_date || "")}" aria-label="전출 예정일">
+        <button id="exOut" class="bass-btn bass-btn--sm" type="button">📦 전출 예정</button>
+      </div>
+      ${moveOut ? `<div class="bass-muted" style="font-size:12.5px;">📦 전출 예정(${Bass.escapeHtml(ec.planned_move_out_date || "")})으로 기록되어 있습니다. 전출 정산은 [전출] 버튼에서 하세요.</div>` : ""}
+      ${stay ? `
+        <div class="r3-lbl" style="margin-top:12px;">③ 계약 갱신 안내 (법정 5% 이내)</div>
+        <div class="r3-grid">
+          <label class="r3-fld">보증금(원) <span class="bass-muted">최대 ${fmtWon(maxDep)}</span><input id="exDep" class="bass-input" type="number" value="${dep0}"></label>
+          <label class="r3-fld">월세(원) <span class="bass-muted">최대 ${fmtWon(maxRent)}</span><input id="exRent" class="bass-input" type="number" value="${rent0}"></label>
+          <label class="r3-fld">관리비(원)<input id="exFee" class="bass-input" type="number" value="${fee0}"></label>
+          <label class="r3-fld">연장 개월<input id="exTerm" class="bass-input" type="number" value="${(ec && ec.proposed_term_months) || 12}"></label>
+        </div>
+        ${msgOf("exMsg2", "")}
+        <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
+          <button id="exCopy2" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
+          <button id="exSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📝 갱신 예고 기록·앱 전달</button>
+        </div>` : ""}`);
+    void body;
+    $m("exCopy1").addEventListener("click", async () => {
+      await copyAndSms($m("exMsg1").value, phone);
+      if (!ec) {   // 통보 실적 기록(임차인 마이홈에도 회신 요청이 뜬다)
+        try {
+          await Bass.api(APP_ID, "/expiry/request-check", { method: "POST", body: { branch: currentBranch, room_no: no } });
+          await refresh();
+          showExpiryModal(no);
+        } catch (e) { Bass.showError(e); }
+      }
+    });
+    const plan = (p) => function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/expiry/record-plan", {
+          method: "POST",
+          body: {
+            branch: currentBranch, room_no: no, tenant_plan: p,
+            planned_move_out_date: p === "MOVE_OUT" ? ($m("exOutDate").value || ct.expiry_date || "") : "",
+            tenant_memo: p === "MOVE_OUT" ? "임차인 문자 답변 — 만기 퇴실 예정" : "임차인 문자 답변 — 전출의사 없음(거주 연장 희망)",
+            prelist_vacancy: true,
+          },
+        });
+        Bass.updateAppAlert(res.level || "success", res.message, res.hint);
+        await refresh();
+        showExpiryModal(no);
+      });
+    };
+    $m("exStay").addEventListener("click", plan("STAY"));
+    $m("exOut").addEventListener("click", plan("MOVE_OUT"));
+    if (stay) {
+      const compose = () => {
+        const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
+        $m("exMsg2").value = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n(법정 증액 한도 5% 이내입니다.) 의견 있으시면 알려 주세요.`;
+      };
+      ["exDep", "exRent", "exFee", "exTerm"].forEach((id) => $m(id).addEventListener("input", compose));
+      compose();
+      $m("exCopy2").addEventListener("click", () => copyAndSms($m("exMsg2").value, phone));
+      $m("exSend").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
+            method: "POST",
+            body: {
+              branch: currentBranch, room_no: no,
+              proposed_deposit: Number($m("exDep").value || 0), proposed_monthly_rent: Number($m("exRent").value || 0),
+              proposed_maintenance_fee: Number($m("exFee").value || 0), proposed_term_months: Number($m("exTerm").value || 12),
+              renewal_note: "전출의사가 없으셔서 연장 재계약 조건을 사전 예고드립니다.", open_cosign_session: true,
+            },
+          });
+          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
+          await refresh();
+          showExpiryModal(no);
+        });
+      });
+    }
+  }
+
+  // ④ 전출: 임차인 정보 · 공제 후 환불액 문자 요약 → 복사 → 정산 확정(공실 매물 자동 공개)
+  function showMoveOutModal(no) {
+    const r = roomOf(no);
+    const ct = r && r.contract;
+    if (!ct || !r.ledger) return;
+    const unpaid = Number(r.ledger.total_unpaid || 0);
+    const dep = Number(ct.deposit || 0);
+    const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
+    const num = (id) => Number(($m(id) && $m(id).value) || 0);
+    const body = openModal(`📦 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 전출`, `
+      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">
+        👤 <strong>${Bass.escapeHtml(ct.tenant_name || "")}</strong> ${phone ? `· ${Bass.escapeHtml(phone)}` : ""}<br>
+        전입 ${Bass.escapeHtml(dotDate(ct.move_in_date))} · 만기 ${Bass.escapeHtml(dotDate(ct.expiry_date))}
+      </div>
+      <div class="r3-grid">
+        <label class="r3-fld">전출일<input id="moDate" class="bass-input" type="date" value="${Bass.escapeHtml(dash.today || "")}"></label>
+        <label class="r3-fld">임차보증금<input class="bass-input" type="text" value="${fmtWon(dep)}" readonly></label>
+        <label class="r3-fld">체납액 <span class="bass-muted">(자동)</span><input class="bass-input" type="text" value="${fmtWon(unpaid)}" readonly></label>
+        <label class="r3-fld">청소비(원)<input id="moClean" class="bass-input" type="number" value="70000"></label>
+        <label class="r3-fld">체납 공과금(원)<input id="moUtil" class="bass-input" type="number" value="0"></label>
+        <label class="r3-fld">파손 복구비(원)<input id="moDmg" class="bass-input" type="number" value="0"></label>
+      </div>
+      ${msgOf("moMsg", "")}
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
+        <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
+        <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">✅ 정산 확정 · 임대 매물 등록</button>
+      </div>
+      <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산 확정을 누르면 보증금 반환을 마친 것으로 보고 호실이 공실이 되어 홈페이지 임대 매물로 공개됩니다.</div>`);
+    void body;
+    const refund = () => Math.max(0, dep - unpaid - num("moClean") - num("moUtil") - num("moDmg"));
+    const compose = () => {
+      const lines = [`[${bldgName()}] ${no}호 ${ct.tenant_name}님 전출 정산 안내 (전출일 ${dotDate($m("moDate").value)})`, `임차보증금 ${fmtWon(dep)}`];
+      [["체납 월세", unpaid], ["청소비", num("moClean")], ["체납 공과금", num("moUtil")], ["파손 복구비", num("moDmg")]].forEach(([k, v]) => { if (v > 0) lines.push(`- ${k} ${fmtWon(v)}`); });
+      lines.push(`환불 예정액 ${fmtWon(refund())}`, "확인 후 말씀해 주시면 등록된 계좌로 보내드리겠습니다.");
+      $m("moMsg").value = lines.join("\n");
+    };
+    ["moDate", "moClean", "moUtil", "moDmg"].forEach((id) => $m(id).addEventListener("input", compose));
+    compose();
+    $m("moCopy").addEventListener("click", () => copyAndSms($m("moMsg").value, phone));
+    $m("moDone").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        if (!window.confirm(`${no}호 정산을 확정할까요?\n환불 예정액 ${fmtWon(refund())}을 임차인에게 돌려준 뒤 눌러 주세요. 호실이 공실이 되고 임대 매물로 공개됩니다.`)) return;
+        const calc = await Bass.api(APP_ID, "/checkout/calculate", {
+          method: "POST",
+          body: { branch: currentBranch, room_no: no, utility_settlement: num("moUtil"), cleaning_fee: num("moClean"), damage_restoration_fee: num("moDmg") },
+        });
+        const res = await Bass.api(APP_ID, `/checkout/${calc.settlement.id}/complete`, { method: "POST", body: { branch: currentBranch } });
+        Bass.updateAppAlert("success", res.message);
+        closeModal();
+        await refresh();
+      });
+    });
+  }
+
+  function renderRoomPanel() {
+    const box = document.getElementById("roomPanel");
+    const r = roomOf(selRoomNo);
+    if (!box) return;
+    if (!r) { box.innerHTML = ""; return; }
+    const ct = r.contract;
+    const lg = r.ledger;
+    if (!(r.is_occupied && lg && ct)) {
+      box.innerHTML = `<div class="room-card">
+        <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
+          <div><strong style="font-size:17px;">${Bass.escapeHtml(r.room_no)}호</strong> <span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 · 매물 공개중" : "공실 · 비공개"}</span></div>
+          <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+            <button class="bass-btn bass-btn--sm btn-pub-toggle" data-id="${r.id}" data-pub="${!r.is_published}" type="button">${r.is_published ? "비공개 전환" : "직거래 매물 공개"}</button>
+            <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개계약 사진등록</button>
+            <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 서식 계약</a>
+          </div>
+        </div>
+        <div class="bass-muted" style="font-size:13px;margin-top:6px;">보증금 ${fmtWon(r.deposit)} · 월세 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}</div>
+      </div>`;
+      box.querySelectorAll(".btn-pub-toggle").forEach((btn) => btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/publish`, { method: "POST", body: { is_published: btn.dataset.pub === "true" } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+        });
+      }));
+      box.querySelectorAll(".btn-go-broker").forEach((btn) => btn.addEventListener("click", () => { brokerTargetRoomNo = btn.dataset.room || ""; switchTab("broker"); }));
+      return;
+    }
+    const ew = r.expiry_window;
+    const ec = r.expiry_check;
+    const inWindow = Boolean(ew && ew.in_6_to_2_months_window);
+    const need = inWindow && !ec;     // 통지 구간인데 통보 실적이 없으면 노란색
+    const n = unpaidCount(r);
+    const bs = r.billing_schedule;
+    box.innerHTML = `<div class="room-card" style="${need ? "border-color:var(--warn);" : ""}">
+      <div class="rc-head">
+        <div class="rc-title"><strong>${Bass.escapeHtml(r.room_no)}호</strong> <span>${Bass.escapeHtml(ct.tenant_name || "")}</span></div>
+        <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span>
+      </div>
+      <div class="rc-btns">
+        <button class="bass-btn bass-btn--sm" data-act="pay" type="button">수납내역</button>
+        <button class="bass-btn bass-btn--sm" data-act="contract" type="button">계약내용</button>
+        <button class="bass-btn bass-btn--sm ${need ? "rc-warn" : ""}" data-act="expiry" type="button">만기통보</button>
+        <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
+      </div>
+      <div class="rc-info">
+        보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
+        만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
+      </div></div>`;
+    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal };
+    box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
+  }
+
   function renderLedgerTab() {
     const rooms = dash.rooms || [];
     const noticeRooms = dash.expiry_notice_rooms || [];
+    if (!roomOf(selRoomNo)) {
+      const late = rooms.find((x) => unpaidCount(x) > 0);
+      selRoomNo = (late || rooms[0] || {}).room_no || "";
+    }
+    const opt = (x) => {
+      const n = unpaidCount(x);
+      const who = x.is_occupied && x.contract ? ` ${x.contract.tenant_name || ""}` : " 공실";
+      return `<option value="${Bass.escapeHtml(x.room_no)}" ${x.room_no === selRoomNo ? "selected" : ""}>${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}${n > 0 ? ` · 미납 ${n}` : ""}</option>`;
+    };
     elTabContent.innerHTML = `
-      <div class="bass-card" style="margin-bottom:14px;">
-        <h3>📩 은행 입금 알림문자 붙여넣기 (자동 파싱 & FIFO 순차 상계)</h3>
-        <p class="bass-muted" style="font-size:13px;">가장 오래된 미납월부터 순차 상계하며, 동일 입금 재등록은 자동 차단(황색 배너)됩니다.</p>
-        <div class="bass-row" style="margin-top:8px;">
-          <input id="smsInput" class="bass-input" style="flex:1;" value="[신한은행] 10/28 202호 정서연 570,000원 입금 잔액 15,200,000원">
-          <button id="btnPasteSms" class="bass-btn bass-btn--primary" type="button">⚡ 문자 읽기 & 즉시 수납</button>
-        </div>
-      </div>
-
-      ${rooms.map((r) => {
-        const lg = r.ledger;
-        const ct = r.contract;
-        const ew = r.expiry_window;
-        const ec = r.expiry_check;
-        const bs = r.billing_schedule;
-        const bns = r.billing_notices || [];
-        const latestBn = bns.length > 0 ? bns[0] : null;
-        const inWindow = Boolean(ew && ew.in_6_to_2_months_window);
-        const defaultExpOpen = inWindow || Boolean(ec);
-        const isExpiryOpen = openExpiryRooms.has(r.room_no) || (defaultExpOpen && !closedExpiryRooms.has(r.room_no));
-        const maxDep5Pct = Math.round(Number(r.deposit || 0) * 1.05);
-        const maxRent5Pct = Math.round(Number(r.monthly_rent || 0) * 1.05);
-        const propDep = (ec && ec.proposed_deposit) ? ec.proposed_deposit : r.deposit;
-        const propRent = (ec && ec.proposed_monthly_rent) ? ec.proposed_monthly_rent : r.monthly_rent;
-        const propMaint = (ec && ec.proposed_maintenance_fee != null && ec.status !== "AWAITING_TENANT") ? ec.proposed_maintenance_fee : r.maintenance_fee;
-        const propTerm = (ec && ec.proposed_term_months) ? ec.proposed_term_months : 12;
-
-        const hasPhoto = Boolean(ct && ct.contract_photo_file);
-        const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}` : "";
-        const isPhotoOpen = openPhotoRooms.has(r.room_no);
-        const isPdfPhoto = hasPhoto && String(ct.contract_photo_file).toLowerCase().endsWith(".pdf");
-        const brokerAgency = (ct && ct.broker_info && ct.broker_info.agency_name) || "공인중개사사무소";
-        return `
-          <div class="room-card" style="${inWindow ? "border-color:var(--warn);" : ""}">
-            <div class="bass-row" style="justify-content:space-between;margin-bottom:8px;">
-              <div>
-                <strong style="font-size:17px;">${Bass.escapeHtml(r.room_no)}호</strong>
-                <span class="bass-muted" style="font-size:13px;"> · ${Bass.escapeHtml(r.room_category)} · 보 ${fmtWon(r.deposit)} / 월 ${fmtWon(r.monthly_rent)} / 관 ${fmtWon(r.maintenance_fee)} (${Bass.escapeHtml(r.pay_timing)})</span>
-                ${hasPhoto ? ` <span class="bass-badge bass-badge--info">📸 중개 지면계약 (${Bass.escapeHtml(brokerAgency)})</span>` : ""}
-                ${inWindow ? ` <span class="bass-badge bass-badge--warn">⚖️ 만기 6~2개월전 통지구간 (마감 ${Bass.escapeHtml(ew.notice_deadline_date)})</span>` : ""}
-                ${ec ? ` <span class="bass-badge ${ec.status === "RENEWAL_ACKNOWLEDGED" || ec.status === "STAY_CONFIRMED" ? "bass-badge--ok" : "bass-badge--info"}">${Bass.escapeHtml(expiryStatusLabel(ec))}</span>` : ""}
-              </div>
-              <div class="bass-row">
-                ${r.is_occupied
-                  ? `<span class="bass-badge ${lg && lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg && lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "완납(정상)"}</span>
-                     <button class="bass-btn bass-btn--sm btn-toggle-expiry" data-room="${r.room_no}" data-default-open="${defaultExpOpen}" type="button">${isExpiryOpen ? "📅 만기예고 접기" : "📅 전출확인·연장예고"}</button>
-                     ${hasPhoto ? `<button class="bass-btn bass-btn--sm btn-toggle-photo" data-room="${r.room_no}" type="button">${isPhotoOpen ? "🖼️ 계약서 닫기" : "📸 첨부 계약서 보기"}</button>` : ""}
-                     ${ct && ct.keys_released === false ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-release-keys" data-id="${r.id}" data-room="${r.room_no}" data-bal="${Math.max(Number(ct.deposit || 0) - Number(ct.contract_deposit || 0), 0)}" data-movein="${Bass.escapeHtml(ct.move_in_date || "")}" type="button">🔑 잔금 확인 & 도어락 교부</button> ${(() => { const br = ct.balance_registry || {}; return br.changed ? `<span class="bass-badge bass-badge--err">⚠️ 임차인이 잔금일 등기부 변동 신고</span>` : (br.checked_at ? `<span class="bass-badge bass-badge--ok">✅ 임차인 등기부 확인 완료</span>` : `<span class="bass-badge bass-badge--warn">⏳ 임차인 잔금일 등기부 확인 대기</span>`); })()}` : ""}
-                     <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개 재계약 등록</button>
-                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
-                  : `<span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 매물 공개중" : "공실 비공개"}</span>
-                     <button class="bass-btn bass-btn--sm btn-pub-toggle" data-id="${r.id}" data-pub="${!r.is_published}" type="button">${r.is_published ? "비공개 전환" : "직거래 매물 공개"}</button>
-                     <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개계약 사진등록</button>
-                     <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 기존 서식 계약</a>`
-                }
-              </div>
-            </div>
-            ${r.is_occupied && lg ? `
-              <div style="font-size:13px;margin-bottom:8px;line-height:1.6;">
-                👤 입주자: <strong>${Bass.escapeHtml(lg.tenant_name)}</strong> (${Bass.escapeHtml((ct && ct.move_in_date) || "")} ~ ${Bass.escapeHtml((ct && ct.expiry_date) || "")} · 만기 D-${lg.days_to_expiry ?? "-"})
-                ${ct && ct.fixed_date_no ? ` · 접수번호 <code>${Bass.escapeHtml(ct.fixed_date_no)}</code> <span class="bass-muted">(법적 확정일자는 입주일에 주민센터·등기소에서)</span>` : ` · <span style="color:var(--warn);">전월세신고 확인필요</span>`}
-                ${r.pre_moveout_notice ? ` · <span class="bass-badge bass-badge--warn">📢 만기퇴실 사전공실 노출중</span>` : ""}
-                ${bs ? `<br>💳 약정 납입일: <strong>매월 ${bs.payment_day}일</strong>(=입주일) · 차기 납입일 <code>${Bass.escapeHtml(bs.upcoming_due_date)}</code> (D-${bs.days_until_due})
-                  ${bs.is_pre_due_3d ? ` <span class="bass-badge bass-badge--info">🔔 납입 3일전 통보 대상</span>` : ""}
-                  ${bs.is_overdue_eligible ? ` <span class="bass-badge bass-badge--err">🚨 납입일(${Bass.escapeHtml(bs.past_due_date)}) +${bs.days_past_due}일 미납</span>` : ""}
-                  ${latestBn ? ` · <span class="bass-muted">최근통보: ${latestBn.notice_type === "OVERDUE_1D" ? "미납통보" : "사전통보"}(${Bass.escapeHtml(latestBn.billing_ym)}, ${latestBn.status === "RESOLVED_PAID" ? "완납해소" : (latestBn.status === "ACKNOWLEDGED" ? "확인됨" : "발송됨")})</span>` : ""}
-                ` : ""}
-              </div>
-              ${isExpiryOpen ? `
-                <div class="bass-card" style="margin:8px 0 10px;padding:12px;border:1px solid ${inWindow ? "var(--warn)" : "var(--border)"};">
-                  <div class="bass-row" style="justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
-                    <div style="font-size:13px;">
-                      <strong>📅 STEP 1. 만기 6~2개월 전 전출계획 확인</strong>
-                      ${ew ? `<span class="bass-muted"> · 법정 통지기간 ${Bass.escapeHtml(ew.notice_open_date)} ~ ${Bass.escapeHtml(ew.notice_deadline_date)} (마감 D-${ew.days_to_notice_deadline})</span>` : ""}
-                    </div>
-                    <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
-                      <button class="bass-btn bass-btn--sm btn-req-moveout-check" data-room="${r.room_no}" type="button">📩 임차인에게 전출계획 확인 요청</button>
-                      <button class="bass-btn bass-btn--sm btn-record-plan" data-room="${r.room_no}" data-plan="STAY" data-exp="${Bass.escapeHtml((ct && ct.expiry_date) || "")}" type="button">🏠 전출의사 없음 기록</button>
-                      <button class="bass-btn bass-btn--sm btn-record-plan" data-room="${r.room_no}" data-plan="MOVE_OUT" data-exp="${Bass.escapeHtml((ct && ct.expiry_date) || "")}" type="button">📦 만기전출(사전공실) 기록</button>
-                    </div>
-                  </div>
-                  ${ec && ec.tenant_memo ? `<div class="bass-muted" style="font-size:12px;margin-bottom:8px;">💬 임차인 회신 메모: ${Bass.escapeHtml(ec.tenant_memo)}</div>` : ""}
-
-                  ${!ec || ec.tenant_plan !== "MOVE_OUT" ? `
-                    <div style="border-top:1px dashed var(--border);padding-top:10px;margin-top:6px;">
-                      <div style="font-size:13px;margin-bottom:6px;">
-                        <strong>📝 STEP 2. 전출의사 없을 때 연장 재계약 예고 발송</strong>
-                        <span class="bass-muted"> · 법정 5% 상한(보증금 최대 ${fmtWon(maxDep5Pct)} / 월세 최대 ${fmtWon(maxRent5Pct)}) 자동 검증</span>
-                      </div>
-                      <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
-                        <label style="font-size:12px;">보증금(원)
-                          <input class="bass-input exp-dep" data-room="${r.room_no}" type="number" style="width:135px;" value="${propDep}">
-                        </label>
-                        <label style="font-size:12px;">월세(원)
-                          <input class="bass-input exp-rent" data-room="${r.room_no}" type="number" style="width:120px;" value="${propRent}">
-                        </label>
-                        <label style="font-size:12px;">관리비(원)
-                          <input class="bass-input exp-maint" data-room="${r.room_no}" type="number" style="width:105px;" value="${propMaint}">
-                        </label>
-                        <label style="font-size:12px;">연장개월
-                          <input class="bass-input exp-term" data-room="${r.room_no}" type="number" style="width:75px;" value="${propTerm}">
-                        </label>
-                        <label style="font-size:12px;flex:1;min-width:170px;">예고 안내문구
-                          <input class="bass-input exp-note" data-room="${r.room_no}" style="width:100%;" value="${Bass.escapeHtml((ec && ec.renewal_note) || "전출의사가 없으셔서 연장 재계약 조건을 사전 예고드립니다.")}">
-                        </label>
-                      </div>
-                      <div class="bass-row" style="justify-content:space-between;margin-top:8px;flex-wrap:wrap;gap:8px;">
-                        <label style="font-size:12.5px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                          <input type="checkbox" class="exp-cosign" data-room="${r.room_no}" checked>
-                          예고 조건으로 공동 재계약을 함께 열어 임차인 마이홈에 전달
-                        </label>
-                        <div class="bass-row" style="gap:6px;">
-                          ${ec && ec.cosign_session_id ? `
-                            <a class="bass-btn bass-btn--sm" href="/rent3_contract/?session=${encodeURIComponent(ec.cosign_session_id)}&role=lessor">🤝 예고된 재계약방 입장 (코드 ${Bass.escapeHtml(ec.cosign_session_code)})</a>
-                          ` : ""}
-                          <button class="bass-btn bass-btn--sm bass-btn--primary btn-send-renewal-preview" data-room="${r.room_no}" type="button">📝 연장 재계약 예고 발송</button>
-                        </div>
-                      </div>
-                    </div>
-                  ` : `
-                    <div class="bass-muted" style="font-size:12.5px;border-top:1px dashed var(--border);padding-top:8px;">
-                      📦 세입자가 만기 전출(${Bass.escapeHtml(ec.planned_move_out_date)})을 회신하여 임차인 공실 쇼케이스에 사전예약 매물로 자동 게시 중입니다. 세입자가 거주를 연장하기로 변경한 경우 위 <strong>[🏠 전출의사 없음 기록]</strong>을 누르면 즉시 연장 재계약 예고창이 열립니다.
-                    </div>
-                  `}
-                </div>
-              ` : ""}
-              ${hasPhoto && isPhotoOpen ? `
-                <div class="bass-card" style="margin:8px 0 10px;padding:12px;">
-                  <div class="bass-row" style="justify-content:space-between;">
-                    <div style="font-size:12.5px;">
-                      <strong>📸 첨부된 공인중개사 임대차계약서 사본</strong> · 중개업소: ${Bass.escapeHtml(brokerAgency)}
-                      ${ct.broker_info && ct.broker_info.agent_name ? ` (대표: ${Bass.escapeHtml(ct.broker_info.agent_name)})` : ""}
-                      · 무결성 SHA-256: <code>${Bass.escapeHtml((ct.integrity_hash || "").slice(0, 14))}...</code>
-                    </div>
-                    <a class="bass-btn bass-btn--sm" href="${photoUrl}" target="_blank" rel="noopener">🔍 원본 새창 열기</a>
-                  </div>
-                  ${isPdfPhoto
-                    ? `<div class="bass-muted" style="margin-top:8px;font-size:13px;">PDF 계약서 스캔본이 보관되어 있습니다. 우측 상단 [원본 새창 열기]로 열람하세요.</div>`
-                    : `<img class="contract-photo-preview" src="${photoUrl}" alt="${Bass.escapeHtml(r.room_no)}호 공인중개사 계약서 사본">`
-                  }
-                </div>
-              ` : ""}
-              <div style="margin-bottom:8px;">
-                ${(() => {
-                  // 오래된 입주자는 달이 수십 개 — 최근 12개월과 미납·부분납부 달만 보이고, 나머지 완납 달은 접어 둔다
-                  const all = lg.months || [];
-                  const chip = (m) => `<span class="month-chip month-${m.status}">${m.ym}: ${Bass.escapeHtml(m.note)}</span>`;
-                  const recent = all.slice(-12);
-                  const older = all.slice(0, Math.max(all.length - 12, 0));
-                  const olderUnpaid = older.filter((m) => m.unpaid > 0);
-                  const olderOk = older.filter((m) => !(m.unpaid > 0));
-                  return olderUnpaid.map(chip).join("") + recent.map(chip).join("") +
-                    (olderOk.length ? `<details style="margin-top:4px;"><summary class="bass-muted" style="font-size:12.5px;cursor:pointer;min-height:32px;">이전 완납 ${olderOk.length}개월 보기</summary>${olderOk.map(chip).join("")}</details>` : "");
-                })()}
-              </div>
-              <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
-                <div class="bass-row">
-                  <input class="bass-input manual-amt" data-room="${r.room_no}" type="number" style="width:160px;" value="${r.monthly_rent + r.maintenance_fee}" placeholder="수납액(원)">
-                  <button class="bass-btn bass-btn--sm btn-manual-pay" data-room="${r.room_no}" type="button">💰 직접 FIFO 수납</button>
-                </div>
-                <div class="bass-row" style="gap:6px;">
-                  <button class="bass-btn bass-btn--sm btn-send-billing-notice" data-room="${r.room_no}" data-type="PRE_DUE_3D" type="button">🔔 납입일 사전통보</button>
-                  <button class="bass-btn bass-btn--sm btn-send-billing-notice" data-room="${r.room_no}" data-type="OVERDUE_1D" type="button">🚨 납입+1일 미납통보</button>
-                </div>
-              </div>
-            ` : `<div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.status_description)}</div>`}
-          </div>
-        `;
-      }).join("")}
+      <label class="r3-lbl" for="roomPick">호실 선택</label>
+      <select id="roomPick" class="bass-select" style="margin-bottom:10px;">${rooms.map(opt).join("")}</select>
+      <div id="roomPanel"></div>
+      <div class="bass-muted" style="font-size:12.5px;margin:4px 0 14px;">자세한 사용법은 <a href="manual.html">이용 매뉴얼</a>을 보세요.</div>
 
       <details style="margin-bottom:14px;">
         <summary style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 안내 (만기 예고 · 납입일 사전/미납 통보)</summary>
@@ -421,155 +710,8 @@
         </div>
       </details>
     `;
-
-    document.getElementById("btnPasteSms").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const sms = document.getElementById("smsInput").value.trim();
-        const res = await Bass.api(APP_ID, "/payments/sms-paste", {
-          method: "POST",
-          body: { branch: currentBranch, sms_text: sms },
-        });
-        Bass.updateAppAlert(res.level || "success", res.message);
-        await refresh();
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-release-keys").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const ok = window.confirm(`${btn.dataset.room}호 입주일(${btn.dataset.movein || "-"})의 잔금 ${fmtWon(Number(btn.dataset.bal))}이 내 은행 앱의 실제 입금 내역에 들어온 것을 직접 확인했습니까?
-
-확인하면 도어락·공동현관 정보가 임차인 화면에 바로 열립니다. (임차인이 보여 주는 이체 완료 화면은 위조될 수 있습니다)`);
-          if (!ok) return;
-          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/release-keys`, { method: "POST", body: { balance_checked: true } });
-          Bass.updateAppAlert("success", res.message);
-          await refresh();
-        });
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-pub-toggle").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/publish`, {
-            method: "POST",
-            body: { is_published: btn.dataset.pub === "true" },
-          });
-          Bass.updateAppAlert("success", res.message);
-          await refresh();
-        });
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-manual-pay").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const roomNo = btn.dataset.room;
-          const inp = elTabContent.querySelector(`.manual-amt[data-room="${roomNo}"]`);
-          const res = await Bass.api(APP_ID, "/payments/collect", {
-            method: "POST",
-            body: { branch: currentBranch, room_no: roomNo, amount: Number(inp.value || 0) },
-          });
-          Bass.updateAppAlert(res.level || "success", res.message);
-          await refresh();
-        });
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-go-broker").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        brokerTargetRoomNo = btn.dataset.room || "";
-        switchTab("broker");
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-toggle-photo").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const rm = btn.dataset.room;
-        if (openPhotoRooms.has(rm)) openPhotoRooms.delete(rm);
-        else openPhotoRooms.add(rm);
-        renderLedgerTab();
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-toggle-expiry").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const rm = btn.dataset.room;
-        const defOpen = btn.dataset.defaultOpen === "true";
-        const currentlyOpen = openExpiryRooms.has(rm) || (defOpen && !closedExpiryRooms.has(rm));
-        if (currentlyOpen) {
-          openExpiryRooms.delete(rm);
-          if (defOpen) closedExpiryRooms.add(rm);
-        } else {
-          closedExpiryRooms.delete(rm);
-          openExpiryRooms.add(rm);
-        }
-        renderLedgerTab();
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-req-moveout-check").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const res = await Bass.api(APP_ID, "/expiry/request-check", {
-            method: "POST",
-            body: { branch: currentBranch, room_no: btn.dataset.room },
-          });
-          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
-          await refresh();
-        });
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-record-plan").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const plan = btn.dataset.plan;
-          const res = await Bass.api(APP_ID, "/expiry/record-plan", {
-            method: "POST",
-            body: {
-              branch: currentBranch,
-              room_no: btn.dataset.room,
-              tenant_plan: plan,
-              planned_move_out_date: plan === "MOVE_OUT" ? (btn.dataset.exp || "") : "",
-              tenant_memo: plan === "MOVE_OUT" ? "임대인 유선 확인 — 만기 퇴실 예정" : "임대인 유선 확인 — 전출의사 없음(거주 연장 희망)",
-              prelist_vacancy: true,
-            },
-          });
-          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
-          await refresh();
-        });
-      });
-    });
-
-    elTabContent.querySelectorAll(".btn-send-renewal-preview").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const roomNo = btn.dataset.room;
-          const dep = Number(elTabContent.querySelector(`.exp-dep[data-room="${roomNo}"]`).value || 0);
-          const rent = Number(elTabContent.querySelector(`.exp-rent[data-room="${roomNo}"]`).value || 0);
-          const maint = Number(elTabContent.querySelector(`.exp-maint[data-room="${roomNo}"]`).value || 0);
-          const term = Number(elTabContent.querySelector(`.exp-term[data-room="${roomNo}"]`).value || 12);
-          const note = elTabContent.querySelector(`.exp-note[data-room="${roomNo}"]`).value.trim();
-          const openCosign = elTabContent.querySelector(`.exp-cosign[data-room="${roomNo}"]`).checked;
-          const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
-            method: "POST",
-            body: {
-              branch: currentBranch,
-              room_no: roomNo,
-              proposed_deposit: dep,
-              proposed_monthly_rent: rent,
-              proposed_maintenance_fee: maint,
-              proposed_term_months: term,
-              renewal_note: note,
-              open_cosign_session: openCosign,
-            },
-          });
-          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
-          await refresh();
-        });
-      });
-    });
+    document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
+    renderRoomPanel();
 
     const elRefDate = document.getElementById("billingRefDate");
     if (elRefDate) {
@@ -588,37 +730,13 @@
           const catchup = document.getElementById("chkCatchupOverdue").checked;
           const res = await Bass.api(APP_ID, "/billing-notices/auto-dispatch", {
             method: "POST",
-            body: {
-              branch: currentBranch,
-              as_of_date: refDate || null,
-              include_catchup_overdue: catchup,
-            },
+            body: { branch: currentBranch, as_of_date: refDate || null, include_catchup_overdue: catchup },
           });
           Bass.updateAppAlert(res.level || "success", res.message);
           await refresh();
         });
       });
     }
-
-    elTabContent.querySelectorAll(".btn-send-billing-notice").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const refDate = (document.getElementById("billingRefDate") && document.getElementById("billingRefDate").value) || null;
-          const res = await Bass.api(APP_ID, "/billing-notices/send", {
-            method: "POST",
-            body: {
-              branch: currentBranch,
-              room_no: btn.dataset.room,
-              notice_type: btn.dataset.type,
-              as_of_date: refDate,
-              force_pre_due: true,
-            },
-          });
-          Bass.updateAppAlert(res.level || "success", res.message, res.hint);
-          await refresh();
-        });
-      });
-    });
   }
 
   function buildSampleBrokerPaperDataUrl(roomObj) {
