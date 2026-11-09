@@ -22,7 +22,10 @@ def _bootstrap_if_empty(p) -> None:
     """비어 있는 Data Pool 을 설정 파일(scripts/fresh_pool.py 형식)로 채운다. 이미 건물이 있으면 아무것도 하지 않는다(덮어쓰지 않음)."""
     global _bootstrapping
     cfg_path = os.getenv("RENT3_BOOTSTRAP_CONFIG", "").strip()
-    if _bootstrapping or not cfg_path or not os.path.isfile(cfg_path) or Building.count() > 0 or Lessor.count() > 0:
+    if _bootstrapping or not cfg_path or Building.count() > 0 or Lessor.count() > 0:
+        return
+    if not os.path.isfile(cfg_path):
+        print(f"[bootstrap] RENT3_BOOTSTRAP_CONFIG={cfg_path} 파일이 없어 빈 Data Pool 을 채우지 못했습니다 (Coolify 의 File Mount 경로를 확인하세요).", flush=True)
         return
     import importlib.util
     import json
