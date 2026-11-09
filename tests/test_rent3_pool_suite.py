@@ -2470,5 +2470,52 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             shutil.rmtree(work, ignore_errors=True)
 
 
+    def test_46_ledger_import_from_paper_ledgers(self):
+        """46. scripts/ledger_import.py: 종이 장부 CSV → 세입자·계약(만기=입주일+1년 자동연장)·월별 수납. 장부의 미수·완납 처리·정정값이 원장과 맞는다."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Contract, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="ledger_imp_")
+        keep = self.temp_pool
+        try:
+            sin = ("호실,성명,입주일,보증금(만원),월세(만원),관리비(만원),입금액,전화,타명/연락처 메모,미수,납부일,비고(키)\n"
+                   "101,가나다,2026-05-24,200,후불 25,8,,010-1111-2222,,,24,1907\n"
+                   "103,라마바,2023-12-31,200,후불 28,5,,010-3333-4444 / 부인 010-5555-6666,부인,231,,1234\n"
+                   "404,사아자,2017-04-14,300,선불 32,3,,010-7777-8888,,35,,0000\n")
+            sun = ("호실,성명,전화번호,입주일,보증금(만원),월세(만원),1월 납부,2월 납부,3월 납부,4월 납부,5월 납부,6월 납부,7월 납부,8월 납부,9월 납부,10월 납부,11월 납부\n"
+                   "201,차카타,8856-4915,2021-02-01,500,50,2/2,3/3,4/11,5/2,8/2,7/6,8/24,9/24,10/4,,\n"
+                   "404,파하갑,5349-2190,2020-05-14,500,60,3/31,////,,,,,,,,,\n")
+            open(os.path.join(work, "sin.csv"), "w", encoding="utf-8").write(sin)
+            open(os.path.join(work, "sun.csv"), "w", encoding="utf-8").write(sun)
+            cfg = {"lessors": [
+                {"username": "lsin", "password": "Sinbi#Pass99", "name": "신비", "phone": "01011110001", "branch": "ls1",
+                 "building": {"name": "가빌", "address": "a", "ledger": {"format": "sinbi", "csv": "sin.csv"}}},
+                {"username": "lsun", "password": "Sunho#Pass99", "name": "선호", "phone": "01011110002", "branch": "ls2",
+                 "building": {"name": "나빌", "address": "b", "ledger": {"format": "sunho", "csv": "sun.csv", "overrides": {"404": {"settle_through": "2026-10", "deposit": 1000}}}}}]}
+            cfgp = os.path.join(work, "c.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            pool_dir = os.path.join(work, "pool")
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "fresh_pool.py"), "--config", cfgp, "--pool-dir", pool_dir],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            use_pool_dir(pool_dir)
+            g = lambda cid: Contract.get(cid)
+            c103 = g("ct_ls1_103")
+            self.assertEqual(c103.ledger(up_to_ym="2026-10")["total_unpaid"], 2_310_000)          # 장부의 미수 231만 원 = 7개월
+            self.assertEqual(c103.ledger(up_to_ym="2026-10")["oldest_unpaid_ym"], "2026-04")
+            self.assertEqual(g("ct_ls1_404").ledger(up_to_ym="2026-10")["total_unpaid"], 350_000)  # 미수 35
+            self.assertEqual(g("ct_ls1_101").ledger(up_to_ym="2026-10")["total_unpaid"], 0)       # 10월분 납부
+            self.assertEqual(g("ct_ls1_101").expiry_date, "2027-05-24")                          # 입주일 + 1년
+            self.assertEqual(c103.expiry_date, "2026-12-31")                                      # 3년째 만기가 오늘 이후
+            self.assertEqual(g("ct_ls2_404").deposit, 10_000_000)                                  # 정정값
+            self.assertEqual(g("ct_ls2_404").ledger(up_to_ym="2026-10")["total_unpaid"], 0)       # 완납 처리
+            self.assertEqual(g("ct_ls2_201").ledger(up_to_ym="2026-09")["total_unpaid"], 0)       # 9월분을 10/4 납부(후불)
+            self.assertEqual(Tenant.get("tenant_ls2_201").phone, "010-8856-4915")                 # 8자리 번호에 010 보정
+            self.assertNotEqual(Tenant.get("tenant_ls2_201").password, "1212")                    # 기본 비밀번호 1212 로는 로그인 불가
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

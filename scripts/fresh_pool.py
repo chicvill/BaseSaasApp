@@ -49,7 +49,7 @@ def build(cfg: dict, base_dir: str = ".") -> dict:
     Admin(id="admin_master", username=adm.get("username", "admin"), name=adm.get("name", "본사 총괄 관리인"),
           phone=adm.get("phone", ""), account_number=adm.get("account_number", ""),
           business_number=adm.get("business_number", ""), email=adm.get("email", "")).save("seeded", app_source=SRC)
-    n_lessor = n_bldg = n_room = 0
+    n_lessor = n_bldg = n_room = n_tenant = n_pay = 0
     for ls in cfg.get("lessors") or []:
         branch = ls.get("branch") or ls["username"]
         pw = ls["password"]
@@ -84,7 +84,11 @@ def build(cfg: dict, base_dir: str = ".") -> dict:
                 doorlock_pwd=r.get("doorlock_pwd", ""),
             ).save("seeded", app_source=SRC)
             n_room += 1
-    return {"lessors": n_lessor, "buildings": n_bldg, "rooms": n_room}
+        if b.get("ledger"):   # 종이 장부(수납부) CSV → 세입자·계약·월별 수납
+            import ledger_import
+            res = ledger_import.import_ledger(lessor, bldg, b["ledger"], base_dir)
+            n_tenant += res["tenants"]; n_pay += res["payments"]
+    return {"lessors": n_lessor, "buildings": n_bldg, "rooms": n_room, "tenants": n_tenant, "payments": n_pay}
 
 
 def main() -> None:
@@ -104,7 +108,7 @@ def main() -> None:
     os.makedirs(d, exist_ok=True)
     use_pool_dir(d)
     res = build(cfg, os.path.dirname(os.path.abspath(a.config)))
-    print(f"새 Data Pool 생성 완료: 임대인 {res['lessors']} · 건물 {res['buildings']} · 호실 {res['rooms']}  ({d})")
+    print(f"새 Data Pool 생성 완료: 임대인 {res['lessors']} · 건물 {res['buildings']} · 호실 {res['rooms']} · 입주 세입자 {res['tenants']} · 수납 기록 {res['payments']}  ({d})")
 
 
 if __name__ == "__main__":

@@ -47,3 +47,4 @@ data/platform.db
 # 공동 계약 시험(e2e_pair) 임시 데이터·상태 — 시험용 계정 정보가 들어 있다
 e2e_runtime/
 2026년_*수납부.csv
+data/private/
