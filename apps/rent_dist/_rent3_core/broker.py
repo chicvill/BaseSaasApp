@@ -370,7 +370,7 @@ class BrokerContractOnboarding:
             tax_invoice_requested=bool(tax_invoice_requested or tenant.business_number),
             tenant_business_number=tenant.business_number,
             tenant_company_name=tenant.company_name,
-            tenant_ceo_name=tenant.ceo_name or tenant.name,
+            tenant_ceo_name=tenant.ceo_name,
             tenant_email=tenant.email,
             contract_date=c_date,
             move_in_date=m_in,

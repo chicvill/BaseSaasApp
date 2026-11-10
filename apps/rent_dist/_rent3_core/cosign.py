@@ -294,7 +294,10 @@ class CoSignSession(PoolObj):
         if not str(data.get("owner_name", "")).strip():
             raise DomainError("직접 열람한 등기부의 갑구 소유자 성명을 입력해 주세요.")
         try:
-            mortgage = int(data.get("mortgage_amount"))
+            raw_m = data.get("mortgage_amount")
+            if raw_m is None:
+                raise ValueError
+            mortgage = int(raw_m)
             if mortgage < 0:
                 raise ValueError
         except (TypeError, ValueError):
@@ -528,7 +531,7 @@ class CoSignSession(PoolObj):
                 "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
                 "lease_type": room.lease_type or "월세",
                 "pay_timing": room.pay_timing or "후불",
-                "vat_target": bool(prev_ct.vat_target if prev_ct else room.vat_applicable),
+                "vat_target": prev_ct.vat_target if prev_ct else room.vat_applicable,
                 "vat_separate": True,
                 "contract_deposit": 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
@@ -582,7 +585,7 @@ class CoSignSession(PoolObj):
         if branch:
             kw["branch"] = normalize_branch_id(branch)
         if room_no:
-            kw["room_no"] = str(room_no)
+            kw["room_no"] = room_no
         n = 0
         for x in cls.find(**kw):
             if x.is_idle_expired():
@@ -602,7 +605,7 @@ class CoSignSession(PoolObj):
     def live_for_room(cls, branch: str, room_no: str) -> Optional["CoSignSession"]:
         """해당 호실에 진행 중(IN_PROGRESS)인 계약 세션. 없으면 None. (무응답 세션은 먼저 해제)"""
         cls.expire_idle(branch, room_no)
-        return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=str(room_no), status="IN_PROGRESS")), None)
+        return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=room_no, status="IN_PROGRESS")), None)
 
     def _tenant_identity_evidence(self) -> Dict[str, Any]:
         """봉인 때 남기는 임차인 본인인증 증거 (업체·시각·가짜 여부). 생년월일 등 개인정보는 싣지 않는다."""
@@ -655,7 +658,7 @@ class CoSignSession(PoolObj):
 
         if role_norm == "tenant":
             mine = [x for x in cls.find(status="IN_PROGRESS") if x.is_tenant_party(id_tenant, tenant_phone)
-                    and not (x.branch == normalize_branch_id(branch) and x.room_no == str(room_no))]
+                    and not (x.branch == normalize_branch_id(branch) and x.room_no == room_no)]
             if len(mine) >= MAX_LIVE_PER_TENANT:
                 raise DomainError(
                     f"동시에 진행할 수 있는 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
@@ -667,7 +670,7 @@ class CoSignSession(PoolObj):
         cls.expire_idle(branch, room_no)
         b_id = normalize_branch_id(branch)
         live = next(
-            (x for x in cls.find(branch=b_id, room_no=str(room_no), status="IN_PROGRESS") if x.mode == mode),
+            (x for x in cls.find(branch=b_id, room_no=room_no, status="IN_PROGRESS") if x.mode == mode),
             None,
         )
         if live:
@@ -1167,7 +1170,7 @@ class CoSignSession(PoolObj):
             tax_invoice_requested=bool(t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
             tenant_business_number=tenant.business_number,
             tenant_company_name=tenant.company_name,
-            tenant_ceo_name=tenant.ceo_name or tenant.name,
+            tenant_ceo_name=tenant.ceo_name,
             tenant_email=tenant.email,
             contract_date=date_today().isoformat(),
             move_in_date=move_in,

@@ -261,11 +261,11 @@
                 · 특약: ${Bass.escapeHtml(ct.special_terms || "-")}
               </div>
             </div>
-            <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}" target="_blank" rel="noopener">🔍 계약서 원본 열기/다운로드</a>
+            <button id="btnOpenContractPhoto" data-cid="${Bass.escapeHtml(ct.id)}" class="bass-btn bass-btn--sm bass-btn--primary" type="button">🔍 계약서 원본 열기/다운로드</button>
           </div>
           ${String(ct.contract_photo_file).toLowerCase().endsWith(".pdf")
             ? `<div class="bass-muted" style="margin-top:8px;font-size:13px;">PDF 스캔본 계약서가 보관되어 있습니다. 우측 상단 버튼으로 확인하세요.</div>`
-            : `<img src="${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:block;">`
+            : `<img id="imgContractPhotoPreview" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:none;">`
           }
         </div>
       ` : ""}
@@ -289,34 +289,43 @@
 
       ${cert ? `
         <div class="bass-card no-print" style="margin-bottom:8px;">
-          <div class="bass-row" style="justify-content:space-between;">
+          <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
-              <h3 style="margin:0;">🧾 국세청 연말정산 17% 월세 세액공제 납입증명서</h3>
-              <div class="bass-muted" style="font-size:12.5px;">예상 환급 세액공제액: <strong>${fmtWon(cert.estimated_tax_credit_17pct)}</strong> (확정일자 ${Bass.escapeHtml(cert.contract.fixed_date_no || "-")})</div>
+              <h3 style="margin:0;">🧾 연말정산 월세 세액공제 참고용 납부확인서 (관리비 제외 순수 월세 기준)</h3>
+              <div class="bass-muted" style="font-size:12.5px;">
+                공제대상 순수 월세: <strong>${fmtWon(cert.rent_only_paid ?? cert.total_paid)}</strong> (관리비 ${fmtWon(cert.maintenance_paid || 0)} 제외) ·
+                예상 세액공제: 총급여 5,500만 이하(17%) <strong>${fmtWon(cert.estimated_tax_credit_17pct)}</strong> / 5,500만~8,000만 이하(15%) <strong>${fmtWon(cert.estimated_tax_credit_15pct || 0)}</strong>
+              </div>
+              <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">
+                💡 ${Bass.escapeHtml(cert.guidance_notice || "월세 세액공제는 임대차계약서 사본과 계좌이체 내역으로 신청하며, 임대인의 법정 증명서 발급 의무는 없습니다.")}
+              </div>
             </div>
-            <button onclick="window.print()" class="bass-btn bass-btn--primary" type="button">🖨️ 납입증명서 A4 인쇄 / PDF</button>
+            <button onclick="window.print()" class="bass-btn bass-btn--primary" type="button">🖨️ 납부확인서 A4 인쇄 / PDF</button>
           </div>
         </div>
         <article class="cert-paper">
           <div style="display:flex;justify-content:space-between;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:12px;">
             <div>
-              <h2 style="margin:0;color:#000;">월세액 세액공제 공식 납입증명서 (${cert.tax_year}년 귀속)</h2>
+              <h2 style="margin:0;color:#000;">월세 납부 내역 확인서 (${cert.tax_year}년 귀속 · 연말정산 참고용)</h2>
               <div style="font-size:12px;">문서번호: ${Bass.escapeHtml(cert.certificate_no)} · 근거: ${Bass.escapeHtml(cert.statute)}</div>
             </div>
-            <div style="border:2px solid #b91c1c;color:#b91c1c;padding:6px 10px;font-weight:800;font-size:12px;">영수필 직인<br>${Bass.escapeHtml(cert.lessor.building_name)}</div>
+            <div style="border:2px solid #b91c1c;color:#b91c1c;padding:6px 10px;font-weight:800;font-size:12px;">확인필<br>${Bass.escapeHtml(cert.lessor.building_name)}</div>
           </div>
           <table>
-            <tr><th>임대인(공급자)</th><td>${Bass.escapeHtml(cert.lessor.name)} (사업자 ${Bass.escapeHtml(cert.lessor.business_number)})</td><th>임차인</th><td>${Bass.escapeHtml(cert.tenant.name)} (${Bass.escapeHtml(cert.tenant.room_no)}호)</td></tr>
+            <tr><th>임대인</th><td>${Bass.escapeHtml(cert.lessor.name)} (${cert.lessor.business_number ? `사업자 ${Bass.escapeHtml(cert.lessor.business_number)}` : "개인임대/미등록"})</td><th>임차인</th><td>${Bass.escapeHtml(cert.tenant.name)} (${Bass.escapeHtml(cert.tenant.room_no)}호)</td></tr>
             <tr><th>임대 목적물 주소</th><td colspan="3">${Bass.escapeHtml(cert.lessor.address)}</td></tr>
-            <tr><th>계약기간 / 접수번호</th><td>${Bass.escapeHtml(cert.contract.move_in_date)} ~ ${Bass.escapeHtml(cert.contract.expiry_date)}</td><th>계약 접수번호</th><td>${Bass.escapeHtml(cert.contract.fixed_date_no)} <span class="bass-muted" style="font-size:11px;">(접수번호, 확정일자 아님)</span></td></tr>
-            <tr><th>연간 총 납입액</th><td><strong>${fmtWon(cert.total_paid)}</strong></td><th>17% 예상 세액공제</th><td><strong>${fmtWon(cert.estimated_tax_credit_17pct)}</strong></td></tr>
+            <tr><th>계약기간</th><td>${Bass.escapeHtml(cert.contract.move_in_date)} ~ ${Bass.escapeHtml(cert.contract.expiry_date)}</td><th>계약 접수번호</th><td>${Bass.escapeHtml(cert.contract.fixed_date_no || "-")} <span class="bass-muted" style="font-size:11px;">(접수번호, 확정일자 아님)</span></td></tr>
+            <tr><th>연간 순수 월세 납입액<br><span style="font-size:11px;font-weight:400;">(관리비 ${fmtWon(cert.maintenance_paid || 0)} 제외)</span></th><td><strong>${fmtWon(cert.rent_only_paid ?? cert.total_paid)}</strong><br><span style="font-size:11px;">(총 납부액 ${fmtWon(cert.total_paid)})</span></td><th>예상 세액공제(참고치)</th><td><strong>17%: ${fmtWon(cert.estimated_tax_credit_17pct)}</strong> (총급여 5,500만 이하)<br><strong>15%: ${fmtWon(cert.estimated_tax_credit_15pct || 0)}</strong> (총급여 5,500만~8,000만)</td></tr>
           </table>
           <table>
-            <thead><tr><th>귀속년월</th><th>납부일자</th><th>납부수단</th><th>국세청 현금영수증 승인번호</th><th>납부금액</th></tr></thead>
+            <thead><tr><th>귀속년월</th><th>납부일자</th><th>납부수단</th><th>현금영수증 승인번호(실제 발급분만)</th><th>순수 월세(공제대상)</th><th>관리비(제외)</th><th>납부합계</th></tr></thead>
             <tbody>
-              ${(cert.payments || []).map((p) => `<tr><td>${Bass.escapeHtml(p.billing_month)}</td><td>${Bass.escapeHtml(p.paid_date)}</td><td>${Bass.escapeHtml(p.method)}</td><td>${Bass.escapeHtml(p.cash_receipt_no)}</td><td>${fmtWon(p.amount)}</td></tr>`).join("")}
+              ${(cert.payments || []).map((p) => `<tr><td>${Bass.escapeHtml(p.billing_month)}</td><td>${Bass.escapeHtml(p.paid_date)}</td><td>${Bass.escapeHtml(p.method)}</td><td>${Bass.escapeHtml(p.cash_receipt_no || "계좌이체 증빙(미발급)")}</td><td><strong>${fmtWon(p.rent_amount ?? p.amount)}</strong></td><td>${fmtWon(p.maintenance_amount || 0)}</td><td>${fmtWon(p.amount)}</td></tr>`).join("")}
             </tbody>
           </table>
+          <div style="font-size:11.5px;margin-top:8px;color:#334155;">
+            ※ ${Bass.escapeHtml(cert.guidance_notice || "")}
+          </div>
         </article>
       ` : ""}
       </details>
@@ -327,6 +336,32 @@
       selectedTenantId = ev.target.value;
       loadMyhome().catch(Bass.showError);
     });
+
+    const btnOpenPhoto = document.getElementById("btnOpenContractPhoto");
+    const imgPhotoPrev = document.getElementById("imgContractPhotoPreview");
+    if (btnOpenPhoto && ct && ct.id) {
+      const fetchPhotoBlobUrl = async () => {
+        const headers = {};
+        const tk = Bass.token();
+        if (tk) headers["Authorization"] = "Bearer " + tk;
+        const resp = await fetch(`${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo`, { headers });
+        if (!resp.ok) throw new Error("계약서 사본을 불러올 수 없습니다.");
+        const blob = await resp.blob();
+        return URL.createObjectURL(blob);
+      };
+      if (imgPhotoPrev) {
+        fetchPhotoBlobUrl().then((url) => {
+          imgPhotoPrev.src = url;
+          imgPhotoPrev.style.display = "block";
+        }).catch(() => {});
+      }
+      btnOpenPhoto.addEventListener("click", () => {
+        fetchPhotoBlobUrl().then((url) => {
+          window.open(url, "_blank", "noopener");
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }).catch(Bass.showError);
+      });
+    }
 
     document.querySelectorAll(".btn-ins-proof").forEach((btn) => btn.addEventListener("click", function () {
       Bass.withLock(this, async () => {

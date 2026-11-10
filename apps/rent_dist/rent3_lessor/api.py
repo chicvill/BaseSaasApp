@@ -89,10 +89,13 @@ class OutlayCreateReq(BaseModel):
     title: str
     amount: int
     vendor: str = ""
+    vendor_business_number: str = ""
+    vendor_tax_type: str = "GENERAL"  # GENERAL | SIMPLIFIED | EXEMPT
     expense_date: Optional[str] = None
     memo: str = ""
     vat_deductible: Optional[bool] = None
     evidence_type: str = "TAX_INVOICE"
+    usage_scope: str = "COMMON"  # COMMON | TAXABLE_ONLY | EXEMPT_ONLY
 
 
 class TicketAssignReq(BaseModel):
@@ -598,20 +601,20 @@ def edit_contract(req: ContractEditReq):
     if req.tenant_email is not None:
         ct.tenant_email = req.tenant_email.strip()
     if req.tax_invoice_requested is not None:
-        ct.tax_invoice_requested = bool(req.tax_invoice_requested)
+        ct.tax_invoice_requested = req.tax_invoice_requested
     elif req.tenant_business_number:
         ct.tax_invoice_requested = True
     if req.vat_target is not None:
-        ct.vat_target = bool(req.vat_target)
+        ct.vat_target = req.vat_target
     elif req.tax_invoice_requested is not None:
-        ct.vat_target = bool(req.tax_invoice_requested)
+        ct.vat_target = req.tax_invoice_requested
     ct.vat = ct.compute_vat()
     ct.save(action="contract_edited", app_source=APP_SRC)
     room = Room.get(ct.id_room)
     if room:
         room.deposit, room.monthly_rent, room.maintenance_fee = req.deposit, req.monthly_rent, req.maintenance_fee
         if req.vat_target is not None:
-            room.vat_applicable = bool(req.vat_target)
+            room.vat_applicable = req.vat_target
         room.save(action="room_terms_synced", app_source=APP_SRC)
     tenant = Tenant.get(ct.id_tenant) if ct.id_tenant else None
     if tenant:
@@ -769,22 +772,22 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
     if ct:
         ct.tenant_business_number = biz_no
         ct.tenant_company_name = comp_name
-        ct.tenant_ceo_name = ceo_name or ct.tenant_name
+        ct.tenant_ceo_name = ceo_name
         ct.tenant_email = email
-        ct.tax_invoice_requested = bool(req.tax_invoice_requested) if req.tax_invoice_requested is not None else bool(biz_no or comp_name or req.vat_target)
+        ct.tax_invoice_requested = req.tax_invoice_requested if req.tax_invoice_requested is not None else bool(biz_no or comp_name or req.vat_target)
         if req.vat_target is not None:
-            ct.vat_target = bool(req.vat_target)
+            ct.vat_target = req.vat_target
         elif ct.tax_invoice_requested:
             ct.vat_target = True
         if req.vat_separate is not None:
-            ct.vat_separate = bool(req.vat_separate)
+            ct.vat_separate = req.vat_separate
         ct.vat = ct.compute_vat()
         ct.save(action="contract_tenant_biz_updated", app_source=APP_SRC)
 
     if tenant:
         tenant.business_number = biz_no
         tenant.company_name = comp_name
-        tenant.ceo_name = ceo_name or tenant.name
+        tenant.ceo_name = ceo_name
         if email:
             tenant.email = email
         tenant.save(action="tenant_biz_updated", app_source=APP_SRC)
@@ -795,7 +798,7 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
             email=email,
             business_number=biz_no,
             company_name=comp_name,
-            ceo_name=ceo_name or ct.tenant_name,
+            ceo_name=ceo_name,
             branch=b_id,
             id_building=room.id_building,
             current_room_id=room.id,
@@ -820,7 +823,7 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
         room.id_tenant = tenant.id
 
     if req.vat_target is not None:
-        room.vat_applicable = bool(req.vat_target)
+        room.vat_applicable = req.vat_target
         room.save(action="room_vat_updated", app_source=APP_SRC)
 
     return {
@@ -855,9 +858,12 @@ def create_outlay(req: OutlayCreateReq):
         title=req.title,
         amount=req.amount,
         vendor=req.vendor,
+        vendor_business_number=req.vendor_business_number.strip(),
+        vendor_tax_type=(req.vendor_tax_type or "GENERAL").strip().upper(),
         memo=req.memo,
         vat_deductible=req.vat_deductible,
         evidence_type=req.evidence_type or "TAX_INVOICE",
+        usage_scope=(req.usage_scope or "COMMON").strip().upper(),
         **({"expense_date": req.expense_date} if req.expense_date else {}),
     ).save(action="outlay_recorded", app_source=APP_SRC)
     return {
@@ -875,25 +881,31 @@ def create_outlay(req: OutlayCreateReq):
 
 @router.get("/tax/summary")
 def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optional[int] = None):
-    """부가세·종합소득세 자료, 세금계산서 발행 대장 및 경비 지출 목록 (더보기 ▸ 부가세·종소세·경비)."""
+    """부가세·종합소득세·면세사업장현황신고 자료, 세금계산서 발행 대장 및 경비 지출 목록 (더보기 ▸ 부가세·종소세·경비)."""
     ensure_pool_seeded()
     b_id = normalize_branch_id(branch)
     yr = year or date_today().year
     fin = TaxAndCertificateService.branch_financial_summary(b_id, yr)
+    ratio = float(fin.get("taxable_supply_ratio", 1.0))
     bldg = Building.first(branch=b_id)
-    pays = [p for p in Pay.find(branch=b_id) if p.payment_kind == "MONTHLY_RENT" and p.paid_date.startswith(f"{yr:04d}")]
+    pays = [
+        p for p in Pay.find(branch=b_id)
+        if p.payment_kind == "MONTHLY_RENT"
+        and not TaxAndCertificateService.is_carryover_payment(p)
+        and TaxAndCertificateService.payment_tax_ym(p).startswith(f"{yr:04d}")
+    ]
     outlays = sorted((o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")), key=lambda o: o.expense_date, reverse=True)
     periods = []
     for label, months in (("1기 (1~6월)", range(1, 7)), ("2기 (7~12월)", range(7, 13))):
-        ps = [p for p in pays if int(p.paid_date[5:7]) in months]
+        ps = [p for p in pays if int(TaxAndCertificateService.payment_tax_ym(p)[5:7]) in months]
         os_period = [o for o in outlays if int(o.expense_date[5:7]) in months]
         out_vat = sum(p.vat_amount for p in ps)
-        in_vat = sum(o.input_vat for o in os_period)
+        in_vat = sum(o.effective_input_vat(ratio) for o in os_period)
         ded_exp = sum(o.amount for o in os_period if o.is_vat_deductible)
         non_ded_exp = sum(o.amount for o in os_period if not o.is_vat_deductible)
         periods.append({
             "label": label,
-            "supply": sum(p.rent_amount + p.maintenance_amount for p in ps),
+            "supply": sum(max(0, p.total_amount - p.vat_amount) for p in ps),
             "vat": out_vat,
             "output_vat": out_vat,
             "input_vat": in_vat,
@@ -903,10 +915,12 @@ def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optiona
             "taxable_count": sum(1 for p in ps if p.vat_amount > 0),
         })
     invoice_reg = TaxAndCertificateService.build_tax_invoice_register(b_id, year=yr, month=month)
+    exempt_report = TaxAndCertificateService.build_exempt_housing_report(b_id, year=yr)
     return {
         "success": True,
         "year": yr,
         "month": month,
+        "tax_disclaimer": TaxAndCertificateService.TAX_DISCLAIMER,
         "summary": fin,
         "building_tax_config": {
             "building_name": bldg.building_name if bldg else b_id,
@@ -918,12 +932,14 @@ def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optiona
         },
         "vat_periods": periods,
         "tax_invoice_register": invoice_reg,
+        "exempt_housing_report": exempt_report,
         "outlays": [
             {
                 **o.model_dump(),
                 "category_label": o.category_label,
                 "is_vat_deductible": o.is_vat_deductible,
                 "input_vat": o.input_vat,
+                "effective_input_vat": o.effective_input_vat(ratio),
                 "supply_amount": o.supply_amount,
             }
             for o in outlays
@@ -939,10 +955,13 @@ class OutlayEditReq(BaseModel):
     title: str
     amount: int
     vendor: str = ""
+    vendor_business_number: Optional[str] = None
+    vendor_tax_type: Optional[str] = None
     expense_date: str
     memo: str = ""
     vat_deductible: Optional[bool] = None
     evidence_type: Optional[str] = None
+    usage_scope: Optional[str] = None
 
 
 @router.post("/outlays/edit")
@@ -961,10 +980,16 @@ def edit_outlay(req: OutlayEditReq):
         raise DomainError("지출일 형식이 올바르지 않습니다 (예: 2026-03-15).")
     o.category, o.title, o.amount = req.category, req.title.strip() or o.title, req.amount
     o.vendor, o.expense_date, o.memo = req.vendor.strip(), req.expense_date, req.memo.strip()
+    if req.vendor_business_number is not None:
+        o.vendor_business_number = req.vendor_business_number.strip()
+    if req.vendor_tax_type is not None:
+        o.vendor_tax_type = req.vendor_tax_type.strip().upper()
     if req.vat_deductible is not None:
         o.vat_deductible = req.vat_deductible
     if req.evidence_type is not None:
         o.evidence_type = req.evidence_type
+    if req.usage_scope is not None:
+        o.usage_scope = req.usage_scope.strip().upper()
     o.save(action="outlay_edited", app_source=APP_SRC)
     return {
         "success": True,
@@ -995,12 +1020,70 @@ def delete_outlay(req: OutlayDeleteReq):
     return {"success": True, "message": f"지출 '{title}'을 지웠습니다."}
 
 
+class TaxInvoiceStatusReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    billing_month: str
+    status: str = "ISSUED"  # DRAFT | ISSUED | MODIFIED | CANCELLED
+    nts_confirm_no: str = ""
+    memo: str = ""
+    write_date: str = ""
+    supply_amount: Optional[int] = None
+    tax_amount: Optional[int] = None
+
+
+@router.post("/tax/invoices/status")
+def update_tax_invoice_status(req: TaxInvoiceStatusReq):
+    """월별 전자세금계산서 발행 완료·국세청 승인번호·수정·취소 이력 저장."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    rec = TaxAndCertificateService.update_tax_invoice_status(
+        branch=b_id,
+        room_no=req.room_no,
+        billing_month=req.billing_month,
+        status=req.status,
+        nts_confirm_no=req.nts_confirm_no,
+        memo=req.memo,
+        write_date=req.write_date,
+        supply_amount=req.supply_amount,
+        tax_amount=req.tax_amount,
+        app_source=APP_SRC,
+    )
+    status_ko = {
+        "DRAFT": "미발행(작성대기)",
+        "ISSUED": "발행완료",
+        "MODIFIED": "수정발행",
+        "CANCELLED": "발행취소",
+    }.get(rec.status, rec.status)
+    return {
+        "success": True,
+        "message": f"{rec.room_no}호 {rec.billing_month} 귀속 세금계산서 상태가 '{status_ko}'로 저장되었습니다.",
+        "record": rec.model_dump(),
+    }
+
+
 @router.get("/tax/export-csv")
 def export_tax_csv(branch: str = "main", year: Optional[int] = None):
     ensure_pool_seeded()
-    csv_body = TaxAndCertificateService.export_annual_tax_csv(branch=branch, year=year)
+    yr = year or date_today().year
+    csv_body = TaxAndCertificateService.export_annual_tax_csv(branch=branch, year=yr)
     b_id = normalize_branch_id(branch)
-    filename = f"rent3_tax_statement_{b_id}_{year or 2026}.csv"
+    filename = f"rent3_tax_statement_{b_id}_{yr}.csv"
+    return Response(
+        content=csv_body.encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/tax/export-exempt-csv")
+def export_exempt_housing_csv(branch: str = "main", year: Optional[int] = None):
+    """주거용(면세) 주택임대 사업장현황신고(매년 2월 10일) 호실별 수입금액 명세 CSV 다운로드."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    yr = year or date_today().year
+    csv_body = TaxAndCertificateService.export_exempt_housing_csv(branch=b_id, year=yr)
+    filename = f"exempt_housing_status_{b_id}_{yr}.csv"
     return Response(
         content=csv_body.encode("utf-8"),
         media_type="text/csv; charset=utf-8",
@@ -1024,7 +1107,7 @@ def export_hometax_tax_invoice_csv(branch: str = "main", year: Optional[int] = N
     b_id = normalize_branch_id(branch)
     yr = year or date_today().year
     csv_body = TaxAndCertificateService.export_hometax_tax_invoice_csv(branch=b_id, year=yr, month=month)
-    mo_suffix = f"_{int(month):02d}" if month else ""
+    mo_suffix = f"_{month:02d}" if month else ""
     filename = f"hometax_tax_invoice_{b_id}_{yr}{mo_suffix}.csv"
     return Response(
         content=csv_body.encode("utf-8"),
