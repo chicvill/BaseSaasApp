@@ -712,6 +712,7 @@
     const head = `<div style="font-weight:800;margin-bottom:4px;">📝 대면 전 미리 작성</div>
       <div class="bass-muted" style="font-size:12.5px;line-height:1.55;margin-bottom:8px;">미리 적어 두면 만나서는 <strong>입주일 정도만 확인</strong>하면 됩니다. 여기 적은 내용은 초안이며, 만난 뒤 ③단계에서 양쪽이 조건을 다시 보고 동의해야 계약이 진행됩니다. (상대가 연결하기 전까지만 고칠 수 있고, 작성 후 72시간 안에 만나지 않으면 자동으로 해제됩니다)</div>`;
     if (currentRole === "lessor") {
+      const taxReq = Boolean(t.tax_invoice_requested || t.tenant_business_number);
       box.innerHTML = head + `
         <div class="field-grid">
           <div><label class="bass-label">입주 예정일(잔금일)</label><input id="pfMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
@@ -722,26 +723,67 @@
           <div><label class="bass-label">관리비(원)</label><input id="pfFee" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
           <div><label class="bass-label">월세 납부</label><select id="pfPay" class="bass-select"><option value="후불" ${t.pay_timing === "후불" ? "selected" : ""}>후불</option><option value="선불" ${t.pay_timing === "선불" ? "selected" : ""}>선불</option></select></div>
         </div>
+        <div class="bass-card" style="padding:10px;margin-top:8px;">
+          <label class="check-row" style="margin-bottom:0;cursor:pointer;">
+            <span style="font-size:13px;font-weight:700;">🧾 세입자가 세금계산서 발행을 요청함 (사무실·법인 기숙사 등 모든 호실 가능)</span>
+            <input type="checkbox" id="pfTaxInvReq" ${taxReq ? "checked" : ""}>
+          </label>
+          <div id="pfTaxBizWrap" class="field-grid" style="display:${taxReq ? "grid" : "none"};margin-top:8px;">
+            <div><label class="bass-label">사업자등록번호</label><input id="pfBizNo" class="bass-input" value="${esc(t.tenant_business_number || "")}" placeholder="예: 214-86-12345"></div>
+            <div><label class="bass-label">상호(법인명)</label><input id="pfCompName" class="bass-input" value="${esc(t.tenant_company_name || "")}" placeholder="예: (주)시크디자인"></div>
+            <div><label class="bass-label">대표자명</label><input id="pfCeoName" class="bass-input" value="${esc(t.tenant_ceo_name || "")}" placeholder="예: 홍길동"></div>
+            <div><label class="bass-label">세금계산서 수신 이메일</label><input id="pfBizEmail" type="email" class="bass-input" value="${esc(t.tenant_email || "")}" placeholder="예: tax@company.co.kr"></div>
+          </div>
+        </div>
         <label class="bass-label" style="margin-top:8px;">특약사항</label>
         <textarea id="pfSpecial" class="bass-input" rows="3">${esc(t.special_terms || "")}</textarea>
         <button id="btnPrefillSave" class="bass-btn bass-btn--primary" style="width:100%;margin-top:8px;" type="button">💾 사전 작성 저장</button>`;
     } else {
+      const taxReq = Boolean(t.tax_invoice_requested || t.tenant_business_number);
       box.innerHTML = head + `
         <div class="field-grid">
           <div><label class="bass-label">이메일</label><input id="pfEmail" type="email" class="bass-input" value="${esc(t.tenant_email || "")}"></div>
           <div><label class="bass-label">차량번호(선택)</label><input id="pfCar" class="bass-input" value="${esc(t.tenant_car_number || "")}"></div>
         </div>
+        <div class="bass-card" style="padding:10px;margin-top:8px;">
+          <label class="check-row" style="margin-bottom:0;cursor:pointer;">
+            <span style="font-size:13px;font-weight:700;">🧾 세금계산서 발행을 요청합니다 (사무실·법인 기숙사 등)</span>
+            <input type="checkbox" id="pfTaxInvReq" ${taxReq ? "checked" : ""}>
+          </label>
+          <div id="pfTaxBizWrap" class="field-grid" style="display:${taxReq ? "grid" : "none"};margin-top:8px;">
+            <div><label class="bass-label">사업자등록번호</label><input id="pfBizNo" class="bass-input" value="${esc(t.tenant_business_number || "")}" placeholder="예: 214-86-12345"></div>
+            <div><label class="bass-label">상호(법인명)</label><input id="pfCompName" class="bass-input" value="${esc(t.tenant_company_name || "")}" placeholder="예: (주)시크디자인"></div>
+            <div><label class="bass-label">대표자명</label><input id="pfCeoName" class="bass-input" value="${esc(t.tenant_ceo_name || "")}" placeholder="예: 홍길동"></div>
+          </div>
+        </div>
         <div class="bass-muted" style="font-size:12px;margin-top:6px;">이름·연락처는 본인인증된 값으로 고정됩니다. 금액과 입주일은 임대인이 정하고, 만나서 함께 확인합니다.</div>
         <button id="btnPrefillSave" class="bass-btn bass-btn--primary" style="width:100%;margin-top:8px;" type="button">💾 사전 작성 저장</button>`;
     }
     elStepPanel.appendChild(box);
+    const pfChk = document.getElementById("pfTaxInvReq");
+    if (pfChk) {
+      pfChk.addEventListener("change", (ev) => {
+        const w = document.getElementById("pfTaxBizWrap");
+        if (w) w.style.display = ev.target.checked ? "grid" : "none";
+      });
+    }
     document.getElementById("btnPrefillSave").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const v = (id) => document.getElementById(id).value;
+        const v = (id) => (document.getElementById(id) && document.getElementById(id).value) || "";
+        const reqInv = Boolean(document.getElementById("pfTaxInvReq") && document.getElementById("pfTaxInvReq").checked);
         const updates = currentRole === "lessor"
           ? { move_in_date: v("pfMoveIn"), lease_term_months: Number(v("pfTerm")), deposit: Number(v("pfDeposit")), contract_deposit: Number(v("pfConDep")),
-              monthly_rent: Number(v("pfRent")), maintenance_fee: Number(v("pfFee")), pay_timing: v("pfPay"), special_terms: v("pfSpecial") }
-          : { tenant_email: v("pfEmail").trim(), tenant_car_number: v("pfCar").trim() };
+              monthly_rent: Number(v("pfRent")), maintenance_fee: Number(v("pfFee")), pay_timing: v("pfPay"), special_terms: v("pfSpecial"),
+              tax_invoice_requested: reqInv, vat_target: reqInv,
+              tenant_business_number: reqInv ? v("pfBizNo").trim() : "",
+              tenant_company_name: reqInv ? v("pfCompName").trim() : "",
+              tenant_ceo_name: reqInv ? v("pfCeoName").trim() : "",
+              tenant_email: reqInv ? v("pfBizEmail").trim() : "" }
+          : { tenant_email: v("pfEmail").trim(), tenant_car_number: v("pfCar").trim(),
+              tax_invoice_requested: reqInv, vat_target: reqInv,
+              tenant_business_number: reqInv ? v("pfBizNo").trim() : "",
+              tenant_company_name: reqInv ? v("pfCompName").trim() : "",
+              tenant_ceo_name: reqInv ? v("pfCeoName").trim() : "" };
         const res = await Bass.api(APP_ID, `/sessions/${s.id}/prefill`, { method: "POST", body: { role: currentRole, updates } });
         activeSession = res.session;
         Bass.updateAppAlert("success", res.message);
@@ -1527,11 +1569,11 @@
         <div><label class="bass-label">당일 계약금(원)</label><input id="tConDep" type="number" class="bass-input term-input" value="${Number(t.contract_deposit || 0)}"></div>
       </div>
       <div class="bass-card" style="padding:10px 12px;margin:10px 0;">
-        <label class="check-row" style="margin-bottom:8px;">
-          <span style="font-size:13px;font-weight:700;">🧾 상가·사무실 부가세 과세 호실 (세금계산서 발행 대상)</span>
-          <input type="checkbox" id="tVatTarget" class="term-input" ${t.vat_target ? "checked" : ""}>
+        <label class="check-row" style="margin-bottom:0;cursor:pointer;">
+          <span style="font-size:13px;font-weight:700;">🧾 세입자가 세금계산서 발행을 요청함 (사무실·법인 기숙사 등 모든 호실 가능)</span>
+          <input type="checkbox" id="tTaxInvReq" class="term-input" ${(t.tax_invoice_requested || t.tenant_business_number) ? "checked" : ""}>
         </label>
-        <div class="field-grid">
+        <div id="tTaxBizWrap" class="field-grid" style="display:${(t.tax_invoice_requested || t.tenant_business_number) ? "grid" : "none"};margin-top:8px;">
           <div><label class="bass-label">사업자등록번호</label><input id="tBizNo" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_business_number || "")}" placeholder="예: 214-86-12345"></div>
           <div><label class="bass-label">상호(법인명)</label><input id="tCompName" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_company_name || "")}" placeholder="예: (주)시크디자인"></div>
           <div><label class="bass-label">대표자명</label><input id="tCeoName" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_ceo_name || "")}" placeholder="예: 홍길동"></div>
@@ -1575,25 +1617,37 @@
       inp.addEventListener("blur", () => { setTimeout(() => { isEditingForm = false; }, 400); });
     });
 
-    const collectUpdates = () => ({
-      tenant_name: document.getElementById("tName").value.trim(),
-      tenant_phone: document.getElementById("tPhone").value.trim(),
-      tenant_car_number: document.getElementById("tCar").value.trim(),
-      vat_target: Boolean(document.getElementById("tVatTarget") && document.getElementById("tVatTarget").checked),
-      tenant_business_number: (document.getElementById("tBizNo") && document.getElementById("tBizNo").value.trim()) || "",
-      tenant_company_name: (document.getElementById("tCompName") && document.getElementById("tCompName").value.trim()) || "",
-      tenant_ceo_name: (document.getElementById("tCeoName") && document.getElementById("tCeoName").value.trim()) || "",
-      tenant_email: (document.getElementById("tBizEmail") && document.getElementById("tBizEmail").value.trim()) || "",
-      move_in_date: document.getElementById("tMoveIn").value,
-      pay_timing: document.getElementById("tPayTiming").value,
-      lease_term_months: Number(document.getElementById("tMonths").value || 12),
-      deposit: Number(document.getElementById("tDeposit").value || 0),
-      monthly_rent: Number(document.getElementById("tRent").value || 0),
-      maintenance_fee: Number(document.getElementById("tMaint").value || 0),
-      contract_deposit: Number(document.getElementById("tConDep").value || 0),
-      special_terms: document.getElementById("tSpecial").value,
-      ...(document.getElementById("tCleanup") && !document.getElementById("tCleanup").disabled ? { mortgage_cleanup_clause: document.getElementById("tCleanup").checked } : {}),
-    });
+    const chkTaxInv = document.getElementById("tTaxInvReq");
+    if (chkTaxInv) {
+      chkTaxInv.addEventListener("change", (ev) => {
+        const w = document.getElementById("tTaxBizWrap");
+        if (w) w.style.display = ev.target.checked ? "grid" : "none";
+      });
+    }
+
+    const collectUpdates = () => {
+      const reqInv = Boolean(document.getElementById("tTaxInvReq") && document.getElementById("tTaxInvReq").checked);
+      return {
+        tenant_name: document.getElementById("tName").value.trim(),
+        tenant_phone: document.getElementById("tPhone").value.trim(),
+        tenant_car_number: document.getElementById("tCar").value.trim(),
+        tax_invoice_requested: reqInv,
+        vat_target: reqInv,
+        tenant_business_number: reqInv ? ((document.getElementById("tBizNo") && document.getElementById("tBizNo").value.trim()) || "") : "",
+        tenant_company_name: reqInv ? ((document.getElementById("tCompName") && document.getElementById("tCompName").value.trim()) || "") : "",
+        tenant_ceo_name: reqInv ? ((document.getElementById("tCeoName") && document.getElementById("tCeoName").value.trim()) || "") : "",
+        tenant_email: reqInv ? ((document.getElementById("tBizEmail") && document.getElementById("tBizEmail").value.trim()) || "") : "",
+        move_in_date: document.getElementById("tMoveIn").value,
+        pay_timing: document.getElementById("tPayTiming").value,
+        lease_term_months: Number(document.getElementById("tMonths").value || 12),
+        deposit: Number(document.getElementById("tDeposit").value || 0),
+        monthly_rent: Number(document.getElementById("tRent").value || 0),
+        maintenance_fee: Number(document.getElementById("tMaint").value || 0),
+        contract_deposit: Number(document.getElementById("tConDep").value || 0),
+        special_terms: document.getElementById("tSpecial").value,
+        ...(document.getElementById("tCleanup") && !document.getElementById("tCleanup").disabled ? { mortgage_cleanup_clause: document.getElementById("tCleanup").checked } : {}),
+      };
+    };
 
     document.getElementById("btnSaveTerms").addEventListener("click", function () {
       Bass.withLock(this, async () => {

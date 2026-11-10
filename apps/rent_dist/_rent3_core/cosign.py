@@ -520,12 +520,15 @@ class CoSignSession(PoolObj):
                 "tenant_phone": t_phone,
                 "tenant_email": matched_t.email if matched_t else (prev_ct.tenant_email if prev_ct else ""),
                 "tenant_car_number": matched_t.car_number if matched_t else "",
+                "tax_invoice_requested": bool(
+                    (prev_ct.tax_invoice_requested or prev_ct.tenant_business_number) if prev_ct else False
+                ),
                 "tenant_business_number": matched_t.business_number if matched_t else (prev_ct.tenant_business_number if prev_ct else ""),
                 "tenant_company_name": matched_t.company_name if matched_t else (prev_ct.tenant_company_name if prev_ct else ""),
                 "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
                 "lease_type": room.lease_type or "월세",
                 "pay_timing": room.pay_timing or "후불",
-                "vat_target": bool(prev_ct.vat_target if prev_ct else (room.vat_applicable or (bldg and bldg.is_vat_room(room.room_no)))),
+                "vat_target": bool(prev_ct.vat_target if prev_ct else room.vat_applicable),
                 "vat_separate": True,
                 "contract_deposit": 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
@@ -839,9 +842,9 @@ class CoSignSession(PoolObj):
 
     PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
                                             "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause",
-                                            "vat_target", "vat_separate",
+                                            "vat_target", "vat_separate", "tax_invoice_requested",
                                             "tenant_business_number", "tenant_company_name", "tenant_ceo_name", "tenant_email")
-    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number",
+    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number", "tax_invoice_requested",
                                             "tenant_business_number", "tenant_company_name", "tenant_ceo_name")
     MAX_FACILITY_PHOTOS: ClassVar[int] = 12
     FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
@@ -964,7 +967,7 @@ class CoSignSession(PoolObj):
         merged = {**self.terms}
         changed = False
         int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
-        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause"}
+        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
 
         for k, v in updates.items():
             if v is None:
@@ -1161,6 +1164,7 @@ class CoSignSession(PoolObj):
             id_tenant=tenant.id,
             tenant_name=tenant.name,
             tenant_phone=tenant.phone,
+            tax_invoice_requested=bool(t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
             tenant_business_number=tenant.business_number,
             tenant_company_name=tenant.company_name,
             tenant_ceo_name=tenant.ceo_name or tenant.name,
@@ -1171,7 +1175,7 @@ class CoSignSession(PoolObj):
             lease_term_months=months,
             lease_type=t_info.get("lease_type", "월세"),
             pay_timing=t_info.get("pay_timing", "후불"),
-            vat_target=bool(t_info.get("vat_target", False)),
+            vat_target=bool(t_info.get("vat_target") or t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
             vat_separate=bool(t_info.get("vat_separate", True)),
             contract_deposit=int(t_info.get("contract_deposit", 300000)),
             keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다

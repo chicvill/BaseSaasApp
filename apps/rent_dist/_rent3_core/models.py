@@ -274,15 +274,36 @@ class Building(PoolObj):
     biz_type: str = "부동산업"               # 공급자 업태
     biz_item: str = "비주거용 건물 임대업"   # 공급자 종목
 
+    @staticmethod
+    def _clean_room_tok(x: Any) -> str:
+        return re.sub(r"[\"'`\[\]\s]|호$", "", str(x or "").strip())
+
+    def clean_vat_rooms(self) -> List[str]:
+        out: List[str] = []
+        for x in (self.vat_rooms or []):
+            t = self._clean_room_tok(x)
+            if t and t not in out:
+                out.append(t)
+        return out
+
+    def clean_income_tax_rooms(self) -> List[str]:
+        out: List[str] = []
+        for x in (self.income_tax_rooms or []):
+            t = self._clean_room_tok(x)
+            if t and t not in out:
+                out.append(t)
+        return out
+
     def is_vat_room(self, room_no: str) -> bool:
-        rn = str(room_no or "").strip()
-        return rn in [str(x).strip() for x in (self.vat_rooms or []) if str(x).strip()]
+        rn = self._clean_room_tok(room_no)
+        return rn in self.clean_vat_rooms()
 
     def is_income_tax_room(self, room_no: str) -> bool:
-        rn = str(room_no or "").strip()
-        if not self.income_tax_rooms:
+        rn = self._clean_room_tok(room_no)
+        cleaned = self.clean_income_tax_rooms()
+        if not cleaned:
             return True
-        return rn in [str(x).strip() for x in (self.income_tax_rooms or []) if str(x).strip()]
+        return rn in cleaned
 
     def summary(self) -> str:
         return f"건물 {self.building_name} ({self.branch})"
@@ -408,7 +429,8 @@ class Contract(PoolObj):
     id_tenant: str = ""
     tenant_name: str = ""
     tenant_phone: str = ""
-    tenant_business_number: str = ""         # 임차인 사업자등록번호 (과세 호실 세금계산서 발행용)
+    tax_invoice_requested: bool = False      # 세입자가 세금계산서 발행을 요청한 계약인지 여부 (사무실·기숙사 등 모든 호실 적용 가능)
+    tenant_business_number: str = ""         # 임차인 사업자등록번호 (세금계산서 발행 요청 시 입력)
     tenant_company_name: str = ""            # 임차인 상호/법인명
     tenant_ceo_name: str = ""                # 임차인 대표자명
     tenant_email: str = ""                   # 임차인 세금계산서 수신 이메일

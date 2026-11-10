@@ -282,10 +282,10 @@ class TaxAndCertificateService:
         estimated_vat_payable = vat_collected - input_vat_deductible
         noi = gross_revenue - total_expense
 
-        vat_rooms = list(bldg.vat_rooms) if (bldg and bldg.vat_rooms) else [
+        vat_rooms = bldg.clean_vat_rooms() if (bldg and bldg.vat_rooms) else [
             r.room_no for r in rooms if r.vat_applicable
         ]
-        income_tax_rooms = list(bldg.income_tax_rooms) if (bldg and bldg.income_tax_rooms) else [
+        income_tax_rooms = bldg.clean_income_tax_rooms() if (bldg and bldg.income_tax_rooms) else [
             r.room_no for r in rooms
         ]
         income_tax_pays = [p for p in pays if not income_tax_rooms or p.room_no in income_tax_rooms]
@@ -413,25 +413,31 @@ class TaxAndCertificateService:
         ct_by_id = {c.id: c for c in contracts}
         tenants_by_id = {t.id: t for t in Tenant.find(branch=b_id)}
 
-        vat_rooms: List[str] = []
-        if bldg and bldg.vat_rooms:
-            vat_rooms = [str(x).strip() for x in bldg.vat_rooms if str(x).strip()]
-        else:
-            vat_rooms = [r.room_no for r in rooms if r.vat_applicable]
-        for r in rooms:
-            ct = active_ct_by_room.get(r.room_no)
-            if (r.vat_applicable or (ct and ct.vat_target)) and r.room_no not in vat_rooms:
-                vat_rooms.append(r.room_no)
-
+        vat_rooms: List[str] = bldg.clean_vat_rooms() if (bldg and bldg.vat_rooms) else [
+            r.room_no for r in rooms if r.vat_applicable
+        ]
         income_tax_rooms: List[str] = (
-            [str(x).strip() for x in bldg.income_tax_rooms if str(x).strip()]
+            bldg.clean_income_tax_rooms()
             if (bldg and bldg.income_tax_rooms)
             else [r.room_no for r in rooms]
         )
 
-        # 1) 과세 대상 호실별 임차인 사업자 정보 디렉터리
+        # 1) 세입자가 세금계산서 발행을 요청한 계약/호실 목록 (사무실·주거용 기숙사 등 모든 호실 대상, 계약 시 요청한 경우만)
+        candidate_room_nos: List[str] = []
+        for r in rooms:
+            ct = active_ct_by_room.get(r.room_no)
+            tn = tenants_by_id.get(ct.id_tenant) if (ct and ct.id_tenant) else (
+                tenants_by_id.get(r.id_tenant) if r.id_tenant else None
+            )
+            requested = bool(
+                (ct and (ct.tax_invoice_requested or ct.tenant_business_number or ct.vat_target))
+                or (tn and tn.business_number)
+            )
+            if requested and r.room_no not in candidate_room_nos:
+                candidate_room_nos.append(r.room_no)
+
         vat_room_contracts: List[Dict[str, Any]] = []
-        for r_no in vat_rooms:
+        for r_no in candidate_room_nos:
             rm = room_by_no.get(r_no)
             ct = active_ct_by_room.get(r_no)
             tn = tenants_by_id.get(ct.id_tenant) if (ct and ct.id_tenant) else (
@@ -470,12 +476,13 @@ class TaxAndCertificateService:
             vat_room_contracts.append({
                 "room_no": r_no,
                 "room_id": rm.id if rm else "",
-                "room_category": rm.room_category if rm else "상가/사무실",
+                "room_category": rm.room_category if rm else "주거용 원룸",
                 "is_occupied": bool(ct or (rm and rm.is_occupied)),
                 "contract_id": ct.id if ct else "",
                 "tenant_id": tn.id if tn else (ct.id_tenant if ct else ""),
                 "tenant_name": ct.tenant_name if ct else (tn.name if tn else ""),
                 "tenant_phone": ct.tenant_phone if ct else (tn.phone if tn else ""),
+                "tax_invoice_requested": bool(ct.tax_invoice_requested) if ct else True,
                 "business_number": biz_no,
                 "company_name": comp_name,
                 "ceo_name": ceo_name,
@@ -489,7 +496,7 @@ class TaxAndCertificateService:
                 "missing_fields": missing,
             })
 
-        # 2) 기간 내 과세 수납 내역 기반 세금계산서 발행 대장 산출
+        # 2) 기간 내 세금계산서 발행 요청 호실 및 과세 수납 내역 기반 세금계산서 발행 대장 산출
         all_pays = [
             p for p in Pay.find(branch=b_id)
             if p.payment_kind == "MONTHLY_RENT"
@@ -512,11 +519,15 @@ class TaxAndCertificateService:
         invoices: List[Dict[str, Any]] = []
         for p in all_pays:
             ct = ct_by_id.get(p.id_contract) or active_ct_by_room.get(p.room_no)
-            is_taxable = (p.room_no in vat_rooms) or (p.vat_amount > 0) or bool(ct and ct.vat_target)
+            tn = tenants_by_id.get(p.id_tenant) or (tenants_by_id.get(ct.id_tenant) if ct else None)
+            is_taxable = (
+                bool(ct and (ct.tax_invoice_requested or ct.tenant_business_number or ct.vat_target))
+                or bool(tn and tn.business_number)
+                or (p.vat_amount > 0)
+                or (p.room_no in vat_rooms)
+            )
             if not is_taxable:
                 continue
-
-            tn = tenants_by_id.get(p.id_tenant) or (tenants_by_id.get(ct.id_tenant) if ct else None)
             biz_no_raw = (
                 (ct.tenant_business_number if ct and ct.tenant_business_number else "")
                 or (tn.business_number if tn and tn.business_number else "")

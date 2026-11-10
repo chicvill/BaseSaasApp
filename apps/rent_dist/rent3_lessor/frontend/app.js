@@ -416,12 +416,11 @@
     if (!ct) return;
     const hasPhoto = Boolean(ct.contract_photo_file);
     const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}` : "";
-    const bVatRooms = ((dash && dash.building && dash.building.vat_rooms) || []).map(String);
-    const isVatRoom = Boolean(ct.vat_target || r.vat_applicable || bVatRooms.includes(String(no)));
     const bizNo = ct.tenant_business_number || (r.tenant && r.tenant.business_number) || "";
     const compName = ct.tenant_company_name || (r.tenant && r.tenant.company_name) || "";
     const ceoName = ct.tenant_ceo_name || (r.tenant && r.tenant.ceo_name) || ct.tenant_name || "";
     const bizEmail = ct.tenant_email || (r.tenant && r.tenant.email) || "";
+    const taxReq = Boolean(ct.tax_invoice_requested || bizNo || compName);
     const f = (id, label, val, type, ph) => `<label class="r3-fld">${label}<input id="${id}" class="bass-input" type="${type || "text"}" value="${Bass.escapeHtml(String(val ?? ""))}" ${ph ? `placeholder="${Bass.escapeHtml(ph)}"` : ""}></label>`;
     const body = openModal(`📄 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 계약내용`, `
       <div class="r3-grid">
@@ -433,11 +432,11 @@
         ${f("cmTel", "임차인 전화번호", ct.tenant_phone || (r.tenant && r.tenant.phone) || "", "tel")}
       </div>
       <div class="bass-card" style="margin-top:10px;padding:10px;background:var(--surface-2, #f8fafc);">
-        <label style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px;margin-bottom:8px;cursor:pointer;">
-          <input id="cmVatTarget" type="checkbox" ${isVatRoom ? "checked" : ""}>
-          🧾 상가·사무실 부가세 과세 호실 (세금계산서 발행 대상)
+        <label style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px;cursor:pointer;">
+          <input id="cmTaxInvReq" type="checkbox" ${taxReq ? "checked" : ""}>
+          🧾 세입자가 세금계산서 발행을 요청함 (사무실·법인 기숙사 등 모든 호실 가능)
         </label>
-        <div class="r3-grid">
+        <div id="cmTaxBizWrap" class="r3-grid" style="display:${taxReq ? "grid" : "none"};margin-top:8px;">
           ${f("cmBizNo", "사업자등록번호", bizNo, "text", "예: 214-86-12345")}
           ${f("cmComp", "상호(법인명)", compName, "text", "예: (주)시크디자인")}
           ${f("cmCeo", "대표자명", ceoName, "text", "예: 홍길동")}
@@ -458,19 +457,24 @@
       ${ct.keys_released === false ? `<div class="bass-card" style="margin-top:12px;padding:10px;">
         <div style="font-size:13px;margin-bottom:6px;">🔑 잔금 입금 확인 전입니다. 내 은행 앱에서 직접 확인한 뒤 도어락 정보를 열어 주세요.</div>
         <button id="cmKeys" class="bass-btn bass-btn--sm bass-btn--primary" type="button">🔑 잔금 확인 & 도어락 교부</button></div>` : ""}`);
+    $m("cmTaxInvReq").addEventListener("change", (ev) => {
+      $m("cmTaxBizWrap").style.display = ev.target.checked ? "grid" : "none";
+    });
     $m("cmSave").addEventListener("click", function () {
       Bass.withLock(this, async () => {
+        const reqInv = Boolean($m("cmTaxInvReq").checked);
         const res = await Bass.api(APP_ID, "/contracts/edit", {
           method: "POST",
           body: {
             branch: currentBranch, contract_id: ct.id,
             deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
             move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, memo: $m("cmMemo").value,
-            vat_target: Boolean($m("cmVatTarget").checked),
-            tenant_business_number: $m("cmBizNo").value.trim(),
-            tenant_company_name: $m("cmComp").value.trim(),
-            tenant_ceo_name: $m("cmCeo").value.trim(),
-            tenant_email: $m("cmEmail").value.trim(),
+            tax_invoice_requested: reqInv,
+            vat_target: reqInv,
+            tenant_business_number: reqInv ? $m("cmBizNo").value.trim() : "",
+            tenant_company_name: reqInv ? $m("cmComp").value.trim() : "",
+            tenant_ceo_name: reqInv ? $m("cmCeo").value.trim() : "",
+            tenant_email: reqInv ? $m("cmEmail").value.trim() : "",
           },
         });
         Bass.updateAppAlert("success", res.message);
@@ -981,6 +985,17 @@
               <input id="brkDepReceived" type="checkbox" checked> 계약금 수령 완료 (체크하면 계약금 수납으로 바로 기록됩니다)
             </label>
           </div>
+          <div class="bass-card" style="margin-top:10px;padding:10px;">
+            <label style="font-size:13.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;">
+              <input id="brkTaxInvReq" type="checkbox"> 🧾 세입자가 세금계산서 발행을 요청함 (사무실·법인 기숙사 등 모든 호실 가능)
+            </label>
+            <div id="brkTaxBizWrap" class="field-grid" style="display:none;margin-top:8px;">
+              <div><label class="bass-label">사업자등록번호</label><input id="brkBizNo" class="bass-input" placeholder="예: 214-86-12345"></div>
+              <div><label class="bass-label">상호(법인명)</label><input id="brkCompName" class="bass-input" placeholder="예: (주)시크디자인"></div>
+              <div><label class="bass-label">대표자명</label><input id="brkCeoName" class="bass-input" placeholder="예: 홍길동"></div>
+              <div><label class="bass-label">세금계산서 수신 이메일</label><input id="brkBizEmail" type="email" class="bass-input" placeholder="예: tax@company.co.kr"></div>
+            </div>
+          </div>
         </div>
 
         <div class="room-card">
@@ -1086,9 +1101,14 @@
       });
     });
 
+    document.getElementById("brkTaxInvReq").addEventListener("change", (ev) => {
+      document.getElementById("brkTaxBizWrap").style.display = ev.target.checked ? "grid" : "none";
+    });
+
     document.getElementById("btnSubmitBrokerContract").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const roomNo = document.getElementById("brkRoomNo").value;
+        const reqInv = Boolean(document.getElementById("brkTaxInvReq").checked);
         const res = await Bass.api(APP_ID, "/contracts/broker-photo", {
           method: "POST",
           body: {
@@ -1115,6 +1135,11 @@
             broker_phone: document.getElementById("brkBrokerPhone").value.trim(),
             rtms_filed_by_broker: document.getElementById("brkRtmsFiled").checked,
             fixed_date_no: document.getElementById("brkFixedNo").value.trim(),
+            tax_invoice_requested: reqInv,
+            tenant_business_number: reqInv ? document.getElementById("brkBizNo").value.trim() : "",
+            tenant_company_name: reqInv ? document.getElementById("brkCompName").value.trim() : "",
+            tenant_ceo_name: reqInv ? document.getElementById("brkCeoName").value.trim() : "",
+            tenant_email: reqInv ? document.getElementById("brkBizEmail").value.trim() : "",
           },
         });
         brokerPhotoDataUrl = "";
@@ -1189,33 +1214,12 @@
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
-        <h3 style="margin:0 0 6px;">🧾 과세 호실 임차인 사업자 정보 (세금계산서 공급받는자)</h3>
-        <div class="bass-muted" style="font-size:12px;margin-bottom:8px;">상가·사무실 과세 호실 임차인의 사업자등록번호, 상호, 대표자명, 수신 이메일을 입력·수정합니다.</div>
-        ${vatContracts.length ? vatContracts.map((vc) => `
-          <div class="room-card" style="margin-bottom:6px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-            <div style="font-size:13px;line-height:1.6;">
-              <strong>${Bass.escapeHtml(vc.room_no)}호</strong>
-              ${vc.tenant_name ? `· ${Bass.escapeHtml(vc.tenant_name)}` : '<span class="bass-muted">(공실/미배정)</span>'}
-              ${vc.ready_for_invoice
-                ? `<span class="bass-badge bass-badge--success" style="margin-left:4px;">발행 준비 완료</span>`
-                : `<span class="bass-badge bass-badge--warning" style="margin-left:4px;">미입력: ${Bass.escapeHtml((vc.missing_fields || []).join("·"))}</span>`}
-              <br>
-              <span class="bass-muted" style="font-size:12px;">
-                사업자번호: <strong>${Bass.escapeHtml(vc.business_number || "-")}</strong> ·
-                상호: <strong>${Bass.escapeHtml(vc.company_name || "-")}</strong> ·
-                대표자: <strong>${Bass.escapeHtml(vc.ceo_name || "-")}</strong> ·
-                이메일: <strong>${Bass.escapeHtml(vc.email || "-")}</strong>
-              </span>
-            </div>
-            <button type="button" class="bass-btn bass-btn--sm btn-edit-tbiz" data-room="${Bass.escapeHtml(vc.room_no)}">✏️ 사업자 정보 입력·수정</button>
-          </div>
-        `).join("") : '<div class="bass-muted">설정된 부가세 대상 호실이 없습니다.</div>'}
-      </div>
-
-      <div class="bass-card" style="margin-bottom:12px;">
         <div class="bass-row" style="justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
           <h3 style="margin:0;">📑 세금계산서 발행 대장 (${d.year}년 ${taxMonth > 0 ? `${taxMonth}월` : "전체"})</h3>
           <a class="bass-btn bass-btn--sm bass-btn--primary" href="${hometaxCsvUrl}">📥 홈택스 일괄발급 포맷(CSV)</a>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-bottom:6px;">
+          세입자의 사업자등록번호·상호·대표자명·이메일은 일괄 입력하지 않고, <strong>계약할 때 세입자가 세금계산서 발행을 요구한 호실(사무실·법인 기숙사 등 모든 호실 가능)에만</strong> 계약 화면 또는 호실별 <code>[계약내용]</code>에서 입력합니다.
         </div>
         <div style="font-size:13.5px;margin-bottom:8px;">
           발행 대상 <strong>${invTotals.count || 0}건</strong> ·
@@ -1310,12 +1314,6 @@
         });
         Bass.updateAppAlert("success", res.message);
         await refresh();
-      });
-    });
-    elTabContent.querySelectorAll(".btn-edit-tbiz").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const vc = vatContracts.find((x) => String(x.room_no) === String(btn.dataset.room));
-        if (vc) showTenantBizModal(vc);
       });
     });
     document.getElementById("btnAddOutlay").addEventListener("click", function () {

@@ -564,6 +564,7 @@ class ContractEditReq(BaseModel):
     tenant_ceo_name: Optional[str] = None
     tenant_email: Optional[str] = None
     vat_target: Optional[bool] = None
+    tax_invoice_requested: Optional[bool] = None
 
 
 @router.post("/contracts/edit")
@@ -596,8 +597,14 @@ def edit_contract(req: ContractEditReq):
         ct.tenant_ceo_name = req.tenant_ceo_name.strip()
     if req.tenant_email is not None:
         ct.tenant_email = req.tenant_email.strip()
+    if req.tax_invoice_requested is not None:
+        ct.tax_invoice_requested = bool(req.tax_invoice_requested)
+    elif req.tenant_business_number:
+        ct.tax_invoice_requested = True
     if req.vat_target is not None:
         ct.vat_target = bool(req.vat_target)
+    elif req.tax_invoice_requested is not None:
+        ct.vat_target = bool(req.tax_invoice_requested)
     ct.vat = ct.compute_vat()
     ct.save(action="contract_edited", app_source=APP_SRC)
     room = Room.get(ct.id_room)
@@ -625,11 +632,11 @@ def edit_contract(req: ContractEditReq):
 def _parse_room_list(raw: Any) -> List[str]:
     if raw is None:
         return []
+    import re
     if isinstance(raw, list):
-        tokens = [str(x).strip().replace("호", "") for x in raw]
+        tokens = [re.sub(r"[\"'`\[\]\s]|호$", "", str(x)).strip() for x in raw]
     else:
-        import re
-        tokens = [t.strip().replace("호", "") for t in re.split(r"[,\s;/]+", str(raw)) if t.strip()]
+        tokens = [re.sub(r"[\"'`\[\]\s]|호$", "", t).strip() for t in re.split(r"[,\s;/]+", str(raw)) if t.strip()]
     seen: List[str] = []
     for tok in tokens:
         if tok and tok not in seen:
@@ -664,6 +671,7 @@ class TenantTaxBizReq(BaseModel):
     email: str = ""
     vat_target: Optional[bool] = None
     vat_separate: Optional[bool] = None
+    tax_invoice_requested: Optional[bool] = None
 
 
 @router.post("/building/edit")
@@ -763,8 +771,11 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
         ct.tenant_company_name = comp_name
         ct.tenant_ceo_name = ceo_name or ct.tenant_name
         ct.tenant_email = email
+        ct.tax_invoice_requested = bool(req.tax_invoice_requested) if req.tax_invoice_requested is not None else bool(biz_no or comp_name or req.vat_target)
         if req.vat_target is not None:
             ct.vat_target = bool(req.vat_target)
+        elif ct.tax_invoice_requested:
+            ct.vat_target = True
         if req.vat_separate is not None:
             ct.vat_separate = bool(req.vat_separate)
         ct.vat = ct.compute_vat()
@@ -902,8 +913,8 @@ def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optiona
             "biz_company_name": (bldg.biz_company_name if bldg and bldg.biz_company_name else (bldg.building_name if bldg else b_id)),
             "biz_type": bldg.biz_type if bldg else "부동산업",
             "biz_item": bldg.biz_item if bldg else "비주거용 건물 임대업",
-            "vat_rooms": list(bldg.vat_rooms) if bldg else [],
-            "income_tax_rooms": list(bldg.income_tax_rooms) if bldg else [],
+            "vat_rooms": bldg.clean_vat_rooms() if bldg else [],
+            "income_tax_rooms": bldg.clean_income_tax_rooms() if bldg else [],
         },
         "vat_periods": periods,
         "tax_invoice_register": invoice_reg,
@@ -1115,6 +1126,11 @@ class BrokerContractPhotoReq(BaseModel):
     broker_phone: str = ""
     rtms_filed_by_broker: bool = True
     fixed_date_no: str = ""
+    tax_invoice_requested: bool = False
+    tenant_business_number: str = ""
+    tenant_company_name: str = ""
+    tenant_ceo_name: str = ""
+    tenant_email: str = ""
 
 
 @router.post("/contracts/parse-broker-text")
@@ -1155,6 +1171,11 @@ def register_broker_contract_photo(req: BrokerContractPhotoReq):
         broker_phone=req.broker_phone,
         rtms_filed_by_broker=req.rtms_filed_by_broker,
         fixed_date_no=req.fixed_date_no,
+        tax_invoice_requested=req.tax_invoice_requested,
+        tenant_business_number=req.tenant_business_number,
+        tenant_company_name=req.tenant_company_name,
+        tenant_ceo_name=req.tenant_ceo_name,
+        tenant_email=req.tenant_email,
         app_source=APP_SRC,
     )
     rtms_status = res["rtms"]["status"]

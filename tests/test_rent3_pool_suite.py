@@ -2663,13 +2663,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             403,
         )
 
-        # 3) 건물 과세·종소세 호실 리스트 편집 및 저장 검증
+        # 3) 건물 과세·종소세 호실 리스트 편집 및 저장 검증 (따옴표가 섞여 들어와도 자동 제거)
         r_upd = c.post(
             "/api/rent3_lessor/building/tax-rooms",
             headers=chic,
             json={
                 "branch": "main",
-                "vat_rooms": "201, 202, 203, 301, 302, 303",
+                "vat_rooms": '"201", "202", "203", "301", "302", "303"',
                 "income_tax_rooms": "201, 202, 203, 301, 302, 303, 401, 402, 403, 501, 502, 503, 601, 602, 603, 701, 702, 703",
                 "biz_company_name": "시크빌",
                 "sync_contracts": False,
@@ -2681,7 +2681,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(b_main["vat_rooms"], ["201", "202", "203", "301", "302", "303"])
         self.assertEqual(len(b_main["income_tax_rooms"]), 18)
 
-        # 4) 과세 호실(201호) 임차인의 사업자등록번호, 상호, 대표자명, 수신 이메일 입력·저장
+        # 4) 계약 시(또는 계약 수정 시) 세입자가 세금계산서 발행을 요구한 호실만 사업자 정보 입력 (주거용 호실 기숙사 사용 포함)
         r_tbiz = c.post(
             "/api/rent3_lessor/tax/tenant-biz",
             headers=chic,
@@ -2693,12 +2693,59 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 "ceo_name": "이지훈",
                 "email": "tax@chicdesign.co.kr",
                 "vat_target": True,
+                "tax_invoice_requested": True,
             },
         )
         self.assertEqual(r_tbiz.status_code, 200, r_tbiz.text)
         self.assertEqual(r_tbiz.json()["contract"]["tenant_business_number"], "214-86-99887")
         self.assertEqual(r_tbiz.json()["contract"]["tenant_company_name"], "(주)시크디자인연구소")
+        self.assertTrue(r_tbiz.json()["contract"]["tax_invoice_requested"])
         self.assertEqual(r_tbiz.json()["tenant"]["business_number"], "214-86-99887")
+
+        # 주거용 호실(401호)을 등록하고 법인 기숙사로 계약할 때 세입자가 세금계산서 발행을 요청한 경우
+        c.post(
+            "/api/rent3_lessor/rooms",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "floor": 4,
+                "room_category": "주거용 원룸",
+                "vat_applicable": False,
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+            },
+        )
+        r_dorm = c.post(
+            "/api/rent3_lessor/contracts/broker-photo",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "photo_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                "photo_filename": "dorm_401.png",
+                "tenant_name": "김민지",
+                "tenant_phone": "010-5555-7777",
+                "lease_type": "월세",
+                "pay_timing": "후불",
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+                "contract_deposit": 500000,
+                "deposit_received": True,
+                "contract_date": "2026-10-01",
+                "move_in_date": "2026-10-01",
+                "lease_term_months": 12,
+                "tax_invoice_requested": True,
+                "tenant_business_number": "120-81-55555",
+                "tenant_company_name": "(주)한빛기숙사",
+                "tenant_ceo_name": "김민지",
+                "tenant_email": "dorm@hanbit.co.kr",
+            },
+        )
+        self.assertEqual(r_dorm.status_code, 200, r_dorm.text)
+        self.assertTrue(r_dorm.json()["contract"]["tax_invoice_requested"])
 
         # 5) 경비 지출: 수리비(110,000원 -> 매입세액 10,000원 공제) vs 경조사비(100,000원 -> 매입세액 0원 불공제, 종소세만 반영)
         r_rep = c.post(
@@ -2731,9 +2778,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertFalse(r_cong["is_vat_deductible"])
         self.assertEqual(r_cong["input_vat"], 0)
 
-        # 6) 세금계산서 발행 대장 조회 및 홈택스 일괄발급 CSV 다운로드 검증
+        # 6) 세금계산서 발행 대장 조회(공실/미요청 호실은 제외되고 요청한 호실만 포함) 및 홈택스 일괄발급 CSV 다운로드 검증
         reg = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
         self.assertTrue(reg["success"])
+        vc_rooms = [v["room_no"] for v in reg["vat_room_contracts"]]
+        self.assertIn("201", vc_rooms)
+        self.assertIn("401", vc_rooms)
+        self.assertNotIn("202", vc_rooms)  # 세금계산서 발행을 요청하지 않은 호실은 제외
+        self.assertNotIn("203", vc_rooms)  # 공실 호실도 제외
         vc_201 = next(v for v in reg["vat_room_contracts"] if v["room_no"] == "201")
         self.assertTrue(vc_201["ready_for_invoice"])
         self.assertEqual(vc_201["company_name"], "(주)시크디자인연구소")
