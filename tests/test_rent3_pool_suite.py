@@ -2618,6 +2618,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json=bb).status_code, 200)
         self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**bb, "building_name": " "}).status_code, 400)
         self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["building"]["address"], "인천 새주소 1")
+        # 부가세·종소세 자료 + 경비 등록·수정·삭제
+        yr = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["today"][:4]
+        o = c.post("/api/rent3_lessor/outlays", headers=chic, json={"branch": "main", "category": "cleaning", "title": "202호 보일러 수리", "amount": 120000, "expense_date": f"{yr}-03-05"}).json()["outlay"]
+        ts = c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()
+        self.assertEqual(len(ts["vat_periods"]), 2)
+        self.assertTrue(any(x["id"] == o["id"] for x in ts["outlays"]))
+        eb = {"branch": "main", "outlay_id": o["id"], "category": "cleaning", "title": "202호 보일러 교체", "amount": 150000, "vendor": "한빛설비", "expense_date": f"{yr}-03-06"}
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=sunho, json=eb).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=chic, json=eb).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=chic, json={**eb, "amount": 0}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/delete", headers=sunho, json={"branch": "main", "outlay_id": o["id"]}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/delete", headers=chic, json={"branch": "main", "outlay_id": o["id"]}).status_code, 200)
+        self.assertFalse(any(x["id"] == o["id"] for x in c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()["outlays"]))
 
 
 if __name__ == "__main__":

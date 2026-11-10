@@ -648,6 +648,76 @@ def create_outlay(req: OutlayCreateReq):
     }
 
 
+@router.get("/tax/summary")
+def tax_summary(branch: str = "main", year: Optional[int] = None):
+    """부가세·종합소득세 자료와 경비 지출 목록 (더보기 ▸ 부가세·종소세·경비)."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    yr = year or date_today().year
+    fin = TaxAndCertificateService.branch_financial_summary(b_id, yr)
+    pays = [p for p in Pay.find(branch=b_id) if p.payment_kind == "MONTHLY_RENT" and p.paid_date.startswith(f"{yr:04d}")]
+    periods = []
+    for label, months in (("1기 (1~6월)", range(1, 7)), ("2기 (7~12월)", range(7, 13))):
+        ps = [p for p in pays if int(p.paid_date[5:7]) in months]
+        periods.append({
+            "label": label,
+            "supply": sum(p.rent_amount + p.maintenance_amount for p in ps),
+            "vat": sum(p.vat_amount for p in ps),
+            "taxable_count": sum(1 for p in ps if p.vat_amount > 0),
+        })
+    outlays = sorted((o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")), key=lambda o: o.expense_date, reverse=True)
+    return {"success": True, "year": yr, "summary": fin, "vat_periods": periods,
+            "outlays": [{**o.model_dump(), "category_label": o.category_label} for o in outlays],
+            "expense_categories": EXPENSE_CATEGORIES}
+
+
+class OutlayEditReq(BaseModel):
+    branch: str = "main"
+    outlay_id: str
+    category: str
+    title: str
+    amount: int
+    vendor: str = ""
+    expense_date: str
+    memo: str = ""
+
+
+@router.post("/outlays/edit")
+def edit_outlay(req: OutlayEditReq):
+    ensure_pool_seeded()
+    o = Outlay.require(req.outlay_id)
+    if normalize_branch_id(o.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 지출은 고칠 수 없습니다.")
+    if req.category not in EXPENSE_CATEGORIES:
+        raise DomainError("분류가 올바르지 않습니다.")
+    if req.amount <= 0:
+        raise DomainError("금액은 0원보다 커야 합니다.")
+    try:
+        date.fromisoformat(req.expense_date)
+    except ValueError:
+        raise DomainError("지출일 형식이 올바르지 않습니다 (예: 2026-03-15).")
+    o.category, o.title, o.amount = req.category, req.title.strip() or o.title, req.amount
+    o.vendor, o.expense_date, o.memo = req.vendor.strip(), req.expense_date, req.memo.strip()
+    o.save(action="outlay_edited", app_source=APP_SRC)
+    return {"success": True, "message": f"지출 '{o.title}'을 고쳤습니다.", "outlay": o.model_dump()}
+
+
+class OutlayDeleteReq(BaseModel):
+    branch: str = "main"
+    outlay_id: str
+
+
+@router.post("/outlays/delete")
+def delete_outlay(req: OutlayDeleteReq):
+    ensure_pool_seeded()
+    o = Outlay.require(req.outlay_id)
+    if normalize_branch_id(o.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 지출은 지울 수 없습니다.")
+    title = o.title
+    o.delete(action="outlay_deleted", app_source=APP_SRC)
+    return {"success": True, "message": f"지출 '{title}'을 지웠습니다."}
+
+
 @router.get("/tax/export-csv")
 def export_tax_csv(branch: str = "main", year: Optional[int] = None):
     ensure_pool_seeded()

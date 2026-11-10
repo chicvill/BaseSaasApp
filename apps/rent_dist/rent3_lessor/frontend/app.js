@@ -1087,55 +1087,121 @@
     });
   }
 
-  function renderTaxTab() {
-    const fin = dash.financial_summary || {};
-    const cats = dash.expense_categories || {};
+  // ── 더보기 ▸ 부가세 · 종소세 · 경비: 연도별 자료, 경비 지출 등록·수정·삭제, CSV ──
+  let taxYear = 0;
+  async function renderTaxTab() {
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    const yr = taxYear || Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    let d;
+    try {
+      d = await Bass.api(APP_ID, `/tax/summary?branch=${encodeURIComponent(currentBranch)}&year=${yr}`);
+    } catch (e) { Bass.showError(e); return; }
+    if (currentTab !== "tax") return;
+    taxYear = d.year;
+    const fin = d.summary || {};
+    const cats = d.expense_categories || {};
+    const years = [d.year + 1, d.year, d.year - 1, d.year - 2].filter((v, i, a) => a.indexOf(v) === i && v <= Number((dash.today || "").slice(0, 4)) + 1);
+    const vatTotal = (d.vat_periods || []).reduce((a, p) => a + p.vat, 0);
     elTabContent.innerHTML = `
-      <div class="bass-card" style="margin-bottom:14px;">
-        <div class="bass-row" style="justify-content:space-between;">
-          <div>
-            <h3>📊 ${fin.year}년 공용 운영비 실결산 & 순운영이익(NOI)</h3>
-            <div class="bass-muted" style="font-size:13px;">총수입 ${fmtWon(fin.gross_revenue)} − 필요경비 ${fmtWon(fin.total_operating_expense)} = <strong>순이익 ${fmtWon(fin.noi)}</strong> (15.4% 분리과세 예상세액 ${fmtWon(fin.estimated_separate_tax)})</div>
-          </div>
-          <a class="bass-btn bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${fin.year}&token=${encodeURIComponent(Bass.token())}">📥 5월 종소세 홈택스 CSV 다운로드</a>
+      <div class="bass-row" style="gap:8px;margin-bottom:10px;align-items:center;">
+        <label class="r3-lbl" for="taxYearSel" style="margin:0;white-space:nowrap;">귀속연도</label>
+        <select id="taxYearSel" class="bass-select" style="width:auto;font-size:16px;">${years.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select>
+        <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${d.year}&token=${encodeURIComponent(Bass.token())}">📥 종소세 CSV</a>
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🧮 종합소득세 자료 (${d.year}년)</h3>
+        <div style="font-size:14px;line-height:1.8;">
+          총수입 <strong>${fmtWon(fin.gross_revenue)}</strong> (수납 ${fin.payment_count || 0}건)<br>
+          − 필요경비 <strong>${fmtWon(fin.total_operating_expense)}</strong> (지출 ${fin.outlay_count || 0}건)<br>
+          = 순임대소득 <strong style="color:var(--primary-2);">${fmtWon(fin.noi)}</strong><br>
+          분리과세 15.4% 예상세액 <strong>${fmtWon(fin.estimated_separate_tax)}</strong>
         </div>
-        <div class="field-grid" style="margin-top:12px;">
-          ${(fin.expenses_by_category || []).map((c) => `
-            <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">${Bass.escapeHtml(c.label)}</div><div style="font-weight:700;margin-top:4px;">${fmtWon(c.amount)}</div></div>
-          `).join("")}
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">참고용 추정치입니다. 신고 방식(분리·종합)과 공제는 세무사·홈택스에서 확인하세요.</div>
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🧾 부가가치세 자료 (${d.year}년)</h3>
+        ${(d.vat_periods || []).map((p) => `<div style="font-size:14px;line-height:1.8;"><strong>${Bass.escapeHtml(p.label)}</strong> · 공급가액 ${fmtWon(p.supply)} · 부가세 <strong>${fmtWon(p.vat)}</strong>${p.taxable_count ? ` (과세 수납 ${p.taxable_count}건)` : ""}</div>`).join("")}
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">${vatTotal > 0 ? "상가·업무용 등 과세 호실에서 받은 부가세입니다." : "주거용 임대는 부가세 면세라 받은 부가세가 없습니다."} 신고 기간은 1기(1~6월분 → 7월 25일), 2기(7~12월분 → 다음 해 1월 25일)입니다.</div>
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 8px;">➕ 경비 지출 등록 (수리비 등)</h3>
+        <div class="r3-grid">
+          <label class="r3-fld">지출일<input id="outDate" class="bass-input" type="date" value="${Bass.escapeHtml(dash.today || "")}"></label>
+          <label class="r3-fld">분류<select id="outCat" class="bass-select">${Object.entries(cats).map(([k, v]) => `<option value="${k}">${Bass.escapeHtml(v)}</option>`).join("")}</select></label>
+          <label class="r3-fld">적요<input id="outTitle" class="bass-input" placeholder="예: 202호 보일러 수리"></label>
+          <label class="r3-fld">금액(원)<input id="outAmt" type="number" class="bass-input" value="0"></label>
+          <label class="r3-fld">거래처<input id="outVendor" class="bass-input" placeholder="예: 한빛설비"></label>
+          <label class="r3-fld">메모<input id="outMemo" class="bass-input"></label>
         </div>
+        <button id="btnAddOutlay" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:8px;">💾 저장</button>
       </div>
 
       <div class="bass-card">
-        <h3>🧾 신규 공용 운영비 지출 등록</h3>
-        <div class="field-grid" style="margin:10px 0;">
-          <div>
-            <label class="bass-label">8대 표준 분류</label>
-            <select id="outCat" class="bass-select">
-              ${Object.entries(cats).map(([k, v]) => `<option value="${k}">${Bass.escapeHtml(v)}</option>`).join("")}
-            </select>
-          </div>
-          <div><label class="bass-label">적요</label><input id="outTitle" class="bass-input" placeholder="예: 복도 센서등 교체"></div>
-          <div><label class="bass-label">지출 금액(원)</label><input id="outAmt" type="number" class="bass-input" value="85000"></div>
-          <div><label class="bass-label">거래처</label><input id="outVendor" class="bass-input" placeholder="예: 한빛전기"></div>
-        </div>
-        <button id="btnAddOutlay" class="bass-btn bass-btn--primary" type="button">➕ 공용 운영비 저장</button>
-      </div>
-    `;
+        <h3 style="margin:0 0 6px;">📋 경비 내역 (${(d.outlays || []).length}건) <span class="bass-muted" style="font-size:12px;">터치하면 고칠 수 있습니다</span></h3>
+        ${(fin.expenses_by_category || []).filter((c) => c.amount > 0).map((c) => `<span class="bass-badge bass-badge--info" style="margin:2px;">${Bass.escapeHtml(c.label)} ${fmtWon(c.amount)}</span>`).join("")}
+        <div id="outlayList" style="margin-top:8px;">${(d.outlays || []).map((o) => `
+          <button type="button" class="outlay-row bass-btn" data-id="${o.id}" style="display:grid;grid-template-columns:78px 1fr auto;gap:6px;width:100%;text-align:left;margin-bottom:4px;font-size:13px;">
+            <span>${Bass.escapeHtml(o.expense_date.slice(2).replace(/-/g, "."))}</span>
+            <span>${Bass.escapeHtml(o.title)}<br><span class="bass-muted" style="font-size:11.5px;">${Bass.escapeHtml(o.category_label)}${o.vendor ? " · " + Bass.escapeHtml(o.vendor) : ""}</span></span>
+            <strong>${fmtWon(o.amount)}</strong></button>`).join("") || '<div class="bass-muted">등록된 경비가 없습니다.</div>'}</div>
+      </div>`;
 
+    document.getElementById("taxYearSel").addEventListener("change", (e) => { taxYear = Number(e.target.value); renderTaxTab(); });
     document.getElementById("btnAddOutlay").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, "/outlays", {
           method: "POST",
           body: {
-            branch: currentBranch,
-            category: document.getElementById("outCat").value,
-            title: document.getElementById("outTitle").value.trim() || "공용부 유지보수",
-            amount: Number(document.getElementById("outAmt").value || 0),
-            vendor: document.getElementById("outVendor").value.trim(),
+            branch: currentBranch, category: $m("outCat").value, title: $m("outTitle").value.trim() || "유지보수",
+            amount: Number($m("outAmt").value || 0), vendor: $m("outVendor").value.trim(), memo: $m("outMemo").value.trim(),
+            expense_date: $m("outDate").value || null,
           },
         });
         Bass.updateAppAlert("success", res.message);
+        await refresh();
+      });
+    });
+    elTabContent.querySelectorAll(".outlay-row").forEach((row) => row.addEventListener("click", () => {
+      const o = (d.outlays || []).find((x) => x.id === row.dataset.id);
+      if (o) showOutlayModal(o, cats);
+    }));
+  }
+
+  function showOutlayModal(o, cats) {
+    openModal("✏️ 경비 내역 수정", `
+      <div class="r3-grid">
+        <label class="r3-fld">지출일<input id="oeDate" class="bass-input" type="date" value="${Bass.escapeHtml(o.expense_date)}"></label>
+        <label class="r3-fld">분류<select id="oeCat" class="bass-select">${Object.entries(cats).map(([k, v]) => `<option value="${k}" ${k === o.category ? "selected" : ""}>${Bass.escapeHtml(v)}</option>`).join("")}</select></label>
+        <label class="r3-fld">적요<input id="oeTitle" class="bass-input" value="${Bass.escapeHtml(o.title)}"></label>
+        <label class="r3-fld">금액(원)<input id="oeAmt" type="number" class="bass-input" value="${o.amount}"></label>
+        <label class="r3-fld">거래처<input id="oeVendor" class="bass-input" value="${Bass.escapeHtml(o.vendor || "")}"></label>
+        <label class="r3-fld">메모<input id="oeMemo" class="bass-input" value="${Bass.escapeHtml(o.memo || "")}"></label>
+      </div>
+      <div class="bass-row" style="gap:6px;margin-top:10px;">
+        <button id="oeSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
+        <button id="oeDel" class="bass-btn bass-btn--sm bass-btn--danger" type="button">🗑️ 삭제</button>
+      </div>`);
+    $m("oeSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/outlays/edit", {
+          method: "POST",
+          body: { branch: currentBranch, outlay_id: o.id, category: $m("oeCat").value, title: $m("oeTitle").value, amount: Number($m("oeAmt").value || 0),
+                  vendor: $m("oeVendor").value, expense_date: $m("oeDate").value, memo: $m("oeMemo").value },
+        });
+        Bass.updateAppAlert("success", res.message);
+        closeModal();
+        await refresh();
+      });
+    });
+    $m("oeDel").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        if (!window.confirm(`'${o.title}' (${fmtWon(o.amount)}) 지출을 지울까요?`)) return;
+        const res = await Bass.api(APP_ID, "/outlays/delete", { method: "POST", body: { branch: currentBranch, outlay_id: o.id } });
+        Bass.updateAppAlert("success", res.message);
+        closeModal();
         await refresh();
       });
     });
