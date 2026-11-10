@@ -2613,6 +2613,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         ct2 = Contract.get(ct["id"])
         self.assertEqual((ct2.deposit, ct2.monthly_rent, ct2.expiry_date, ct2.lessor_memo), (6000000, 310000, "2027-03-01", "연락은 문자로"))
         self.assertEqual(Room.get(ct2.id_room).monthly_rent, 310000)
+        bb = {"branch": "main", "building_name": "시크빌2", "address": "인천 새주소 1"}
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=sunho, json=bb).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json=bb).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**bb, "building_name": " "}).status_code, 400)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["building"]["address"], "인천 새주소 1")
 
 
 if __name__ == "__main__":

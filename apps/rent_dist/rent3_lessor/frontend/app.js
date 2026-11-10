@@ -138,6 +138,17 @@
     } catch (e) { box.innerHTML = ""; }
   }
 
+  // 머리글: 건물이름[아이디] 현재 일시 (1분마다 갱신)
+  let hdrName = "";
+  function tickClock() {
+    const n = new Date();
+    const p = (v) => String(v).padStart(2, "0");
+    const t = `${n.getFullYear()}.${p(n.getMonth() + 1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;
+    const el = document.getElementById("bldgTitle");
+    if (el && hdrName) el.textContent = `🏢 ${hdrName} ${t}`;
+  }
+  setInterval(tickClock, 30000);
+
   async function refresh() {
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
     dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
@@ -150,7 +161,10 @@
 
     const b = dash.building || {};
     const l = dash.lessor || {};
-    document.getElementById("bldgSubtitle").textContent = `${b.building_name || ""} · ${b.address || ""} · 소유자: ${l.name || "-"}`;
+    hdrName = `${b.building_name || ""}${l.username ? `[${l.username}]` : ""}`;
+    tickClock();
+    const isAdmin = Boolean(savedSession && (savedSession.role === "admin" || savedSession.role === "superadmin"));
+    elBranch.hidden = !isAdmin;   // 건물 선택은 본사 관리자만
 
     const fin = dash.financial_summary || {};
     document.getElementById("kpiGrid").innerHTML = `
@@ -612,6 +626,31 @@
     });
   }
 
+  // 더보기 ▸ 건물 정보 수정
+  function showBuildingModal() {
+    const b = (dash && dash.building) || {};
+    openModal("🏢 건물 정보 수정", `
+      <label class="r3-fld">건물 이름<input id="bdName" class="bass-input" value="${Bass.escapeHtml(b.building_name || "")}"></label>
+      <label class="r3-fld" style="margin-top:8px;">주소<input id="bdAddr" class="bass-input" value="${Bass.escapeHtml(b.address || "")}"></label>
+      <button id="bdSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:10px;">💾 저장</button>`);
+    $m("bdSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/building/edit", { method: "POST", body: { branch: currentBranch, building_name: $m("bdName").value, address: $m("bdAddr").value } });
+        Bass.updateAppAlert("success", res.message);
+        closeModal();
+        await refresh();
+      });
+    });
+  }
+  const btnEditBuilding = document.getElementById("btnEditBuilding");
+  if (btnEditBuilding) {
+    btnEditBuilding.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      showBuildingModal();
+    });
+  }
+
   function renderRoomPanel() {
     const box = document.getElementById("roomPanel");
     const r = roomOf(selRoomNo);
@@ -679,10 +718,8 @@
       return `<option value="${Bass.escapeHtml(x.room_no)}" ${x.room_no === selRoomNo ? "selected" : ""}>${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}${n > 0 ? ` · 미납 ${n}` : ""}</option>`;
     };
     elTabContent.innerHTML = `
-      <label class="r3-lbl" for="roomPick">호실 선택</label>
-      <select id="roomPick" class="bass-select" style="margin-bottom:10px;">${rooms.map(opt).join("")}</select>
+      <select id="roomPick" class="bass-select" aria-label="호실 선택" style="margin-bottom:10px;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
       <div id="roomPanel"></div>
-      <div class="bass-muted" style="font-size:12.5px;margin:4px 0 14px;">자세한 사용법은 <a href="manual.html">이용 매뉴얼</a>을 보세요.</div>
 
       <details style="margin-bottom:14px;">
         <summary style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 안내 (만기 예고 · 납입일 사전/미납 통보)</summary>

@@ -30,11 +30,11 @@
         <header class="bass-card">
       <div class="bass-row" style="justify-content:space-between;">
         <div>
-          <h1 style="font-size:21px;margin-bottom:4px;">🏢 임대인 · 월세 수납 현황</h1>
-          <div id="bldgSubtitle" class="bass-muted" style="font-size:13px;">공동 JSON Data Pool 실시간 연동 중...</div>
+          <h1 id="bldgTitle" style="font-size:19px;margin-bottom:2px;">🏢 불러오는 중...</h1>
+          <div id="bldgSubtitle" class="bass-muted" style="font-size:13px;"></div>
         </div>
         <div class="bass-row">
-          <select id="branchSelect" class="bass-select" style="width:auto;"></select>
+          <select id="branchSelect" class="bass-select" style="width:auto;" hidden></select>
           <span id="poolRevBadge" hidden></span>
           <button type="button" data-r3-burger>☰ 더보기</button>
         </div>
@@ -48,9 +48,11 @@
       <button class="bass-btn tab-btn is-active" data-tab="ledger" type="button">💰 월세 수납 현황</button>
       <button class="bass-btn tab-btn" data-tab="rooms" type="button">🏷️ 임대매물등록</button>
       <a class="bass-btn" href="/rent3_contract/" style="text-decoration:none;">🤝 직거래 계약</a>
+      <a class="bass-btn" href="manual.html" style="text-decoration:none;">❓ 도움말</a>
 
       <aside class="r3-drawer" data-r3-drawer>
         <div class="r3-drawer__group">관리 도구</div>
+        <button class="bass-btn" id="btnEditBuilding" type="button">🏢 건물 정보 수정</button>
         <button class="bass-btn tab-btn" data-tab="broker" type="button">📸 중개 계약서 사진 등록</button>
         <button class="bass-btn tab-btn" data-tab="tax" type="button">📊 운영비 · 세금 정리</button>
         <button class="bass-btn tab-btn" data-tab="ops" type="button">🔧 A/S · 채팅 · 퇴실정산</button>

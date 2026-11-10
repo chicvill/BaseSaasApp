@@ -593,6 +593,27 @@ def edit_contract(req: ContractEditReq):
     return {"success": True, "message": f"{ct.room_no}호 계약 내용을 저장했습니다.", "contract": ct.model_dump()}
 
 
+class BuildingEditReq(BaseModel):
+    branch: str = "main"
+    building_name: str
+    address: str = ""
+
+
+@router.post("/building/edit")
+def edit_building(req: BuildingEditReq):
+    """건물 이름·주소 수정 (임대인 더보기 ▸ 건물 정보 수정)."""
+    ensure_pool_seeded()
+    name = req.building_name.strip()
+    if not name:
+        raise DomainError("건물 이름을 입력해 주세요.")
+    b = Building.first(branch=normalize_branch_id(req.branch))
+    if not b:
+        raise DomainError("건물 정보를 찾을 수 없습니다.")
+    b.building_name, b.address = name, req.address.strip()
+    b.save(action="building_edited", app_source=APP_SRC)
+    return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).", "building": b.model_dump()}
+
+
 @router.post("/payments/sms-paste")
 def paste_sms_payment(req: SmsPasteReq):
     ensure_pool_seeded()
