@@ -687,10 +687,6 @@
     const n = unpaidCount(r);
     const bs = r.billing_schedule;
     box.innerHTML = `<div class="room-card" style="${need ? "border-color:var(--warn);" : ""}">
-      <div class="rc-head">
-        <div class="rc-title"><strong>${Bass.escapeHtml(r.room_no)}호</strong> <span>${Bass.escapeHtml(ct.tenant_name || "")}</span></div>
-        <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span>
-      </div>
       <div class="rc-btns">
         <button class="bass-btn bass-btn--sm" data-act="pay" type="button">수납내역</button>
         <button class="bass-btn bass-btn--sm" data-act="contract" type="button">계약내용</button>
@@ -698,6 +694,7 @@
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
       </div>
       <div class="rc-info">
+        <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>`;
@@ -718,7 +715,10 @@
       return `<option value="${Bass.escapeHtml(x.room_no)}" ${x.room_no === selRoomNo ? "selected" : ""}>${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}${n > 0 ? ` · 미납 ${n}` : ""}</option>`;
     };
     elTabContent.innerHTML = `
-      <select id="roomPick" class="bass-select" aria-label="호실 선택" style="margin-bottom:10px;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <label class="r3-lbl" for="roomPick" style="margin:0;white-space:nowrap;">호실 선택</label>
+        <select id="roomPick" class="bass-select" style="flex:1;min-width:0;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
+      </div>
       <div id="roomPanel"></div>
 
       <details style="margin-bottom:14px;">
