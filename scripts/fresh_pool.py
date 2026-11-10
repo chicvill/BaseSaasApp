@@ -88,6 +88,8 @@ def build(cfg: dict, base_dir: str = ".") -> dict:
             import ledger_import
             res = ledger_import.import_ledger(lessor, bldg, b["ledger"], base_dir)
             n_tenant += res["tenants"]; n_pay += res["payments"]
+        if b.get("vat_rooms"):   # 부가세 납부 대상 호실 (사무실 겸용 등) — 계약이 만들어진 뒤에 반영
+            (Building.get(bldg.id) or bldg).apply_vat_rooms([str(x) for x in b["vat_rooms"]], app_source=SRC)
     return {"lessors": n_lessor, "buildings": n_bldg, "rooms": n_room, "tenants": n_tenant, "payments": n_pay}
 
 

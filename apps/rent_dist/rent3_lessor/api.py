@@ -327,7 +327,8 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         card = {
             **r.model_dump(),
             "pays": [{"id": x.id, "paid_date": x.paid_date, "billing_month": x.billing_month, "rent": x.rent_amount,
-                      "fee": x.maintenance_amount, "total": x.total_amount} for x in pays],
+                      "fee": x.maintenance_amount, "total": x.total_amount, "vat": x.vat_amount,
+                      "tax_invoice": x.tax_invoice or None} for x in pays],
             "is_occupied": r.is_occupied,
             "tenant": tenant.model_dump() if tenant else None,
             "contract": ct.model_dump() if ct else None,
@@ -383,6 +384,18 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
     }
 
 
+def _sync_vat_list(bldg, room_no: str, vat_on: bool) -> None:
+    """호실 화면에서 과세 여부를 바꾸면 건물의 부가세 대상 호실 목록에도 맞춘다."""
+    if not bldg:
+        return
+    cur = list(bldg.vat_rooms or [])
+    if vat_on and room_no not in cur:
+        cur.append(room_no)
+    elif not vat_on and room_no in cur:
+        cur.remove(room_no)
+    bldg.apply_vat_rooms(cur, app_source=APP_SRC)
+
+
 @router.post("/rooms")
 def create_or_update_room(req: RoomCreateReq):
     ensure_pool_seeded()
@@ -414,7 +427,8 @@ def create_or_update_room(req: RoomCreateReq):
         existing.status_description = req.status_description
         existing.is_published = req.is_published
         existing.save(action="room_updated", app_source=APP_SRC)
-        return {"success": True, "message": f"{req.room_no}호 정보가 저장되었습니다.", "room": existing.model_dump()}
+        _sync_vat_list(bldg, req.room_no, req.vat_applicable)
+        return {"success": True, "message": f"{req.room_no}호 정보가 저장되었습니다.", "room": Room.get(existing.id).model_dump()}
 
     room = Room(
         id=f"room_{b_id}_{req.room_no}",
@@ -436,7 +450,8 @@ def create_or_update_room(req: RoomCreateReq):
         status_description=req.status_description,
         is_published=req.is_published,
     ).save(action="room_created", app_source=APP_SRC)
-    return {"success": True, "message": f"신규 {room.room_no}호가 등록되었습니다.", "room": room.model_dump()}
+    _sync_vat_list(bldg, req.room_no, req.vat_applicable)
+    return {"success": True, "message": f"신규 {room.room_no}호가 등록되었습니다.", "room": Room.get(room.id).model_dump()}
 
 
 @router.post("/rooms/{room_id}/publish")
@@ -533,6 +548,8 @@ def edit_payment(req: PayEditReq):
     pay = Pay.require(req.pay_id)
     if normalize_branch_id(pay.branch) != normalize_branch_id(req.branch):
         raise Forbidden("다른 지점의 수납 내역은 고칠 수 없습니다.")
+    if pay.tax_invoice:
+        raise DomainError("세금계산서가 발행된 수납은 고칠 수 없습니다.", hint="수정이 필요하면 발행 기록을 정정(수정세금계산서)해야 합니다.")
     try:
         d = date.fromisoformat(req.paid_date)
     except ValueError:
@@ -581,10 +598,12 @@ def edit_contract(req: ContractEditReq):
         ct.expiry_date = req.expiry_date
     ct.tenant_phone = req.tenant_phone.strip()
     ct.lessor_memo = req.memo.strip()
+    ct.vat = ct.compute_vat()
     ct.save(action="contract_edited", app_source=APP_SRC)
     room = Room.get(ct.id_room)
     if room:
         room.deposit, room.monthly_rent, room.maintenance_fee = req.deposit, req.monthly_rent, req.maintenance_fee
+        room.vat_amount = ct.vat
         room.save(action="room_terms_synced", app_source=APP_SRC)
     tenant = Tenant.get(ct.id_tenant) if ct.id_tenant else None
     if tenant and req.tenant_phone.strip():
@@ -597,6 +616,7 @@ class BuildingEditReq(BaseModel):
     branch: str = "main"
     building_name: str
     address: str = ""
+    vat_rooms: Optional[List[str]] = None   # 부가세 납부 대상 호실 (None = 그대로)
 
 
 @router.post("/building/edit")
@@ -611,7 +631,55 @@ def edit_building(req: BuildingEditReq):
         raise DomainError("건물 정보를 찾을 수 없습니다.")
     b.building_name, b.address = name, req.address.strip()
     b.save(action="building_edited", app_source=APP_SRC)
-    return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).", "building": b.model_dump()}
+    extra = ""
+    if req.vat_rooms is not None:
+        want = [x.strip() for x in req.vat_rooms if x and x.strip()]
+        known = {r.room_no for r in Room.find(id_building=b.id)}
+        unknown = [x for x in want if x not in known]
+        if unknown:
+            raise DomainError(f"없는 호실입니다: {', '.join(unknown)}", hint="호실 번호를 쉼표로 구분해 정확히 적어 주세요. (예: 201, 202)")
+        b.apply_vat_rooms(want, app_source=APP_SRC)
+        extra = f" 부가세 대상 호실: {', '.join(want) if want else '없음'}."
+    return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).{extra}", "building": Building.get(b.id).model_dump()}
+
+
+class TaxInvoiceReq(BaseModel):
+    branch: str = "main"
+    pay_id: str
+
+
+@router.post("/payments/tax-invoice")
+def issue_tax_invoice(req: TaxInvoiceReq):
+    """부가세가 들어 있는 수납 건의 세금계산서 발행 기록을 만든다(국세청 전송은 하지 않는다 — 홈택스 입력·인쇄용)."""
+    ensure_pool_seeded()
+    pay = Pay.require(req.pay_id)
+    if normalize_branch_id(pay.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 수납 내역입니다.")
+    if pay.vat_amount <= 0:
+        raise DomainError("부가세가 없는 수납은 세금계산서를 발행하지 않습니다.", hint="부가세 대상 호실의 부가세 포함 수납 건에서만 발행할 수 있습니다.")
+    if pay.tax_invoice:
+        return {"success": True, "already": True, "message": f"이미 발행된 세금계산서입니다 ({pay.tax_invoice.get('no')}).", "invoice": pay.tax_invoice}
+    bldg = Building.first(branch=normalize_branch_id(pay.branch))
+    lessor = Lessor.get(bldg.id_lessor) if (bldg and bldg.id_lessor) else Lessor.first(branch=normalize_branch_id(pay.branch))
+    ct = Contract.get(pay.id_contract)
+    tenant = Tenant.get(pay.id_tenant) if pay.id_tenant else None
+    supply = pay.total_amount - pay.vat_amount
+    pay.tax_invoice = {
+        "no": f"TI-{pay.paid_date.replace('-', '')}-{pay.id[-5:].upper()}",
+        "issued_at": now_iso(),
+        "write_date": pay.paid_date,
+        "billing_month": pay.billing_month,
+        "item": f"{pay.room_no}호 임대료·관리비 ({pay.billing_month}분)",
+        "supply": supply,
+        "vat": pay.vat_amount,
+        "total": pay.total_amount,
+        "supplier": {"name": (bldg.building_name if bldg else ""), "rep": (lessor.name if lessor else ""),
+                     "biz_no": (lessor.business_number if lessor else ""), "address": (bldg.address if bldg else "")},
+        "buyer": {"name": (ct.tenant_name if ct else pay.payer_name), "biz_no": (tenant.business_number if tenant else ""),
+                  "phone": ((ct.tenant_phone if ct else "") or (tenant.phone if tenant else ""))},
+    }
+    pay.save(action="tax_invoice_issued", app_source=APP_SRC)
+    return {"success": True, "already": False, "message": f"{pay.room_no}호 세금계산서 발행 기록을 만들었습니다 ({pay.tax_invoice['no']}).", "invoice": pay.tax_invoice}
 
 
 @router.post("/payments/sms-paste")
@@ -664,6 +732,7 @@ def tax_summary(branch: str = "main", year: Optional[int] = None):
             "supply": sum(p.rent_amount + p.maintenance_amount for p in ps),
             "vat": sum(p.vat_amount for p in ps),
             "taxable_count": sum(1 for p in ps if p.vat_amount > 0),
+            "issued_count": sum(1 for p in ps if p.vat_amount > 0 and p.tax_invoice),
         })
     outlays = sorted((o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")), key=lambda o: o.expense_date, reverse=True)
     return {"success": True, "year": yr, "summary": fin, "vat_periods": periods,

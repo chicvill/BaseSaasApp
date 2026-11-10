@@ -145,9 +145,23 @@ class FifoPaymentEngine:
                 "cleared": (row["unpaid"] - take) == 0,
             })
 
-        # 비례 배분 요약
-        monthly_std = contract.monthly_rent + contract.maintenance_fee + contract.compute_vat()
-        if monthly_std > 0:
+        # 월세·관리비·부가세 나누기: 상계된 달의 청구 구성비를 따른다 (부가세가 없던 달에 부가세가 잡히지 않게)
+        row_by_ym = {r["ym"]: r for r in before_ledger["months"]}
+        alloc_total = sum(a["allocated"] for a in allocations)
+        if alloc_total > 0:
+            rp = mp = vp = 0.0
+            for a in allocations:
+                row = row_by_ym.get(a["ym"]) or {}
+                due = row.get("due") or 0
+                if due > 0:
+                    rp += a["allocated"] * (row.get("rent") or 0) / due
+                    mp += a["allocated"] * (row.get("maintenance") or 0) / due
+                    vp += a["allocated"] * (row.get("vat") or 0) / due
+            vat_part = round(vp)
+            maint_part = round(mp)
+            rent_part = amount - vat_part - maint_part
+        elif contract.monthly_rent + contract.maintenance_fee + contract.compute_vat() > 0:
+            monthly_std = contract.monthly_rent + contract.maintenance_fee + contract.compute_vat()
             ratio = amount / monthly_std
             rent_part = round(contract.monthly_rent * ratio)
             vat_part = round(contract.compute_vat() * ratio)

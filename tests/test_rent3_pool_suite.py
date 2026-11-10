@@ -2633,5 +2633,49 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertFalse(any(x["id"] == o["id"] for x in c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()["outlays"]))
 
 
+    def test_50_vat_rooms_and_tax_invoice(self):
+        """50. 건물의 부가세 대상 호실 → 호실 부가세·계약 반영(소급 없음), 수납의 부가세 분리, 세금계산서 발행 기록(중복 방지·수정 잠금)."""
+        from apps.rent_dist._rent3_core import Building, current_ym
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        r = next(x for x in Room.find(branch="main") if x.active_contract_id and Contract.get(x.active_contract_id).lease_type == "월세"
+                 and Contract.get(x.active_contract_id).monthly_rent > 0)
+        ct0 = Contract.get(r.active_contract_id)
+        before = {m["ym"]: m["due"] for m in ct0.ledger()["months"]}
+        base = {"branch": "main", "building_name": Building.first(branch="main").building_name}
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": ["999"]}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=sunho, json={**base, "vat_rooms": [r.room_no]}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": [r.room_no]}).status_code, 200)
+        self.assertEqual(Building.first(branch="main").vat_rooms, [r.room_no])
+        ct = Contract.get(r.active_contract_id)
+        want = round((ct.monthly_rent + ct.maintenance_fee) * 0.1)
+        self.assertTrue(ct.vat_target)
+        self.assertEqual((ct.vat, Room.get(r.id).vat_amount, Room.get(r.id).vat_applicable), (want, want, True))
+        self.assertEqual(ct.vat_from_ym, current_ym())
+        after = {m["ym"]: m["due"] for m in ct.ledger()["months"]}
+        for ym, due in before.items():                                   # 지난 달 청구액은 그대로(소급 미납 없음)
+            if ym < current_ym():
+                self.assertEqual(after[ym], due, ym)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["building"]["vat_rooms"], [r.room_no])
+        # 부가세가 들어 있는 수납 건: 세금계산서 발행 기록
+        ct.vat_from_ym = ""; ct.save("t")
+        amt = ct.monthly_rent + ct.maintenance_fee + want
+        res = c.post("/api/rent3_lessor/payments/collect", headers=chic, json={"branch": "main", "room_no": r.room_no, "amount": amt, "paid_date": "2026-11-09"}).json()
+        pid = res["payment"]["id"]
+        self.assertGreater(Pay.get(pid).vat_amount, 0)
+        self.assertEqual(c.post("/api/rent3_lessor/payments/tax-invoice", headers=sunho, json={"branch": "main", "pay_id": pid}).status_code, 403)
+        inv = c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": pid}).json()
+        self.assertFalse(inv["already"])
+        self.assertEqual(inv["invoice"]["supply"] + inv["invoice"]["vat"], Pay.get(pid).total_amount)
+        self.assertTrue(c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": pid}).json()["already"])
+        edit = {"branch": "main", "pay_id": pid, "paid_date": "2026-11-10", "rent_amount": 1, "maintenance_amount": 1}
+        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=chic, json=edit).status_code, 400)   # 발행 후 수정 잠금
+        plain = Pay(branch="main", id_room=r.id, room_no=r.room_no, id_contract=ct.id, rent_amount=1000, total_amount=1000).save("t")
+        self.assertEqual(c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": plain.id}).status_code, 400)
+        # 대상에서 빼면 호실·계약의 부가세가 0
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": []}).status_code, 200)
+        self.assertEqual((Contract.get(ct.id).vat_target, Room.get(r.id).vat_amount), (False, 0))
+
+
 if __name__ == "__main__":
     unittest.main()

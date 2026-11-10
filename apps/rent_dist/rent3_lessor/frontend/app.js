@@ -231,6 +231,8 @@
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
     .pr--un, .pr--ok { grid-template-columns: 44px 1fr; }
+    .pr--tax { grid-template-columns: 44px 1fr; min-height: 0; }
+    .pr--tax .bass-btn { white-space: nowrap; }
     .pr--un .pr__un { color: var(--err); font-weight: 800; }
     .pr-list { max-height: 205px; overflow-y: auto; border-bottom: 1px solid var(--border); }
     `;
@@ -339,10 +341,17 @@
         rows.push(`<div class="pr pr--un"><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">미납 ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}</span></div>`);
       }
       const ps = byYm[m.ym] || [];
-      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
-        <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
-        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
-        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"></div>`));
+      ps.forEach((p) => {
+        const lock = p.tax_invoice ? " disabled" : "";
+        rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
+        <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일"${lock}>
+        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세"${lock}>
+        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"${lock}></div>`);
+        if (p.vat > 0) {
+          rows.push(`<div class="pr pr--tax"><span></span><span>부가세 <strong>${fmtWon(p.vat)}</strong>
+            <button type="button" class="bass-btn bass-btn--sm btn-tax-inv ${p.tax_invoice ? "" : "bass-btn--primary"}" data-pay="${p.id}" style="margin-left:6px;">🧾 ${p.tax_invoice ? "세금계산서 보기" : "세금계산서 발행"}</button></span></div>`);
+        }
+      });
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
@@ -388,6 +397,14 @@
       });
     });
     $m("pmCopy").addEventListener("click", () => copyAndSms($m("pmMsg").value, ct.tenant_phone || (r.tenant && r.tenant.phone)));
+    body.querySelectorAll(".btn-tax-inv").forEach((btn) => btn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/payments/tax-invoice", { method: "POST", body: { branch: currentBranch, pay_id: btn.dataset.pay } });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+        showInvoiceModal(no, res.invoice);
+      });
+    }));
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
       row.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
         Bass.withLock(inp, async () => {
@@ -407,6 +424,58 @@
         }).catch(() => {});
       }));
     });
+  }
+
+  // 세금계산서 발행 기록: 화면 · 복사 · 인쇄 (국세청 전송은 하지 않으니 홈택스에 이 값을 입력해 발급)
+  function invoiceText(i) {
+    const sp = i.supplier || {}, by = i.buyer || {};
+    return [`[세금계산서 발행 기록] ${i.no}`, `작성일자 ${i.write_date}`,
+      `공급자 ${sp.name || ""} (대표 ${sp.rep || ""}) 사업자번호 ${sp.biz_no || "-"} ${sp.address || ""}`,
+      `공급받는자 ${by.name || ""} 사업자번호 ${by.biz_no || "-"} 연락처 ${by.phone || "-"}`,
+      `품목 ${i.item}`, `공급가액 ${fmtWon(i.supply)} / 세액 ${fmtWon(i.vat)} / 합계 ${fmtWon(i.total)}`].join("\n");
+  }
+
+  function printInvoice(i) {
+    const sp = i.supplier || {}, by = i.buyer || {};
+    const w = window.open("", "_blank");
+    if (!w) { Bass.updateAppAlert("warning", "팝업이 막혀 있습니다. 허용한 뒤 다시 눌러 주세요."); return; }
+    const e = Bass.escapeHtml;
+    w.document.write(`<!doctype html><meta charset="utf-8"><title>${e(i.no)}</title>
+      <style>body{font:14px/1.6 sans-serif;padding:24px;color:#111}table{border-collapse:collapse;width:100%;margin:10px 0}td,th{border:1px solid #444;padding:6px 8px;text-align:left}th{background:#eee;width:22%}h2{margin:0}</style>
+      <h2>세금계산서 (발행 기록)</h2><div>번호 ${e(i.no)} · 작성일자 ${e(i.write_date)}</div>
+      <table><tr><th>공급자 상호</th><td>${e(sp.name || "")}</td><th>대표자</th><td>${e(sp.rep || "")}</td></tr>
+      <tr><th>사업자번호</th><td>${e(sp.biz_no || "")}</td><th>주소</th><td>${e(sp.address || "")}</td></tr>
+      <tr><th>공급받는자</th><td>${e(by.name || "")}</td><th>사업자번호</th><td>${e(by.biz_no || "")}</td></tr></table>
+      <table><tr><th>품목</th><td colspan="3">${e(i.item)}</td></tr>
+      <tr><th>공급가액</th><td>${fmtWon(i.supply)}</td><th>세액</th><td>${fmtWon(i.vat)}</td></tr>
+      <tr><th>합계금액</th><td colspan="3"><strong>${fmtWon(i.total)}</strong></td></tr></table>
+      <p style="font-size:12px;color:#555">이 문서는 앱의 발행 기록이며 국세청에 전송되지 않습니다. 홈택스에서 전자세금계산서를 발급할 때 위 값을 사용하세요.</p>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
+
+  function showInvoiceModal(no, inv) {
+    const sp = inv.supplier || {}, by = inv.buyer || {};
+    const e = Bass.escapeHtml;
+    openModal(`🧾 ${e(no)}호 세금계산서`, `
+      <div style="font-size:13.5px;line-height:1.8;">
+        <strong>${e(inv.no)}</strong> · 작성일자 ${e(inv.write_date)}<br>
+        공급자 ${e(sp.name || "")} (대표 ${e(sp.rep || "")}) · 사업자번호 ${e(sp.biz_no || "-")}<br>
+        공급받는자 ${e(by.name || "")} · 사업자번호 ${e(by.biz_no || "-")}<br>
+        품목 ${e(inv.item)}<br>
+        공급가액 <strong>${fmtWon(inv.supply)}</strong> · 세액 <strong>${fmtWon(inv.vat)}</strong> · 합계 <strong>${fmtWon(inv.total)}</strong>
+      </div>
+      ${sp.biz_no ? "" : '<div class="bass-muted" style="font-size:12px;margin-top:6px;">⚠️ 임대인 사업자번호가 비어 있습니다. 홈택스 입력 전에 확인하세요.</div>'}
+      <div class="bass-muted" style="font-size:12px;margin:8px 0;">앱의 발행 기록이며 국세청에는 전송되지 않습니다. 홈택스에서 전자세금계산서를 발급할 때 이 값을 사용하세요. 발행한 수납 건은 금액을 고칠 수 없습니다.</div>
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+        <button id="tiPrint" class="bass-btn bass-btn--sm bass-btn--primary" type="button">🖨️ 인쇄</button>
+        <button id="tiCopy" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
+        <button id="tiBack" class="bass-btn bass-btn--sm" type="button">← 수납내역</button>
+      </div>`);
+    $m("tiPrint").addEventListener("click", () => printInvoice(inv));
+    $m("tiCopy").addEventListener("click", async () => { const ok = await copyText(invoiceText(inv)); Bass.updateAppAlert(ok ? "success" : "warning", ok ? "복사했습니다." : "복사에 실패했습니다."); });
+    $m("tiBack").addEventListener("click", () => showPayModal(no));
   }
 
   // ② 계약내용: 보기·고치기 + 계약서 사진 + (잔금 확인 전이면) 도어락 교부
@@ -632,10 +701,13 @@
     openModal("🏢 건물 정보 수정", `
       <label class="r3-fld">건물 이름<input id="bdName" class="bass-input" value="${Bass.escapeHtml(b.building_name || "")}"></label>
       <label class="r3-fld" style="margin-top:8px;">주소<input id="bdAddr" class="bass-input" value="${Bass.escapeHtml(b.address || "")}"></label>
+      <label class="r3-fld" style="margin-top:8px;">부가세 납부 대상 호실 <span class="bass-muted">(쉼표로 구분 · 예: 201, 202, 203)</span>
+        <input id="bdVat" class="bass-input" value="${Bass.escapeHtml((b.vat_rooms || []).join(", "))}" placeholder="없으면 비워 두세요"></label>
+      <div class="bass-muted" style="font-size:12px;margin-top:4px;">대상 호실은 월세+관리비의 10%를 부가세로 별도 청구합니다. 새로 지정하면 이번 달 청구분부터 적용되고 지난 달에는 소급하지 않습니다. (전세 호실은 월세가 없어 0원)</div>
       <button id="bdSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:10px;">💾 저장</button>`);
     $m("bdSave").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/building/edit", { method: "POST", body: { branch: currentBranch, building_name: $m("bdName").value, address: $m("bdAddr").value } });
+        const res = await Bass.api(APP_ID, "/building/edit", { method: "POST", body: { branch: currentBranch, building_name: $m("bdName").value, address: $m("bdAddr").value, vat_rooms: $m("bdVat").value.split(/[,\s]+/).filter(Boolean) } });
         Bass.updateAppAlert("success", res.message);
         closeModal();
         await refresh();
@@ -695,7 +767,7 @@
       </div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
-        보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
+        보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}${r.vat_amount > 0 ? ` · 부가세 ${fmtWon(r.vat_amount)}` : ""}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>`;
     const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal };
