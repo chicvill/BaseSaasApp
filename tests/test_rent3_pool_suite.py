@@ -2804,6 +2804,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("(주)시크디자인연구소", csv_text)
         self.assertIn("tax@chicdesign.co.kr", csv_text)
 
+        # 7) 부가세·종소세 호실별 산출내역 및 납부 상세내역 검증
+        ts_after = c.get("/api/rent3_lessor/tax/summary?branch=main&year=2026", headers=chic).json()["summary"]
+        self.assertTrue(len(ts_after["vat_room_breakdown"]) >= 1)
+        self.assertTrue(len(ts_after["income_tax_room_breakdown"]) >= 1)
+        self.assertTrue(len(ts_after["vat_payment_rows"]) >= 1)
+        self.assertTrue(len(ts_after["income_tax_payment_rows"]) >= 1)
+        r_tax_csv = c.get("/api/rent3_lessor/tax/export-csv?branch=main&year=2026", headers=chic)
+        self.assertEqual(r_tax_csv.status_code, 200)
+        self.assertIn("[호실별 임대수입 산출내역 (종합소득세 신고대상)]", r_tax_csv.content.decode("utf-8-sig"))
+
 
 if __name__ == "__main__":
     unittest.main()

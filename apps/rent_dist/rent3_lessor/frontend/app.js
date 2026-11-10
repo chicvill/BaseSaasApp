@@ -1170,7 +1170,12 @@
     const invReg = d.tax_invoice_register || {};
     const vatRoomsList = bCfg.vat_rooms || fin.vat_rooms || [];
     const incRoomsList = bCfg.income_tax_rooms || fin.income_tax_rooms || [];
-    const vatContracts = invReg.vat_room_contracts || [];
+    const vatRoomBreakdown = fin.vat_room_breakdown || [];
+    const vatPayRows = fin.vat_payment_rows || [];
+    const incRoomBreakdown = fin.income_tax_room_breakdown || [];
+    const incPayRows = fin.income_tax_payment_rows || [];
+    const stickyTh = 'style="position:sticky;top:0;background:var(--surface, #1e293b);z-index:1;"';
+    const scrollBox5 = 'style="max-height:215px;overflow-y:auto;overflow-x:auto;border:1px solid var(--border, rgba(148,163,184,0.22));border-radius:8px;"';
     const invoices = invReg.invoices || [];
     const invTotals = invReg.totals || { count: 0, supply_amount: 0, tax_amount: 0, total_amount: 0 };
     const cats = d.expense_categories || {};
@@ -1215,7 +1220,7 @@
 
       <div class="bass-card" style="margin-bottom:12px;">
         <div class="bass-row" style="justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
-          <h3 style="margin:0;">📑 세금계산서 발행 대장 (${d.year}년 ${taxMonth > 0 ? `${taxMonth}월` : "전체"})</h3>
+          <h3 style="margin:0;">📑 세금계산서 발급 리스트 (${d.year}년 ${taxMonth > 0 ? `${taxMonth}월` : "전체"} · 5줄 스크롤)</h3>
           <a class="bass-btn bass-btn--sm bass-btn--primary" href="${hometaxCsvUrl}">📥 홈택스 일괄발급 포맷(CSV)</a>
         </div>
         <div class="bass-muted" style="font-size:12px;margin-bottom:6px;">
@@ -1227,9 +1232,9 @@
           세액(10%) 합계 <strong>${fmtWon(invTotals.tax_amount || 0)}</strong> ·
           합계금액 <strong>${fmtWon(invTotals.total_amount || 0)}</strong>
         </div>
-        ${invoices.length ? `<div style="overflow-x:auto;">
-          <table class="bass-table" style="width:100%;font-size:12.5px;">
-            <thead>
+        ${invoices.length ? `<div ${scrollBox5}>
+          <table class="bass-table" style="width:100%;font-size:12.5px;margin:0;">
+            <thead ${stickyTh}>
               <tr><th>작성일자</th><th>호실</th><th>사업자번호</th><th>상호 / 대표자</th><th>수신 이메일</th><th>공급가액</th><th>세액(10%)</th><th>상태</th></tr>
             </thead>
             <tbody>
@@ -1247,7 +1252,7 @@
               `).join("")}
             </tbody>
           </table>
-        </div>` : '<div class="bass-muted" style="font-size:13px;">해당 기간에 과세 호실 수납 내역이 없습니다.</div>'}
+        </div>` : '<div class="bass-muted" style="font-size:13px;">해당 기간에 세금계산서 발급 대상 수납 내역이 없습니다.</div>'}
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
@@ -1259,10 +1264,56 @@
           예상 납부세액 <strong style="color:var(--primary-2);">${fmtWon(p.net_vat_payable ?? p.vat)}</strong>
           ${p.non_deductible_expense ? `<span class="bass-muted" style="font-size:12px;">(불공제 경비 ${fmtWon(p.non_deductible_expense)} 제외)</span>` : ""}
         </div>`).join("")}
-        <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+        <div class="bass-muted" style="font-size:12px;margin-top:4px;margin-bottom:8px;">
           수리비·청소비·승강기·공용전기 등 사업 관련 세금계산서·카드 지출의 매입세액(연간 ${fmtWon(inputVatTotal)})은 공제되며,
           <strong>경조사비·화재보험료(면세)</strong> 등은 부가세 매입세액 불공제(종합소득세 필요경비로만 반영)됩니다.
         </div>
+        <div style="font-weight:700;font-size:13px;margin:8px 0 4px;">📊 부가세 호실별 산출내역 (과세 호실별 1기·2기·연간 집계)</div>
+        ${vatRoomBreakdown.length ? `<div ${scrollBox5}>
+          <table class="bass-table" style="width:100%;font-size:12.5px;margin:0;">
+            <thead ${stickyTh}>
+              <tr><th>호실</th><th>임차인</th><th>수납건수</th><th>1기 공급가액(세액)</th><th>2기 공급가액(세액)</th><th>연간 공급가액</th><th>연간 부가세(10%)</th></tr>
+            </thead>
+            <tbody>
+              ${vatRoomBreakdown.map((rb) => `
+                <tr>
+                  <td><strong>${Bass.escapeHtml(rb.room_no)}호</strong></td>
+                  <td>${Bass.escapeHtml(rb.tenant_name || "-")}</td>
+                  <td>${rb.count}건</td>
+                  <td>${fmtWon(rb.h1_supply)} (${fmtWon(rb.h1_vat)})</td>
+                  <td>${fmtWon(rb.h2_supply)} (${fmtWon(rb.h2_vat)})</td>
+                  <td><strong>${fmtWon(rb.supply_amount)}</strong></td>
+                  <td><strong>${fmtWon(rb.vat_amount)}</strong></td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>` : '<div class="bass-muted" style="font-size:12.5px;">과세 호실 수납 내역이 없습니다.</div>'}
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer;font-size:12.5px;font-weight:700;">🔍 과세 호실 건별 납부 상세내역 보기 (${vatPayRows.length}건)</summary>
+          <div ${scrollBox5} style="max-height:215px;overflow-y:auto;overflow-x:auto;margin-top:6px;border:1px solid var(--border, rgba(148,163,184,0.22));border-radius:8px;">
+            <table class="bass-table" style="width:100%;font-size:12px;margin:0;">
+              <thead ${stickyTh}>
+                <tr><th>납부일</th><th>귀속월</th><th>호실</th><th>입금자</th><th>월세</th><th>관리비</th><th>공급가액</th><th>부가세</th><th>합계</th></tr>
+              </thead>
+              <tbody>
+                ${vatPayRows.map((pr) => `
+                  <tr>
+                    <td>${Bass.escapeHtml(pr.paid_date)}</td>
+                    <td>${Bass.escapeHtml(pr.billing_month)}</td>
+                    <td><strong>${Bass.escapeHtml(pr.room_no)}호</strong></td>
+                    <td>${Bass.escapeHtml(pr.payer_name || "-")}</td>
+                    <td>${fmtWon(pr.rent_amount)}</td>
+                    <td>${fmtWon(pr.maintenance_amount)}</td>
+                    <td>${fmtWon(pr.supply_amount)}</td>
+                    <td>${fmtWon(pr.vat_amount)}</td>
+                    <td><strong>${fmtWon(pr.total_amount)}</strong></td>
+                  </tr>
+                `).join("") || '<tr><td colspan="9" class="bass-muted">내역 없음</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
@@ -1273,7 +1324,53 @@
           = 순임대소득 <strong style="color:var(--primary-2);">${fmtWon(fin.noi)}</strong><br>
           분리과세 15.4% 예상세액 <strong>${fmtWon(fin.estimated_separate_tax)}</strong>
         </div>
-        <div class="bass-muted" style="font-size:12px;margin-top:6px;">참고용 추정치입니다. 신고 방식(분리·종합)과 공제는 세무사·홈택스에서 확인하세요.</div>
+        <div class="bass-muted" style="font-size:12px;margin-top:4px;margin-bottom:8px;">참고용 추정치입니다. 상단 <strong>[📥 종소세 명세서 CSV]</strong>를 누르면 호실별 산출내역·납부 상세내역·경비 원장 전체를 엑셀로도 내려받을 수 있습니다.</div>
+        <div style="font-weight:700;font-size:13px;margin:8px 0 4px;">📊 종합소득세 호실별 수입 산출내역 (5줄 스크롤)</div>
+        ${incRoomBreakdown.length ? `<div ${scrollBox5}>
+          <table class="bass-table" style="width:100%;font-size:12.5px;margin:0;">
+            <thead ${stickyTh}>
+              <tr><th>호실</th><th>임차인</th><th>수납건수</th><th>월세 합계</th><th>관리비 합계</th><th>종소세 수입(공급가액)</th><th>총수납액</th></tr>
+            </thead>
+            <tbody>
+              ${incRoomBreakdown.map((rb) => `
+                <tr>
+                  <td><strong>${Bass.escapeHtml(rb.room_no)}호</strong></td>
+                  <td>${Bass.escapeHtml(rb.tenant_name || "-")}</td>
+                  <td>${rb.count}건</td>
+                  <td>${fmtWon(rb.rent_amount)}</td>
+                  <td>${fmtWon(rb.maintenance_amount)}</td>
+                  <td><strong>${fmtWon(rb.supply_amount)}</strong></td>
+                  <td>${fmtWon(rb.total_amount)}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>` : '<div class="bass-muted" style="font-size:12.5px;">종소세 대상 호실 수납 내역이 없습니다.</div>'}
+        <details style="margin-top:8px;">
+          <summary style="cursor:pointer;font-size:12.5px;font-weight:700;">🔍 호실별 월세·관리비 건별 납부 상세내역 보기 (${incPayRows.length}건)</summary>
+          <div ${scrollBox5} style="max-height:215px;overflow-y:auto;overflow-x:auto;margin-top:6px;border:1px solid var(--border, rgba(148,163,184,0.22));border-radius:8px;">
+            <table class="bass-table" style="width:100%;font-size:12px;margin:0;">
+              <thead ${stickyTh}>
+                <tr><th>납부일</th><th>귀속월</th><th>호실</th><th>입금자</th><th>월세</th><th>관리비</th><th>종소세 수입(공급가액)</th><th>부가세</th><th>총수납액</th></tr>
+              </thead>
+              <tbody>
+                ${incPayRows.map((pr) => `
+                  <tr>
+                    <td>${Bass.escapeHtml(pr.paid_date)}</td>
+                    <td>${Bass.escapeHtml(pr.billing_month)}</td>
+                    <td><strong>${Bass.escapeHtml(pr.room_no)}호</strong></td>
+                    <td>${Bass.escapeHtml(pr.payer_name || "-")}</td>
+                    <td>${fmtWon(pr.rent_amount)}</td>
+                    <td>${fmtWon(pr.maintenance_amount)}</td>
+                    <td><strong>${fmtWon(pr.supply_amount)}</strong></td>
+                    <td>${fmtWon(pr.vat_amount)}</td>
+                    <td>${fmtWon(pr.total_amount)}</td>
+                  </tr>
+                `).join("") || '<tr><td colspan="9" class="bass-muted">내역 없음</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">

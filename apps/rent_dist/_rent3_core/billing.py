@@ -293,6 +293,90 @@ class TaxAndCertificateService:
         vat_room_pays = [p for p in pays if p.room_no in vat_rooms or p.vat_amount > 0]
         vat_room_revenue = sum(p.total_amount for p in vat_room_pays)
 
+        active_ct_by_room = {
+            c.room_no: c for c in Contract.find(branch=b_id) if c.status == "ACTIVE"
+        }
+
+        def _build_room_breakdown(target_pays: List[Pay], room_filter: List[str], is_vat: bool = False) -> List[Dict[str, Any]]:
+            grouped: Dict[str, Dict[str, Any]] = {}
+            for r_no in room_filter:
+                ct = active_ct_by_room.get(r_no)
+                grouped[r_no] = {
+                    "room_no": r_no,
+                    "tenant_name": ct.tenant_name if ct else "",
+                    "count": 0,
+                    "rent_amount": 0,
+                    "maintenance_amount": 0,
+                    "supply_amount": 0,
+                    "vat_amount": 0,
+                    "total_amount": 0,
+                    "h1_supply": 0,
+                    "h1_vat": 0,
+                    "h2_supply": 0,
+                    "h2_vat": 0,
+                }
+            for p in sorted(target_pays, key=lambda x: (x.room_no, x.paid_date)):
+                r_no = p.room_no
+                if r_no not in grouped:
+                    ct = active_ct_by_room.get(r_no)
+                    grouped[r_no] = {
+                        "room_no": r_no,
+                        "tenant_name": (ct.tenant_name if ct else "") or p.payer_name,
+                        "count": 0,
+                        "rent_amount": 0,
+                        "maintenance_amount": 0,
+                        "supply_amount": 0,
+                        "vat_amount": 0,
+                        "total_amount": 0,
+                        "h1_supply": 0,
+                        "h1_vat": 0,
+                        "h2_supply": 0,
+                        "h2_vat": 0,
+                    }
+                g = grouped[r_no]
+                if not g["tenant_name"] and p.payer_name:
+                    g["tenant_name"] = p.payer_name
+                sup = (p.rent_amount + p.maintenance_amount) or max(0, p.total_amount - p.vat_amount)
+                vat_val = p.vat_amount if p.vat_amount > 0 else (round(sup * 0.1) if is_vat else 0)
+                g["count"] += 1
+                g["rent_amount"] += p.rent_amount
+                g["maintenance_amount"] += p.maintenance_amount
+                g["supply_amount"] += sup
+                g["vat_amount"] += vat_val
+                g["total_amount"] += p.total_amount
+                mo_num = int(p.paid_date[5:7]) if len(p.paid_date) >= 7 and p.paid_date[5:7].isdigit() else 1
+                if mo_num <= 6:
+                    g["h1_supply"] += sup
+                    g["h1_vat"] += vat_val
+                else:
+                    g["h2_supply"] += sup
+                    g["h2_vat"] += vat_val
+            return [grouped[k] for k in sorted(grouped.keys())]
+
+        def _build_pay_rows(target_pays: List[Pay], is_vat: bool = False) -> List[Dict[str, Any]]:
+            rows: List[Dict[str, Any]] = []
+            for p in sorted(target_pays, key=lambda x: (x.paid_date, x.room_no), reverse=True):
+                sup = (p.rent_amount + p.maintenance_amount) or max(0, p.total_amount - p.vat_amount)
+                vat_val = p.vat_amount if p.vat_amount > 0 else (round(sup * 0.1) if is_vat else 0)
+                rows.append({
+                    "id": p.id,
+                    "paid_date": p.paid_date,
+                    "billing_month": p.billing_month,
+                    "room_no": p.room_no,
+                    "payer_name": p.payer_name,
+                    "rent_amount": p.rent_amount,
+                    "maintenance_amount": p.maintenance_amount,
+                    "supply_amount": sup,
+                    "vat_amount": vat_val,
+                    "total_amount": p.total_amount,
+                })
+            return rows
+
+        vat_room_breakdown = _build_room_breakdown(vat_room_pays, vat_rooms, is_vat=True)
+        vat_payment_rows = _build_pay_rows(vat_room_pays, is_vat=True)
+        income_tax_room_breakdown = _build_room_breakdown(income_tax_pays, income_tax_rooms, is_vat=False)
+        income_tax_payment_rows = _build_pay_rows(income_tax_pays, is_vat=False)
+
         by_cat: Dict[str, int] = {k: 0 for k in EXPENSE_CATEGORIES}
         by_cat_vat: Dict[str, int] = {k: 0 for k in EXPENSE_CATEGORIES}
         for o in outlays:
@@ -348,6 +432,10 @@ class TaxAndCertificateService:
             ],
             "outlay_count": len(outlays),
             "payment_count": len(pays),
+            "vat_room_breakdown": vat_room_breakdown,
+            "vat_payment_rows": vat_payment_rows,
+            "income_tax_room_breakdown": income_tax_room_breakdown,
+            "income_tax_payment_rows": income_tax_payment_rows,
         }
 
     @classmethod
@@ -388,6 +476,35 @@ class TaxAndCertificateService:
                 o.amount,
                 "공제" if o.is_vat_deductible else "불공제(종소세만)",
                 o.input_vat,
+            ])
+        writer.writerow([])
+        writer.writerow(["[호실별 임대수입 산출내역 (종합소득세 신고대상)]"])
+        writer.writerow(["호실", "임차인", "수납건수", "월세합계(원)", "관리비합계(원)", "공급가액합계(원)", "부가세(원)", "총수납액(원)"])
+        for rb in summary.get("income_tax_room_breakdown", []):
+            writer.writerow([
+                f"{rb['room_no']}호",
+                rb["tenant_name"] or "-",
+                rb["count"],
+                rb["rent_amount"],
+                rb["maintenance_amount"],
+                rb["supply_amount"],
+                rb["vat_amount"],
+                rb["total_amount"],
+            ])
+        writer.writerow([])
+        writer.writerow(["[호실별 월세·관리비 납부 상세내역]"])
+        writer.writerow(["수납일자", "귀속월", "호실", "입금자", "월세(원)", "관리비(원)", "공급가액(원)", "부가세(원)", "총수납액(원)"])
+        for pr in summary.get("income_tax_payment_rows", []):
+            writer.writerow([
+                pr["paid_date"],
+                pr["billing_month"],
+                f"{pr['room_no']}호",
+                pr["payer_name"],
+                pr["rent_amount"],
+                pr["maintenance_amount"],
+                pr["supply_amount"],
+                pr["vat_amount"],
+                pr["total_amount"],
             ])
         return buf.getvalue()
 
