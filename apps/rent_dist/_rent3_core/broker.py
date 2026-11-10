@@ -357,7 +357,7 @@ class BrokerContractOnboarding:
             lease_type=lease_type,
             pay_timing=pay_timing,
             vat_target=room.vat_applicable,
-            vat_separate=True,
+            vat_separate=bool(room.vat_invoice),
             contract_deposit=contract_deposit or 0,
             deposit=deposit or 0,
             monthly_rent=0 if lease_type == "전세" else (monthly_rent or 0),

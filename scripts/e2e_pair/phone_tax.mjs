@@ -13,8 +13,8 @@ const A = await launch("tx", 9613);
 try {
   const res = await loginUser(ls.username, ls.password);
   await asUser(A, res.user, res.token, "/rent3_lessor/?tab=tax"); await sleep(4000);
-  console.log(await A.eval(`Bass.api("rent3_lessor","/tax/summary?branch=main&year=2026").then((d)=>"ok "+Object.keys(d).join(",")).catch((e)=>"ERR "+e.message)`)); await snap(A, "1_세금탭", "부가세·종소세·경비");
-  await A.eval(`(() => { const b = document.querySelector(".outlay-row"); if (b) b.click(); return 1; })()`); await sleep(700);
+  await sleep(1);
+  await A.eval(`(() => { const b = document.querySelector("#btnVatBulk"); if (b) b.click(); return 1; })()`); await sleep(700);
   await snap(A, "2_경비수정", "경비 수정 창");
   console.log("콘솔 오류:", A.logs.length ? A.logs.join("\n") : "없음");
 } finally { await A.close(); }
