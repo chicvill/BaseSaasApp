@@ -66,18 +66,30 @@ def build(cfg: dict, base_dir: str = ".") -> dict:
         b = ls.get("building")
         if not b:
             continue
+        vat_rooms = [str(x).strip() for x in (b.get("vat_rooms") or [
+            "201", "202", "203", "301", "302", "303"
+        ]) if str(x).strip()]
+        income_tax_rooms = [str(x).strip() for x in (b.get("income_tax_rooms") or [
+            "201", "202", "203", "301", "302", "303",
+            "401", "402", "403", "501", "502", "503",
+            "601", "602", "603", "701", "702", "703",
+        ]) if str(x).strip()]
         bldg = Building(
             id=f"bldg_{branch}", branch=branch, building_name=b["name"], address=b.get("address", ""),
             id_lessor=lessor.id, default_maintenance_fee=int(b.get("default_maintenance_fee", 0)),
             common_entrance_pwd=b.get("common_entrance_pwd", ""), manager_phone=ls.get("phone", ""),
+            biz_company_name=b.get("biz_company_name", b["name"]),
+            vat_rooms=vat_rooms, income_tax_rooms=income_tax_rooms,
         ).save("seeded", app_source=SRC)
         n_bldg += 1
         for r in _rooms(b, base_dir):
             no = str(r["room_no"]).strip()
+            is_vat = bool(r.get("vat_applicable")) or (no in vat_rooms)
             Room(
                 id=f"room_{branch}_{no}", branch=branch, id_building=bldg.id, room_no=no,
                 name=r.get("name") or f"{no}호", floor=int(r.get("floor") or (no[:-2] or 1)),
-                room_category=r.get("room_category") or "주거용 원룸",
+                room_category=r.get("room_category") or ("상가/사무실" if is_vat else "주거용 원룸"),
+                vat_applicable=is_vat,
                 deposit=int(r.get("deposit") or 0), monthly_rent=int(r.get("monthly_rent") or 0),
                 maintenance_fee=int(r.get("maintenance_fee") or bldg.default_maintenance_fee or 0),
                 pay_timing=r.get("pay_timing") or "후불", available_from="즉시입주", is_published=False,
@@ -88,8 +100,6 @@ def build(cfg: dict, base_dir: str = ".") -> dict:
             import ledger_import
             res = ledger_import.import_ledger(lessor, bldg, b["ledger"], base_dir)
             n_tenant += res["tenants"]; n_pay += res["payments"]
-        if b.get("vat_rooms"):   # 부가세 납부 대상 호실 (사무실 겸용 등) — 계약이 만들어진 뒤에 반영
-            (Building.get(bldg.id) or bldg).apply_vat_rooms([str(x) for x in b["vat_rooms"]], app_source=SRC)
     return {"lessors": n_lessor, "buildings": n_bldg, "rooms": n_room, "tenants": n_tenant, "payments": n_pay}
 
 

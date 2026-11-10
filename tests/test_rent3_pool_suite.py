@@ -2632,49 +2632,125 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post("/api/rent3_lessor/outlays/delete", headers=chic, json={"branch": "main", "outlay_id": o["id"]}).status_code, 200)
         self.assertFalse(any(x["id"] == o["id"] for x in c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()["outlays"]))
 
-
-    def test_50_vat_rooms_and_tax_invoice(self):
-        """50. 건물의 부가세 대상 호실 → 호실 부가세·계약 반영(소급 없음), 수납의 부가세 분리, 세금계산서 발행 기록(중복 방지·수정 잠금)."""
-        from apps.rent_dist._rent3_core import Building, current_ym
+    def test_50_vat_and_income_tax_rooms_tenant_biz_and_hometax_invoice_csv(self):
+        """50. 시크빌 부가세(201~303호)·종소세(201~703호) 대상 호실 리스트 저장·편집, 과세 호실 임차인 사업자 정보 입력, 매입세액 공제(수리비 vs 경조사비 불공제), 세금계산서 발행 대장 및 홈택스 일괄발급 CSV 검증."""
         c = self.client
         chic, sunho = self._login("chic"), self._login("sunho")
-        r = next(x for x in Room.find(branch="main") if x.active_contract_id and Contract.get(x.active_contract_id).lease_type == "월세"
-                 and Contract.get(x.active_contract_id).monthly_rent > 0)
-        ct0 = Contract.get(r.active_contract_id)
-        before = {m["ym"]: m["due"] for m in ct0.ledger()["months"]}
-        base = {"branch": "main", "building_name": Building.first(branch="main").building_name}
-        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": ["999"]}).status_code, 400)
-        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=sunho, json={**base, "vat_rooms": [r.room_no]}).status_code, 403)
-        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": [r.room_no]}).status_code, 200)
-        self.assertEqual(Building.first(branch="main").vat_rooms, [r.room_no])
-        ct = Contract.get(r.active_contract_id)
-        want = round((ct.monthly_rent + ct.maintenance_fee) * 0.1)
-        self.assertTrue(ct.vat_target)
-        self.assertEqual((ct.vat, Room.get(r.id).vat_amount, Room.get(r.id).vat_applicable), (want, want, True))
-        self.assertEqual(ct.vat_from_ym, current_ym())
-        after = {m["ym"]: m["due"] for m in ct.ledger()["months"]}
-        for ym, due in before.items():                                   # 지난 달 청구액은 그대로(소급 미납 없음)
-            if ym < current_ym():
-                self.assertEqual(after[ym], due, ym)
-        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["building"]["vat_rooms"], [r.room_no])
-        # 부가세가 들어 있는 수납 건: 세금계산서 발행 기록
-        ct.vat_from_ym = ""; ct.save("t")
-        amt = ct.monthly_rent + ct.maintenance_fee + want
-        res = c.post("/api/rent3_lessor/payments/collect", headers=chic, json={"branch": "main", "room_no": r.room_no, "amount": amt, "paid_date": "2026-11-09"}).json()
-        pid = res["payment"]["id"]
-        self.assertGreater(Pay.get(pid).vat_amount, 0)
-        self.assertEqual(c.post("/api/rent3_lessor/payments/tax-invoice", headers=sunho, json={"branch": "main", "pay_id": pid}).status_code, 403)
-        inv = c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": pid}).json()
-        self.assertFalse(inv["already"])
-        self.assertEqual(inv["invoice"]["supply"] + inv["invoice"]["vat"], Pay.get(pid).total_amount)
-        self.assertTrue(c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": pid}).json()["already"])
-        edit = {"branch": "main", "pay_id": pid, "paid_date": "2026-11-10", "rent_amount": 1, "maintenance_amount": 1}
-        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=chic, json=edit).status_code, 400)   # 발행 후 수정 잠금
-        plain = Pay(branch="main", id_room=r.id, room_no=r.room_no, id_contract=ct.id, rent_amount=1000, total_amount=1000).save("t")
-        self.assertEqual(c.post("/api/rent3_lessor/payments/tax-invoice", headers=chic, json={"branch": "main", "pay_id": plain.id}).status_code, 400)
-        # 대상에서 빼면 호실·계약의 부가세가 0
-        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**base, "vat_rooms": []}).status_code, 200)
-        self.assertEqual((Contract.get(ct.id).vat_target, Room.get(r.id).vat_amount), (False, 0))
+
+        # 1) 시크빌 기본 과세·종소세 대상 호실 리스트 확인
+        ts0 = c.get("/api/rent3_lessor/tax/summary?branch=main&year=2026", headers=chic).json()
+        b_cfg = ts0["building_tax_config"]
+        self.assertEqual(b_cfg["vat_rooms"], ["201", "202", "203", "301", "302", "303"])
+        self.assertEqual(
+            b_cfg["income_tax_rooms"],
+            [
+                "201", "202", "203",
+                "301", "302", "303",
+                "401", "402", "403",
+                "501", "502", "503",
+                "601", "602", "603",
+                "701", "702", "703",
+            ],
+        )
+
+        # 2) 다른 지점 임대인(sunho)은 시크빌 과세 호실 리스트나 사업자 정보를 수정할 수 없음 (403)
+        self.assertEqual(
+            c.post("/api/rent3_lessor/building/tax-rooms", headers=sunho, json={"branch": "main", "vat_rooms": ["201"]}).status_code,
+            403,
+        )
+        self.assertEqual(
+            c.post("/api/rent3_lessor/tax/tenant-biz", headers=sunho, json={"branch": "main", "room_no": "201", "business_number": "111-11-11111"}).status_code,
+            403,
+        )
+
+        # 3) 건물 과세·종소세 호실 리스트 편집 및 저장 검증
+        r_upd = c.post(
+            "/api/rent3_lessor/building/tax-rooms",
+            headers=chic,
+            json={
+                "branch": "main",
+                "vat_rooms": "201, 202, 203, 301, 302, 303",
+                "income_tax_rooms": "201, 202, 203, 301, 302, 303, 401, 402, 403, 501, 502, 503, 601, 602, 603, 701, 702, 703",
+                "biz_company_name": "시크빌",
+                "sync_contracts": False,
+            },
+        )
+        self.assertEqual(r_upd.status_code, 200, r_upd.text)
+        bldg_disk = self._read_disk_json("buildings")
+        b_main = next(b for b in bldg_disk["items"] if b["branch"] == "main")
+        self.assertEqual(b_main["vat_rooms"], ["201", "202", "203", "301", "302", "303"])
+        self.assertEqual(len(b_main["income_tax_rooms"]), 18)
+
+        # 4) 과세 호실(201호) 임차인의 사업자등록번호, 상호, 대표자명, 수신 이메일 입력·저장
+        r_tbiz = c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "201",
+                "business_number": "214-86-99887",
+                "company_name": "(주)시크디자인연구소",
+                "ceo_name": "이지훈",
+                "email": "tax@chicdesign.co.kr",
+                "vat_target": True,
+            },
+        )
+        self.assertEqual(r_tbiz.status_code, 200, r_tbiz.text)
+        self.assertEqual(r_tbiz.json()["contract"]["tenant_business_number"], "214-86-99887")
+        self.assertEqual(r_tbiz.json()["contract"]["tenant_company_name"], "(주)시크디자인연구소")
+        self.assertEqual(r_tbiz.json()["tenant"]["business_number"], "214-86-99887")
+
+        # 5) 경비 지출: 수리비(110,000원 -> 매입세액 10,000원 공제) vs 경조사비(100,000원 -> 매입세액 0원 불공제, 종소세만 반영)
+        r_rep = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "repair_maint",
+                "title": "301호 도어락 및 수전 교체",
+                "amount": 110000,
+                "vendor": "관악설비",
+                "expense_date": "2026-10-15",
+            },
+        ).json()["outlay"]
+        self.assertTrue(r_rep["is_vat_deductible"])
+        self.assertEqual(r_rep["input_vat"], 10000)
+
+        r_cong = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "congrat_condol",
+                "title": "입주사 대표 경조사 화환",
+                "amount": 100000,
+                "vendor": "사랑플라워",
+                "expense_date": "2026-10-16",
+            },
+        ).json()["outlay"]
+        self.assertFalse(r_cong["is_vat_deductible"])
+        self.assertEqual(r_cong["input_vat"], 0)
+
+        # 6) 세금계산서 발행 대장 조회 및 홈택스 일괄발급 CSV 다운로드 검증
+        reg = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
+        self.assertTrue(reg["success"])
+        vc_201 = next(v for v in reg["vat_room_contracts"] if v["room_no"] == "201")
+        self.assertTrue(vc_201["ready_for_invoice"])
+        self.assertEqual(vc_201["company_name"], "(주)시크디자인연구소")
+        self.assertGreaterEqual(reg["totals"]["count"], 1)
+        inv_201 = next(i for i in reg["invoices"] if i["room_no"] == "201")
+        self.assertTrue(inv_201["ready_for_hometax"])
+        self.assertEqual(inv_201["buyer_business_number_digits"], "2148699887")
+        self.assertEqual(inv_201["buyer_email"], "tax@chicdesign.co.kr")
+
+        r_csv = c.get("/api/rent3_lessor/tax/export-hometax-csv?branch=main&year=2026&month=10", headers=chic)
+        self.assertEqual(r_csv.status_code, 200)
+        self.assertIn("text/csv", r_csv.headers["content-type"])
+        csv_text = r_csv.content.decode("utf-8-sig")
+        self.assertIn("전자세금계산서종류(01:일반)", csv_text)
+        self.assertIn("2148699887", csv_text)
+        self.assertIn("(주)시크디자인연구소", csv_text)
+        self.assertIn("tax@chicdesign.co.kr", csv_text)
 
 
 if __name__ == "__main__":

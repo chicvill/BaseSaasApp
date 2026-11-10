@@ -248,6 +248,10 @@ class BrokerContractOnboarding:
         tenant_name: str,
         tenant_phone: str,
         tenant_car_number: str = "",
+        tenant_business_number: str = "",
+        tenant_company_name: str = "",
+        tenant_ceo_name: str = "",
+        tenant_email: str = "",
         lease_type: str = "월세",
         pay_timing: str = "후불",
         deposit: int = 5000000,
@@ -295,6 +299,10 @@ class BrokerContractOnboarding:
             tenant = Tenant(
                 name=tenant_name.strip(),
                 phone=t_phone,
+                email=tenant_email.strip(),
+                business_number=tenant_business_number.strip(),
+                company_name=tenant_company_name.strip(),
+                ceo_name=tenant_ceo_name.strip(),
                 car_number=tenant_car_number.strip(),
                 doorlock_pwd=room.doorlock_pwd,
                 branch=b_id,
@@ -305,6 +313,14 @@ class BrokerContractOnboarding:
             )
         else:
             tenant.name = tenant_name.strip()
+            if tenant_email.strip():
+                tenant.email = tenant_email.strip()
+            if tenant_business_number.strip():
+                tenant.business_number = tenant_business_number.strip()
+            if tenant_company_name.strip():
+                tenant.company_name = tenant_company_name.strip()
+            if tenant_ceo_name.strip():
+                tenant.ceo_name = tenant_ceo_name.strip()
             if tenant_car_number.strip():
                 tenant.car_number = tenant_car_number.strip()
             tenant.doorlock_pwd = room.doorlock_pwd
@@ -350,14 +366,18 @@ class BrokerContractOnboarding:
             id_tenant=tenant.id,
             tenant_name=tenant.name,
             tenant_phone=tenant.phone,
+            tenant_business_number=tenant.business_number,
+            tenant_company_name=tenant.company_name,
+            tenant_ceo_name=tenant.ceo_name or tenant.name,
+            tenant_email=tenant.email,
             contract_date=c_date,
             move_in_date=m_in,
             expiry_date=expiry,
             lease_term_months=months,
             lease_type=lease_type,
             pay_timing=pay_timing,
-            vat_target=room.vat_applicable,
-            vat_separate=bool(room.vat_invoice),
+            vat_target=bool(room.vat_applicable or (bldg and bldg.is_vat_room(room.room_no))),
+            vat_separate=bool(getattr(room, "vat_invoice", True)),
             contract_deposit=contract_deposit or 0,
             deposit=deposit or 0,
             monthly_rent=0 if lease_type == "전세" else (monthly_rent or 0),

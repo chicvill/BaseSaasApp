@@ -518,11 +518,14 @@ class CoSignSession(PoolObj):
             terms={
                 "tenant_name": t_name,
                 "tenant_phone": t_phone,
-                "tenant_email": matched_t.email if matched_t else "",
+                "tenant_email": matched_t.email if matched_t else (prev_ct.tenant_email if prev_ct else ""),
                 "tenant_car_number": matched_t.car_number if matched_t else "",
+                "tenant_business_number": matched_t.business_number if matched_t else (prev_ct.tenant_business_number if prev_ct else ""),
+                "tenant_company_name": matched_t.company_name if matched_t else (prev_ct.tenant_company_name if prev_ct else ""),
+                "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
                 "lease_type": room.lease_type or "월세",
                 "pay_timing": room.pay_timing or "후불",
-                "vat_target": room.vat_applicable,
+                "vat_target": bool(prev_ct.vat_target if prev_ct else (room.vat_applicable or (bldg and bldg.is_vat_room(room.room_no)))),
                 "vat_separate": True,
                 "contract_deposit": 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
@@ -835,8 +838,11 @@ class CoSignSession(PoolObj):
         return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
 
     PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
-                                            "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause")
-    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number")
+                                            "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause",
+                                            "vat_target", "vat_separate",
+                                            "tenant_business_number", "tenant_company_name", "tenant_ceo_name", "tenant_email")
+    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number",
+                                            "tenant_business_number", "tenant_company_name", "tenant_ceo_name")
     MAX_FACILITY_PHOTOS: ClassVar[int] = 12
     FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
 
@@ -1102,6 +1108,9 @@ class CoSignSession(PoolObj):
                 name=t_info["tenant_name"],
                 phone=t_info["tenant_phone"],
                 email=t_info.get("tenant_email", ""),
+                business_number=t_info.get("tenant_business_number", ""),
+                company_name=t_info.get("tenant_company_name", ""),
+                ceo_name=t_info.get("tenant_ceo_name", ""),
                 car_number=t_info.get("tenant_car_number", ""),
                 doorlock_pwd=room.doorlock_pwd,
                 branch=self.branch,
@@ -1113,6 +1122,12 @@ class CoSignSession(PoolObj):
         else:
             tenant.name = t_info["tenant_name"]
             tenant.email = t_info.get("tenant_email", tenant.email)
+            if t_info.get("tenant_business_number") is not None and str(t_info.get("tenant_business_number")).strip():
+                tenant.business_number = str(t_info["tenant_business_number"]).strip()
+            if t_info.get("tenant_company_name") is not None and str(t_info.get("tenant_company_name")).strip():
+                tenant.company_name = str(t_info["tenant_company_name"]).strip()
+            if t_info.get("tenant_ceo_name") is not None and str(t_info.get("tenant_ceo_name")).strip():
+                tenant.ceo_name = str(t_info["tenant_ceo_name"]).strip()
             if t_info.get("tenant_car_number"):
                 tenant.car_number = t_info["tenant_car_number"]
             tenant.doorlock_pwd = room.doorlock_pwd
@@ -1146,6 +1161,10 @@ class CoSignSession(PoolObj):
             id_tenant=tenant.id,
             tenant_name=tenant.name,
             tenant_phone=tenant.phone,
+            tenant_business_number=tenant.business_number,
+            tenant_company_name=tenant.company_name,
+            tenant_ceo_name=tenant.ceo_name or tenant.name,
+            tenant_email=tenant.email,
             contract_date=date_today().isoformat(),
             move_in_date=move_in,
             expiry_date=expiry,

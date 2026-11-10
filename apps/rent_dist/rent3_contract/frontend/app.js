@@ -1526,6 +1526,18 @@
         <div><label class="bass-label">월 관리비(원)</label><input id="tMaint" type="number" class="bass-input term-input" value="${Number(t.maintenance_fee || 0)}"></div>
         <div><label class="bass-label">당일 계약금(원)</label><input id="tConDep" type="number" class="bass-input term-input" value="${Number(t.contract_deposit || 0)}"></div>
       </div>
+      <div class="bass-card" style="padding:10px 12px;margin:10px 0;">
+        <label class="check-row" style="margin-bottom:8px;">
+          <span style="font-size:13px;font-weight:700;">🧾 상가·사무실 부가세 과세 호실 (세금계산서 발행 대상)</span>
+          <input type="checkbox" id="tVatTarget" class="term-input" ${t.vat_target ? "checked" : ""}>
+        </label>
+        <div class="field-grid">
+          <div><label class="bass-label">사업자등록번호</label><input id="tBizNo" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_business_number || "")}" placeholder="예: 214-86-12345"></div>
+          <div><label class="bass-label">상호(법인명)</label><input id="tCompName" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_company_name || "")}" placeholder="예: (주)시크디자인"></div>
+          <div><label class="bass-label">대표자명</label><input id="tCeoName" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_ceo_name || "")}" placeholder="예: 홍길동"></div>
+          <div><label class="bass-label">세금계산서 수신 이메일</label><input id="tBizEmail" type="email" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_email || "")}" placeholder="예: tax@company.co.kr"></div>
+        </div>
+      </div>
       ${(() => {
         const need = needsGuarantee(s) && (s.tenant_registry || {}).submitted && mortgageExposure(s) > 0;
         if (!need) return "";
@@ -1567,6 +1579,11 @@
       tenant_name: document.getElementById("tName").value.trim(),
       tenant_phone: document.getElementById("tPhone").value.trim(),
       tenant_car_number: document.getElementById("tCar").value.trim(),
+      vat_target: Boolean(document.getElementById("tVatTarget") && document.getElementById("tVatTarget").checked),
+      tenant_business_number: (document.getElementById("tBizNo") && document.getElementById("tBizNo").value.trim()) || "",
+      tenant_company_name: (document.getElementById("tCompName") && document.getElementById("tCompName").value.trim()) || "",
+      tenant_ceo_name: (document.getElementById("tCeoName") && document.getElementById("tCeoName").value.trim()) || "",
+      tenant_email: (document.getElementById("tBizEmail") && document.getElementById("tBizEmail").value.trim()) || "",
       move_in_date: document.getElementById("tMoveIn").value,
       pay_timing: document.getElementById("tPayTiming").value,
       lease_term_months: Number(document.getElementById("tMonths").value || 12),

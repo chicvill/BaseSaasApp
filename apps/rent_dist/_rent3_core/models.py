@@ -48,8 +48,11 @@ EXPENSE_CATEGORIES = {
     "insurance": "건물 화재보험·배상책임",
     "repair_maint": "공용시설 수선 및 소모품",
     "internet_tv": "건물 인터넷·IPTV 단체선",
+    "congrat_condol": "경조사비·업무추진비 (종소세 전용·부가세 불공제)",
     "other": "기타 일반 잡비",
 }
+
+VAT_NON_DEDUCTIBLE_CATEGORIES = {"insurance", "congrat_condol"}
 
 
 def normalize_branch_id(raw: Optional[str]) -> str:
@@ -215,6 +218,8 @@ class Tenant(PoolObj):
     email: str = ""
     account_number: str = ""
     business_number: str = ""
+    company_name: str = ""                   # 사업자 상호/법인명 (세금계산서 공급받는자 상호)
+    ceo_name: str = ""                       # 사업자 대표자명 (미입력 시 임차인 실명 사용)
     car_number: str = ""
     car_model: str = ""
     doorlock_pwd: str = "1234*"
@@ -263,41 +268,24 @@ class Building(PoolObj):
     wifi_info: str = "Rent3_Giga_WiFi / pass1234"
     property_value: int = 1200000000         # 자산 평가액 (세무/수익률 산출용)
     manager_phone: str = "010-1212-3434"
-    vat_rooms: List[str] = Field(default_factory=list)   # 부가세 납부 대상 호실 번호 목록 (사무실 겸용 등)
+    vat_rooms: List[str] = Field(default_factory=list)         # 부가가치세 납부 대상 호실 리스트 (예: ["201", "202", ...])
+    income_tax_rooms: List[str] = Field(default_factory=list)  # 종합소득세 신고 대상 호실 리스트 (예: ["201", ..., "703"])
+    biz_company_name: str = ""               # 공급자 상호(미입력 시 building_name 사용)
+    biz_type: str = "부동산업"               # 공급자 업태
+    biz_item: str = "비주거용 건물 임대업"   # 공급자 종목
+
+    def is_vat_room(self, room_no: str) -> bool:
+        rn = str(room_no or "").strip()
+        return rn in [str(x).strip() for x in (self.vat_rooms or []) if str(x).strip()]
+
+    def is_income_tax_room(self, room_no: str) -> bool:
+        rn = str(room_no or "").strip()
+        if not self.income_tax_rooms:
+            return True
+        return rn in [str(x).strip() for x in (self.income_tax_rooms or []) if str(x).strip()]
 
     def summary(self) -> str:
         return f"건물 {self.building_name} ({self.branch})"
-
-    def apply_vat_rooms(self, room_nos: List[str], app_source: str = "rent3_lessor") -> List[str]:
-        """부가세 대상 호실 목록을 정하고 호실·진행 중 계약에 반영한다.
-        새로 과세가 되는 계약은 '이번 달 청구분부터' 부가세를 별도 청구한다(이미 입력된 지난 달에 소급 미납이 생기지 않게)."""
-        nos: List[str] = []
-        for x in room_nos or []:
-            x = str(x).strip()
-            if x and x not in nos:
-                nos.append(x)
-        self.vat_rooms = nos
-        self.save(action="building_vat_rooms_set", app_source=app_source)
-        ym = current_ym()
-        for r in Room.find(id_building=self.id):
-            on = r.room_no in nos
-            ct = Contract.get(r.active_contract_id) if r.active_contract_id else None
-            if ct:
-                if ct.vat_target != on:
-                    ct.vat_target = on
-                    if on:
-                        ct.vat_separate = True
-                        if not ct.vat_from_ym:
-                            ct.vat_from_ym = ym
-                new_vat = ct.compute_vat()
-                if ct.vat != new_vat or ct.vat_target != on:
-                    ct.vat = new_vat
-                    ct.save(action="contract_vat_synced", app_source=app_source)
-                    ct = Contract.get(ct.id)
-            r.vat_applicable = on
-            r.vat_amount = ct.compute_vat() if ct else r.calc_vat()
-            r.save(action="room_vat_synced", app_source=app_source)
-        return nos
 
     def rooms(self) -> List["Room"]:
         return sorted(Room.find(id_building=self.id), key=lambda r: r.room_no)
@@ -335,8 +323,6 @@ class Room(PoolObj):
     direction: str = ""                      # 향 (남향·동향 등)
     room_category: str = "주거용 원룸"        # 주거용 원룸 / 오피스텔 / 상가/사무실
     vat_applicable: bool = False             # 상가/업무용 시 True
-    vat_invoice: bool = True                 # 과세 호실의 부가세를 월세와 별도로 청구(=세금계산서 발행 대상). 중개계약 등록 때 계약에 그대로 옮긴다
-    vat_amount: int = 0                      # 월 부가세 (월세+관리비의 10%, 건물 '부가세 대상 호실'에서 자동 계산)
     id_tenant: str = ""
     active_contract_id: str = ""
     doorlock_pwd: str = "2580*"
@@ -365,11 +351,6 @@ class Room(PoolObj):
     pre_moveout_notice: bool = False         # 만기 전출예정 회신 시 사전 공실 매물 예고 플래그
     is_published: bool = True
     images: List[str] = Field(default_factory=list)
-
-    def calc_vat(self) -> int:
-        if not self.vat_applicable or self.lease_type == "전세":
-            return 0
-        return round((self.monthly_rent + self.maintenance_fee) * 0.1)
 
     @property
     def is_occupied(self) -> bool:
@@ -427,6 +408,10 @@ class Contract(PoolObj):
     id_tenant: str = ""
     tenant_name: str = ""
     tenant_phone: str = ""
+    tenant_business_number: str = ""         # 임차인 사업자등록번호 (과세 호실 세금계산서 발행용)
+    tenant_company_name: str = ""            # 임차인 상호/법인명
+    tenant_ceo_name: str = ""                # 임차인 대표자명
+    tenant_email: str = ""                   # 임차인 세금계산서 수신 이메일
     contract_date: str = Field(default_factory=lambda: date_today().isoformat())
     move_in_date: str = ""
     expiry_date: str = ""
@@ -451,7 +436,6 @@ class Contract(PoolObj):
     monthly_rent: int = 500000               # 월 임차료
     maintenance_fee: int = 50000             # 월 관리비
     vat: int = 0                             # 월 부가세
-    vat_from_ym: str = ""                    # 이 달 청구분부터 부가세를 별도 청구 (빈 값 = 처음부터)
     special_terms: str = ""
     lessor_memo: str = ""                    # 임대인 메모(연락처·특이사항)
     option_snapshot: List[Dict[str, Any]] = Field(default_factory=list)
@@ -665,7 +649,7 @@ class Contract(PoolObj):
 
         rent_amt = 0 if self.lease_type == "전세" else self.monthly_rent
         maint_amt = self.maintenance_fee
-        vat_amt = self.compute_vat() if (self.vat_target and self.vat_separate and (not self.vat_from_ym or ym >= self.vat_from_ym)) else 0
+        vat_amt = self.compute_vat() if (self.vat_target and self.vat_separate) else 0
         total_due = rent_amt + maint_amt + vat_amt
         return {
             "ym": ym,
@@ -818,7 +802,6 @@ class Pay(PoolObj):
     allocated_months: List[Dict[str, Any]] = Field(default_factory=list)
     idempotency_key: str = ""
     raw_sms: str = ""
-    tax_invoice: Dict[str, Any] = Field(default_factory=dict)   # 세금계산서 발행 기록 {no, issued_at, supply, vat, ...}
 
     def summary(self) -> str:
         return f"수납 {self.room_no}호 {self.payer_name} {self.total_amount:,}원 ({self.billing_month})"
@@ -839,10 +822,31 @@ class Outlay(PoolObj):
     amount: int = 0
     vendor: str = ""
     memo: str = ""
+    vat_deductible: Optional[bool] = None    # True=매입세액 공제, False=불공제(경조비·면세 보험료·간이영수증 등), None=카테고리 기본 규칙
+    evidence_type: str = "TAX_INVOICE"       # TAX_INVOICE(세금계산서) / CARD(사업용카드·현금영수증) / EXEMPT_RECEIPT(면세·간이영수증)
 
     @property
     def category_label(self) -> str:
         return EXPENSE_CATEGORIES.get(self.category, self.category)
+
+    @property
+    def is_vat_deductible(self) -> bool:
+        if self.vat_deductible is not None:
+            return bool(self.vat_deductible)
+        if self.evidence_type == "EXEMPT_RECEIPT":
+            return False
+        return self.category not in VAT_NON_DEDUCTIBLE_CATEGORIES
+
+    @property
+    def input_vat(self) -> int:
+        """지출 합계액(부가세 포함) 기준 공제 가능 매입세액 산출."""
+        if not self.is_vat_deductible or self.amount <= 0:
+            return 0
+        return round(self.amount - (self.amount / 1.1))
+
+    @property
+    def supply_amount(self) -> int:
+        return int(self.amount) - self.input_vat
 
     def summary(self) -> str:
         return f"지출 [{self.category_label}] {self.title} {self.amount:,}원"

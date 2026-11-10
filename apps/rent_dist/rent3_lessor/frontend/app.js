@@ -231,8 +231,6 @@
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
     .pr--un, .pr--ok { grid-template-columns: 44px 1fr; }
-    .pr--tax { grid-template-columns: 44px 1fr; min-height: 0; }
-    .pr--tax .bass-btn { white-space: nowrap; }
     .pr--un .pr__un { color: var(--err); font-weight: 800; }
     .pr-list { max-height: 205px; overflow-y: auto; border-bottom: 1px solid var(--border); }
     `;
@@ -341,17 +339,10 @@
         rows.push(`<div class="pr pr--un"><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">미납 ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}</span></div>`);
       }
       const ps = byYm[m.ym] || [];
-      ps.forEach((p) => {
-        const lock = p.tax_invoice ? " disabled" : "";
-        rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
-        <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일"${lock}>
-        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세"${lock}>
-        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"${lock}></div>`);
-        if (p.vat > 0) {
-          rows.push(`<div class="pr pr--tax"><span></span><span>부가세 <strong>${fmtWon(p.vat)}</strong>
-            <button type="button" class="bass-btn bass-btn--sm btn-tax-inv ${p.tax_invoice ? "" : "bass-btn--primary"}" data-pay="${p.id}" style="margin-left:6px;">🧾 ${p.tax_invoice ? "세금계산서 보기" : "세금계산서 발행"}</button></span></div>`);
-        }
-      });
+      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
+        <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
+        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
+        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"></div>`));
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
@@ -397,14 +388,6 @@
       });
     });
     $m("pmCopy").addEventListener("click", () => copyAndSms($m("pmMsg").value, ct.tenant_phone || (r.tenant && r.tenant.phone)));
-    body.querySelectorAll(".btn-tax-inv").forEach((btn) => btn.addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/payments/tax-invoice", { method: "POST", body: { branch: currentBranch, pay_id: btn.dataset.pay } });
-        Bass.updateAppAlert("success", res.message);
-        await refresh();
-        showInvoiceModal(no, res.invoice);
-      });
-    }));
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
       row.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
         Bass.withLock(inp, async () => {
@@ -426,58 +409,6 @@
     });
   }
 
-  // 세금계산서 발행 기록: 화면 · 복사 · 인쇄 (국세청 전송은 하지 않으니 홈택스에 이 값을 입력해 발급)
-  function invoiceText(i) {
-    const sp = i.supplier || {}, by = i.buyer || {};
-    return [`[세금계산서 발행 기록] ${i.no}`, `작성일자 ${i.write_date}`,
-      `공급자 ${sp.name || ""} (대표 ${sp.rep || ""}) 사업자번호 ${sp.biz_no || "-"} ${sp.address || ""}`,
-      `공급받는자 ${by.name || ""} 사업자번호 ${by.biz_no || "-"} 연락처 ${by.phone || "-"}`,
-      `품목 ${i.item}`, `공급가액 ${fmtWon(i.supply)} / 세액 ${fmtWon(i.vat)} / 합계 ${fmtWon(i.total)}`].join("\n");
-  }
-
-  function printInvoice(i) {
-    const sp = i.supplier || {}, by = i.buyer || {};
-    const w = window.open("", "_blank");
-    if (!w) { Bass.updateAppAlert("warning", "팝업이 막혀 있습니다. 허용한 뒤 다시 눌러 주세요."); return; }
-    const e = Bass.escapeHtml;
-    w.document.write(`<!doctype html><meta charset="utf-8"><title>${e(i.no)}</title>
-      <style>body{font:14px/1.6 sans-serif;padding:24px;color:#111}table{border-collapse:collapse;width:100%;margin:10px 0}td,th{border:1px solid #444;padding:6px 8px;text-align:left}th{background:#eee;width:22%}h2{margin:0}</style>
-      <h2>세금계산서 (발행 기록)</h2><div>번호 ${e(i.no)} · 작성일자 ${e(i.write_date)}</div>
-      <table><tr><th>공급자 상호</th><td>${e(sp.name || "")}</td><th>대표자</th><td>${e(sp.rep || "")}</td></tr>
-      <tr><th>사업자번호</th><td>${e(sp.biz_no || "")}</td><th>주소</th><td>${e(sp.address || "")}</td></tr>
-      <tr><th>공급받는자</th><td>${e(by.name || "")}</td><th>사업자번호</th><td>${e(by.biz_no || "")}</td></tr></table>
-      <table><tr><th>품목</th><td colspan="3">${e(i.item)}</td></tr>
-      <tr><th>공급가액</th><td>${fmtWon(i.supply)}</td><th>세액</th><td>${fmtWon(i.vat)}</td></tr>
-      <tr><th>합계금액</th><td colspan="3"><strong>${fmtWon(i.total)}</strong></td></tr></table>
-      <p style="font-size:12px;color:#555">이 문서는 앱의 발행 기록이며 국세청에 전송되지 않습니다. 홈택스에서 전자세금계산서를 발급할 때 위 값을 사용하세요.</p>`);
-    w.document.close();
-    w.focus();
-    w.print();
-  }
-
-  function showInvoiceModal(no, inv) {
-    const sp = inv.supplier || {}, by = inv.buyer || {};
-    const e = Bass.escapeHtml;
-    openModal(`🧾 ${e(no)}호 세금계산서`, `
-      <div style="font-size:13.5px;line-height:1.8;">
-        <strong>${e(inv.no)}</strong> · 작성일자 ${e(inv.write_date)}<br>
-        공급자 ${e(sp.name || "")} (대표 ${e(sp.rep || "")}) · 사업자번호 ${e(sp.biz_no || "-")}<br>
-        공급받는자 ${e(by.name || "")} · 사업자번호 ${e(by.biz_no || "-")}<br>
-        품목 ${e(inv.item)}<br>
-        공급가액 <strong>${fmtWon(inv.supply)}</strong> · 세액 <strong>${fmtWon(inv.vat)}</strong> · 합계 <strong>${fmtWon(inv.total)}</strong>
-      </div>
-      ${sp.biz_no ? "" : '<div class="bass-muted" style="font-size:12px;margin-top:6px;">⚠️ 임대인 사업자번호가 비어 있습니다. 홈택스 입력 전에 확인하세요.</div>'}
-      <div class="bass-muted" style="font-size:12px;margin:8px 0;">앱의 발행 기록이며 국세청에는 전송되지 않습니다. 홈택스에서 전자세금계산서를 발급할 때 이 값을 사용하세요. 발행한 수납 건은 금액을 고칠 수 없습니다.</div>
-      <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
-        <button id="tiPrint" class="bass-btn bass-btn--sm bass-btn--primary" type="button">🖨️ 인쇄</button>
-        <button id="tiCopy" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
-        <button id="tiBack" class="bass-btn bass-btn--sm" type="button">← 수납내역</button>
-      </div>`);
-    $m("tiPrint").addEventListener("click", () => printInvoice(inv));
-    $m("tiCopy").addEventListener("click", async () => { const ok = await copyText(invoiceText(inv)); Bass.updateAppAlert(ok ? "success" : "warning", ok ? "복사했습니다." : "복사에 실패했습니다."); });
-    $m("tiBack").addEventListener("click", () => showPayModal(no));
-  }
-
   // ② 계약내용: 보기·고치기 + 계약서 사진 + (잔금 확인 전이면) 도어락 교부
   function showContractModal(no) {
     const r = roomOf(no);
@@ -485,7 +416,13 @@
     if (!ct) return;
     const hasPhoto = Boolean(ct.contract_photo_file);
     const photoUrl = hasPhoto ? `${Bass.apiBase(APP_ID)}/contracts/${encodeURIComponent(ct.id)}/photo?token=${encodeURIComponent(Bass.token())}` : "";
-    const f = (id, label, val, type) => `<label class="r3-fld">${label}<input id="${id}" class="bass-input" type="${type || "text"}" value="${Bass.escapeHtml(String(val ?? ""))}"></label>`;
+    const bVatRooms = ((dash && dash.building && dash.building.vat_rooms) || []).map(String);
+    const isVatRoom = Boolean(ct.vat_target || r.vat_applicable || bVatRooms.includes(String(no)));
+    const bizNo = ct.tenant_business_number || (r.tenant && r.tenant.business_number) || "";
+    const compName = ct.tenant_company_name || (r.tenant && r.tenant.company_name) || "";
+    const ceoName = ct.tenant_ceo_name || (r.tenant && r.tenant.ceo_name) || ct.tenant_name || "";
+    const bizEmail = ct.tenant_email || (r.tenant && r.tenant.email) || "";
+    const f = (id, label, val, type, ph) => `<label class="r3-fld">${label}<input id="${id}" class="bass-input" type="${type || "text"}" value="${Bass.escapeHtml(String(val ?? ""))}" ${ph ? `placeholder="${Bass.escapeHtml(ph)}"` : ""}></label>`;
     const body = openModal(`📄 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 계약내용`, `
       <div class="r3-grid">
         ${f("cmIn", "전입일", ct.move_in_date, "date")}
@@ -494,6 +431,18 @@
         ${f("cmRent", "월세(원)", ct.monthly_rent, "number")}
         ${f("cmFee", "관리비(원)", ct.maintenance_fee, "number")}
         ${f("cmTel", "임차인 전화번호", ct.tenant_phone || (r.tenant && r.tenant.phone) || "", "tel")}
+      </div>
+      <div class="bass-card" style="margin-top:10px;padding:10px;background:var(--surface-2, #f8fafc);">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px;margin-bottom:8px;cursor:pointer;">
+          <input id="cmVatTarget" type="checkbox" ${isVatRoom ? "checked" : ""}>
+          🧾 상가·사무실 부가세 과세 호실 (세금계산서 발행 대상)
+        </label>
+        <div class="r3-grid">
+          ${f("cmBizNo", "사업자등록번호", bizNo, "text", "예: 214-86-12345")}
+          ${f("cmComp", "상호(법인명)", compName, "text", "예: (주)시크디자인")}
+          ${f("cmCeo", "대표자명", ceoName, "text", "예: 홍길동")}
+          ${f("cmEmail", "세금계산서 수신 이메일", bizEmail, "email", "예: tax@company.co.kr")}
+        </div>
       </div>
       <label class="r3-fld" style="margin-top:8px;">메모<textarea id="cmMemo" class="bass-input" rows="3">${Bass.escapeHtml(ct.lessor_memo || "")}</textarea></label>
       <div class="bass-muted" style="font-size:12.5px;margin:8px 0;">
@@ -517,6 +466,11 @@
             branch: currentBranch, contract_id: ct.id,
             deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
             move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, memo: $m("cmMemo").value,
+            vat_target: Boolean($m("cmVatTarget").checked),
+            tenant_business_number: $m("cmBizNo").value.trim(),
+            tenant_company_name: $m("cmComp").value.trim(),
+            tenant_ceo_name: $m("cmCeo").value.trim(),
+            tenant_email: $m("cmEmail").value.trim(),
           },
         });
         Bass.updateAppAlert("success", res.message);
@@ -698,16 +652,30 @@
   // 더보기 ▸ 건물 정보 수정
   function showBuildingModal() {
     const b = (dash && dash.building) || {};
-    openModal("🏢 건물 정보 수정", `
+    const vatStr = (b.vat_rooms || []).join(", ");
+    const incStr = (b.income_tax_rooms || []).join(", ");
+    openModal("🏢 건물 정보 및 과세·종소세 대상 호실 수정", `
       <label class="r3-fld">건물 이름<input id="bdName" class="bass-input" value="${Bass.escapeHtml(b.building_name || "")}"></label>
       <label class="r3-fld" style="margin-top:8px;">주소<input id="bdAddr" class="bass-input" value="${Bass.escapeHtml(b.address || "")}"></label>
-      <label class="r3-fld" style="margin-top:8px;">부가세 납부 대상 호실 <span class="bass-muted">(쉼표로 구분 · 예: 201, 202, 203)</span>
-        <input id="bdVat" class="bass-input" value="${Bass.escapeHtml((b.vat_rooms || []).join(", "))}" placeholder="없으면 비워 두세요"></label>
-      <div class="bass-muted" style="font-size:12px;margin-top:4px;">대상 호실은 월세+관리비의 10%를 부가세로 별도 청구합니다. 새로 지정하면 이번 달 청구분부터 적용되고 지난 달에는 소급하지 않습니다. (전세 호실은 월세가 없어 0원)</div>
+      <label class="r3-fld" style="margin-top:8px;">부가가치세 납부 대상 호실 (사무실·상가, 쉼표 구분)
+        <input id="bdVatRooms" class="bass-input" value="${Bass.escapeHtml(vatStr)}" placeholder="예: 201, 202, 203, 301, 302, 303">
+      </label>
+      <label class="r3-fld" style="margin-top:8px;">종합소득세 신고 대상 호실 (쉼표 구분)
+        <input id="bdIncRooms" class="bass-input" value="${Bass.escapeHtml(incStr)}" placeholder="예: 201, 202, 203, 301, 302, 303, 401, 402, 403...">
+      </label>
       <button id="bdSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:10px;">💾 저장</button>`);
     $m("bdSave").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/building/edit", { method: "POST", body: { branch: currentBranch, building_name: $m("bdName").value, address: $m("bdAddr").value, vat_rooms: $m("bdVat").value.split(/[,\s]+/).filter(Boolean) } });
+        const res = await Bass.api(APP_ID, "/building/edit", {
+          method: "POST",
+          body: {
+            branch: currentBranch,
+            building_name: $m("bdName").value,
+            address: $m("bdAddr").value,
+            vat_rooms: $m("bdVatRooms").value,
+            income_tax_rooms: $m("bdIncRooms").value,
+          },
+        });
         Bass.updateAppAlert("success", res.message);
         closeModal();
         await refresh();
@@ -767,7 +735,7 @@
       </div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
-        보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}${r.vat_amount > 0 ? ` · 부가세 ${fmtWon(r.vat_amount)}` : ""}<br>
+        보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>`;
     const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal };
@@ -1159,33 +1127,145 @@
     });
   }
 
-  // ── 더보기 ▸ 부가세 · 종소세 · 경비: 연도별 자료, 경비 지출 등록·수정·삭제, CSV ──
+  // ── 더보기 ▸ 부가세 · 종소세 · 경비: 연도별 자료, 과세/종소세 대상 호실, 세금계산서 대장 & 홈택스 CSV, 경비 지출 등록·수정·삭제 ──
   let taxYear = 0;
+  let taxMonth = 0;
   async function renderTaxTab() {
     elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
     const yr = taxYear || Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    const moParam = taxMonth > 0 ? `&month=${taxMonth}` : "";
     let d;
     try {
-      d = await Bass.api(APP_ID, `/tax/summary?branch=${encodeURIComponent(currentBranch)}&year=${yr}`);
+      d = await Bass.api(APP_ID, `/tax/summary?branch=${encodeURIComponent(currentBranch)}&year=${yr}${moParam}`);
     } catch (e) { Bass.showError(e); return; }
     if (currentTab !== "tax") return;
     taxYear = d.year;
     const fin = d.summary || {};
+    const bCfg = d.building_tax_config || {};
+    const invReg = d.tax_invoice_register || {};
+    const vatRoomsList = bCfg.vat_rooms || fin.vat_rooms || [];
+    const incRoomsList = bCfg.income_tax_rooms || fin.income_tax_rooms || [];
+    const vatContracts = invReg.vat_room_contracts || [];
+    const invoices = invReg.invoices || [];
+    const invTotals = invReg.totals || { count: 0, supply_amount: 0, tax_amount: 0, total_amount: 0 };
     const cats = d.expense_categories || {};
     const years = [d.year + 1, d.year, d.year - 1, d.year - 2].filter((v, i, a) => a.indexOf(v) === i && v <= Number((dash.today || "").slice(0, 4)) + 1);
     const vatTotal = (d.vat_periods || []).reduce((a, p) => a + p.vat, 0);
+    const inputVatTotal = fin.input_vat_deductible || 0;
+    const hometaxCsvUrl = `${Bass.apiBase(APP_ID)}/tax/export-hometax-csv?branch=${encodeURIComponent(currentBranch)}&year=${d.year}${taxMonth > 0 ? `&month=${taxMonth}` : ""}&token=${encodeURIComponent(Bass.token())}`;
+
     elTabContent.innerHTML = `
-      <div class="bass-row" style="gap:8px;margin-bottom:10px;align-items:center;">
+      <div class="bass-row" style="gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
         <label class="r3-lbl" for="taxYearSel" style="margin:0;white-space:nowrap;">귀속연도</label>
         <select id="taxYearSel" class="bass-select" style="width:auto;font-size:16px;">${years.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select>
-        <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${d.year}&token=${encodeURIComponent(Bass.token())}">📥 종소세 CSV</a>
+        <select id="taxMonthSel" class="bass-select" style="width:auto;font-size:16px;">
+          <option value="0" ${taxMonth === 0 ? "selected" : ""}>전체 월 (연간)</option>
+          ${[1,2,3,4,5,6,7,8,9,10,11,12].map((m) => `<option value="${m}" ${m === taxMonth ? "selected" : ""}>${m}월</option>`).join("")}
+        </select>
+        <a class="bass-btn bass-btn--sm bass-btn--primary" href="${Bass.apiBase(APP_ID)}/tax/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${d.year}&token=${encodeURIComponent(Bass.token())}">📥 종소세 명세서 CSV</a>
+        <a class="bass-btn bass-btn--sm bass-btn--primary" href="${hometaxCsvUrl}">📥 홈택스 세금계산서 일괄발급 CSV</a>
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
-        <h3 style="margin:0 0 6px;">🧮 종합소득세 자료 (${d.year}년)</h3>
+        <h3 style="margin:0 0 6px;">🏢 건물 부가세 · 종합소득세 대상 호실 설정</h3>
+        <div class="r3-grid">
+          <label class="r3-fld">부가세 납부 대상 호실 (사무실·상가)
+            <input id="txVatRooms" class="bass-input" value="${Bass.escapeHtml(vatRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303">
+          </label>
+          <label class="r3-fld">종합소득세 신고 대상 호실
+            <input id="txIncRooms" class="bass-input" value="${Bass.escapeHtml(incRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303, 401~703">
+          </label>
+        </div>
+        <div class="bass-row" style="gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+          <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input id="txSyncContracts" type="checkbox"> 현재 입주 계약에도 과세 여부 즉시 동기화
+          </label>
+          <button id="btnSaveTaxRooms" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 대상 호실 저장</button>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+          현재 설정: 부가세 대상 <strong>${vatRoomsList.length}개 호실</strong> (${Bass.escapeHtml(vatRoomsList.join(", ") || "없음")}) ·
+          종소세 대상 <strong>${incRoomsList.length}개 호실</strong>
+        </div>
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🧾 과세 호실 임차인 사업자 정보 (세금계산서 공급받는자)</h3>
+        <div class="bass-muted" style="font-size:12px;margin-bottom:8px;">상가·사무실 과세 호실 임차인의 사업자등록번호, 상호, 대표자명, 수신 이메일을 입력·수정합니다.</div>
+        ${vatContracts.length ? vatContracts.map((vc) => `
+          <div class="room-card" style="margin-bottom:6px;padding:8px 10px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+            <div style="font-size:13px;line-height:1.6;">
+              <strong>${Bass.escapeHtml(vc.room_no)}호</strong>
+              ${vc.tenant_name ? `· ${Bass.escapeHtml(vc.tenant_name)}` : '<span class="bass-muted">(공실/미배정)</span>'}
+              ${vc.ready_for_invoice
+                ? `<span class="bass-badge bass-badge--success" style="margin-left:4px;">발행 준비 완료</span>`
+                : `<span class="bass-badge bass-badge--warning" style="margin-left:4px;">미입력: ${Bass.escapeHtml((vc.missing_fields || []).join("·"))}</span>`}
+              <br>
+              <span class="bass-muted" style="font-size:12px;">
+                사업자번호: <strong>${Bass.escapeHtml(vc.business_number || "-")}</strong> ·
+                상호: <strong>${Bass.escapeHtml(vc.company_name || "-")}</strong> ·
+                대표자: <strong>${Bass.escapeHtml(vc.ceo_name || "-")}</strong> ·
+                이메일: <strong>${Bass.escapeHtml(vc.email || "-")}</strong>
+              </span>
+            </div>
+            <button type="button" class="bass-btn bass-btn--sm btn-edit-tbiz" data-room="${Bass.escapeHtml(vc.room_no)}">✏️ 사업자 정보 입력·수정</button>
+          </div>
+        `).join("") : '<div class="bass-muted">설정된 부가세 대상 호실이 없습니다.</div>'}
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <div class="bass-row" style="justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+          <h3 style="margin:0;">📑 세금계산서 발행 대장 (${d.year}년 ${taxMonth > 0 ? `${taxMonth}월` : "전체"})</h3>
+          <a class="bass-btn bass-btn--sm bass-btn--primary" href="${hometaxCsvUrl}">📥 홈택스 일괄발급 포맷(CSV)</a>
+        </div>
+        <div style="font-size:13.5px;margin-bottom:8px;">
+          발행 대상 <strong>${invTotals.count || 0}건</strong> ·
+          공급가액 합계 <strong>${fmtWon(invTotals.supply_amount || 0)}</strong> ·
+          세액(10%) 합계 <strong>${fmtWon(invTotals.tax_amount || 0)}</strong> ·
+          합계금액 <strong>${fmtWon(invTotals.total_amount || 0)}</strong>
+        </div>
+        ${invoices.length ? `<div style="overflow-x:auto;">
+          <table class="bass-table" style="width:100%;font-size:12.5px;">
+            <thead>
+              <tr><th>작성일자</th><th>호실</th><th>사업자번호</th><th>상호 / 대표자</th><th>수신 이메일</th><th>공급가액</th><th>세액(10%)</th><th>상태</th></tr>
+            </thead>
+            <tbody>
+              ${invoices.map((inv) => `
+                <tr>
+                  <td>${Bass.escapeHtml(inv.paid_date)}</td>
+                  <td><strong>${Bass.escapeHtml(inv.room_no)}호</strong></td>
+                  <td>${Bass.escapeHtml(inv.buyer_business_number || "-")}</td>
+                  <td>${Bass.escapeHtml(inv.buyer_company_name || "-")} (${Bass.escapeHtml(inv.buyer_ceo_name || "-")})</td>
+                  <td>${Bass.escapeHtml(inv.buyer_email || "-")}</td>
+                  <td>${fmtWon(inv.supply_amount)}</td>
+                  <td>${fmtWon(inv.tax_amount)}</td>
+                  <td>${inv.ready_for_hometax ? "✅ 정상" : `⚠️ ${Bass.escapeHtml((inv.missing_fields || []).join(","))}`}</td>
+                </tr>
+              `).join("")}
+            </tbody>
+          </table>
+        </div>` : '<div class="bass-muted" style="font-size:13px;">해당 기간에 과세 호실 수납 내역이 없습니다.</div>'}
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🧾 부가가치세 자료 (${d.year}년 · 매출세액 − 매입세액 공제)</h3>
+        ${(d.vat_periods || []).map((p) => `<div style="font-size:13.5px;line-height:1.8;margin-bottom:4px;">
+          <strong>${Bass.escapeHtml(p.label)}</strong> · 과세 공급가액 ${fmtWon(p.supply)} ·
+          매출세액 <strong>${fmtWon(p.output_vat ?? p.vat)}</strong> −
+          공제 매입세액(수리비·유지비 등) <strong>${fmtWon(p.input_vat || 0)}</strong> =
+          예상 납부세액 <strong style="color:var(--primary-2);">${fmtWon(p.net_vat_payable ?? p.vat)}</strong>
+          ${p.non_deductible_expense ? `<span class="bass-muted" style="font-size:12px;">(불공제 경비 ${fmtWon(p.non_deductible_expense)} 제외)</span>` : ""}
+        </div>`).join("")}
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+          수리비·청소비·승강기·공용전기 등 사업 관련 세금계산서·카드 지출의 매입세액(연간 ${fmtWon(inputVatTotal)})은 공제되며,
+          <strong>경조사비·화재보험료(면세)</strong> 등은 부가세 매입세액 불공제(종합소득세 필요경비로만 반영)됩니다.
+        </div>
+      </div>
+
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🧮 종합소득세 자료 (${d.year}년 · 신고대상 ${incRoomsList.length}개 호실)</h3>
         <div style="font-size:14px;line-height:1.8;">
-          총수입 <strong>${fmtWon(fin.gross_revenue)}</strong> (수납 ${fin.payment_count || 0}건)<br>
-          − 필요경비 <strong>${fmtWon(fin.total_operating_expense)}</strong> (지출 ${fin.outlay_count || 0}건)<br>
+          총수입 <strong>${fmtWon(fin.gross_revenue)}</strong> (종소세 대상 호실 수입 <strong>${fmtWon(fin.income_tax_revenue ?? fin.gross_revenue)}</strong> · 수납 ${fin.payment_count || 0}건)<br>
+          − 필요경비 <strong>${fmtWon(fin.total_operating_expense)}</strong> (수리비·관리비·경조사비·보험료 등 지출 ${fin.outlay_count || 0}건)<br>
           = 순임대소득 <strong style="color:var(--primary-2);">${fmtWon(fin.noi)}</strong><br>
           분리과세 15.4% 예상세액 <strong>${fmtWon(fin.estimated_separate_tax)}</strong>
         </div>
@@ -1193,13 +1273,7 @@
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
-        <h3 style="margin:0 0 6px;">🧾 부가가치세 자료 (${d.year}년)</h3>
-        ${(d.vat_periods || []).map((p) => `<div style="font-size:14px;line-height:1.8;"><strong>${Bass.escapeHtml(p.label)}</strong> · 공급가액 ${fmtWon(p.supply)} · 부가세 <strong>${fmtWon(p.vat)}</strong>${p.taxable_count ? ` (과세 수납 ${p.taxable_count}건)` : ""}</div>`).join("")}
-        <div class="bass-muted" style="font-size:12px;margin-top:6px;">${vatTotal > 0 ? "상가·업무용 등 과세 호실에서 받은 부가세입니다." : "주거용 임대는 부가세 면세라 받은 부가세가 없습니다."} 신고 기간은 1기(1~6월분 → 7월 25일), 2기(7~12월분 → 다음 해 1월 25일)입니다.</div>
-      </div>
-
-      <div class="bass-card" style="margin-bottom:12px;">
-        <h3 style="margin:0 0 8px;">➕ 경비 지출 등록 (수리비 등)</h3>
+        <h3 style="margin:0 0 8px;">➕ 경비 지출 등록 (수리비·경조사비 등)</h3>
         <div class="r3-grid">
           <label class="r3-fld">지출일<input id="outDate" class="bass-input" type="date" value="${Bass.escapeHtml(dash.today || "")}"></label>
           <label class="r3-fld">분류<select id="outCat" class="bass-select">${Object.entries(cats).map(([k, v]) => `<option value="${k}">${Bass.escapeHtml(v)}</option>`).join("")}</select></label>
@@ -1217,11 +1291,33 @@
         <div id="outlayList" style="margin-top:8px;">${(d.outlays || []).map((o) => `
           <button type="button" class="outlay-row bass-btn" data-id="${o.id}" style="display:grid;grid-template-columns:78px 1fr auto;gap:6px;width:100%;text-align:left;margin-bottom:4px;font-size:13px;">
             <span>${Bass.escapeHtml(o.expense_date.slice(2).replace(/-/g, "."))}</span>
-            <span>${Bass.escapeHtml(o.title)}<br><span class="bass-muted" style="font-size:11.5px;">${Bass.escapeHtml(o.category_label)}${o.vendor ? " · " + Bass.escapeHtml(o.vendor) : ""}</span></span>
+            <span>${Bass.escapeHtml(o.title)}<br><span class="bass-muted" style="font-size:11.5px;">${Bass.escapeHtml(o.category_label)}${o.vendor ? " · " + Bass.escapeHtml(o.vendor) : ""} · ${o.is_vat_deductible === false ? "부가세 불공제(종소세만)" : `매입세액 ${fmtWon(o.input_vat || 0)}`}</span></span>
             <strong>${fmtWon(o.amount)}</strong></button>`).join("") || '<div class="bass-muted">등록된 경비가 없습니다.</div>'}</div>
       </div>`;
 
     document.getElementById("taxYearSel").addEventListener("change", (e) => { taxYear = Number(e.target.value); renderTaxTab(); });
+    document.getElementById("taxMonthSel").addEventListener("change", (e) => { taxMonth = Number(e.target.value); renderTaxTab(); });
+    document.getElementById("btnSaveTaxRooms").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/building/tax-rooms", {
+          method: "POST",
+          body: {
+            branch: currentBranch,
+            vat_rooms: document.getElementById("txVatRooms").value,
+            income_tax_rooms: document.getElementById("txIncRooms").value,
+            sync_contracts: Boolean(document.getElementById("txSyncContracts").checked),
+          },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+      });
+    });
+    elTabContent.querySelectorAll(".btn-edit-tbiz").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const vc = vatContracts.find((x) => String(x.room_no) === String(btn.dataset.room));
+        if (vc) showTenantBizModal(vc);
+      });
+    });
     document.getElementById("btnAddOutlay").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, "/outlays", {
@@ -1240,6 +1336,41 @@
       const o = (d.outlays || []).find((x) => x.id === row.dataset.id);
       if (o) showOutlayModal(o, cats);
     }));
+  }
+
+  function showTenantBizModal(vc) {
+    openModal(`🧾 ${Bass.escapeHtml(vc.room_no)}호 세금계산서 사업자 정보`, `
+      <div class="r3-grid">
+        <label class="r3-fld">사업자등록번호<input id="tbBizNo" class="bass-input" value="${Bass.escapeHtml(vc.business_number || "")}" placeholder="예: 214-86-12345"></label>
+        <label class="r3-fld">상호 (법인명)<input id="tbComp" class="bass-input" value="${Bass.escapeHtml(vc.company_name || "")}" placeholder="예: (주)시크디자인"></label>
+        <label class="r3-fld">대표자명<input id="tbCeo" class="bass-input" value="${Bass.escapeHtml(vc.ceo_name || vc.tenant_name || "")}" placeholder="예: 홍길동"></label>
+        <label class="r3-fld">세금계산서 수신 이메일<input id="tbEmail" class="bass-input" type="email" value="${Bass.escapeHtml(vc.email || "")}" placeholder="예: tax@company.co.kr"></label>
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;cursor:pointer;">
+        <input id="tbVatTarget" type="checkbox" ${vc.vat_target !== false ? "checked" : ""}> 부가가치세 과세 계약 (10% 세금계산서 발행 대상)
+      </label>
+      <div class="bass-row" style="gap:6px;margin-top:10px;">
+        <button id="tbSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
+      </div>`);
+    $m("tbSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/tax/tenant-biz", {
+          method: "POST",
+          body: {
+            branch: currentBranch,
+            room_no: vc.room_no,
+            business_number: $m("tbBizNo").value.trim(),
+            company_name: $m("tbComp").value.trim(),
+            ceo_name: $m("tbCeo").value.trim(),
+            email: $m("tbEmail").value.trim(),
+            vat_target: Boolean($m("tbVatTarget").checked),
+          },
+        });
+        Bass.updateAppAlert("success", res.message);
+        closeModal();
+        await refresh();
+      });
+    });
   }
 
   function showOutlayModal(o, cats) {

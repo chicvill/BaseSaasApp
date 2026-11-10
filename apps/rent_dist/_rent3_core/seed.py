@@ -133,6 +133,16 @@ def ensure_pool_seeded(force: bool = False) -> None:
         wifi_info="ChicVill_5G / chic2026!",
         property_value=1850000000,
         manager_phone="010-2222-1111",
+        biz_company_name="시크빌",
+        vat_rooms=["201", "202", "203", "301", "302", "303"],
+        income_tax_rooms=[
+            "201", "202", "203",
+            "301", "302", "303",
+            "401", "402", "403",
+            "501", "502", "503",
+            "601", "602", "603",
+            "701", "702", "703",
+        ],
     ).save("seeded", app_source=src)
 
     Building(
@@ -159,6 +169,8 @@ def ensure_pool_seeded(force: bool = False) -> None:
         wifi_info="Sinbi_Fiber / sinbi7788",
         property_value=1450000000,
         manager_phone="010-4444-3333",
+        vat_rooms=["101"],
+        income_tax_rooms=["101", "201", "202"],
     ).save("seeded", app_source=src)
 
     # 3. Tenants (users.json)
