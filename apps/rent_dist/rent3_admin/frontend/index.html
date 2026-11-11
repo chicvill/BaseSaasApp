@@ -9,7 +9,7 @@
   <style>
     .app-shell { max-width: 1020px; margin: 0 auto; padding: 16px 14px 70px; }
     .nav-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
+    .kpi-strip { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; margin: 8px 0 2px; font-size: 14px; }
     .kpi-box { padding: 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); }
     .kpi-val { font-size: 20px; font-weight: 800; margin-top: 4px; }
     .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0; }
@@ -32,11 +32,12 @@
         <span id="poolBadge" hidden></span>
         <button type="button" data-r3-burger>☰ 더보기</button>
       </div>
-      <div id="kpiGrid" class="kpi-grid"></div>
+      <div id="kpiGrid" class="kpi-strip"></div>
     </header>
 
     <nav class="tabs" id="tabBar">
-      <button class="bass-btn tab-btn is-active" data-tab="lessors" type="button">🏢 임대인 가맹 · 월 가맹비</button>
+      <button class="bass-btn tab-btn is-active" data-tab="support" type="button">🎯 원격 지원 · 대리 접속</button>
+      <button class="bass-btn tab-btn" data-tab="lessors" type="button">🏢 임대인 가맹 · 월 가맹비</button>
 
       <aside class="r3-drawer" data-r3-drawer>
         <div class="r3-drawer__group">관제 도구</div>
@@ -45,8 +46,7 @@
         <div class="r3-drawer__group">그 밖의</div>
         <a href="manual.html">📘 이용 매뉴얼</a>
         <a href="/rent3/pool.html">🌐 Data Pool 관제</a>
-        <a href="/rent3_lessor/">🏢 임대인 앱</a>
-        <a href="/rent3_tenant/">🔑 임차인 앱</a>
+        <span class="bass-muted" style="font-size:12px;padding:4px 8px;">임대인·임차인 화면은 <strong>원격 지원</strong>에서 들어갑니다.</span>
       </aside>
     </nav>
 

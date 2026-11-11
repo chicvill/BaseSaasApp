@@ -2398,10 +2398,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
 
     def test_43_frontends_do_not_call_staff_only_apis_as_tenant(self):
-        """43. 회귀 방지: 임차인 마이홈 화면이 직원 전용 API(/tenants)를 세입자 본인 로그인으로 부르면 화면이 비어 버린다(실제로 있었던 사고). 세입자 본인은 목록을 부르지 않는다."""
+        """43. 회귀 방지: 임차인 마이홈 화면이 직원 전용 API(/tenants)를 세입자 본인 로그인으로 부르면 화면이 비어 버린다(실제로 있었던 사고). 관리자용 세입자 선택기는 관리인 앱 한 곳으로 모았으므로 임차인 앱에는 전체 세입자 목록 호출·선택기가 없다."""
         src = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
-        self.assertIn("const isTenantUser", src)
-        self.assertIn("if (!tenantList.length && !isTenantUser) await loadTenants();", src)
+        for gone in ("loadTenants", "tenantList", "tenantSel", '"/tenants"'):
+            self.assertNotIn(gone, src, gone)
         # 서버 쪽 약속: 임차인 토큰으로 /tenants 는 403, 본인 마이홈은 200
         reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
             "role": "prospect", "name": "마이홈본인", "phone": "01066661201", "password": "Pw123456"}).json()
@@ -3138,7 +3138,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
         # 이동 링크와 단추
         for needle in ('href: "/rent3_contract/?role=lessor"', 'href: "manual.html"', 'href: "/rent3_tenant/"',
-                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"', 'id: "btnSupportSetting"'):
+                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"', 'id: "btnSupportSetting"', 'id: "btnSupportChat"'):
             self.assertIn(needle, menu, needle)
         # 첫 화면에는 상단 탭 줄이 없다 (메뉴 서랍만)
         self.assertNotIn('data-tab="rooms"', idx)
@@ -3254,6 +3254,93 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 호환 모드(시연·기존 시험): 동의 없이도 가입·로그인된다
         with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "0"}):
             self.assertTrue(login("sunho").json().get("token"))
+
+    def test_55_support_chat_access_log_and_phone_intake(self):
+        """55. 지원 채팅·접속 기록: 원격 지원 허용 + 채팅(또는 전화 접수)이 있어야 입장, 입장하면 기록·안내, 10일 뒤 채팅 삭제(접속 기록은 1년), 이벤트 로그에 본문 없음."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import Lessor, Tenant, consent as cs, support as sup
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        from apps.rent_dist._rent3_core.models import date_today
+        c = self.client                       # 기본 헤더 = admin
+        lessor = Lessor.first(username="chic")
+        tenant = Tenant.first(room_no="201", branch="main")
+        lh = {"Authorization": f"Bearer {lessor_token(lessor)}"}
+        th = {"Authorization": f"Bearer {tenant_token(tenant)}"}
+        lkey, tkey = sup.thread_key(lessor), sup.thread_key(tenant)
+        for u in (lessor, tenant):            # 개인정보 동의는 했고 원격 지원은 아직 허용 안 함
+            cs.record_consent(u, True, False)
+        secret = "비밀문장-보일러가-안켜져요-9981"
+
+        # 사용자: 지원 채팅 글쓰기·읽기 (관리인 계정은 사용자용 API 대상이 아니다)
+        self.assertEqual(c.post("/api/rent3/pool/support/messages", headers=th, json={"body": secret}).status_code, 200)
+        self.assertEqual(c.post("/api/rent3/pool/support/messages", headers=th, json={"body": "  "}).status_code, 400)
+        self.assertEqual(c.get("/api/rent3/pool/support/thread").status_code, 400)       # admin 토큰
+        mine = c.get("/api/rent3/pool/support/thread", headers=th).json()
+        self.assertEqual([m["body"] for m in mine["messages"]], [secret])
+        self.assertEqual(c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"], [])   # 임대인은 임차인의 대화를 못 본다
+        # 풀 이벤트 로그(덧붙이기 전용)에는 본문이 남지 않는다
+        ev = open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read()
+        self.assertNotIn(secret, ev)
+
+        # 관리인: 대화 읽기, 원격 지원 허용 전에는 입장·전화 접수 모두 거부
+        thr = c.get("/api/rent3_admin/support/thread", params={"user": tkey}).json()
+        self.assertEqual(thr["messages"][0]["body"], secret)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "x"}).status_code, 403)
+
+        # 허용하면 입장: 접속 기록 + 지원 채팅에 안내, 이동 주소는 보기 전용 표시(proxy) 포함
+        cs.set_support_access(tenant, True)
+        r = c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "사용법 문의"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["redirect_url"], f"/rent3_tenant/?tenant={tenant.id}&proxy=tenant")
+        logs = sup.SupportAccessLog.find(target_user=tkey)
+        self.assertEqual((len(logs), logs[0].category, logs[0].view), (1, "사용법 문의", "tenant"))
+        self.assertTrue(logs[0].retain_until >= (date_today() + timedelta(days=364)).isoformat())
+        kinds = [m["kind"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]]
+        self.assertIn("access_start", kinds)
+        self.assertTrue(c.get("/api/rent3/pool/support/summary", headers=th).json()["admin_viewing"])      # 사용자에게 '접속 중' 알림
+        # 입장 종류가 사용자 역할과 다르면 거부, 계약방은 세션이 있어야 한다
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "lessor"}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "contract", "session_id": "ghost"}).status_code, 404)
+
+        # 전화 접수: 채팅이 없던 임대인도 '[전화 요청 접수]' 글이 생기며 입장 가능
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 403)   # 허용 전
+        cs.set_support_access(lessor, True)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 400)    # 채팅 없음
+        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "없는분류", "memo": "x"}).status_code, 400)
+        r = c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "사용법 문의", "memo": "수납 입력 방법을 모르심"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["item"]["body"].startswith("[전화 요청 접수]"))
+        self.assertIn("수납 입력 방법", [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"]][0])
+        r = c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor", "room_no": "201", "category": "사용법 문의"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["redirect_url"], f"/rent3_lessor/?branch={lessor.branch}&proxy=lessor&room=201")
+
+        # 원격 지원을 다시 끄면 즉시 입장 불가
+        cs.set_support_access(tenant, False)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant"}).status_code, 403)
+
+        # 원격 지원 카드용 목록: 건물·호실·임차인·허용 여부
+        d = c.get("/api/rent3_admin/support/directory", params={"branch": "main"}).json()
+        room201 = next(x for x in d["rooms"] if x["room_no"] == "201")
+        self.assertEqual((room201["tenant"]["user"], room201["tenant"]["support_allowed"]), (tkey, False))
+        self.assertEqual(d["lessor"]["support_allowed"], True)
+        self.assertTrue(any(b["branch"] == "main" for b in c.get("/api/rent3_admin/support/directory").json()["branches"]))
+        # 일반 사용자는 관리인용 API를 쓸 수 없다
+        self.assertIn(c.get("/api/rent3_admin/support/directory", headers=th).status_code, (401, 403))
+        self.assertIn(c.post("/api/rent3_admin/support/enter", headers=lh, json={"user": tkey, "view": "tenant"}).status_code, (401, 403))
+
+        # 10일이 지난 채팅은 지워지고, 접속 기록은 1년이 지나야 지워진다
+        old = sup.SupportMessage.first(thread_user=tkey)
+        old.expires_at = (date_today() - timedelta(days=1)).isoformat()
+        old.save(action="test_expire")
+        sup.SupportAccessLog.first(target_user=tkey).delete(action="test_cleanup")
+        keep = sup.SupportAccessLog(admin_user="admin", target_user=tkey, retain_until=(date_today() + timedelta(days=5)).isoformat()).save(action="t")
+        gone = sup.SupportAccessLog(admin_user="admin", target_user=tkey, retain_until=(date_today() - timedelta(days=1)).isoformat()).save(action="t")
+        self.assertEqual(sup.purge_expired()["messages"] >= 1, True)
+        self.assertNotIn(secret, [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]])
+        self.assertIsNone(sup.SupportAccessLog.get(gone.id))
+        self.assertIsNotNone(sup.SupportAccessLog.get(keep.id))
 
 
 if __name__ == "__main__":

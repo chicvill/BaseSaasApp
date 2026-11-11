@@ -3,7 +3,7 @@
   "use strict";
 
   const APP_ID = "rent3_admin";
-  let currentTab = "lessors";
+  let currentTab = "support";
   let selectedCollection = "contracts";
   let ov = null;
 
@@ -55,12 +55,9 @@
     const kpi = ov.kpi || {};
     document.getElementById("poolBadge").textContent = `JSON Pool v${meta.total_revision} (${meta.total_objects} 객체)`;
 
-    document.getElementById("kpiGrid").innerHTML = `
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">가맹 건물 / 전체 호실</div><div class="kpi-val">${kpi.total_buildings}채 / ${kpi.occupied_rooms}/${kpi.total_rooms}실</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">플랫폼 월 SaaS MRR (복비 0)</div><div class="kpi-val" style="color:var(--ok);">${fmtWon(kpi.monthly_saas_mrr)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">전사 연간 총 임대수입</div><div class="kpi-val">${fmtWon(kpi.portfolio_gross_revenue)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">전사 순운영이익 (NOI)</div><div class="kpi-val" style="color:var(--primary-2);">${fmtWon(kpi.portfolio_noi)}</div></div>
-    `;
+    document.getElementById("kpiGrid").innerHTML =
+      `<span>가맹 ${kpi.total_buildings}채 · ${kpi.occupied_rooms}/${kpi.total_rooms}실</span>` +
+      `<span class="bass-muted">월 이용료 ${fmtWon(kpi.monthly_saas_mrr)}</span>`;
 
     renderTab();
   }
@@ -75,9 +72,127 @@
 
   function renderTab() {
     if (!ov) return;
-    if (currentTab === "lessors") renderLessorsTab();
+    if (currentTab === "support") renderSupportTab();
+    else if (currentTab === "lessors") renderLessorsTab();
     else if (currentTab === "portfolio") renderPortfolioTab();
     else renderPoolTab();
+  }
+
+
+  // ───────── 원격 지원 · 대리 접속 ─────────
+  // 건물 → 호실 → 입장. 사용자가 원격 지원을 허용했고 지원 채팅(또는 전화 접수)이 있어야 입장하며, 입장하면 보기 전용이다.
+  const sp = { branch: "", roomNo: "", user: "", cat: "사용법 문의" };
+  const spFmt = (iso) => (String(iso || "").length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
+
+  async function renderSupportTab() {
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    let d = await Bass.api(APP_ID, "/support/directory" + (sp.branch ? `?branch=${encodeURIComponent(sp.branch)}` : ""));
+    if (!sp.branch && d.branches.length) {
+      sp.branch = d.branches[0].branch;
+      d = await Bass.api(APP_ID, `/support/directory?branch=${encodeURIComponent(sp.branch)}`);
+    }
+    if (currentTab !== "support") return;
+    const rooms = d.rooms || [];
+    if (!rooms.some((r) => r.room_no === sp.roomNo)) sp.roomNo = "";
+    const room = rooms.find((r) => r.room_no === sp.roomNo) || null;
+    const cards = [];
+    if (d.lessor) cards.push({ ...d.lessor, role: "lessor", title: `🏢 임대인 ${d.lessor.name}` });
+    if (room && room.tenant) cards.push({ ...room.tenant, role: "tenant", title: `🏠 ${room.room_no}호 임차인 ${room.tenant.name}` });
+    if (!cards.some((c) => c.user === sp.user)) sp.user = "";
+    const badge = (c) => `<span class="bass-badge ${c.support_allowed ? "bass-badge--ok" : "bass-badge--warn"}">원격 지원 ${c.support_allowed ? "허용 ON" : "허용 OFF"}</span>` +
+      ` <span class="bass-badge ${c.has_thread ? "bass-badge--info" : ""}">${c.has_thread ? "채팅 있음" : "채팅 없음"}</span>` +
+      (c.unread > 0 ? ` <span class="bass-badge bass-badge--err">안 읽음 ${c.unread}</span>` : "");
+    elTabContent.innerHTML = `
+      <div class="bass-card" style="margin-bottom:14px;">
+        <h3 style="margin:0 0 4px;">🎯 원격 지원 · 대리 접속</h3>
+        <p class="bass-muted" style="font-size:12.5px;margin:0 0 10px;">사용자가 <strong>원격 지원을 허용</strong>했고 <strong>지원 채팅</strong>(전화로 받았다면 전화 접수)이 있어야 입장할 수 있습니다. 입장하면 <strong>보기 전용</strong>이며 접속 기록이 남습니다.</p>
+        <div class="field-grid">
+          <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">① 건물<select id="spBranch" class="bass-select">${d.branches.map((b) => `<option value="${Bass.escapeHtml(b.branch)}" ${b.branch === sp.branch ? "selected" : ""}>${Bass.escapeHtml(b.building_name)} (${Bass.escapeHtml(b.branch)})</option>`).join("")}</select></label>
+          <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">② 호실<select id="spRoom" class="bass-select"><option value="">건물 전체 (임대인)</option>${rooms.map((r) => `<option value="${Bass.escapeHtml(r.room_no)}" ${r.room_no === sp.roomNo ? "selected" : ""}>${Bass.escapeHtml(r.room_no)}호 ${r.tenant ? Bass.escapeHtml(r.tenant.name) : "공실"}${r.sessions.length ? ` · 계약방 ${r.sessions.length}` : ""}</option>`).join("")}</select></label>
+        </div>
+        <div style="margin-top:10px;">${cards.map((c) => `
+          <div class="item-card" style="margin-top:8px;">
+            <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
+              <div><strong>${Bass.escapeHtml(c.title)}</strong> <span class="bass-muted" style="font-size:12px;">(끝자리 ${Bass.escapeHtml(c.phone_tail)})</span><div style="margin-top:4px;">${badge(c)}</div></div>
+              <button class="bass-btn bass-btn--sm ${c.user === sp.user ? "bass-btn--primary" : ""} btn-sp-open" data-user="${Bass.escapeHtml(c.user)}" type="button">💬 지원 채팅 / 입장</button>
+            </div>
+          </div>`).join("") || '<div class="bass-muted">이 건물에서 보여 줄 사용자가 없습니다.</div>'}</div>
+      </div>
+      <div id="spThread"></div>`;
+    document.getElementById("spBranch").addEventListener("change", (e) => { sp.branch = e.target.value; sp.roomNo = ""; sp.user = ""; renderSupportTab().catch(Bass.showError); });
+    document.getElementById("spRoom").addEventListener("change", (e) => { sp.roomNo = e.target.value; sp.user = ""; renderSupportTab().catch(Bass.showError); });
+    elTabContent.querySelectorAll(".btn-sp-open").forEach((b) => b.addEventListener("click", () => { sp.user = b.dataset.user; renderSupportThread(d, cards.find((c) => c.user === sp.user), room).catch(Bass.showError); }));
+    if (sp.user) await renderSupportThread(d, cards.find((c) => c.user === sp.user), room);
+  }
+
+  async function renderSupportThread(d, card, room) {
+    const box = document.getElementById("spThread");
+    if (!card || !box) return;
+    const t = await Bass.api(APP_ID, `/support/thread?user=${encodeURIComponent(card.user)}`);
+    const msgs = t.messages || [];
+    const can = card.support_allowed && msgs.length > 0;
+    const sessions = card.role === "lessor" ? rooms_sessions(d) : (room ? room.sessions : []);
+    const why = !card.support_allowed ? "이 사용자는 원격 지원을 허용하지 않았습니다. 전화로 방법을 안내하거나, 사용자가 메뉴에서 허용을 켜도록 안내해 주세요."
+      : (!msgs.length ? "지원 채팅이 없습니다. 아래 ‘전화 접수’를 남기거나 사용자에게 먼저 글을 보내 주세요." : "");
+    box.innerHTML = `
+      <div class="bass-card">
+        <h3 style="margin:0 0 6px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
+        <div id="spList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:6px 8px;">${msgs.map((m) => `
+          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:11px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>'}</div>
+        <div class="bass-row" style="gap:6px;margin-top:8px;"><input id="spMsg" class="bass-input" style="flex:1;" placeholder="사용자에게 보낼 글"><button id="btnSpSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">보내기</button></div>
+        <div class="bass-muted" style="font-size:12px;margin-top:4px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
+
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
+          <strong style="font-size:13.5px;">📞 전화 접수 (전화로 요청받은 경우)</strong>
+          <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+            <select id="spCat" class="bass-select" style="width:auto;">${d.categories.map((c) => `<option ${c === sp.cat ? "selected" : ""}>${Bass.escapeHtml(c)}</option>`).join("")}</select>
+            <input id="spMemo" class="bass-input" style="flex:1;min-width:160px;" placeholder="접수 메모 (예: 수납 입력 방법을 모르심)">
+            <button id="btnSpPhone" class="bass-btn bass-btn--sm" type="button">📞 전화 접수 남기기</button>
+          </div>
+          <div class="bass-muted" style="font-size:12px;margin-top:4px;">남기면 사용자 지원 채팅에 “[전화 요청 접수] …”가 자동으로 생기고, 바로 입장할 수 있습니다.</div>
+        </div>
+
+        <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
+          <strong style="font-size:13.5px;">🛡️ 입장 (보기 전용)</strong>
+          ${why ? `<div style="font-size:12.5px;color:var(--warn);margin:6px 0;">${Bass.escapeHtml(why)}</div>` : ""}
+          <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+            ${card.role === "lessor" ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-sp-enter" data-view="lessor" type="button" ${can ? "" : "disabled"}>🏢 임대인 입장</button>` : `<button class="bass-btn bass-btn--sm bass-btn--primary btn-sp-enter" data-view="tenant" type="button" ${can ? "" : "disabled"}>🏠 임차인 입장</button>`}
+            ${sessions.map((x) => `<button class="bass-btn bass-btn--sm btn-sp-enter" data-view="contract" data-sid="${Bass.escapeHtml(x.id)}" type="button" ${can ? "" : "disabled"}>🤝 계약방 ${Bass.escapeHtml(x.room_no || "")}호 (${card.role === "lessor" ? "임대인" : "임차인"} 시점 · ${x.step}단계)</button>`).join("")}
+          </div>
+        </div>
+      </div>`;
+    const list = document.getElementById("spList");
+    list.scrollTop = list.scrollHeight;
+    const reload = () => renderSupportTab().catch(Bass.showError);
+    document.getElementById("spCat").addEventListener("change", (e) => { sp.cat = e.target.value; });
+    document.getElementById("btnSpSend").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const body = document.getElementById("spMsg").value.trim();
+        if (!body) return;
+        await Bass.api(APP_ID, "/support/messages", { method: "POST", body: { user: card.user, body } });
+        await reload();
+      });
+    });
+    document.getElementById("btnSpPhone").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/support/phone-intake", { method: "POST", body: { user: card.user, category: document.getElementById("spCat").value, memo: document.getElementById("spMemo").value } });
+        Bass.updateAppAlert("success", res.message);
+        await reload();
+      });
+    });
+    box.querySelectorAll(".btn-sp-enter").forEach((btn) => btn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/support/enter", {
+          method: "POST",
+          body: { user: card.user, view: btn.dataset.view, session_id: btn.dataset.sid || "", room_no: sp.roomNo, category: document.getElementById("spCat").value },
+        });
+        window.location.href = res.redirect_url;
+      });
+    }));
+  }
+
+  function rooms_sessions(d) {
+    return (d.rooms || []).flatMap((r) => (r.sessions || []).map((x) => ({ ...x, room_no: r.room_no })));
   }
 
   function renderLessorsTab() {
@@ -116,7 +231,6 @@
                 <button class="bass-btn bass-btn--sm btn-limit" data-id="${l.id}" data-limit="${l.room_limit}" type="button">호실 한도</button>
                 <span class="bass-badge ${l.app_fee_status === "PAID" ? "bass-badge--ok" : "bass-badge--warn"}">사용료 ${l.app_fee_status}</span>
                 ${l.app_fee_status !== "PAID" ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-settle-fee" data-id="${l.id}" type="button">💰 사용료 완납 정산</button>` : ""}
-                <a class="bass-btn bass-btn--sm" href="/rent3_lessor/?branch=${encodeURIComponent(l.branch)}">지점 장부 열기 →</a>
               </div>
             </div>
           </div>

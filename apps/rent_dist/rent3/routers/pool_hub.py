@@ -15,7 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs
+from apps.rent_dist._rent3_core import consent as cs, support as sup
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -384,6 +384,7 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         ratelimit.fail("login", keys)
         raise
     ratelimit.clear("login", keys[:1])
+    sup.purge_expired()   # 스케줄러가 없으므로 로그인 때 기한 지난 지원 채팅·접속 기록을 지운다
     out = _gate_consent(out)
     from apps.rent_dist._rent3_core.authz import unrevoke_token
     unrevoke_token(out.get("token", ""))
@@ -431,6 +432,48 @@ def portal_consent(req: ConsentReq) -> Dict[str, Any]:
     return out
 
 
+class SupportPostReq(BaseModel):
+    body: str
+
+
+def _support_user(request: Request) -> Any:
+    from apps.rent_dist._rent3_core.authz import need_claims
+    user = cs.user_from_claims(need_claims(request))
+    if user is None:
+        raise DomainError("임대인·임차인 계정으로 로그인해야 합니다.", hint="관리인은 관리인 앱의 원격 지원 화면을 쓰세요.")
+    return user
+
+
+@router.get("/support/thread")
+def support_my_thread(request: Request) -> Dict[str, Any]:
+    """내 지원 채팅(관리인과의 대화). 읽으면 관리인 글이 읽음 처리된다."""
+    user = _support_user(request)
+    sup.purge_expired()
+    key = sup.thread_key(user)
+    sup.mark_read(key, "user")
+    return {
+        "success": True,
+        "messages": [sup.public_message(m) for m in sup.thread_messages(key)],
+        "support_access": cs.support_allowed(user),
+        "retention_days": sup.SUPPORT_CHAT_DAYS,
+    }
+
+
+@router.post("/support/messages")
+def support_my_post(req: SupportPostReq, request: Request) -> Dict[str, Any]:
+    user = _support_user(request)
+    m = sup.post_user_message(user, req.body)
+    return {"success": True, "message": "관리인에게 보냈습니다.", "item": sup.public_message(m)}
+
+
+@router.get("/support/summary")
+def support_my_summary(request: Request) -> Dict[str, Any]:
+    """앱이 주기적으로 확인하는 가벼운 상태: 안 읽은 관리인 글 수, 관리인 접속 중 여부."""
+    user = _support_user(request)
+    key = sup.thread_key(user)
+    return {"success": True, "unread": sup.unread_count(key, "user"), "admin_viewing": sup.admin_viewing(key)}
+
+
 @router.get("/auth/consents")
 def my_consents(request: Request) -> Dict[str, Any]:
     """내 동의 상태(개인정보 동의, 관리인 원격 지원 허용 여부)."""
@@ -448,7 +491,7 @@ def set_my_support_access(req: SupportToggleReq, request: Request) -> Dict[str, 
     user = cs.user_from_claims(need_claims(request))
     if user is None:
         raise DomainError("관리인 계정에는 해당하지 않습니다.")
-    if not cs.has_valid_consent(user):
+    if cs.consent_required() and not cs.has_valid_consent(user):
         raise DomainError("먼저 개인정보 수집·이용에 동의해 주세요.", hint="다시 로그인하면 동의 화면이 나옵니다.")
     cs.set_support_access(user, req.allow)
     return {

@@ -24,6 +24,7 @@ from .models import (
     validate_email_format,
     validate_kr_business_number,
 )
+from .support import SupportAccessLog, SupportMessage  # noqa: F401 (풀 객체 등록)
 from .ops import (
     CheckOutSettlement,
     DirectChat,

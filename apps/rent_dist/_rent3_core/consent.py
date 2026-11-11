@@ -79,7 +79,9 @@ def set_support_access(user: Any, allow: bool, app_source: str = "rent3_portal")
 
 def support_allowed(user: Any) -> bool:
     """관리인 원격 지원 접속을 허용한 사용자인가 (개인정보 동의도 유효해야 한다)."""
-    return bool(user is not None and has_valid_consent(user) and (user.consents or {}).get("support_access"))
+    if user is None or not (getattr(user, "consents", None) or {}).get("support_access"):
+        return False
+    return has_valid_consent(user) or not consent_required()   # 시연·개발 모드에서는 개인정보 동의 기록 없이도 켤 수 있다
 
 
 def consent_status(user: Any) -> Dict[str, Any]:

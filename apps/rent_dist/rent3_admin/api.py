@@ -3,7 +3,7 @@ apps/rent3_admin/api.py — 플랫폼 총괄 관리인 전용 API 라우터.
 """
 from typing import Any, Dict, List, Optional
 import re
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -11,7 +11,7 @@ from core.auth import require_role
 
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
-from apps.rent_dist._rent3_core import franchise as fr
+from apps.rent_dist._rent3_core import franchise as fr, consent as cs, support as sup
 from apps.rent_dist._rent3_core.authz import api_headers, not_revoked
 from apps.rent_dist._rent3_core import (
     Admin,
@@ -307,3 +307,102 @@ def inspect_pool_collection(collection: str, q: str = ""):
         envelope["filtered_count"] = len(envelope["items"])
     return {"success": True, "collections": list(POOL_COLLECTIONS), **envelope}
 
+
+# ───────── 원격 지원 · 대리 접속 (4A) ─────────
+# 관리인이 사용법을 모르는 임대인·임차인을 돕는다. 사용자가 원격 지원을 허용했고 지원 채팅이 있어야 입장할 수 있으며,
+# 입장하면 보기 전용이다(authz.admin_proxy_guard). 접속 사유는 지원 채팅에 남고, 접속 기록(1년)이 따로 남는다.
+class SupportMsgReq(BaseModel):
+    user: str                      # 'lessor:<id>' | 'tenant:<id>'
+    body: str
+
+
+class PhoneIntakeReq(BaseModel):
+    user: str
+    category: str
+    memo: str = ""
+
+
+class SupportEnterReq(BaseModel):
+    user: str
+    view: str                      # lessor | tenant | contract
+    session_id: str = ""
+    room_no: str = ""
+    category: str = ""
+
+
+def _admin_name(request: Request) -> str:
+    from apps.rent_dist._rent3_core.authz import need_claims
+    return str(need_claims(request).get("u") or "admin")
+
+
+def _user_card(user: Any) -> Dict[str, Any]:
+    key = sup.thread_key(user)
+    msgs = sup.thread_messages(key)
+    return {
+        "id": user.id, "name": user.name, "user": key, "phone_tail": "".join(ch for ch in (user.phone or "") if ch.isdigit())[-4:],
+        "support_allowed": cs.support_allowed(user),
+        "has_thread": bool(msgs), "unread": sup.unread_count(key, "admin"),
+        "last_at": msgs[-1].created_at if msgs else "",
+    }
+
+
+@router.get("/support/directory", dependencies=ADMIN_ONLY)
+def support_directory(branch: str = ""):
+    """원격 지원 카드: 건물 목록, 선택한 건물의 호실별 임대인·현 임차인·진행 중 계약방과 원격 지원 허용 여부."""
+    ensure_pool_seeded()
+    sup.purge_expired()
+    buildings = Building.all()
+    out: Dict[str, Any] = {"success": True, "branches": [{"branch": b.branch, "building_name": b.building_name} for b in buildings],
+                           "categories": list(sup.CATEGORIES)}
+    if not branch:
+        return out
+    b_id = normalize_branch_id(branch)
+    bldg = Building.first(branch=b_id)
+    if not bldg:
+        raise DomainError(f"'{branch}' 건물을 찾을 수 없습니다.")
+    lessor = Lessor.get(bldg.id_lessor) if bldg.id_lessor else Lessor.first(branch=b_id)
+    from apps.rent_dist._rent3_core.cosign import CoSignSession
+    sessions = [x for x in CoSignSession.find(branch=b_id) if getattr(x, "status", "") == "IN_PROGRESS"]
+    rooms = []
+    for r in sorted(Room.find(branch=b_id), key=lambda x: x.room_no):
+        tenant = Tenant.get(r.id_tenant) if r.id_tenant else None
+        rooms.append({
+            "room_no": r.room_no, "is_occupied": r.is_occupied,
+            "tenant": _user_card(tenant) if tenant else None,
+            "sessions": [{"id": x.id, "step": x.current_step, "call_status": x.call_status,
+                          "tenant_name": str((x.terms or {}).get("tenant_name", ""))}
+                         for x in sessions if x.room_no == r.room_no],
+        })
+    out.update({"branch": b_id, "building_name": bldg.building_name, "lessor": _user_card(lessor) if lessor else None, "rooms": rooms})
+    return out
+
+
+@router.get("/support/thread", dependencies=ADMIN_ONLY)
+def support_thread(user: str):
+    sup.purge_expired()
+    u = sup.user_by_thread(user)
+    sup.mark_read(user, "admin")
+    return {"success": True, "user": _user_card(u), "messages": [sup.public_message(m) for m in sup.thread_messages(user)],
+            "retention_days": sup.SUPPORT_CHAT_DAYS}
+
+
+@router.post("/support/messages", dependencies=ADMIN_ONLY)
+def support_post(req: SupportMsgReq, request: Request):
+    u = sup.user_by_thread(req.user)
+    m = sup.post_admin_message(u, _admin_name(request), req.body)
+    return {"success": True, "message": "사용자에게 보냈습니다.", "item": sup.public_message(m)}
+
+
+@router.post("/support/phone-intake", dependencies=ADMIN_ONLY)
+def support_phone_intake(req: PhoneIntakeReq, request: Request):
+    """전화로 요청받은 경우: 사유 분류와 접수 메모를 지원 채팅에 '[전화 요청 접수]'로 남긴다."""
+    u = sup.user_by_thread(req.user)
+    m = sup.phone_intake(u, _admin_name(request), req.category, req.memo)
+    return {"success": True, "message": "전화 요청 접수를 지원 채팅에 남겼습니다. 이제 입장할 수 있습니다.", "item": sup.public_message(m)}
+
+
+@router.post("/support/enter", dependencies=ADMIN_ONLY)
+def support_enter(req: SupportEnterReq, request: Request):
+    u = sup.user_by_thread(req.user)
+    res = sup.enter(_admin_name(request), u, req.view, session_id=req.session_id, category=req.category, room_no=req.room_no)
+    return {"success": True, "message": "접속 기록을 남기고 보기 전용으로 입장합니다.", **res}

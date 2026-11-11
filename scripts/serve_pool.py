@@ -22,6 +22,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=9080)
     ap.add_argument("--tokens-out", default="")
     ap.add_argument("--tenants", default="")
+    ap.add_argument("--admin-out", default="", help="화면 확인용 관리인 로그인 정보(JSON)를 적는다")
     a = ap.parse_args()
     for k in ("RENT3_DEMO_LOGIN", "RENT3_FAKE_IDENTITY", "RENT3_TODAY", "RENT2_TODAY", "RENT3_POOL_DIR"):
         os.environ.pop(k, None)
@@ -40,6 +41,12 @@ def main() -> None:
                 out[tid] = {"token": tenant_token(t), "user": {"id": t.id, "tenant_id": t.id, "name": t.name, "phone": t.phone,
                                                                "role": "tenant", "branch": t.branch}}
         json.dump(out, open(a.tokens_out, "w", encoding="utf-8"), ensure_ascii=False)
+    if a.admin_out:
+        from core.auth import User as CoreUser, ensure_default_admins, issue_token
+        ensure_default_admins()
+        u = CoreUser.by_username("admin")
+        json.dump({"token": issue_token(u), "user": {"id": "admin", "username": "admin", "name": "관리인", "role": "admin", "branch": "all"}},
+                  open(a.admin_out, "w", encoding="utf-8"), ensure_ascii=False)
     print(f"[pool] http://127.0.0.1:{a.port}  (데이터: {a.pool_dir})", flush=True)
     uvicorn.run(app, host="127.0.0.1", port=a.port, log_level="warning")
 

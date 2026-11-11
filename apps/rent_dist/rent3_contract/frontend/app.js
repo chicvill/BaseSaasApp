@@ -27,9 +27,19 @@
     window.location.replace("/rent3/?login=1");
     return;
   }
-  const currentRole = (loggedUser.role === "tenant" || loggedUser.role === "prospect")
-    ? "tenant"
-    : (loggedUser.role === "cosign" && params.get("role") === "tenant" ? "tenant" : "lessor");
+  // 관리인 대리 접속(보기 전용): 관리인 원격 지원 카드가 정한 입장(role)으로 계약방을 연다. 동의·서명은 서버가 막는다.
+  const adminProxy = Boolean((loggedUser.role === "admin" || loggedUser.role === "superadmin") && params.get("proxy"));
+  const currentRole = adminProxy
+    ? (params.get("role") === "tenant" ? "tenant" : "lessor")
+    : (loggedUser.role === "tenant" || loggedUser.role === "prospect")
+      ? "tenant"
+      : (loggedUser.role === "cosign" && params.get("role") === "tenant" ? "tenant" : "lessor");
+  if (adminProxy) {
+    const st = document.createElement("style");
+    st.textContent = ".r3-proxy #stepPanel button,.r3-proxy #stepPanel input,.r3-proxy #stepPanel select,.r3-proxy #stepPanel textarea,.r3-proxy #dlgHost button,.r3-proxy #btnCancelContract{pointer-events:none;opacity:.5}";
+    document.head.appendChild(st);
+    document.body.classList.add("r3-proxy");
+  }
   const myTenantId = loggedUser.tenant_id || loggedUser.id || "";
   const myBranch = loggedUser.branch && loggedUser.branch !== "all" ? loggedUser.branch : "";
   const ROLE_KO = { lessor: "임대인", tenant: "임차인" };
@@ -601,6 +611,7 @@
     elContract.hidden = false;
     const s = activeSession;
     document.getElementById("wsTitle").textContent = `${s.building_name} ${s.room_no}호`;
+    R3Shell.proxyBanner(`${s.building_name} ${s.room_no}호 (${ROLE_KO[currentRole]} 입장 · 계약방)`);   // 관리인 대리 접속 때만 보인다
     document.getElementById("wsMeta").textContent =
       `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}`;
 

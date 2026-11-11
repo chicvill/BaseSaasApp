@@ -17,11 +17,20 @@
   // 세입자 본인 로그인이면 본인 계정만 본다. 전체 세입자 목록(/tenants)은 임대인·관리자 전용이라 세입자는 부를 수 없다.
   const isTenantUser = Boolean(savedSession && (savedSession.role === "tenant" || savedSession.role === "prospect"));
   let selectedTenantId = (isTenantUser ? (savedSession.tenant_id || savedSession.id) : "") || params.get("tenant") || (savedSession && savedSession.tenant_id ? savedSession.tenant_id : "");
-  let tenantList = [];
   let showDoorlock = false;
 
   const elMyhome = document.getElementById("viewMyhome");
   const elListings = document.getElementById("viewListings");
+  const btnSupportChat = document.getElementById("btnSupportChat");
+  if (btnSupportChat) {
+    btnSupportChat.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      R3Shell.openSupportChat();
+    });
+  }
+  if (R3Shell.isAdminSession() && btnSupportChat) btnSupportChat.hidden = true;   // 관리인에게는 필요 없다
+  R3Shell.watchSupport();
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) {
     btnSupportSetting.addEventListener("click", () => {
@@ -52,18 +61,11 @@
   btnMyhome.addEventListener("click", () => setMode("myhome"));
   btnListings.addEventListener("click", () => setMode("listings"));
 
-  async function loadTenants() {
-    const res = await Bass.api(APP_ID, "/tenants");
-    tenantList = res.tenants || [];
-    if (!selectedTenantId && tenantList.length) {
-      selectedTenantId = tenantList[0].id;
-    }
-  }
-
   async function loadMyhome() {
-    if (!tenantList.length && !isTenantUser) await loadTenants();
     if (!selectedTenantId) {
-      elMyhome.innerHTML = `<div class="bass-card">현재 활성 입주 세입자가 없습니다. '빈 집 찾기'에서 계약을 진행해 보세요.</div>`;
+      elMyhome.innerHTML = R3Shell.isAdminSession()
+        ? `<div class="bass-card">관리인 계정입니다. 관리인 페이지의 <strong>원격 지원</strong>에서 호실을 골라 들어오세요. <a class="bass-btn bass-btn--sm" href="/rent3_admin/">← 관리인 페이지로</a></div>`
+        : `<div class="bass-card">현재 활성 입주 세입자가 없습니다. '빈 집 찾기'에서 계약을 진행해 보세요.</div>`;
       return;
     }
     const data = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}`);
@@ -98,16 +100,12 @@
                 </div>
               </div></div></div>` : "";
 
+    R3Shell.proxyBanner(`${b.building_name || ""} ${r.room_no || ""}호 ${t.name} (임차인 입장)`);   // 관리인 대리 접속 때만 보인다
     elMyhome.innerHTML = `
       ${keysLockHtml}
       <div class="bass-card no-print" style="margin-bottom:14px;">
         <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
-          ${isTenantUser ? `<div><strong>${Bass.escapeHtml(t.name)}</strong> 님의 마이홈 · ${Bass.escapeHtml(b.building_name || "")} ${Bass.escapeHtml(r.room_no || "")}호</div>` : `<div>
-            <label class="bass-label">현재 조회 중인 입주 세입자 선택</label>
-            <select id="tenantSel" class="bass-select">
-              ${tenantList.map((item) => `<option value="${item.id}" ${item.id === t.id ? "selected" : ""}>[${Bass.escapeHtml(item.building_name)} ${Bass.escapeHtml(item.room_no)}호] ${Bass.escapeHtml(item.name)} (${Bass.escapeHtml(item.phone)})</option>`).join("")}
-            </select>
-          </div>`}
+          <div><strong>${Bass.escapeHtml(t.name)}</strong> 님의 마이홈 · ${Bass.escapeHtml(b.building_name || "")} ${Bass.escapeHtml(r.room_no || "")}호</div>
           <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
             <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
             ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
@@ -338,12 +336,6 @@
       ` : ""}
       </details>
     `;
-
-    const tenantSel = document.getElementById("tenantSel");
-    if (tenantSel) tenantSel.addEventListener("change", (ev) => {
-      selectedTenantId = ev.target.value;
-      loadMyhome().catch(Bass.showError);
-    });
 
     const btnOpenPhoto = document.getElementById("btnOpenContractPhoto");
     const imgPhotoPrev = document.getElementById("imgContractPhotoPreview");

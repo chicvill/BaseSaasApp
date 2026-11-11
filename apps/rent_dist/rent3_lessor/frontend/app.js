@@ -33,7 +33,6 @@
     return map[ec.status] || ec.status;
   }
 
-  const elBranch = document.getElementById("branchSelect");
   const elTabContent = document.getElementById("tabContent");
 
   // ☰ 메뉴: 첫 화면(수납 현황) 외의 모든 기능은 여기서 들어간다. 항목을 빼면 기능에 닿을 수 없으니 test_52 가 목록을 점검한다.
@@ -54,14 +53,19 @@
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
     { title: "도움말 · 이동", items: [
-      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting" },
+      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
+      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
-      { label: "🔑 임차인 앱", href: "/rent3_tenant/" },
-      { label: "👑 관리인 앱", href: "/rent3_admin/" },
-      { label: "🌐 Data Pool 관제", href: "/rent3/pool.html" },
+      { label: "🔑 임차인 앱", href: "/rent3_tenant/", adminOnly: true },
+      { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
+      { label: "🌐 Data Pool 관제", href: "/rent3/pool.html", adminOnly: true },
     ] },
   ];
-  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), LESSOR_MENU);
+  // 사용자 전용 항목(문의·원격 지원 설정)은 관리인에게, 이동 링크(다른 앱)는 일반 임대인에게 보이지 않는다
+  const ME_ADMIN = R3Shell.isAdminSession();
+  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
+  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
+  R3Shell.watchSupport();
   const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "부가세 · 종소세 · 경비", ops: "A/S · 메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
 
   function fmtWon(n) {
@@ -176,16 +180,11 @@
     document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
     renderFranchiseBanner();
 
-    elBranch.innerHTML = (dash.branches || []).map((b) =>
-      `<option value="${b.branch}" ${b.branch === dash.branch ? "selected" : ""}>🏢 ${Bass.escapeHtml(b.building_name)} (${b.branch})</option>`
-    ).join("");
-
     const b = dash.building || {};
     const l = dash.lessor || {};
     hdrName = `${b.building_name || ""}${l.username ? `[${l.username}]` : ""}`;
     tickClock();
-    const isAdmin = Boolean(savedSession && (savedSession.role === "admin" || savedSession.role === "superadmin"));
-    elBranch.hidden = !isAdmin;   // 건물 선택은 본사 관리자만
+    R3Shell.proxyBanner(`${b.building_name || ""} ${selRoomNo ? selRoomNo + "호 " : ""}(임대인 입장)`);   // 관리인 대리 접속 때만 보인다
 
     const fin = dash.financial_summary || {};
     document.getElementById("kpiGrid").innerHTML =
@@ -194,11 +193,6 @@
 
     renderTab();
   }
-
-  elBranch.addEventListener("change", () => {
-    currentBranch = elBranch.value;
-    refresh().catch(Bass.showError);
-  });
 
   function switchTab(tabName) {
     currentTab = tabName;
@@ -251,7 +245,7 @@
     `;
     document.head.appendChild(st);
   })();
-  let selRoomNo = "";
+  let selRoomNo = params.get("room") || "";   // 관리인 원격 지원 카드가 호실을 지정해서 들어온다
   const receiptMsg = {};   // 호실 → 임차인에게 보낼 문자 초안(수납 직후 영수 문구)
 
   const roomOf = (no) => (dash.rooms || []).find((x) => x.room_no === no);
@@ -697,6 +691,14 @@
         closeModal();
         await refresh();
       });
+    });
+  }
+  const btnSupportChat = document.getElementById("btnSupportChat");
+  if (btnSupportChat) {
+    btnSupportChat.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      R3Shell.openSupportChat();
     });
   }
   const btnSupportSetting = document.getElementById("btnSupportSetting");

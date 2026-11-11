@@ -395,6 +395,7 @@
           <input type="checkbox" id="csSupport" style="margin-top:3px;">
           <span><strong>(선택)</strong> 관리인 원격 지원 접속에 동의합니다. 도움을 요청하신 때에 한해 관리인이 <strong>보기만</strong> 하며 금전·계약 기록은 고칠 수 없고, 접속 기록이 남습니다. 메뉴에서 언제든 끌 수 있습니다.</span>
         </label>
+        <div id="csWarn" style="display:none;margin-top:10px;color:#b91c1c;font-size:12.5px;font-weight:700;">⚠️ 개인정보 수집·이용(필수)에 체크해야 계속할 수 있습니다.</div>
         <div style="display:flex;gap:8px;margin-top:14px;">
           <button type="button" id="csOk" class="or-btn or-btn--green" style="flex:1;padding:11px;">동의하고 계속</button>
           <button type="button" id="csNo" class="or-btn" style="padding:11px;">취소</button>
@@ -404,9 +405,10 @@
       bg.querySelector("#csNo").addEventListener("click", () => { close(); reject(new Error("동의하지 않아 로그인을 취소했습니다.")); });
       bg.querySelector("#csOk").addEventListener("click", async function () {
         if (!bg.querySelector("#csPrivacy").checked) {
-          Bass.updateAppAlert("warning", "개인정보 수집·이용(필수)에 동의해 주세요.");
+          bg.querySelector("#csWarn").style.display = "block";   // 팝업 안에 바로 보이게 한다(알림창은 팝업 뒤에 가려질 수 있음)
           return;
         }
+        bg.querySelector("#csWarn").style.display = "none";
         try {
           const done = await Bass.api(APP_ID, "/pool/auth/consent", {
             method: "POST",
