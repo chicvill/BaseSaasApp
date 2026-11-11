@@ -1,6 +1,8 @@
 /* apps/rent3_tenant/frontend/app.js — 임차인 매물 탐색 & 세입자 마이홈 클라이언트 */
 (function () {
   "use strict";
+  // 바로가기(qk)로 열렸고 아직 로그인 전이면 R3Shell 이 간편 비밀번호 화면을 덮어 띄운다 — 로그인되면 새로 불러오므로 앱은 그때 시작한다
+  if (window.R3Shell && window.R3Shell.pinPending && window.R3Shell.pinPending()) return;
 
   const APP_ID = "rent3_tenant";
   const params = new URLSearchParams(window.location.search);
@@ -39,6 +41,7 @@
     ] },
     { title: "찾기", items: [{ label: "🔍 빈 집 찾기", id: "btnMenuListings" }] },
     { title: "도움말", items: [
+      { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
       { label: "🏢 임대인 앱", href: "/rent3_lessor/", adminOnly: true },
@@ -116,6 +119,8 @@
   if (elMenuListings) elMenuListings.addEventListener("click", () => { closeDrawer(); setMode("listings"); });
   const btnSupportChat = document.getElementById("btnSupportChat");
   if (btnSupportChat) btnSupportChat.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportChat(); });
+  const btnShortcut = document.getElementById("btnShortcut");
+  if (btnShortcut) btnShortcut.addEventListener("click", () => { closeDrawer(); R3Shell.openShortcutSettings(); });
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
   R3Shell.watchSupport();

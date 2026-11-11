@@ -148,7 +148,7 @@ def list_tenants():
         "success": True,
         "tenants": [
             {
-                **t.model_dump(),
+                **t.safe_dump(),
                 "building_name": bldgs[t.id_building].building_name if t.id_building in bldgs else t.branch,
             }
             for t in tenants
@@ -182,7 +182,7 @@ def get_myhome(tenant_id: str):
     )[:20]
     payments = sorted(Pay.find(id_tenant=t.id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
 
-    tenant_d = t.model_dump()
+    tenant_d = t.safe_dump()
     bldg_d = bldg.model_dump() if bldg else None
     room_d = room.model_dump() if room else None
     keys_locked = bool(ct and ct.keys_released is False)  # 잔금 확인 전: 출입 정보를 API 단계에서 가린다
@@ -338,7 +338,7 @@ def update_vehicle(tenant_id: str, req: VehicleReq):
     return {
         "success": True,
         "message": f"차량번호 '{t.car_number}'가 건물 주차 대장에 등록되었습니다.",
-        "tenant": t.model_dump(),
+        "tenant": t.safe_dump(),
     }
 
 
@@ -349,7 +349,7 @@ def confirm_checkin(tenant_id: str, req: CheckinReq):
     return {
         "success": True,
         "message": "첫 입실 체크인 확인이 저장되었습니다.",
-        "tenant": t.model_dump(),
+        "tenant": t.safe_dump(),
     }
 
 

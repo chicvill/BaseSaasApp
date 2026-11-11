@@ -3419,7 +3419,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
         self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
-                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg"})
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut"})
         for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
                        'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
             self.assertIn(needle, menu, needle)
@@ -3870,6 +3870,169 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 같은 로그인 정리 경로: 이미 지운 것은 다시 지우지 않고, 던져 둔 호출은 오류 없이 끝난다
         self.assertEqual(cc.purge_expired(force=True)["messages"], 0)
         self.assertEqual(cc.purge_expired()["messages"], 0)                  # 10분 안 재호출은 훑지 않는다
+
+    def test_64_quick_shortcut_pin_login(self):
+        """64. 스마트폰 바로가기 + 간편 비밀번호(PIN): 4자리·약한 번호 거부, 키·PIN 해시만 저장, 5회 실패 영구 잠금(일반 로그인으로 해제),
+        PIN 토큰(m=pin)은 열람·일상 업무만(계약 동의·서명, 퇴실 정산 동의, 설정 변경 차단), 퇴실·미동의·타 역할은 거부."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant, quicklogin as ql, passwords as pwd
+        from apps.rent_dist._rent3_core import authz
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        t = Tenant.first(room_no="202", branch="main")
+        self.assertIsNotNone(t)
+        old = (t.password, t.phone, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices))
+        t.password, t.phone, t.status, t.pin_hash, t.quick_devices = pwd.hash_password("Pw123456"), "010-4444-6173", "ACTIVE", "", []
+        t.save(action="t")
+        tid = t.id
+        PL = "/api/rent3/pool"
+
+        def login():
+            r = c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"})
+            self.assertEqual(r.status_code, 200, r.text)
+            return {"Authorization": f"Bearer {r.json()['token']}"}
+
+        full = login()
+        # ── 설정: 4자리 숫자, 약한 번호 거부(반복·연속·흔한 번호·휴대폰 끝 4자리) ──
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=full).json()["has_pin"], False)
+        for bad in ("1111", "0000", "1234", "4321", "6789", "2580", "6173", "123", "12345", "12a4", ""):
+            r = c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": bad})
+            self.assertEqual(r.status_code, 400, (bad, r.text))
+        self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "x"}).status_code, 400)   # PIN 먼저
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": "2846"}).status_code, 200)
+        t = Tenant.get(tid)
+        self.assertTrue(t.pin_hash and "2846" not in t.pin_hash)
+        dv = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "내 폰"}).json()
+        qk = dv["qk"]
+        self.assertGreaterEqual(len(qk), 32)
+        self.assertIn(f"qk={qk}", dv["start_url"])
+        self.assertNotIn(qk, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 키 원문은 저장하지 않는다
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=full).json()["devices"][0]["label"], "내 폰")
+        for h in (full, NA):                                                                                # 응답에 해시가 실리지 않는다
+            body = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=full).text
+            self.assertNotIn(t.pin_hash, body)
+            self.assertNotIn("quick_devices", body)
+
+        # ── 공개: 이름 가림, 매니페스트(이름·시작 주소·아이콘) ──
+        idn = c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()
+        self.assertEqual((idn["room_no"], idn["eligible"], idn["locked"]), ("202", True, False))
+        self.assertEqual(idn["masked_name"], ql.mask_name(t.name))
+        self.assertNotEqual(idn["masked_name"], t.name)
+        self.assertEqual((ql.mask_name("홍길동"), ql.mask_name("남궁민수"), ql.mask_name("이몽")), ("홍*동", "남**수", "이*"))
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk=nope-not-a-key-0000000000", headers=NA).status_code, 404)
+        mf = c.get(f"{PL}/shortcut/manifest.json?qk={qk}", headers=NA)
+        self.assertEqual(mf.status_code, 200)
+        self.assertIn("manifest+json", mf.headers["content-type"])
+        m = mf.json()
+        self.assertEqual((m["display"], m["scope"]), ("standalone", "/rent3_tenant/"))
+        self.assertEqual(m["start_url"], f"/rent3_tenant/?tenant={tid}&qk={qk}")
+        for ic in m["icons"]:
+            self.assertEqual(c.get(ic["src"].split("?")[0], headers=NA).status_code, 200, ic["src"])
+        self.assertEqual(c.get(f"/rent3_tenant/icons/apple-touch-icon.png", headers=NA).status_code, 200)
+
+        # ── PIN 로그인: 틀리면 남은 횟수, 5번째에 영구 잠금(맞는 PIN 도 거부), 일반 로그인이 풀어 준다 ──
+        pl = lambda pin, key=qk: c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": key, "pin": pin})
+        r = pl("9999")
+        self.assertEqual(r.status_code, 401)
+        self.assertIn("남은 시도 4회", r.json()["message"])
+        for _ in range(3):
+            self.assertEqual(pl("9999").status_code, 401)
+        r = pl("9999")                                                    # 5번째
+        self.assertIn("잠겼", r.json()["message"])
+        self.assertEqual(pl("2846").status_code, 401)                    # 잠긴 뒤엔 맞는 PIN 도 거부
+        self.assertTrue(c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()["locked"])
+        full = login()                                                    # 아이디·비밀번호 로그인 → 잠금 해제
+        self.assertFalse(c.get(f"{PL}/shortcut/status", headers=full).json()["devices"][0]["locked"])
+        self.assertEqual(pl("1111").status_code, 401)                    # 실패 횟수는 다시 처음부터
+        ok = pl("2846")
+        self.assertEqual(ok.status_code, 200, ok.text)
+        pinh = {"Authorization": f"Bearer {ok.json()['token']}"}
+        claims = verify_token(ok.json()["token"])
+        self.assertEqual((claims["m"], claims["r"], claims["u"]), ("pin", "tenant", f"tenant:{tid}"))
+        self.assertNotIn("m", verify_token(full["Authorization"].split()[1]))   # 일반 로그인 토큰에는 m 이 없다
+        self.assertEqual(ok.json()["user"]["room_no"], "202")
+
+        # ── PIN 토큰 권한: 열람·일상 업무 OK, 법적·민감 행위 차단(허용 목록 방식) ──
+        base = f"/api/rent3_tenant/myhome/{tid}"
+        self.assertEqual(c.get(base, headers=pinh).status_code, 200)
+        self.assertEqual(c.get(f"{base}/messages", headers=pinh).status_code, 200)
+        self.assertEqual(c.post(f"{base}/messages", headers=pinh, json={"body": "PIN 으로 보낸 메시지"}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/vehicle", headers=pinh, json={"car_number": "12가3456", "car_model": "소나타"}).status_code, 200)
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=pinh).json()["via_pin"], True)
+        blocked = [
+            ("post", f"{base}/expiry-plan", {"plan": "RENEW"}), ("post", f"{base}/acknowledge-renewal", {}),
+            ("post", "/api/rent3_tenant/checkout/x/agree", {"agreed": True}),
+            ("post", "/api/rent3_contract/sessions/x/respond", {"responder_role": "tenant"}),
+            ("post", "/api/rent3_contract/sessions/x/step4/sign", {"role": "tenant", "signature": "s"}),
+            ("post", "/api/rent3_contract/sessions/x/step3/agree", {"role": "tenant"}),
+            ("post", "/api/rent3_contract/sessions/x/messages/y/respond", {"action": "accept"}),
+            ("post", f"{PL}/auth/consents/support", {"allow": True}),
+            ("post", f"{PL}/shortcut/pin", {"pin": "2846"}), ("post", f"{PL}/shortcut/devices", {"label": "y"}),
+        ]
+        for _m, url, js in blocked:
+            r = getattr(c, _m)(url, headers=pinh, json=js)
+            self.assertEqual(r.status_code, 403, (url, r.status_code, r.text))
+            self.assertIn("아이디·비밀번호", r.json().get("message", "") + r.json().get("hint", ""))
+            # 같은 요청이 일반 로그인 토큰에서는 이 가드로 막히지 않는다(다른 이유로 실패할 수는 있다)
+            self.assertNotEqual(getattr(c, _m)(url, headers=full, json=js).json().get("message", ""), authz.PIN_BLOCK_MESSAGE)
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv['device']['id']}/revoke", headers=pinh, json={}).status_code, 403)   # 기기 해제도 비밀번호 로그인 필요
+        self.assertTrue(any(rx.search("/api/rent3_contract/sessions/ab12/messages") for rx in authz.PIN_WRITE_ALLOW))   # 계약방 글쓰기만 허용
+        self.assertFalse(any(rx.search("/api/rent3_contract/sessions/ab12/messages/m1/respond") for rx in authz.PIN_WRITE_ALLOW))
+
+        # ── 해제·퇴실·동의·다른 역할 ──
+        dv2 = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "태블릿"}).json()
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv['device']['id']}/revoke", headers=full, json={}).status_code, 200)
+        r = pl("2846")
+        self.assertEqual(r.status_code, 401)                             # 해제한 기기의 키는 더 못 쓴다
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).status_code, 404)
+        qk2 = dv2["qk"]
+        self.assertEqual(pl("2846", qk2).status_code, 200)
+        t = Tenant.get(tid)
+        t.status = "MOVED_OUT"
+        t.save(action="t")
+        r = pl("2846", qk2)
+        self.assertEqual(r.status_code, 401)                             # 퇴실하면 바로가기는 즉시 거부
+        self.assertIn("입주 중", r.json()["message"])
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk={qk2}", headers=NA).json()["eligible"], False)
+        t.status = "ACTIVE"
+        t.save(action="t")
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):   # 개인정보 동의 전에는 PIN 으로 못 들어온다
+            t = Tenant.get(tid)
+            t.consents = {}
+            t.save(action="t")
+            r = pl("2846", qk2)
+            self.assertEqual(r.status_code, 401)
+            self.assertIn("동의", r.json()["message"])
+        self.assertEqual(pl("2846", qk2).status_code, 200)
+        # 임대인·관리인은 쓸 수 없다
+        lh = self._login("chic")
+        for h in (lh, self._as(self.admin_token)):
+            self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=h, json={"pin": "2846"}).status_code, 400)
+        self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": "x" * 40, "pin": "2846"}).status_code, 401)
+        # 기기 수 한도
+        for i in range(ql.MAX_DEVICES):
+            c.post(f"{PL}/shortcut/devices", headers=full, json={"label": f"d{i}"})
+        self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "초과"}).status_code, 400)
+
+        t = Tenant.get(tid)
+        t.password, t.phone, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices = old
+        t.save(action="t")
+
+    def test_65_quick_shortcut_static_ui(self):
+        """65. 바로가기 화면: PIN 입력 오버레이·메뉴·세션 가드(qk 면 포털로 안 보냄)·아이콘 파일."""
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        guard = open(os.path.join(ROOT, "shared_ui", "rent3_session_guard.js"), encoding="utf-8").read()
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        for needle in ("pinPending", "showPinGate", "/auth/pin-login", "/identify?qk=", "openShortcutSettings", "공유(□↑) → 홈 화면에 추가",
+                       "beforeinstallprompt", "apple-mobile-web-app-title", "manifest"):
+            self.assertIn(needle, shell, needle)
+        self.assertIn("qk=", guard)
+        self.assertIn("pinPending()) return", app)
+        self.assertIn("openShortcutSettings", app)
+        for name in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
+            data = open(os.path.join(fe, "icons", name), "rb").read()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n", name)
 
 
 if __name__ == "__main__":

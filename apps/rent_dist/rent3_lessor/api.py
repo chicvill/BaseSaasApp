@@ -334,7 +334,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
             "pays": [{"id": x.id, "paid_date": x.paid_date, "billing_month": x.billing_month, "rent": x.rent_amount,
                       "fee": x.maintenance_amount, "total": x.total_amount} for x in pays],
             "is_occupied": r.is_occupied,
-            "tenant": tenant.model_dump() if tenant else None,
+            "tenant": tenant.safe_dump() if tenant else None,
             "contract": ct.model_dump() if ct else None,
             "ledger": ledger,
             "expiry_window": exp_win,
@@ -841,7 +841,7 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
         "success": True,
         "message": f"{r_no}호 세금계산서 사업자 정보({comp_name or biz_no})가 저장되었습니다.",
         "contract": ct.model_dump() if ct else None,
-        "tenant": tenant.model_dump() if tenant else None,
+        "tenant": tenant.safe_dump() if tenant else None,
     }
 
 

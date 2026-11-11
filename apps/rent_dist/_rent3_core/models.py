@@ -235,7 +235,18 @@ class Tenant(PoolObj):
     status: str = "ACTIVE"                   # PROSPECT / ACTIVE / MOVED_OUT
     identity: Dict[str, Any] = Field(default_factory=dict)  # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
     consents: Dict[str, Any] = Field(default_factory=dict)  # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
+    pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py)
+    quick_devices: List[Dict[str, Any]] = Field(default_factory=list)  # 바로가기 기기 목록(키는 해시만 저장)
     password: str = "1212"
+
+    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices")
+
+    def safe_dump(self) -> Dict[str, Any]:
+        """화면·API 로 내려보낼 때 쓰는 model_dump — 간편 비밀번호 해시와 바로가기 키 해시는 뺀다(디스크 저장은 model_dump 그대로)."""
+        d = self.model_dump()
+        for k in self.SECRET_FIELDS:
+            d.pop(k, None)
+        return d
 
     def summary(self) -> str:
         return f"임차인 {self.name} ({self.room_no or '미배정'}호)"

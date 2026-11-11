@@ -467,7 +467,7 @@ class BrokerContractOnboarding:
 
         return {
             "contract": ct.model_dump(),
-            "tenant": tenant.model_dump(),
+            "tenant": tenant.safe_dump(),
             "room": room.model_dump(),
             "rtms": rtms.model_dump(),
         }

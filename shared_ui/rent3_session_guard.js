@@ -19,7 +19,9 @@
             redirecting = true;
             window.localStorage.removeItem("bass_token");
             window.localStorage.removeItem("rent3_session");
-            if (window.location.pathname.indexOf("/rent3/") !== 0) {
+            if (/[?&]qk=/.test(window.location.search)) {
+              window.location.reload();   // 스마트폰 바로가기로 연 화면: 포털로 보내지 않고 간편 비밀번호 화면을 다시 띄운다
+            } else if (window.location.pathname.indexOf("/rent3/") !== 0) {
               window.location.replace("/rent3/?login=1&expired=1");
             }
           }

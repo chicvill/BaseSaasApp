@@ -30,8 +30,11 @@ LESSOR_ROLES = ("lessor", "branch_admin")
 
 # ── 토큰 발급 (포털 로그인/가입에서 호출) ──
 # 플랫폼 코어(core/)는 수정하지 않는다. 코어와 같은 서명 방식(HMAC-SHA256)으로 임대인·임차인 토큰을 만든다.
-def issue_claims_token(username: str, role: str, branch: Optional[str], ttl: int = TOKEN_TTL_SECONDS) -> str:
-    payload = _b64(json.dumps({"u": username, "r": role, "b": branch, "exp": int(time.time()) + ttl}).encode())
+def issue_claims_token(username: str, role: str, branch: Optional[str], ttl: int = TOKEN_TTL_SECONDS, extra: Optional[Dict[str, Any]] = None) -> str:
+    claims = {"u": username, "r": role, "b": branch, "exp": int(time.time()) + ttl}
+    if extra:
+        claims.update(extra)
+    payload = _b64(json.dumps(claims).encode())
     sig = _b64(hmac.new(_secret(), payload.encode(), hashlib.sha256).digest())
     return f"{payload}.{sig}"
 
@@ -40,8 +43,9 @@ def lessor_token(lessor: Any) -> str:
     return issue_claims_token(f"lessor:{lessor.id}", "lessor", lessor.branch)
 
 
-def tenant_token(tenant: Any) -> str:
-    return issue_claims_token(f"tenant:{tenant.id}", "tenant", getattr(tenant, "branch", None))
+def tenant_token(tenant: Any, via_pin: bool = False) -> str:
+    """via_pin=True: 간편 비밀번호로 들어온 토큰(m="pin") — 법적·민감 행위는 막힌다(아래 pin_guard)."""
+    return issue_claims_token(f"tenant:{tenant.id}", "tenant", getattr(tenant, "branch", None), extra=({"m": "pin"} if via_pin else None))
 
 
 # ── 토큰 읽기 ──
@@ -147,10 +151,32 @@ def claims_from(request: Request) -> Optional[Dict[str, Any]]:
     return verify_token(raw)
 
 
+# ── 간편 비밀번호(PIN)로 들어온 토큰은 '열람 + 일상 업무'만 ──
+# 허용 목록 방식: 아래에 없는 쓰기(공동계약 동의·서명·수락, 퇴실 정산 동의, 계좌 변경, 원격 지원 허용·동의 변경, PIN·기기 관리 등)는 모두 막힌다.
+PIN_WRITE_ALLOW = (
+    re.compile(r"/myhome/[^/]+/(messages|pay|vehicle|checkin|tickets|balance-registry-check|insurance-proof)/?$"),
+    re.compile(r"/myhome/[^/]+/billing-notices/[^/]+/acknowledge/?$"),
+    re.compile(r"/rent3_contract/sessions/[^/]+/messages/?$"),      # 계약방 대화 글쓰기만(제안 수락 /respond 는 막힘)
+    re.compile(r"/support/messages/?$"),
+    re.compile(r"/auth/logout/?$"),
+)
+PIN_BLOCK_MESSAGE = "이 작업은 간편 비밀번호로 들어온 상태에서는 할 수 없습니다. 아이디·비밀번호로 다시 로그인해 주세요."
+
+
+def pin_guard(request: Request, c: Dict[str, Any]) -> None:
+    if c.get("m") != "pin" or request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    path = request.url.path
+    if any(rx.search(path) for rx in PIN_WRITE_ALLOW):
+        return
+    raise Forbidden(PIN_BLOCK_MESSAGE, hint="계약 동의·서명, 퇴실 정산 동의, 계좌·동의 설정 변경은 아이디·비밀번호로 로그인해야 합니다.")
+
+
 def need_claims(request: Request) -> Dict[str, Any]:
     c = claims_from(request)
     if c is None:
         raise Unauthorized("로그인이 필요합니다.", hint="포털에서 로그인한 뒤 다시 시도해 주세요.")
+    pin_guard(request, c)
     return c
 
 

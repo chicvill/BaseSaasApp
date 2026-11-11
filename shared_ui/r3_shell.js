@@ -13,6 +13,8 @@
  *   R3Shell.isAdminSession() / isAdminProxy() / proxyBanner(라벨) → 관리인 대리 접속 중 위쪽 띠(보기 전용 안내 + 관리인 페이지로 돌아가기)
  *   R3Shell.openSupportChat() → '관리인에게 문의' 창(지원 채팅). R3Shell.watchSupport() → 안 읽은 글 수·관리인 접속 알림 확인
  *   R3Shell.openSupportSettings() → '관리인 원격 지원 허용 ON/OFF' 창 (임대인·임차인 앱 메뉴에서 연다). r3_modal.js 가 먼저 있어야 한다.
+ *   R3Shell.openShortcutSettings() → '바로가기 · 간편 비밀번호' 창 (입주 임차인 앱 메뉴): PIN 정하기, 이 기기 바로가기 만들기, 기기별 해제.
+ *   R3Shell.pinPending() → 주소에 qk(바로가기 키)가 있고 아직 로그인 전이면 true. 이때 이 파일이 PIN 입력 화면을 덮어 띄우므로 앱은 시작하지 않는다.
  */
 (function (global) {
   "use strict";
@@ -120,6 +122,202 @@
   }
 
 
+  // ── 스마트폰 바로가기 + 간편 비밀번호(PIN) ──
+  var SHORTCUT_API = "/api/rent3/pool/shortcut";
+  var urlParams = new URLSearchParams(global.location.search);
+  var QK = urlParams.get("qk") || "";
+
+  function readJson(key) { try { return JSON.parse(global.localStorage.getItem(key) || "null"); } catch (e) { return null; } }
+  function tokenAlive(tok) {
+    try {
+      var p = JSON.parse(atob(String(tok).split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
+      return p.exp * 1000 > Date.now() + 30000;
+    } catch (e) { return false; }
+  }
+  function needsPin() {
+    if (!QK) return false;
+    var tok = global.localStorage.getItem("bass_token") || "";
+    var sess = readJson("rent3_session");
+    var tid = urlParams.get("tenant") || "";
+    var same = sess && sess.role === "tenant" && (!tid || sess.tenant_id === tid || sess.id === tid);
+    return !(tok && tokenAlive(tok) && same);
+  }
+  var PIN_PENDING = needsPin();
+  function pinPending() { return PIN_PENDING; }
+
+  // 바로가기로 열린 화면: 홈 화면 이름·아이콘·매니페스트를 이 기기 것으로 맞춘다
+  function applyShortcutHead(qk, label) {
+    function link(rel, href, extra) {
+      var el = document.querySelector('link[rel="' + rel + '"]');
+      if (!el) { el = document.createElement("link"); el.rel = rel; document.head.appendChild(el); }
+      el.href = href;
+      if (extra) el.setAttribute("sizes", extra);
+    }
+    link("manifest", SHORTCUT_API + "/manifest.json?qk=" + encodeURIComponent(qk));
+    link("apple-touch-icon", "/rent3_tenant/icons/apple-touch-icon.png?v=1", "180x180");
+    function meta(name, val) {
+      var el = document.querySelector('meta[name="' + name + '"]');
+      if (!el) { el = document.createElement("meta"); el.name = name; document.head.appendChild(el); }
+      el.content = val;
+    }
+    meta("apple-mobile-web-app-capable", "yes");
+    meta("mobile-web-app-capable", "yes");
+    meta("theme-color", "#2563eb");
+    if (label) { meta("apple-mobile-web-app-title", label); document.title = label; }
+  }
+
+  function showPinGate() {
+    var ov = document.createElement("div");
+    ov.id = "r3PinGate";
+    ov.style.cssText = "position:fixed;inset:0;z-index:99999;background:#fff;color:#111;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;font-family:inherit;";
+    ov.innerHTML =
+      '<div style="font-size:40px;line-height:1;">🏠</div>' +
+      '<div id="r3PinWho" style="font-size:17px;font-weight:700;margin:10px 0 2px;text-align:center;">확인하는 중…</div>' +
+      '<div style="font-size:13px;color:#555;margin-bottom:14px;">간편 비밀번호 4자리를 눌러 주세요</div>' +
+      '<div id="r3PinDots" style="display:flex;gap:14px;margin-bottom:10px;"></div>' +
+      '<div id="r3PinMsg" style="min-height:36px;font-size:13px;color:#dc2626;text-align:center;max-width:300px;"></div>' +
+      '<div id="r3PinPad" style="display:grid;grid-template-columns:repeat(3,72px);gap:12px;margin-top:6px;"></div>' +
+      '<a href="/rent3/?login=1" style="margin-top:10px;padding:12px 18px;font-size:14px;color:#2563eb;display:inline-block;">아이디·비밀번호로 로그인</a>';
+    document.body.appendChild(ov);
+    var dots = ov.querySelector("#r3PinDots"), msg = ov.querySelector("#r3PinMsg"), pad = ov.querySelector("#r3PinPad");
+    var pin = "", busy = false, dead = false;
+    function drawDots() {
+      dots.innerHTML = [0, 1, 2, 3].map(function (i) {
+        return '<span style="width:14px;height:14px;border-radius:50%;border:2px solid #2563eb;background:' + (i < pin.length ? "#2563eb" : "transparent") + ';display:inline-block;"></span>';
+      }).join("");
+    }
+    var keys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
+    pad.innerHTML = keys.map(function (k) {
+      return k === "" ? "<span></span>" : '<button type="button" data-k="' + k + '" style="height:60px;border-radius:30px;border:1px solid #d1d5db;background:#f3f4f6;font-size:22px;color:#111;">' + k + "</button>";
+    }).join("");
+    function lock(text) { dead = true; msg.textContent = text; pad.style.opacity = "0.35"; }
+    function submit() {
+      busy = true;
+      fetch("/api/rent3/pool/auth/pin-login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ qk: QK, pin: pin }) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (res.ok && res.d.token) {
+            global.localStorage.setItem("bass_token", res.d.token);
+            global.localStorage.setItem("rent3_session", JSON.stringify(res.d.user));
+            global.location.reload();
+            return;
+          }
+          var text = (res.d.message || res.d.detail || "로그인하지 못했습니다.") + (res.d.hint ? " " + res.d.hint : "");
+          pin = ""; drawDots(); busy = false;
+          if (/잠겼|해제|등록되지|입주 중인|동의/.test(text)) lock(text); else msg.textContent = text;
+        })
+        .catch(function () { pin = ""; drawDots(); busy = false; msg.textContent = "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요."; });
+    }
+    pad.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-k]");
+      if (!b || busy || dead) return;
+      msg.textContent = "";
+      if (b.dataset.k === "⌫") pin = pin.slice(0, -1);
+      else if (pin.length < 4) pin += b.dataset.k;
+      drawDots();
+      if (pin.length === 4) submit();
+    });
+    drawDots();
+    fetch(SHORTCUT_API + "/identify?qk=" + encodeURIComponent(QK))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        var who = ov.querySelector("#r3PinWho");
+        if (!res.ok) { who.textContent = "바로가기를 쓸 수 없습니다"; lock(res.d.message || res.d.detail || "등록되지 않았거나 해제된 바로가기입니다."); return; }
+        var d = res.d;
+        who.textContent = ((d.building_name ? d.building_name + " " : "") + (d.room_no ? d.room_no + "호 · " : "") + d.masked_name + "님").trim();
+        applyShortcutHead(QK, ((d.building_name || "내 집") + " " + d.room_no + "호").trim());
+        if (!d.eligible) lock("현재 입주 중인 계정이 아니어서 바로가기를 쓸 수 없습니다.");
+        else if (d.locked) lock("간편 비밀번호를 5번 틀려 잠겼습니다. 아이디·비밀번호로 한 번 로그인하면 다시 쓸 수 있습니다.");
+        else if (!d.has_pin) lock("간편 비밀번호가 설정되어 있지 않습니다. 아이디·비밀번호로 로그인해 주세요.");
+      })
+      .catch(function () { msg.textContent = "서버에 연결하지 못했습니다."; });
+  }
+  if (PIN_PENDING) {
+    if (document.body) showPinGate(); else document.addEventListener("DOMContentLoaded", showPinGate);
+  } else if (QK) {
+    applyShortcutHead(QK, "");   // 이미 로그인된 상태로 열려도 매니페스트는 이 기기 것으로
+  }
+
+  var installPrompt = null;
+  global.addEventListener("beforeinstallprompt", function (e) { e.preventDefault(); installPrompt = e; });
+
+  function openShortcutSettings() {
+    function call(path, opts) {
+      return fetch(SHORTCUT_API + path, Object.assign({ headers: authHeaders(Boolean(opts && opts.body)) }, opts || {}))
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+    }
+    call("/status").then(function (res) {
+      if (!res.ok) { notify("error", res.d.message || res.d.detail || "상태를 불러오지 못했습니다."); return; }
+      var st = res.d;
+      if (!st.applicable) { notify("warning", "입주한 임차인만 쓸 수 있습니다."); return; }
+      var fresh = null;   // 방금 만든 기기의 안내
+      function render() {
+        var ua = global.navigator.userAgent || "";
+        var ios = /iPhone|iPad|iPod/.test(ua);
+        var html =
+          '<p style="font-size:13.5px;line-height:1.7;margin:0 0 8px;">홈 화면 아이콘을 누르면 <strong>4자리 숫자</strong>만으로 내 집 화면이 열립니다. 이 기기에서만 쓰이고, 언제든 해제할 수 있습니다.</p>' +
+          '<ul style="font-size:12.5px;line-height:1.6;margin:0 0 10px;padding-left:18px;">' +
+          "<li>열람·납부·메시지·A/S 요청 같은 일상 업무만 됩니다.</li>" +
+          "<li>계약 동의·서명, 퇴실 정산 동의, 설정 변경은 아이디·비밀번호로 로그인해야 합니다.</li>" +
+          "<li>5번 틀리면 그 기기는 잠기고, 아이디·비밀번호로 로그인하면 풀립니다.</li></ul>";
+        if (st.via_pin) {
+          html += '<div style="font-size:13px;padding:8px;background:rgba(245,158,11,.22);border-radius:6px;margin-bottom:8px;">간편 비밀번호로 들어온 상태입니다. 설정을 바꾸려면 아이디·비밀번호로 다시 로그인해 주세요.</div>';
+        } else {
+          html += '<div style="font-weight:700;font-size:14px;margin:6px 0;">① 간편 비밀번호 ' + (st.has_pin ? "(설정됨)" : "(아직 없음)") + "</div>" +
+            '<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;"><input id="r3PinNew" type="password" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="숫자 4자리" style="width:120px;height:44px;box-sizing:border-box;font-size:16px;padding:8px;border:1px solid #d1d5db;border-radius:6px;color:#111;background:#fff;">' +
+            '<button type="button" id="r3PinSave" class="bass-btn bass-btn--primary">' + (st.has_pin ? "바꾸기" : "정하기") + "</button></div>";
+        }
+        html += '<div style="font-weight:700;font-size:14px;margin:6px 0;">② 이 기기 바로가기</div>';
+        if (!st.via_pin) {
+          html += '<div style="margin-bottom:8px;"><button type="button" id="r3DevAdd" class="bass-btn"' + (st.has_pin ? "" : " disabled") + ">📲 이 기기에 바로가기 만들기</button>" +
+            (st.has_pin ? "" : '<span style="font-size:12px;opacity:.75;margin-left:6px;">먼저 간편 비밀번호를 정해 주세요.</span>') + "</div>";
+        }
+        if (fresh) {
+          html += '<div style="font-size:13px;line-height:1.7;padding:10px;background:rgba(99,102,241,.22);border-radius:6px;margin-bottom:8px;">' +
+            (ios ? "<strong>아이폰</strong>: Safari 아래 <strong>공유(□↑) → 홈 화면에 추가</strong>를 누르세요."
+                 : '<strong>안드로이드</strong>: ' + (installPrompt ? '<button type="button" id="r3DevInstall" class="bass-btn bass-btn--sm bass-btn--primary">홈 화면에 설치</button> 를 누르거나, ' : "") + "브라우저 메뉴(⋮) → <strong>홈 화면에 추가</strong>를 누르세요.") +
+            "<br>추가한 아이콘을 누르면 간편 비밀번호 화면이 나옵니다.</div>";
+        }
+        html += st.devices.length ? st.devices.map(function (d) {
+          return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.35);font-size:13px;">' +
+            "<span>📱 " + esc(d.label) + (d.locked ? ' <b style="color:#dc2626;">잠김</b>' : "") + '<br><span style="opacity:.7;font-size:11.5px;">' + esc((d.created_at || "").slice(0, 10)) + " 등록" + (d.last_used_at ? " · 최근 " + esc(d.last_used_at.slice(0, 16).replace("T", " ")) : "") + "</span></span>" +
+            (st.via_pin ? "" : '<button type="button" class="bass-btn bass-btn--sm" data-rev="' + esc(d.id) + '">해제</button>') + "</div>";
+        }).join("") : '<div style="font-size:12.5px;opacity:.7;">등록된 기기가 없습니다.</div>';
+        var body = global.R3.openModal("📲 바로가기 · 간편 비밀번호", html);
+        var save = body.querySelector("#r3PinSave");
+        if (save) save.addEventListener("click", function () {
+          call("/pin", { method: "POST", body: JSON.stringify({ pin: body.querySelector("#r3PinNew").value }) }).then(function (r) {
+            if (!r.ok) { notify("error", r.d.message || r.d.detail || "저장하지 못했습니다."); return; }
+            notify("success", r.d.message);
+            st.has_pin = true; render();
+          });
+        });
+        var add = body.querySelector("#r3DevAdd");
+        if (add) add.addEventListener("click", function () {
+          var label = ios ? "내 아이폰" : "내 휴대폰";
+          call("/devices", { method: "POST", body: JSON.stringify({ label: label }) }).then(function (r) {
+            if (!r.ok) { notify("error", r.d.message || r.d.detail || "만들지 못했습니다."); return; }
+            applyShortcutHead(r.d.qk, "");
+            try { global.history.replaceState(null, "", r.d.start_url); } catch (e) { /* 주소 바꾸기가 막혀도 안드로이드 설치는 매니페스트를 쓴다 */ }
+            fresh = r.d; call("/status").then(function (r2) { if (r2.ok) st = r2.d; render(); });
+          });
+        });
+        var inst = body.querySelector("#r3DevInstall");
+        if (inst) inst.addEventListener("click", function () { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-rev]"), function (b) {
+          b.addEventListener("click", function () {
+            call("/devices/" + encodeURIComponent(b.getAttribute("data-rev")) + "/revoke", { method: "POST", body: "{}" }).then(function (r) {
+              if (!r.ok) { notify("error", r.d.message || r.d.detail || "해제하지 못했습니다."); return; }
+              notify("success", r.d.message); st.devices = r.d.devices; render();
+            });
+          });
+        });
+      }
+      render();
+    });
+  }
+
+
   // ── 관리인 대리 접속 띠 (admin 세션이고 주소에 proxy= 가 있을 때만) ──
   function sessionRole() {
     try { return (JSON.parse(global.localStorage.getItem("rent3_session") || "null") || {}).role || ""; } catch (e) { return ""; }
@@ -218,7 +416,7 @@
   }
 
   global.R3Shell = {
-    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings,
+    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings, openShortcutSettings: openShortcutSettings, pinPending: pinPending,
     isAdminSession: isAdminSession, isAdminProxy: isAdminProxy, proxyBanner: proxyBanner, openSupportChat: openSupportChat, watchSupport: watchSupport
   };
 })(window);

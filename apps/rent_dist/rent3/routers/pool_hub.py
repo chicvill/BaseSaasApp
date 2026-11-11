@@ -15,7 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat
+from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -384,6 +384,10 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         ratelimit.fail("login", keys)
         raise
     ratelimit.clear("login", keys[:1])
+    if out.get("role") == "tenant":
+        _t = Tenant.get(str((out.get("user") or {}).get("id") or ""))
+        if _t is not None:
+            ql.unlock_all(_t)   # 아이디·비밀번호로 정상 로그인하면 잠긴 바로가기를 푼다
     sup.purge_expired()   # 스케줄러가 없으므로 로그인 때 기한 지난 지원 채팅·접속 기록을 지운다
     contract_chat.purge_expired()   # 계약방 대화: 취소 후 90일 · 체결 계약 종료 후 5년(10분에 한 번만 실제로 훑는다)
     out = _gate_consent(out)
@@ -500,6 +504,147 @@ def set_my_support_access(req: SupportToggleReq, request: Request) -> Dict[str, 
         "applicable": True,
         **cs.consent_status(user),
         "message": "관리인 원격 지원 접속을 허용했습니다." if req.allow else "관리인 원격 지원 접속을 허용하지 않도록 바꿨습니다.",
+    }
+
+
+# ── 스마트폰 바로가기 + 간편 비밀번호(PIN) 로그인 (입주 임차인) ──
+class PinSetReq(BaseModel):
+    pin: str
+
+
+class DeviceReq(BaseModel):
+    label: str = ""
+
+
+def _me_tenant(request: Request) -> Tenant:
+    """아이디·비밀번호로 로그인한 입주 임차인 본인(PIN 토큰은 need_claims 에서 이미 막힌다)."""
+    from apps.rent_dist._rent3_core.authz import need_claims
+    c = need_claims(request)
+    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:")) if c.get("r") == "tenant" else None
+    if t is None:
+        raise DomainError("입주 임차인 계정에서만 쓸 수 있습니다.", hint="바로가기·간편 비밀번호는 입주한 임차인 전용입니다.")
+    if not ql.eligible(t):
+        raise DomainError("입주 중인 호실이 있어야 쓸 수 있습니다.")
+    return t
+
+
+@router.get("/shortcut/status")
+def shortcut_status(request: Request) -> Dict[str, Any]:
+    from apps.rent_dist._rent3_core.authz import need_claims
+    c = need_claims(request)
+    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:")) if c.get("r") == "tenant" else None
+    if t is None:
+        return {"success": True, "applicable": False}
+    return {"success": True, "applicable": ql.eligible(t), "has_pin": bool(t.pin_hash), "via_pin": c.get("m") == "pin",
+            "devices": ql.public_devices(t), "max_devices": ql.MAX_DEVICES, "pin_len": ql.PIN_LEN}
+
+
+@router.post("/shortcut/pin")
+def shortcut_set_pin(req: PinSetReq, request: Request) -> Dict[str, Any]:
+    t = _me_tenant(request)
+    why = ql.weak_pin_reason(req.pin, t)
+    if why:
+        raise DomainError(why, hint="다른 4자리 숫자를 입력해 주세요.")
+    ql.set_pin(t, req.pin)
+    return {"success": True, "has_pin": True, "message": "간편 비밀번호를 저장했습니다."}
+
+
+@router.post("/shortcut/devices")
+def shortcut_add_device(req: DeviceReq, request: Request) -> Dict[str, Any]:
+    """이 기기용 바로가기 키를 발급한다. 키 원문은 이 응답에서만 볼 수 있다(서버에는 해시만 남는다)."""
+    t = _me_tenant(request)
+    if not t.pin_hash:
+        raise DomainError("먼저 간편 비밀번호를 정해 주세요.")
+    if len(ql.devices_of(t)) >= ql.MAX_DEVICES:
+        raise DomainError(f"바로가기 기기는 {ql.MAX_DEVICES}대까지 등록할 수 있습니다.", hint="쓰지 않는 기기를 먼저 해제해 주세요.")
+    dev, qk = ql.new_device(t, req.label)
+    return {"success": True, "device": {"id": dev["id"], "label": dev["label"]}, "qk": qk,
+            "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}", "manifest_url": f"/api/rent3/pool/shortcut/manifest.json?qk={qk}"}
+
+
+@router.post("/shortcut/devices/{device_id}/revoke")
+def shortcut_revoke_device(device_id: str, request: Request) -> Dict[str, Any]:
+    t = _me_tenant(request)
+    if not ql.revoke_device(t, device_id):
+        raise NotFound("등록된 기기를 찾을 수 없습니다.")
+    return {"success": True, "devices": ql.public_devices(t), "message": "그 기기의 바로가기를 해제했습니다."}
+
+
+def _qk_lookup(qk: str, request: Request) -> Any:
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("quickkey", keys)
+    found = ql.find_by_qk(qk)
+    if found is None:
+        ratelimit.fail("quickkey", keys)
+        raise NotFound("등록되지 않았거나 해제된 바로가기입니다.", hint="아이디·비밀번호로 로그인한 뒤 바로가기를 다시 만들어 주세요.")
+    return found
+
+
+@router.get("/shortcut/identify")
+def shortcut_identify(qk: str, request: Request) -> Dict[str, Any]:
+    """PIN 입력 화면에 보일 최소 정보(이름은 가린다)."""
+    t, d = _qk_lookup(qk, request)
+    b = Building.get(t.id_building) if t.id_building else None
+    return {"success": True, "masked_name": ql.mask_name(t.name), "room_no": t.room_no, "building_name": (b.building_name if b else ""),
+            "eligible": ql.eligible(t), "locked": bool(d.get("locked")), "has_pin": bool(t.pin_hash), "pin_len": ql.PIN_LEN}
+
+
+@router.get("/shortcut/manifest.json")
+def shortcut_manifest(qk: str, request: Request):
+    """홈 화면에 추가할 때 쓰는 매니페스트. start_url 에 qk 가 들어가므로 홈 화면에서 열면 이 기기의 PIN 화면으로 곧장 온다."""
+    from fastapi.responses import JSONResponse
+    t, _d = _qk_lookup(qk, request)
+    b = Building.get(t.id_building) if t.id_building else None
+    label = f"{(b.building_name if b else '내 집')} {t.room_no}호".strip()
+    ver = "?v=1"
+    icons = [
+        {"src": f"/rent3_tenant/icons/icon-192.png{ver}", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+        {"src": f"/rent3_tenant/icons/icon-512.png{ver}", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        {"src": f"/rent3_tenant/icons/icon-maskable-512.png{ver}", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+    ]
+    body = {"name": label, "short_name": label[:12], "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}", "scope": "/rent3_tenant/",
+            "display": "standalone", "background_color": "#ffffff", "theme_color": "#2563eb", "lang": "ko", "icons": icons}
+    return JSONResponse(body, media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
+
+
+class PinLoginReq(BaseModel):
+    qk: str
+    pin: str
+
+
+@router.post("/auth/pin-login")
+def pin_login(req: PinLoginReq, request: Request) -> Dict[str, Any]:
+    """간편 비밀번호 로그인. 기기별 연속 5회 실패면 그 기기는 영구 잠금(아이디·비밀번호 로그인 시 해제)."""
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("pinlogin", keys)
+    found = ql.find_by_qk(req.qk)
+    if found is None:
+        ratelimit.fail("pinlogin", keys)
+        raise Unauthorized("등록되지 않았거나 해제된 바로가기입니다.", hint="아이디·비밀번호로 로그인한 뒤 바로가기를 다시 만들어 주세요.")
+    t, d = found
+    if d.get("locked"):
+        raise Unauthorized("간편 비밀번호를 5번 틀려 이 바로가기가 잠겼습니다.", hint="아이디·비밀번호로 한 번 로그인하면 다시 쓸 수 있습니다.")
+    if not ql.eligible(t):
+        raise Unauthorized("현재 입주 중인 계정이 아니어서 바로가기를 쓸 수 없습니다.", hint="입주 중인 호실이 있을 때만 쓸 수 있습니다.")
+    if not t.pin_hash or not pwd.verify(t.pin_hash, str(req.pin or "")):
+        ratelimit.fail("pinlogin", keys)
+        info = ql.record_failure(t, d["id"])
+        if info["locked"]:
+            raise Unauthorized("간편 비밀번호를 5번 틀려 이 바로가기가 잠겼습니다.", hint="아이디·비밀번호로 한 번 로그인하면 다시 쓸 수 있습니다.")
+        raise Unauthorized(f"간편 비밀번호가 맞지 않습니다. (남은 시도 {info['remaining']}회)", hint="5번 틀리면 잠깁니다.")
+    if cs.consent_required() and not cs.has_valid_consent(t):
+        raise Unauthorized("개인정보 동의가 필요합니다.", hint="아이디·비밀번호로 한 번 로그인해 동의를 마친 뒤 이용해 주세요.")
+    ratelimit.clear("pinlogin", keys)
+    ql.record_success(t, d["id"])
+    from apps.rent_dist._rent3_core.authz import unrevoke_token
+    tok = tenant_token(t, via_pin=True)
+    unrevoke_token(tok)
+    url = f"/rent3_tenant/?tenant={t.id}"
+    return {
+        "success": True, "role": "tenant", "role_label": f"입주 임차인 ({t.room_no}호)", "redirect_url": url, "token": tok, "via_pin": True,
+        "user": {"id": t.id, "username": t.id, "name": t.name, "phone": t.phone, "role": "tenant", "role_label": f"입주 임차인 ({t.room_no}호)",
+                 "branch": t.branch, "room_no": t.room_no, "tenant_id": t.id, "login_auth_verified": True, "via_pin": True, "redirect_url": url},
+        "message": f"{ql.mask_name(t.name)}님 환영합니다.",
     }
 
 
