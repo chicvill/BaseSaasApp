@@ -108,6 +108,11 @@ def _sys(s: Any, text: str, step: Optional[int] = None) -> DirectChat:
     ).save(action="contract_chat_system", app_source="rent3_contract")
 
 
+def system_note(session: Any, text: str, step: Optional[int] = None) -> DirectChat:
+    """계약방 대화에 자동 안내 글을 남긴다(조건 다시 열기 등)."""
+    return _sys(session, text, step)
+
+
 def messages_of(session_id: str) -> List[DirectChat]:
     return sorted((m for m in DirectChat.find(session_id=session_id) if m.kind in CONTRACT_KINDS), key=lambda m: (m.created_at, m.id))
 

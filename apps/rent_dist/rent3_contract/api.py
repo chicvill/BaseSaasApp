@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
-from core.errors import DomainError
+from core.errors import Conflict, DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import franchise as fr, contract_chat
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_local_request, public_room, contract_scope, is_admin, session_party_ok
@@ -647,9 +647,56 @@ def delete_facility_photo(session_id: str, photo_id: str, req: FacilityPhotoDele
     return {"success": True, "message": "사진을 지웠습니다.", "session": s.model_dump()}
 
 
+FIELD_KO = {"deposit": "보증금", "contract_deposit": "계약금", "monthly_rent": "월세", "maintenance_fee": "관리비",
+            "move_in_date": "입주일", "lease_term_months": "계약기간"}
+
+
+def terms_lock_enabled() -> bool:
+    """RENT3_TERMS_LOCK: 기본 켜짐. '0' 이면 예전처럼 /terms 로 모든 조건을 바로 고칠 수 있다(비상·시연용)."""
+    import os
+    return os.environ.get("RENT3_TERMS_LOCK", "1").strip() != "0"
+
+
+class ReopenTermsReq(BaseModel):
+    role: str = "lessor"
+    confirm: bool = False
+
+
+@router.post("/sessions/{session_id}/reopen-terms")
+def reopen_terms(session_id: str, req: ReopenTermsReq):
+    """서명 이후 조건 변경: 경고를 확인(confirm)하면 양측 서명·동의가 지워지고 3단계로 돌아간다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    if not req.confirm:
+        raise DomainError(
+            "조건을 다시 열면 양측 서명과 3단계 동의가 초기화되고 3단계로 돌아갑니다.",
+            hint="그래도 진행하려면 확인 후 다시 요청해 주세요(confirm=true).",
+        )
+    s.reopen_terms(role=req.role, app_source=APP_SRC)
+    who = "임대인" if req.role == "lessor" else "임차인"
+    contract_chat.system_note(s, f"{who}이(가) 조건을 다시 열었습니다. 양측 서명·동의가 초기화되고 3단계로 돌아갔습니다 (리비전 v{s.revision}).", step=3)
+    return {
+        "success": True, "level": "diff",
+        "message": f"조건을 다시 열었습니다. 서명이 초기화되고 3단계로 돌아갑니다 (리비전 v{s.revision}).",
+        "session": s.model_dump(),
+    }
+
+
 @router.post("/sessions/{session_id}/terms")
 def update_terms(session_id: str, req: TermsUpdateReq):
     s = CoSignSession.by_code_or_id(session_id)
+    if terms_lock_enabled() and s.call_status != "CALLING" and s.status == "IN_PROGRESS":
+        changed_keys = s.terms_changes(req.updates)      # 지금 값과 같게 넘어온 항목은 그대로 통과한다
+        if changed_keys and s.current_step >= 4:
+            raise Conflict(
+                "서명 단계 이후에는 조건을 바로 고칠 수 없습니다.",
+                hint="'조건 다시 열기'를 쓰세요. 양측 서명과 3단계 동의가 초기화되고 3단계로 돌아갑니다.",
+            )
+        locked = [FIELD_KO[k] for k in changed_keys if k in CoSignSession.TERMS_LOCKED_FIELDS]
+        if locked:
+            raise Conflict(
+                f"{', '.join(locked)}은(는) 직접 고칠 수 없습니다. 상대에게 제안하고 수락을 받아야 바뀝니다.",
+                hint="계약방 대화(💬)에서 '제안'을 보내세요. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.",
+            )
     prev_rev = s.revision
     s.update_terms(role=req.role, updates=req.updates, app_source=APP_SRC)
     changed = s.revision != prev_rev

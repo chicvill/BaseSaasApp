@@ -80,6 +80,33 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
         }})
 
+    def _party_headers(self, sid):
+        """계약 당사자 토큰을 돌려준다: 임대인(해당 지점) + 세션의 임차인(번호가 같은 계정, 없으면 가입시키고 본인인증 처리)."""
+        from apps.rent_dist._rent3_core import Lessor, Tenant
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        s = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        lessor = Lessor.first(branch=s["branch"])
+        digits = lambda v: "".join(ch for ch in str(v or "") if ch.isdigit())
+        tenant = Tenant.get(s.get("id_tenant")) if s.get("id_tenant") else None
+        phone = (s.get("terms") or {}).get("tenant_phone", "")
+        tenant = tenant or next((t for t in Tenant.all() if digits(t.phone) == digits(phone) and phone), None)
+        if tenant is None:
+            reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
+                                   json={"role": "prospect", "name": (s.get("terms") or {}).get("tenant_name") or "당사자", "phone": phone or "010-7000-0000", "password": "Pw123456"})
+            tenant = Tenant.get(reg.json()["user"]["id"])
+        tenant.identity = {"verified": True}          # 조건을 바꾸는 수락·서명은 본인인증이 필요하다
+        tenant.save(action="test_verified")
+        return ({"Authorization": f"Bearer {lessor_token(lessor)}"}, {"Authorization": f"Bearer {tenant_token(tenant)}"})
+
+    def _propose_accept(self, sid, field, value, proposer="lessor"):
+        """한쪽이 제안하고 상대가 수락하는 흐름(6개 항목은 이 방법으로만 바뀐다). 수락 응답을 돌려준다."""
+        lh, th = self._party_headers(sid)
+        mine, other = (lh, th) if proposer == "lessor" else (th, lh)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        p = self.client.post(url, headers=mine, json={"kind": "proposal", "field": field, "new_value": value})
+        self.assertEqual(p.status_code, 200, p.text)
+        return self.client.post(f"{url}/{p.json()['item']['id']}/respond", headers=other, json={"action": "accept"})
+
     def _tenant_recheck_ok(self, sid):
         return self.client.post(f"/api/rent3_contract/sessions/{sid}/recheck", json={"changed": False})
 
@@ -204,17 +231,37 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # Step 3: v1 양측 합의 완료 후, 임대인이 월세를 55만 -> 54만으로 수정하면 양측 합의가 자동 초기화되는지 검증!
         self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={
             "role": "lessor",
-            "updates": {"move_in_date": "2026-10-15", "pay_timing": "후불"},
+            "updates": {"pay_timing": "후불"},
         })
+        cur_move_in = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]["move_in_date"]
+        new_move_in = "2026-10-15" if cur_move_in != "2026-10-15" else "2026-10-16"
+        # 입주일 같은 6개 항목은 /terms 로 직접 바꿀 수 없고(409), 제안 → 상대 수락으로만 바뀐다
+        direct = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"move_in_date": new_move_in}})
+        self.assertEqual(direct.status_code, 409, direct.text)
+        self.assertIn("제안", direct.text)
+        same = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"move_in_date": cur_move_in}})
+        self.assertEqual(same.status_code, 200)                                    # 지금 값과 같게 넘어오면 통과(변경 없음)
+        self.assertFalse(same.json()["changed"])
+        self.assertEqual(self._propose_accept(sid, "move_in_date", new_move_in).status_code, 200)
         cur_rev = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["revision"]
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": cur_rev})
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "tenant", "expected_revision": cur_rev})
 
-        # 조건 1개 수정 -> Revision Lock 발동 검증!
-        r_edit = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={
-            "role": "lessor",
-            "updates": {"monthly_rent": 540000},
-        }).json()
+        # 양측 동의 뒤(단계 ④)에는 /terms 로 바로 고칠 수 없고(409), '조건 다시 열기'를 거쳐야 한다
+        self.assertGreaterEqual(self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["current_step"], 4)
+        blocked = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"monthly_rent": 540000}})
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("조건 다시 열기", blocked.text)
+        self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/reopen-terms", json={"role": "lessor"}).status_code, 400)   # 경고 확인 필요
+        reopened = self.client.post(f"/api/rent3_contract/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True})
+        self.assertEqual(reopened.status_code, 200, reopened.text)
+        rs = reopened.json()["session"]
+        self.assertEqual((rs["current_step"], rs["revision"], rs["step3_lessor_agreed"], rs["step3_tenant_agreed"], rs["lessor_signature"]), (3, cur_rev + 1, False, False, ""))
+        cur_rev = rs["revision"]
+        # 조건 1개 수정(월세 제안 → 수락) -> Revision Lock 발동 검증!
+        acc = self._propose_accept(sid, "monthly_rent", 540000)
+        self.assertEqual(acc.status_code, 200, acc.text)
+        r_edit = {"changed": True, "session": acc.json()["session"]}
         self.assertTrue(r_edit["changed"])
         self.assertGreater(r_edit["session"]["revision"], cur_rev)
         self.assertFalse(r_edit["session"]["step3_lessor_agreed"])
@@ -296,11 +343,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "room_no": "201",
             "mode": "RENEWAL",
         }).json()["session"]
-        r_cap_fail = self.client.post(f"/api/rent3_contract/sessions/{r_ren['id']}/terms", json={
-            "role": "lessor",
-            "updates": {"monthly_rent": 550000},
-        })
-        self.assertEqual(r_cap_fail.status_code, 422)
+        direct_cap = self.client.post(f"/api/rent3_contract/sessions/{r_ren['id']}/terms", json={"role": "lessor", "updates": {"monthly_rent": 550000}})
+        self.assertEqual(direct_cap.status_code, 409)                              # 6개 항목은 직접 못 고친다
+        r_cap_fail = self._propose_accept(r_ren["id"], "monthly_rent", 550000)     # 제안은 되지만 수락 때 법정 5% 상한 검증에서 막힌다
+        self.assertEqual(r_cap_fail.status_code, 422, r_cap_fail.text)
         self.assertEqual(r_cap_fail.json()["level"], "diff")
 
         # 202호 퇴실 정산 산출 -> 임차인 동의 -> 임대인 반환 완료 -> 호실 자동 공실 복귀 검증
@@ -3555,6 +3601,48 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         ses.save(action="test_cancel")
         self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": "취소 후 문의"}).status_code, 409)
         self.assertTrue(c.get(url, headers=th).json()["read_only"])
+
+    def test_59_terms_lock_and_reopen(self):
+        """59. 6개 항목은 /terms 로 직접 못 바꾸고(같은 값은 통과) 제안·수락으로만 바뀐다. 다른 조건은 직접 수정 가능. 3단계에서는 다시 열 필요 없음. 잠금 스위치·당사자 권한."""
+        from unittest import mock
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("962", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        t0 = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+        post = lambda updates, **kw: c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": updates}, **kw)
+        # 6개 항목: 바꾸면 409(이름을 알려 준다), 같은 값이면 통과
+        for field, val in (("deposit", 4000000), ("contract_deposit", 100000), ("monthly_rent", 250000), ("maintenance_fee", 1000),
+                           ("move_in_date", "2030-01-01"), ("lease_term_months", 6)):
+            r = post({field: val})
+            self.assertEqual(r.status_code, 409, field)
+            self.assertIn("제안", r.text)
+        self.assertEqual(post({"deposit": t0["deposit"], "monthly_rent": str(t0["monthly_rent"])}).status_code, 200)   # 같은 값(문자열 숫자 포함)
+        # 인적사항·납부 시점·세금계산서·특약은 직접 수정 가능
+        r = post({"tenant_car_number": "12가3456", "special_terms": "1. 반려동물 불가", "pay_timing": "선불"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["changed"])
+        # 6개 항목과 다른 항목을 함께 보내도 6개 항목이 달라지면 통째로 거부된다
+        self.assertEqual(post({"special_terms": "다른 특약", "deposit": 1}).status_code, 409)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]["special_terms"], "1. 반려동물 불가")
+        # 3단계에서는 '다시 열기'가 필요 없다
+        r = c.post(f"{base}/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("이미 계약 조건 단계", r.text)
+        # 제안 → 수락은 잠금과 무관하게 조건을 바꾼다
+        acc = self._propose_accept(sid, "maintenance_fee", 40000, proposer="tenant")
+        self.assertEqual(acc.status_code, 200, acc.text)
+        self.assertEqual(acc.json()["session"]["terms"]["maintenance_fee"], 40000)
+        # 잠금 스위치를 끄면 예전처럼 직접 수정(비상용)
+        with mock.patch.dict(os.environ, {"RENT3_TERMS_LOCK": "0"}):
+            r = post({"maintenance_fee": 45000})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["changed"])
+        # 당사자만: 타 지점 임대인·비로그인·(엄격 모드) 관리인은 조건 다시 열기를 못 한다
+        sunho = self._login("sunho")
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", headers=sunho, json={"role": "lessor", "confirm": True}).status_code, 403)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", headers=self.NOAUTH, json={"role": "lessor", "confirm": True}).status_code, 401)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True}).status_code, 403)
 
 
 if __name__ == "__main__":

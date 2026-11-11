@@ -959,6 +959,46 @@ class CoSignSession(PoolObj):
             raise NotFound("사진 파일을 찾을 수 없습니다.")
         return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
 
+    # 3단계에서 '제안 → 상대 수락'으로만 바뀌는 6개 항목 (POST /terms 로는 직접 못 바꾼다 — contract_chat.respond 가 update_terms 를 부른다)
+    TERMS_LOCKED_FIELDS: ClassVar[tuple] = ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "move_in_date", "lease_term_months")
+
+    def terms_changes(self, updates: Dict[str, Any]) -> List[str]:
+        """update_terms 와 같은 값 정리를 거쳐, 지금 값과 달라지는 항목 이름 목록을 돌려준다(저장하지 않는다)."""
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
+        out: List[str] = []
+        for k, v in (updates or {}).items():
+            if v is None:
+                continue
+            try:
+                if k in int_fields:
+                    v = int(v)
+                elif k in bool_fields:
+                    v = bool(v)
+                elif isinstance(v, str):
+                    v = v.strip()
+            except (TypeError, ValueError):
+                out.append(k)
+                continue
+            if (self.terms or {}).get(k) != v:
+                out.append(k)
+        return out
+
+    def reopen_terms(self, role: str, app_source: str = "rent3_contract") -> "CoSignSession":
+        """서명(4단계) 이후 조건을 바꿔야 할 때의 유일한 길: 양측 서명·3단계 동의를 지우고 3단계로 돌아간다(리비전 +1)."""
+        self._ensure_ready_for_steps()
+        if self.current_step < 4:
+            raise DomainError("이미 계약 조건 단계(③)입니다.", hint="조건은 제안·수락으로 바꿀 수 있습니다.")
+        self.step3_lessor_agreed = False
+        self.step3_tenant_agreed = False
+        self.lessor_signature = ""
+        self.tenant_signature = ""
+        self.integrity_hash = ""
+        self.tenant_recheck_at = ""            # 다시 서명하면 체결 직전 등기부 재확인도 다시 한다
+        self.current_step = 3
+        self.revision += 1
+        return self.save(action=f"terms_reopened_by_{role}_rev_{self.revision}", app_source=app_source)
+
     def update_terms(
         self,
         role: str,
