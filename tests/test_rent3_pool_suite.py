@@ -3342,6 +3342,32 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIsNone(sup.SupportAccessLog.get(gone.id))
         self.assertIsNotNone(sup.SupportAccessLog.get(keep.id))
 
+    def test_56_tenant_menu_reaches_every_service(self):
+        """56. 임차인 첫 화면은 '내 집(납부 확인)' 하나뿐이고, 나머지 서비스는 모두 ☰ 메뉴에서 닿는다(빠진 기능 0개). 헤더 모드 단추·관리자용 선택기는 없다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
+        ids = set(re.findall(r'id: "(\w+)"', menu))
+        self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting"})
+        for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
+                       'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
+            self.assertIn(needle, menu, needle)
+        # 메뉴의 서비스 화면 = 마이홈에 실제로 있는 구역
+        views = set(re.findall(r'btnSvc\w+: "(\w+)"', app[app.index("const MENU_VIEWS"):]))
+        sections = set(re.findall(r'<section class="svc" data-svc="(\w+)">', app))
+        self.assertTrue(views <= sections, (views, sections))
+        self.assertIn("home", sections)
+        # 첫 화면 구성: 할 일 배너(미납>퇴실 정산>만기 확인, 최대 2줄)와 납부 현황(오래된 완납 달은 접힘)
+        self.assertIn("todos.slice(0, 2)", app)
+        self.assertIn("이전 완납", app)
+        # 옛 헤더 모드 단추와 관리자용 세입자 선택기는 없다
+        for gone in ("btnModeMyhome", "btnModeListings", "mode-switch", "tenantSel", "loadTenants"):
+            self.assertNotIn(gone, app + idx, gone)
+        self.assertIn("data-r3-drawer", idx)
+
 
 if __name__ == "__main__":
     unittest.main()

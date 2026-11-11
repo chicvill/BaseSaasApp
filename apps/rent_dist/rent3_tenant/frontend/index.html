@@ -9,8 +9,6 @@
   <style>
     .app-shell { max-width: 860px; margin: 0 auto; padding: 16px 14px 70px; }
     .nav-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
-    .mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
-    .mode-btn.is-active { background: linear-gradient(120deg, var(--primary), var(--primary-2)); border-color: transparent; font-weight: 800; }
     .listing-card { padding: 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 12px; }
     .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
     .cert-paper { background: #fff; color: #111; padding: 24px; border-radius: 14px; margin-top: 14px; }
@@ -27,31 +25,17 @@
 </head>
 <body>
   <main class="app-shell">
-    <aside class="r3-drawer" data-r3-drawer>
-      <a href="/rent3_contract/?role=tenant">🤝 직거래 계약 화면</a>
-      <button type="button" class="bass-btn r3-item" id="btnSupportChat">💬 관리인에게 문의</button>
-      <button type="button" class="bass-btn r3-item" id="btnSupportSetting">🛡️ 원격 지원 허용 설정</button>
-      <a href="manual.html">📘 이용 매뉴얼</a>
-      <div class="r3-drawer__group">그 밖의 화면</div>
-      <a href="/rent3/pool.html">🌐 Data Pool 관제</a>
-      <a href="/rent3_lessor/">🏢 임대인 앱</a>
-      <a href="/rent3_admin/">👑 관리인 앱</a>
-    </aside>
+    <aside class="r3-drawer" data-r3-drawer></aside>   <!-- 메뉴 항목은 app.js 의 TENANT_MENU 가 채운다 -->
     <div id="app-alert"></div>
 
         <header class="bass-card no-print">
       <div class="bass-row" style="justify-content:space-between;">
         <div>
-          <h1 style="font-size:21px;margin-bottom:4px;">🔑 내 집 · 월세 납부 확인</h1>
-          <div class="bass-muted" style="font-size:13px;">내가 낸 월세가 잘 입금됐는지 확인하고, 새 집을 찾아 계약합니다.</div>
+          <h1 id="hdrTitle" style="font-size:19px;margin:0;">🔑 내 집 · 월세 납부 확인</h1>
         </div>
         <div class="bass-row"><span id="poolBadge" hidden></span><button type="button" data-r3-burger>☰ 더보기</button></div>
       </div>
 
-      <div class="mode-switch">
-        <button id="btnModeMyhome" class="bass-btn mode-btn is-active" type="button">🏠 내 월세 납부 확인</button>
-        <button id="btnModeListings" class="bass-btn mode-btn" type="button">🔍 빈 집 찾기</button>
-      </div>
     </header>
 
     <section id="viewMyhome" style="margin-top:14px;"></section>

@@ -21,26 +21,73 @@
 
   const elMyhome = document.getElementById("viewMyhome");
   const elListings = document.getElementById("viewListings");
+  // ☰ 메뉴: 첫 화면은 '내 집(납부 확인)' 하나뿐이고, 나머지는 모두 여기서 들어간다(빠진 기능 0개 — test_56 이 점검).
+  const TENANT_MENU = [
+    { items: [{ label: "🏠 내 집 (납부 확인)", id: "btnSvcHome" }] },
+    { title: "계약 · 서류", items: [
+      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=tenant" },
+      { label: "🧾 연말정산 납부확인서", id: "btnSvcCert" },
+      { label: "📸 중개 계약서 사본", id: "btnSvcPaper" },
+      { label: "📅 만기 · 연장 안내", id: "btnSvcExpiry" },
+      { label: "🚪 퇴실 정산", id: "btnSvcCheckout" },
+    ] },
+    { title: "요청", items: [
+      { label: "🔧 A/S 요청", id: "btnSvcAs" },
+      { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
+      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
+    ] },
+    { title: "찾기", items: [{ label: "🔍 빈 집 찾기", id: "btnMenuListings" }] },
+    { title: "도움말", items: [
+      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
+      { label: "📘 이용 매뉴얼", href: "manual.html" },
+      { label: "🏢 임대인 앱", href: "/rent3_lessor/", adminOnly: true },
+      { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
+      { label: "🌐 Data Pool 관제", href: "/rent3/pool.html", adminOnly: true },
+    ] },
+  ];
+  const ME_ADMIN = R3Shell.isAdminSession();
+  const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
+  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
+
+  const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
+  let svcView = SVC_TITLES[params.get("svc")] !== undefined ? params.get("svc") : "home";
+
+  function closeDrawer() {
+    const dr = document.querySelector("[data-r3-drawer]");
+    if (dr) dr.classList.remove("is-open");
+    const ov = document.querySelector(".r3-overlay");
+    if (ov) ov.classList.remove("is-open");
+  }
+
+  // 마이홈 안의 화면 전환: 해당 서비스 구역만 보이고 위에 '← 내 집' 줄이 나온다
+  function applyView() {
+    elMyhome.querySelectorAll("section.svc").forEach((sec) => { sec.style.display = sec.dataset.svc === svcView ? "" : "none"; });
+    const keep = elMyhome.querySelector(".svc-home-only");
+    if (keep) keep.style.display = svcView === "home" ? "" : "none";
+    const back = document.getElementById("svcBack");
+    if (back) {
+      back.style.display = svcView === "home" ? "none" : "flex";
+      document.getElementById("svcTitle").textContent = SVC_TITLES[svcView] || "";
+    }
+  }
+  function go(view) {
+    svcView = SVC_TITLES[view] !== undefined ? view : "home";
+    if (mode !== "myhome") setMode("myhome");
+    else applyView();
+    window.scrollTo(0, 0);
+  }
+  const MENU_VIEWS = { btnSvcHome: "home", btnSvcCert: "cert", btnSvcPaper: "paper", btnSvcExpiry: "expiry", btnSvcCheckout: "checkout", btnSvcAs: "as", btnSvcDoor: "door" };
+  Object.entries(MENU_VIEWS).forEach(([id, view]) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("click", () => { closeDrawer(); go(view); });
+  });
+  const elMenuListings = document.getElementById("btnMenuListings");
+  if (elMenuListings) elMenuListings.addEventListener("click", () => { closeDrawer(); setMode("listings"); });
   const btnSupportChat = document.getElementById("btnSupportChat");
-  if (btnSupportChat) {
-    btnSupportChat.addEventListener("click", () => {
-      const dr = document.querySelector("[data-r3-drawer]");
-      if (dr) dr.classList.remove("is-open");
-      R3Shell.openSupportChat();
-    });
-  }
-  if (R3Shell.isAdminSession() && btnSupportChat) btnSupportChat.hidden = true;   // 관리인에게는 필요 없다
-  R3Shell.watchSupport();
+  if (btnSupportChat) btnSupportChat.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportChat(); });
   const btnSupportSetting = document.getElementById("btnSupportSetting");
-  if (btnSupportSetting) {
-    btnSupportSetting.addEventListener("click", () => {
-      const dr = document.querySelector("[data-r3-drawer]");
-      if (dr) dr.classList.remove("is-open");
-      R3Shell.openSupportSettings();
-    });
-  }
-  const btnMyhome = document.getElementById("btnModeMyhome");
-  const btnListings = document.getElementById("btnModeListings");
+  if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
+  R3Shell.watchSupport();
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
@@ -48,18 +95,12 @@
 
   function setMode(m) {
     mode = m;
-    btnMyhome.classList.toggle("is-active", m === "myhome");
-    btnListings.classList.toggle("is-active", m === "listings");
+    document.getElementById("hdrTitle").textContent = m === "listings" ? "🔍 빈 집 찾기" : "🔑 내 집 · 월세 납부 확인";
     elMyhome.style.display = m === "myhome" ? "block" : "none";
     elListings.style.display = m === "listings" ? "block" : "none";
     if (m === "myhome") loadMyhome().catch(Bass.showError);
     else loadListings().catch(Bass.showError);
   }
-
-  window.addEventListener("beforeprint", () => { const d = document.getElementById("moreServices"); if (d) d.open = true; });
-
-  btnMyhome.addEventListener("click", () => setMode("myhome"));
-  btnListings.addEventListener("click", () => setMode("listings"));
 
   async function loadMyhome() {
     if (!selectedTenantId) {
@@ -100,9 +141,43 @@
                 </div>
               </div></div></div>` : "";
 
+    const blk = (html, empty) => (String(html).trim() ? html : `<div class="bass-card no-print"><div class="bass-muted" style="font-size:13.5px;">${empty}</div></div>`);
+    // 납부 현황: 미납이 남은 달과 최근 12개월은 펼치고, 오래된 완납 달은 접어 둔다
+    const monthRow = (m) => `
+      <div style="display:flex;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px;">
+        <span><strong>${m.ym}</strong> · 청구 ${fmtWon(m.due)}</span>
+        <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${Bass.escapeHtml(m.note)}</span>
+      </div>`;
+    const allMonths = lg.months || [];
+    const recentMonths = allMonths.slice(-12);
+    const olderMonths = allMonths.slice(0, Math.max(allMonths.length - 12, 0));
+    const olderUnpaid = olderMonths.filter((m) => m.unpaid > 0);
+    const olderOk = olderMonths.filter((m) => !(m.unpaid > 0));
+    const monthsHtml = olderUnpaid.map(monthRow).join("") + recentMonths.map(monthRow).join("") +
+      (olderOk.length ? `<details style="margin-top:4px;"><summary class="bass-muted no-print" style="cursor:pointer;font-size:12.5px;min-height:32px;padding:6px 4px;">이전 완납 ${olderOk.length}개월 보기</summary>${olderOk.map(monthRow).join("")}</details>` : "");
+
+    // 할 일 배너: 미납 > 퇴실 정산 > 만기 확인 (해당할 때만, 최대 2줄)
+    const todos = [];
+    if (lg.total_unpaid > 0) todos.push({ icon: "🚨", text: `미납 ${fmtWon(lg.total_unpaid)}이 있습니다`, label: "납부하기", go: "pay", hot: true });
+    if (co && co.status === "CALCULATED") todos.push({ icon: "🚪", text: "퇴실 정산서가 도착했습니다", label: "확인·동의", go: "checkout", hot: true });
+    if (ec && ec.status === "AWAITING_TENANT") todos.push({ icon: "📅", text: "만기 후 전출 계획을 알려 주세요", label: "답변하기", go: "expiry", hot: true });
+    else if (ec && ec.status === "RENEWAL_PREVIEWED") todos.push({ icon: "📝", text: "연장 재계약 예고가 도착했습니다", label: "확인하기", go: "expiry", hot: true });
+    else if (ew && ew.in_6_to_2_months_window && !ec) todos.push({ icon: "📅", text: "만기가 다가옵니다. 전출 계획을 알릴 수 있습니다", label: "열기", go: "expiry", hot: false });
+    if (activeBns.some((x) => x.status !== "ACKNOWLEDGED")) todos.push({ icon: "🔔", text: "납입 안내가 도착했습니다", label: "보기", go: "notice", hot: false });
+    const todoHtml = todos.length ? `<div class="bass-card no-print" style="margin-bottom:14px;padding:10px 12px;">${todos.slice(0, 2).map((x) => `
+      <div class="bass-row" style="justify-content:space-between;align-items:center;gap:8px;padding:4px 0;">
+        <span style="font-size:14px;${x.hot ? "font-weight:700;" : ""}">${x.icon} ${Bass.escapeHtml(x.text)}</span>
+        <button class="bass-btn bass-btn--sm ${x.hot ? "bass-btn--primary" : ""} btn-todo" data-go="${x.go}" type="button">${x.label}</button>
+      </div>`).join("")}</div>` : "";
+    const contractLine = `<div class="bass-card no-print" style="margin-bottom:14px;font-size:13.5px;line-height:1.7;">
+      <strong>내 계약</strong><br>보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
+      입주 ${Bass.escapeHtml(ct.move_in_date || "-")} · 만기 ${Bass.escapeHtml(ct.expiry_date || "-")}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}</div>`;
+
     R3Shell.proxyBanner(`${b.building_name || ""} ${r.room_no || ""}호 ${t.name} (임차인 입장)`);   // 관리인 대리 접속 때만 보인다
     elMyhome.innerHTML = `
-      ${keysLockHtml}
+      <div class="svc-home-only">${keysLockHtml}</div>
+      <div id="svcBack" class="bass-row no-print" style="gap:8px;margin:0 0 12px;display:none;"><button id="btnSvcBack" class="bass-btn bass-btn--sm" type="button">← 내 집</button><strong id="svcTitle" style="font-size:15px;"></strong></div>
+      <section class="svc" data-svc="home">
       <div class="bass-card no-print" style="margin-bottom:14px;">
         <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
           <div><strong>${Bass.escapeHtml(t.name)}</strong> 님의 마이홈 · ${Bass.escapeHtml(b.building_name || "")} ${Bass.escapeHtml(r.room_no || "")}호</div>
@@ -115,7 +190,28 @@
 
       </div>
 
-      ${activeBns.map((bn) => `
+      ${todoHtml}
+      <div class="bass-card no-print" style="margin-bottom:14px;">
+        <h3 style="margin:0 0 8px;">💳 월세 납부</h3>
+        <div class="bass-row">
+          <input id="payAmtInput" type="number" class="bass-input" style="width:170px;" value="${lg.total_unpaid > 0 ? lg.total_unpaid : (Number(ct.monthly_rent || 0) + Number(ct.maintenance_fee || 0))}">
+          <select id="payMethodSel" class="bass-select" style="width:160px;">
+            <option value="KAKAOPAY">카카오페이</option>
+            <option value="CARD">신용/체크카드</option>
+            <option value="TRANSFER">계좌이체</option>
+          </select>
+          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부</button>
+        </div>
+        <div class="bass-muted" style="font-size:12.5px;margin:12px 0 2px;">월별 납부 현황</div>
+        <div style="margin:10px 0;">
+          ${monthsHtml}
+        </div>
+      </div>
+
+      ${contractLine}
+      </section>
+      <section class="svc" data-svc="notice">
+      ${blk(`      ${activeBns.map((bn) => `
         <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid ${bn.notice_type === "OVERDUE_1D" ? "var(--err)" : "var(--primary-2)"};">
           <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
             <div>
@@ -137,51 +233,10 @@
         </div>
       `).join("")}
 
-      <div class="bass-card no-print" style="margin-bottom:14px;">
-        <h3>💳 월별 납부 현황 & 온라인 간편 납부 (임대인 FIFO 장부 실시간 동기화)</h3>
-        <div style="margin:10px 0;">
-          ${(lg.months || []).map((m) => `
-            <div style="display:flex;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px;">
-              <span><strong>${m.ym}</strong> · 청구 ${fmtWon(m.due)}</span>
-              <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${Bass.escapeHtml(m.note)}</span>
-            </div>
-          `).join("")}
-        </div>
-        <div class="bass-row">
-          <input id="payAmtInput" type="number" class="bass-input" style="width:170px;" value="${lg.total_unpaid > 0 ? lg.total_unpaid : (Number(ct.monthly_rent || 0) + Number(ct.maintenance_fee || 0))}">
-          <select id="payMethodSel" class="bass-select" style="width:160px;">
-            <option value="KAKAOPAY">카카오페이</option>
-            <option value="CARD">신용/체크카드</option>
-            <option value="TRANSFER">계좌이체</option>
-          </select>
-          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부</button>
-        </div>
-      </div>
-
-      <details id="moreServices" style="margin-bottom:14px;">
-        <summary class="no-print" style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 서비스 (도어락 · 차량 · 만기 안내 · A/S · 세액공제 증명서)</summary>
-        <div class="bass-card no-print" style="margin-bottom:14px;">
-        <div class="field-grid" style="margin-top:14px;">
-          <div class="listing-card" style="margin:0;">
-            <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
-            ${(data.keys && data.keys.locked) ? `<div class="bass-muted" style="font-size:12.5px;margin:6px 0;">🔒 도어락은 잠겨 있습니다. 화면 맨 위의 안내를 확인하세요.</div>` : ""}
-            <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
-              <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
-            </div>
-            <div style="font-size:12.5px;margin-top:4px;">공동현관: <code>${Bass.escapeHtml(b.common_entrance_pwd || "#1004*")}</code> · Wi-Fi: <code>${Bass.escapeHtml(b.wifi_info || "-")}</code></div>
-          </div>
-
-          <div class="listing-card" style="margin:0;">
-            <div class="bass-muted" style="font-size:12px;">🚗 내 차량 건물 주차 등록</div>
-            <div class="bass-row" style="margin-top:6px;">
-              <input id="carNoInput" class="bass-input" style="flex:1;" value="${Bass.escapeHtml(t.car_number || "")}" placeholder="예: 12가 3456">
-              <button id="btnSaveCar" class="bass-btn bass-btn--sm bass-btn--primary" type="button">등록</button>
-            </div>
-          </div>
-        </div>
-        </div>
-
-      ${showExpiryCard ? `
+`, "도착한 납입 안내·미납 통보가 없습니다.")}
+      </section>
+      <section class="svc" data-svc="expiry">
+      ${blk(`      ${showExpiryCard ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-left:4px solid var(--warn);">
           <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
             <div>
@@ -242,7 +297,10 @@
         </div>
       ` : ""}
 
-      ${co ? `
+`, "만기 6~2개월 전부터 이곳에서 전출 계획을 알리고 연장 재계약 예고를 확인할 수 있습니다.")}
+      </section>
+      <section class="svc" data-svc="checkout">
+      ${blk(`      ${co ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-color:var(--warn);">
           <h3>🚪 퇴실 보증금 정산 명세서 도착 (실반환 예정액: ${fmtWon(co.refund_amount)})</h3>
           <p class="bass-muted" style="font-size:13px;">원보증금 ${fmtWon(co.deposit_original)} − 미납월세 ${fmtWon(co.unpaid_rent_deduction)} − 공과금 ${fmtWon(co.utility_settlement)} − 청소비 ${fmtWon(co.cleaning_fee)}</p>
@@ -256,7 +314,10 @@
         </div>
       ` : ""}
 
-      ${ct && ct.contract_photo_file ? `
+`, "받은 퇴실 정산 명세서가 없습니다.")}
+      </section>
+      <section class="svc" data-svc="paper">
+      ${blk(`      ${ct && ct.contract_photo_file ? `
         <div class="bass-card no-print" style="margin-bottom:14px;">
           <div class="bass-row" style="justify-content:space-between;">
             <div>
@@ -276,6 +337,9 @@
         </div>
       ` : ""}
 
+`, "보관된 중개 계약서 사본이 없습니다. (직거래 계약은 계약 화면에서 확인합니다)")}
+      </section>
+      <section class="svc" data-svc="as">
       <div class="bass-card no-print" style="margin-bottom:14px;">
         <h3>🔧 1:1 시설 수리(A/S) 요청 접수</h3>
         <div class="field-grid" style="margin:10px 0;">
@@ -293,7 +357,9 @@
         </div>
       </div>
 
-      ${cert ? `
+      </section>
+      <section class="svc" data-svc="cert">
+      ${blk(`      ${cert ? `
         <div class="bass-card no-print" style="margin-bottom:8px;">
           <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div>
@@ -334,8 +400,43 @@
           </div>
         </article>
       ` : ""}
-      </details>
+`, "납부확인서를 만들 월세 납부 내역이 아직 없습니다.")}
+      </section>
+      <section class="svc" data-svc="door">
+        <div class="bass-card no-print" style="margin-bottom:14px;">
+        <div class="field-grid" style="margin-top:14px;">
+          <div class="listing-card" style="margin:0;">
+            <div class="bass-muted" style="font-size:12px;">🔑 출입 · 와이파이 (계약 체결자 전용)</div>
+            ${(data.keys && data.keys.locked) ? `<div class="bass-muted" style="font-size:12.5px;margin:6px 0;">🔒 도어락은 잠겨 있습니다. 화면 맨 위의 안내를 확인하세요.</div>` : ""}
+            <div style="margin-top:6px;">세대 도어락: <strong>${showDoorlock ? Bass.escapeHtml(r.doorlock_pwd || t.doorlock_pwd) : "••••*"}</strong>
+              <button id="btnToggleDl" class="bass-btn bass-btn--sm" style="margin-left:6px;" type="button">${showDoorlock ? "숨기기" : "보기"}</button>
+            </div>
+            <div style="font-size:12.5px;margin-top:4px;">공동현관: <code>${Bass.escapeHtml(b.common_entrance_pwd || "#1004*")}</code> · Wi-Fi: <code>${Bass.escapeHtml(b.wifi_info || "-")}</code></div>
+          </div>
+
+          <div class="listing-card" style="margin:0;">
+            <div class="bass-muted" style="font-size:12px;">🚗 내 차량 건물 주차 등록</div>
+            <div class="bass-row" style="margin-top:6px;">
+              <input id="carNoInput" class="bass-input" style="flex:1;" value="${Bass.escapeHtml(t.car_number || "")}" placeholder="예: 12가 3456">
+              <button id="btnSaveCar" class="bass-btn bass-btn--sm bass-btn--primary" type="button">등록</button>
+            </div>
+          </div>
+        </div>
+        </div>
+
+      </section>
     `;
+
+    applyView();
+    document.getElementById("btnSvcBack").addEventListener("click", () => go("home"));
+    elMyhome.querySelectorAll(".btn-todo").forEach((bt) => bt.addEventListener("click", () => {
+      if (bt.dataset.go === "pay") {
+        const inp = document.getElementById("payAmtInput");
+        if (inp) { inp.scrollIntoView({ behavior: "smooth", block: "center" }); inp.focus(); }
+      } else {
+        go(bt.dataset.go);
+      }
+    }));
 
     const btnOpenPhoto = document.getElementById("btnOpenContractPhoto");
     const imgPhotoPrev = document.getElementById("imgContractPhotoPreview");
@@ -518,6 +619,7 @@
 
     elMyhome.querySelectorAll(".btn-jump-pay").forEach((btn) => {
       btn.addEventListener("click", () => {
+        go("home");
         const payInp = document.getElementById("payAmtInput");
         if (payInp) {
           payInp.value = btn.dataset.amt || payInp.value;
@@ -534,6 +636,7 @@
     const list = data.listings || [];
 
     elListings.innerHTML = `
+      <div class="bass-row no-print" style="gap:8px;margin:0 0 12px;"><button id="btnBackHome" class="bass-btn bass-btn--sm" type="button">← 내 집</button><strong style="font-size:15px;">빈 집 찾기</strong></div>
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>📢 지금 계약 가능한 빈 집 (${list.length}실)</h3>
         <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
@@ -567,6 +670,7 @@
       `).join("")}
     `;
 
+    document.getElementById("btnBackHome").addEventListener("click", () => go("home"));
     elListings.querySelectorAll(".btn-send-inq").forEach((btn) => {
       btn.addEventListener("click", function () {
         Bass.withLock(this, async () => {
