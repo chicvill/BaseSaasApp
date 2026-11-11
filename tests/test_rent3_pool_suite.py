@@ -3368,6 +3368,49 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertNotIn(gone, app + idx, gone)
         self.assertIn("data-r3-drawer", idx)
 
+    def test_57_tax_hub_keeps_every_tax_feature(self):
+        """57. 세무 허브(종합소득세 / 부가세 / 세금계산서 / 경비·면세 신고)로 나눈 뒤에도 세무 기능이 하나도 빠지지 않는다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+        app = open(fe, encoding="utf-8").read()
+        tax = app[app.index("async function renderTaxTab"):app.index("// 건물 ▸ 부가세 · 소득세 대상 호실 설정")]
+        # 허브와 하위 화면 4개
+        for v in ('"income"', '"vat"', '"invoice"', '"expense"'):
+            self.assertIn(v, tax)
+        self.assertIn("tax-hub-btn", tax)
+        self.assertIn('id="btnTaxHub"', tax)
+        # 화면별로 있어야 할 기능 (사용자가 확정한 유지 목록)
+        keep = {
+            "income": ("btnDlTaxCsv", "housing_separate_tax_general", "housing_separate_tax_registered", "comprehensive_combined_estimate",
+                       "commercial_comprehensive_estimate", "carryover_excluded_amount", "필요경비율 50%", "누진세율"),
+            "vat": ("btnGoBldgTax", "vat_periods", "output_vat", "input_vat", "net_vat_payable", "공통경비"),
+            "invoice": ("btnDlHometaxCsv", "btnDlHometaxCsv2", "btn-inv-status", "taxMonthSel", "ready_for_hometax", "ISSUED", "nts_confirm_no", "5줄 스크롤"),
+            "expense": ("btnDlExemptCsv", "btnDlExemptCsv2", "btnAddOutlay", "outEvid", "outScope", "outVendorTax", "is_vat_deductible", "exempt_housing_report",
+                        "exemptTotals", "outlay-row"),
+        }
+        for view, needles in keep.items():
+            for n in needles:
+                self.assertIn(n, tax, (view, n))
+        # 세금계산서 발행 기록·사업장 주소 입력은 모달(전 호실 대상)로 유지
+        self.assertIn("tenant_business_address", app)      # 계약내용 창에서 모든 호실의 사업자 정보·사업장 주소를 입력·수정
+        self.assertIn("cmBizAddr", app)
+        self.assertIn("showInvoiceStatusModal", app)
+        self.assertIn("charge_type_label", tax)       # 영수(01)/청구(02) 구분이 화면에 보인다
+        # 서버가 네 화면에 필요한 값을 모두 준다
+        d = self.client.get("/api/rent3_lessor/tax/summary?branch=main&year=2026").json()
+        for k in ("summary", "vat_periods", "tax_invoice_register", "exempt_housing_report", "outlays", "expense_categories", "building_tax_config"):
+            self.assertIn(k, d, k)
+        fin = d["summary"]
+        for k in ("comprehensive_combined_estimate", "housing_separate_tax_general", "carryover_excluded_amount", "vat_room_breakdown",
+                  "income_tax_room_breakdown", "expenses_by_category"):
+            self.assertIn(k, fin, k)
+        for path in ("export-csv", "export-hometax-csv", "export-exempt-csv"):
+            self.assertEqual(self.client.get(f"/api/rent3_lessor/tax/{path}?branch=main&year=2026").status_code, 200, path)
+        # 메뉴에는 세무 허브 한 곳으로 들어간다
+        menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
+        self.assertIn('tab: "tax"', menu)
+        self.assertIn("switchTab", app)
+
 
 if __name__ == "__main__":
     unittest.main()
