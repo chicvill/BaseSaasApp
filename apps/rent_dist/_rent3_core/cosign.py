@@ -1015,6 +1015,8 @@ class CoSignSession(PoolObj):
     def agree_step3(self, role: str, expected_revision: Optional[int] = None, app_source: str = "rent3_contract") -> "CoSignSession":
         self._ensure_ready_for_steps()
         self._ensure_risk_ok()
+        from .contract_chat import ensure_no_open_requests   # 답하지 않은 제안·수정 요청이 있으면 최종 동의 불가
+        ensure_no_open_requests(self.id)
         if expected_revision is not None and expected_revision != self.revision:
             raise Conflict(
                 f"계약 조건이 방금 수정되었습니다 (현재 리비전 v{self.revision}).",

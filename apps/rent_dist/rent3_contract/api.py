@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
-from apps.rent_dist._rent3_core import franchise as fr
+from apps.rent_dist._rent3_core import franchise as fr, contract_chat
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_local_request, public_room, contract_scope, is_admin, session_party_ok
 from pydantic import BaseModel, Field
 
@@ -427,6 +427,56 @@ def get_session(token: str):
         "session": s.model_dump(),
         "contract": contract.model_dump() if contract else None,
     }
+
+
+class ContractMsgReq(BaseModel):
+    kind: str = "question"            # question | proposal | change_request
+    body: str = ""
+    field: str = ""
+    new_value: Optional[Any] = None   # 제안 값(숫자 또는 날짜)
+
+
+class ContractMsgRespondReq(BaseModel):
+    action: str                        # accept | decline | withdraw
+
+
+def _chat_actor(request: Request, s) -> Dict[str, str]:
+    """토큰으로 이 대화의 발화자(역할·이름)를 정한다. 본문에 적은 역할은 믿지 않는다. 관리인은 읽기만 가능(쓰기는 authz 가 막는다)."""
+    from apps.rent_dist._rent3_core.authz import need_claims, is_admin, LESSOR_ROLES
+    c = need_claims(request)
+    if is_admin(c):
+        return {"role": "", "name": "관리인"}
+    if c.get("r") in LESSOR_ROLES:
+        return {"role": "lessor", "name": s.lessor_name or "임대인"}
+    return {"role": "tenant", "name": str((s.terms or {}).get("tenant_name") or "임차인")}
+
+
+@router.get("/sessions/{session_id}/messages")
+def contract_messages(session_id: str, request: Request):
+    """계약방 대화 목록(문의·제안·수정 요청·안내). 당사자만."""
+    s = CoSignSession.by_code_or_id(session_id)
+    who = _chat_actor(request, s)
+    return {"success": True, **contract_chat.list_for(s, who["role"] or None)}
+
+
+@router.post("/sessions/{session_id}/messages")
+def contract_message_post(session_id: str, req: ContractMsgReq, request: Request):
+    s = CoSignSession.by_code_or_id(session_id)
+    who = _chat_actor(request, s)
+    m = contract_chat.post(s, who["role"], who["name"], req.kind, body=req.body, field=req.field, new_value=req.new_value)
+    msg = {"question": "문의를 남겼습니다.", "proposal": "제안을 보냈습니다. 상대방이 수락하면 조건이 바뀝니다.",
+           "change_request": "수정 요청을 보냈습니다."}[m.kind]
+    return {"success": True, "message": msg, "item": contract_chat.public_item(m), "open_count": len(contract_chat.open_items(s.id))}
+
+
+@router.post("/sessions/{session_id}/messages/{msg_id}/respond")
+def contract_message_respond(session_id: str, msg_id: str, req: ContractMsgRespondReq, request: Request):
+    s = CoSignSession.by_code_or_id(session_id)
+    who = _chat_actor(request, s)
+    res = contract_chat.respond(s, msg_id, who["role"], req.action)
+    text = {"accept": "수락했습니다." if res["item"]["kind"] == "proposal" else "확인·반영으로 표시했습니다.",
+            "decline": "거절했습니다.", "withdraw": "철회했습니다."}[req.action]
+    return {"success": True, "message": text, "session": s.model_dump(), **res, "open_count": len(contract_chat.open_items(s.id))}
 
 
 @router.post("/sessions/{session_id}/step1")

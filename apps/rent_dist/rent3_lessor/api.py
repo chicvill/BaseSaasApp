@@ -357,7 +357,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
     outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
     tickets = sorted(MaintenanceTicket.find(branch=b_id), key=lambda t: t.updated_at, reverse=True)
     checkouts = sorted(CheckOutSettlement.find(branch=b_id), key=lambda c: c.updated_at, reverse=True)
-    chats = sorted(DirectChat.find(branch=b_id), key=lambda c: c.created_at, reverse=True)[:30]
+    chats = sorted((c for c in DirectChat.find(branch=b_id) if not c.session_id), key=lambda c: c.created_at, reverse=True)[:30]   # 계약방 대화는 계약 화면에서
     cosign_sessions = sorted(CoSignSession.find(branch=b_id), key=lambda s: s.updated_at, reverse=True)
     recent_billing_notices = sorted(
         RentBillingNotice.find(branch=b_id), key=lambda x: x.created_at, reverse=True

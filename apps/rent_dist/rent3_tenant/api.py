@@ -175,7 +175,7 @@ def get_myhome(tenant_id: str):
     tickets = sorted(MaintenanceTicket.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
     checkouts = [c for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED"]
     chats = sorted(
-        DirectChat.find(branch=t.branch, room_no=t.room_no),
+        [c for c in DirectChat.find(branch=t.branch, room_no=t.room_no) if not c.session_id],   # 계약방 대화는 계약 화면에서만
         key=lambda x: x.created_at,
         reverse=True,
     )[:20]

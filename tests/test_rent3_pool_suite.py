@@ -3411,6 +3411,144 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn('tab: "tax"', menu)
         self.assertIn("switchTab", app)
 
+    def test_58_contract_room_chat_proposals_and_agree_block(self):
+        """58. 계약방 대화(5단계): 문의·제안·수정 요청, 제안 수락 시 update_terms(리비전·동의 초기화), 열린 제안이 있으면 Step 3 동의 차단, 단계 ④ 이후엔 문의만, 당사자만 접근."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import DirectChat, Lessor, Tenant
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("961", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,        # 계약 상대(예비 임차인)가 같은 번호로 가입한 계정
+                     json={"role": "prospect", "name": "정책시험", "phone": "010-5555-9961", "password": "Pw123456"})
+        self.assertEqual(reg.status_code, 200, reg.text)
+        tenant = Tenant.get(reg.json()["user"]["id"])
+        tenant.identity = {"verified": True}          # 본인인증을 마친 임차인(수락·서명 같은 행위는 본인인증이 필요하다)
+        tenant.save(action="test_verified")
+        lh = {"Authorization": f"Bearer {lessor_token(Lessor.first(username='chic'))}"}
+        th = {"Authorization": f"Bearer {tenant_token(tenant)}"}
+        url = f"{base}/sessions/{sid}/messages"
+        secret = "비밀-문의-내용-4417"
+        t0 = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+
+        # ── 문의: 양쪽 모두 가능, 읽음 처리 ──
+        r = c.post(url, headers=th, json={"kind": "question", "body": secret})
+        self.assertEqual(r.status_code, 200, r.text)
+        got = c.get(url, headers=lh).json()
+        self.assertEqual([m["body"] for m in got["messages"]], [secret])
+        self.assertEqual(got["unread"], 1)
+        self.assertEqual(c.get(url, headers=lh).json()["unread"], 0)             # 읽으면 줄어든다
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": " "}).status_code, 400)
+        self.assertEqual(c.post(url, headers=th, json={"kind": "gossip", "body": "x"}).status_code, 400)
+        # 풀 이벤트 로그에 본문이 남지 않는다
+        self.assertNotIn(secret, open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read())
+
+        # ── 접근 통제: 타 지점 임대인·다른 임차인·비로그인은 거부, 관리인은 읽기만 ──
+        sunho = self._login("sunho")
+        other_t = self._as(tenant_token(Tenant.first(room_no="201", branch="main")))
+        for h in (sunho, other_t):
+            self.assertEqual(c.get(url, headers=h).status_code, 403)
+            self.assertEqual(c.post(url, headers=h, json={"kind": "question", "body": "x"}).status_code, 403)
+        self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(url).status_code, 200)                              # admin 기본 토큰: 읽기
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.get(url).status_code, 200)
+            self.assertEqual(c.post(url, json={"kind": "question", "body": "관리인이 끼어듦"}).status_code, 403)
+
+        # ── 제안: 6개 항목만, 값 검증 ──
+        prop = lambda h, field, val, **kw: c.post(url, headers=h, json={"kind": "proposal", "field": field, "new_value": val, **kw})
+        self.assertEqual(prop(th, "special_terms", "x").status_code, 400)            # 특약은 제안이 아니라 수정 요청
+        self.assertEqual(prop(th, "deposit", 5000000).status_code, 400)              # 현재 값과 같음
+        self.assertEqual(prop(th, "deposit", "abc").status_code, 400)
+        self.assertEqual(prop(th, "contract_deposit", 99000000).status_code, 400)    # 계약금 > 보증금
+        self.assertEqual(prop(th, "move_in_date", "2026-13-45").status_code, 400)
+        self.assertEqual(prop(th, "lease_term_months", 0).status_code, 400)
+        for field, val in (("contract_deposit", 400000), ("monthly_rent", 280000), ("maintenance_fee", 40000),
+                           ("move_in_date", "2026-12-20"), ("lease_term_months", 24)):
+            self.assertEqual(prop(th, field, val).status_code, 200, field)
+        r = prop(th, "deposit", 4500000)
+        self.assertEqual(r.status_code, 200, r.text)
+        dep_id = r.json()["item"]["id"]
+        self.assertEqual(r.json()["item"]["proposal"]["old"], 5000000)
+        self.assertEqual(r.json()["open_count"], 6)
+        # 같은 사람이 같은 항목을 다시 제안하면 이전 제안은 대체된다
+        r2 = prop(th, "deposit", 4600000)
+        dep_id2 = r2.json()["item"]["id"]
+        self.assertEqual(r2.json()["open_count"], 6)
+        self.assertEqual(c.post(f"{url}/{dep_id}/respond", headers=lh, json={"action": "accept"}).status_code, 409)   # 이미 처리됨(대체)
+
+        # ── 수정 요청(특약): 자동 반영 없음 ──
+        cr = c.post(url, headers=lh, json={"kind": "change_request", "field": "special_terms", "body": "반려동물 관련 특약 문구 수정 요청"})
+        self.assertEqual(cr.status_code, 200, cr.text)
+        cr_id = cr.json()["item"]["id"]
+        self.assertEqual(c.post(url, headers=lh, json={"kind": "change_request", "field": "deposit", "body": "x"}).status_code, 400)
+
+        # ── 열린 요청이 있으면 Step 3 최종 동의 불가 ──
+        r = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"})
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("답하지 않은 제안", r.text)
+
+        # ── 응답 규칙: 내 글은 수락·거절 불가(철회만), 상대 글은 철회 불가 ──
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=th, json={"action": "accept"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "withdraw"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=sunho, json={"action": "accept"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "maybe"}).status_code, 400)
+        self.assertEqual(c.post(f"{url}/nope/respond", headers=lh, json={"action": "accept"}).status_code, 404)
+
+        # ── 수락 = 기존 update_terms: 값이 바뀌고 리비전이 오르며 양측 동의가 초기화된다 ──
+        rev0 = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        r = c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "accept"})
+        self.assertEqual(r.status_code, 200, r.text)
+        ss = r.json()["session"]
+        self.assertEqual(ss["terms"]["deposit"], 4600000)
+        self.assertEqual(ss["revision"], rev0 + 1)
+        self.assertFalse(ss["step3_lessor_agreed"] or ss["step3_tenant_agreed"])
+        self.assertTrue(any(m["kind"] == "system" and "수락했습니다" in m["body"] for m in c.get(url, headers=th).json()["messages"]))
+        # 나머지 제안: 임대인이 하나는 거절, 나머지는 수락
+        items = [m for m in c.get(url, headers=lh).json()["messages"] if m["kind"] == "proposal" and m["status"] == "open"]
+        self.assertEqual(len(items), 5)
+        for m in items:
+            action = "decline" if m["field"] == "maintenance_fee" else "accept"
+            self.assertEqual(c.post(f"{url}/{m['id']}/respond", headers=lh, json={"action": action}).status_code, 200, m["field"])
+        terms = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+        self.assertEqual((terms["contract_deposit"], terms["monthly_rent"], terms["move_in_date"], terms["lease_term_months"]),
+                         (400000, 280000, "2026-12-20", 24))
+        self.assertEqual(terms["maintenance_fee"], t0["maintenance_fee"])          # 거절한 제안은 반영되지 않는다
+        # 수정 요청이 남아 있는 동안은 여전히 동의 불가 → 요청자가 철회하면 동의 가능
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"}).status_code, 409)
+        self.assertEqual(c.post(f"{url}/{cr_id}/respond", headers=th, json={"action": "withdraw"}).status_code, 403)   # 요청자(임대인)만 철회
+        self.assertEqual(c.post(f"{url}/{cr_id}/respond", headers=lh, json={"action": "withdraw"}).status_code, 200)
+        self.assertEqual(c.get(url, headers=lh).json()["open_count"], 0)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "tenant"}).status_code, 200)
+
+        # ── 단계 ④ 이후: 제안·수정 요청 불가, 문의만 가능 ──
+        self.assertGreaterEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["current_step"], 4)
+        r = prop(th, "monthly_rent", 270000)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("단계 ④", r.text)
+        self.assertEqual(c.post(url, headers=lh, json={"kind": "change_request", "body": "x"}).status_code, 400)
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": "서명 전에 하나만 더 여쭙니다"}).status_code, 200)
+
+        # ── 기존 1:1 대화 목록에는 계약방 대화가 섞이지 않는다 ──
+        self.assertFalse(any(x.get("session_id") for x in c.get("/api/rent3_lessor/dashboard?branch=main").json()["chats"]))
+        self.assertTrue(DirectChat.find(session_id=sid))
+
+        # ── 관리인 지원 채팅(SupportMessage)과 섞이지 않는다: 같은 사람이어도 서로의 글이 보이지 않는다 ──
+        from apps.rent_dist._rent3_core import support as sup
+        self.assertEqual(c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"], [])
+        self.assertEqual(sup.SupportMessage.find(thread_user=sup.thread_key(tenant)), [])
+        sup.post_user_message(tenant, "지원 채팅 글")
+        self.assertNotIn("지원 채팅 글", [m["body"] for m in c.get(url, headers=th).json()["messages"]])
+
+        # ── 체결·취소된 계약방은 읽기 전용 ──
+        from apps.rent_dist._rent3_core import CoSignSession
+        ses = CoSignSession.get(sid)
+        ses.status = "CANCELLED"
+        ses.save(action="test_cancel")
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": "취소 후 문의"}).status_code, 409)
+        self.assertTrue(c.get(url, headers=th).json()["read_only"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,9 +31,22 @@ class DirectChat(PoolObj):
     quick_action_label: str = ""
     quick_action_url: str = ""
     is_read: bool = False
+    # ── 계약방 대화(contract_chat.py): session_id 가 있는 글. 기존 1:1 대화는 모두 기본값 그대로다. ──
+    session_id: str = ""                     # 공동계약 세션 id (없으면 입주 후 1:1 대화)
+    tenant_id: str = ""                      # 예비 임차인 단계에서는 비어 있을 수 있다
+    kind: str = "chat"                       # chat | question | proposal | change_request | system
+    step: int = 0                            # 글을 올린 시점의 계약 단계(1~5)
+    field: str = ""                          # 제안·수정 요청 대상 항목
+    proposal: Dict[str, Any] = Field(default_factory=dict)   # {field, label, old, new}
+    status: str = ""                         # 제안·수정 요청: open | accepted | declined | withdrawn
+    resolved_by: str = ""
+    resolved_at: str = ""
+    read_by_lessor: bool = False
+    read_by_tenant: bool = False
 
-    def summary(self) -> str:
-        return f"채팅 [{self.room_no}호] {self.sender_name}: {self.message[:24]}"
+    def summary(self) -> str:                # 본문은 넣지 않는다(풀 이벤트 로그는 지워지지 않으므로)
+        tag = f"계약방 {self.kind}" if self.session_id else "채팅"
+        return f"{tag} [{self.room_no}호] {self.sender_name}"
 
 
 class MaintenanceTicket(PoolObj):
