@@ -24,6 +24,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["RENT3_TODAY"] = "2026-10-29"
+        os.environ["RENT3_ADMIN_PROXY_STRICT"] = "0"   # 기존 시험은 admin 기본 토큰으로 수납·서명을 통과시킨다. 엄격 모드는 test_53
         cls.temp_pool = tempfile.mkdtemp(prefix="rent3_pool_test_")
         use_pool_dir(cls.temp_pool)
         ensure_pool_seeded(force=True)
@@ -38,6 +39,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def tearDownClass(cls):
         os.environ.pop("RENT3_POOL_DIR", None)
         os.environ.pop("RENT3_TODAY", None)
+        os.environ.pop("RENT3_ADMIN_PROXY_STRICT", None)
         if os.path.exists(cls.temp_pool):
             shutil.rmtree(cls.temp_pool, ignore_errors=True)
 
@@ -3136,7 +3138,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
         # 이동 링크와 단추
         for needle in ('href: "/rent3_contract/?role=lessor"', 'href: "manual.html"', 'href: "/rent3_tenant/"',
-                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"'):
+                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"', 'id: "btnSupportSetting"'):
             self.assertIn(needle, menu, needle)
         # 첫 화면에는 상단 탭 줄이 없다 (메뉴 서랍만)
         self.assertNotIn('data-tab="rooms"', idx)
@@ -3148,6 +3150,110 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 대상 호실 설정은 건물 메뉴 한 곳에만 입력칸이 있다 (세무 화면에는 바로가기만)
         self.assertEqual(app.count('id="txVatRooms"'), 1)
         self.assertIn('id="btnGoBldgTax"', app)
+
+    def test_53_admin_proxy_is_read_only_in_strict_mode(self):
+        """53. 엄격 모드(운영 기본): 관리인 토큰은 읽기만 되고, 당사자의 법적 행위·금전·계약 기록은 403. 허용 목록(A/S)은 통과. 호환 모드에선 예전처럼 동작."""
+        from unittest import mock
+        c = self.client                       # 기본 헤더 = admin 토큰
+        chic = self._login("chic")
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            # 읽기는 된다
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_tenant/myhome/tenant_201").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
+            # 금전·계약 기록은 403 (임대인 앱)
+            money = [
+                ("/api/rent3_lessor/payments/collect", {"branch": "main", "room_no": "201", "amount": 1000}),
+                ("/api/rent3_lessor/payments/sms-paste", {"branch": "main", "sms_text": "x"}),
+                ("/api/rent3_lessor/payments/edit", {"branch": "main", "pay_id": "x", "paid_date": "2026-01-01"}),
+                ("/api/rent3_lessor/outlays", {"branch": "main", "title": "x", "amount": 1000}),
+                ("/api/rent3_lessor/contracts/edit", {"branch": "main", "contract_id": "x", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}),
+                ("/api/rent3_lessor/checkout/calculate", {"branch": "main", "room_no": "201"}),
+                ("/api/rent3_lessor/building/tax-rooms", {"branch": "main", "vat_rooms": "201"}),
+            ]
+            for url, body in money:
+                r = c.post(url, json=body)
+                self.assertEqual(r.status_code, 403, url)
+                self.assertIn("보기 전용", r.text)
+            # 당사자의 법적 행위는 403 (계약 앱) — 역할 값과 무관
+            for suffix in ("step1", "step2", "step3/agree", "step4/sign", "step5/complete", "verify-id", "tenant-registry"):
+                for role in ("lessor", "tenant"):
+                    r = c.post(f"/api/rent3_contract/sessions/ghost/{suffix}", json={"role": role})
+                    self.assertEqual(r.status_code, 403, (suffix, role))
+                    self.assertIn("대신할 수 없습니다", r.text)
+            # 임차인 앱: 납부·정산 동의도 대신할 수 없다
+            self.assertEqual(c.post("/api/rent3_tenant/myhome/tenant_201/pay", json={}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3_tenant/checkout/ghost/agree", json={}).status_code, 403)
+            # 허용 목록(A/S 배정·접수)은 가드를 통과한다 (대상이 없어 다른 오류가 나도 403 은 아니다)
+            self.assertNotEqual(c.post("/api/rent3_lessor/tickets/ghost/assign", json={}).status_code, 403)
+            self.assertNotEqual(c.post("/api/rent3_tenant/myhome/tenant_201/tickets", json={}).status_code, 403)
+            # 임대인 본인 토큰은 영향이 없다
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).status_code, 200)
+            self.assertNotEqual(c.post("/api/rent3_lessor/contracts/edit", headers=chic,
+                                       json={"branch": "main", "contract_id": "ghost", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}).status_code, 403)
+        # 호환 모드(기존 시험 묶음): 관리인 쓰기가 가드에서 막히지 않는다
+        self.assertNotEqual(c.post("/api/rent3_lessor/contracts/edit",
+                                   json={"branch": "main", "contract_id": "ghost", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}).status_code, 403)
+
+    def test_54_signup_consent_and_support_toggle(self):
+        """54. 운영 모드: 가입은 개인정보 동의 필수(원격 지원은 선택), 동의 기록 없는 기존 사용자는 로그인 때 동의 화면을 거친다. 원격 지원 허용은 언제든 ON/OFF. 관리인은 해당 없음."""
+        from unittest import mock
+        c = self.client
+        login = lambda ident, pw="1212": c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                                                json={"login_mode": "account", "identifier": ident, "password": pw})
+        reg = lambda **kw: c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
+                                  json={"role": "prospect", "name": "동의테스트", "phone": "010-5555-0054", "password": "Reg#Pass12345", **kw})
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
+            # 가입: 개인정보 동의가 없으면 거부
+            r = reg()
+            self.assertEqual(r.status_code, 400, r.text)
+            self.assertIn("개인정보 수집·이용 동의는 필수", r.text)
+            # 동의하면 가입되고, 선택 항목(원격 지원)은 꺼진 채로 기록
+            r = reg(agree_privacy=True)
+            self.assertEqual(r.status_code, 200, r.text)
+            tok = r.json()["token"]
+            hdr = {"Authorization": f"Bearer {tok}"}
+            st = c.get("/api/rent3/pool/auth/consents", headers=hdr).json()
+            self.assertTrue(st["privacy_agreed"])
+            self.assertFalse(st["support_access"])
+            # 원격 지원 허용 ON → OFF 를 언제든 바꿀 수 있다
+            on = c.post("/api/rent3/pool/auth/consents/support", headers=hdr, json={"allow": True}).json()
+            self.assertTrue(on["support_access"])
+            off = c.post("/api/rent3/pool/auth/consents/support", headers=hdr, json={"allow": False}).json()
+            self.assertFalse(off["support_access"])
+            self.assertTrue(off["privacy_agreed"])
+            # 기존 사용자(시드 임대인, 동의 기록 없음): 로그인하면 토큰 없이 '동의 필요'
+            r = login("chic")
+            self.assertEqual(r.status_code, 200, r.text)
+            held = r.json()
+            self.assertTrue(held.get("needs_consent"))
+            self.assertNotIn("token", held)
+            self.assertTrue(held["consent_ticket"])
+            # 필수 동의 없이는 진행할 수 없고, 잘못된 확인표도 거부
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": held["consent_ticket"], "agree_privacy": False}).status_code, 400)
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": "ghost", "agree_privacy": True}).status_code, 401)
+            # 동의하면 보류했던 로그인 결과(토큰)를 받고, 동의 기록이 남는다
+            done = c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                          json={"ticket": held["consent_ticket"], "agree_privacy": True, "agree_support": True}).json()
+            self.assertTrue(done["token"])
+            self.assertEqual(done["user"]["role"], "lessor")
+            self.assertTrue(c.get("/api/rent3/pool/auth/consents", headers={"Authorization": f"Bearer {done['token']}"}).json()["support_access"])
+            # 확인표는 한 번만 쓸 수 있다
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": held["consent_ticket"], "agree_privacy": True}).status_code, 401)
+            # 다시 로그인하면 바로 토큰
+            again = login("chic").json()
+            self.assertTrue(again.get("token"))
+            self.assertFalse(again.get("needs_consent"))
+            # 관리인은 동의 화면 대상이 아니다
+            adm = login("admin").json()
+            self.assertTrue(adm.get("token"))
+            self.assertFalse(c.get("/api/rent3/pool/auth/consents", headers={"Authorization": f"Bearer {adm['token']}"}).json()["applicable"])
+        # 호환 모드(시연·기존 시험): 동의 없이도 가입·로그인된다
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "0"}):
+            self.assertTrue(login("sunho").json().get("token"))
 
 
 if __name__ == "__main__":

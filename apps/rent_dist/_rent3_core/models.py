@@ -162,6 +162,7 @@ class Lessor(PoolObj):
     franchise_docs: Dict[str, Any] = Field(default_factory=dict)  # 제출한 등기부(파일 해시)·AI 읽기·소유자 대조 결과
     applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
     franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
+    consents: Dict[str, Any] = Field(default_factory=dict)       # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
     password: str = "1212"
 
     def summary(self) -> str:
@@ -233,6 +234,7 @@ class Tenant(PoolObj):
     checkin_memo: str = ""
     status: str = "ACTIVE"                   # PROSPECT / ACTIVE / MOVED_OUT
     identity: Dict[str, Any] = Field(default_factory=dict)  # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
+    consents: Dict[str, Any] = Field(default_factory=dict)  # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
     password: str = "1212"
 
     def summary(self) -> str:

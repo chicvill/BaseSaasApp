@@ -369,10 +369,52 @@
               target_hint: effectiveHint,
             },
           });
-          saveSession(res.user, res.token);
-          Bass.updateAppAlert("success", res.message, `이동 경로: ${res.redirect_url}`);
-          window.location.href = res.redirect_url;
+          const done = await resolveConsent(res);
+          saveSession(done.user, done.token);
+          Bass.updateAppAlert("success", done.message, `이동 경로: ${done.redirect_url}`);
+          window.location.href = done.redirect_url;
         }, "본인인증 확인 및 이동 중... ⏳");
+      });
+    });
+  }
+
+  // ── 로그인 결과가 '동의 필요'이면 동의 화면을 거쳐 토큰을 받는다 ──
+  function resolveConsent(res) {
+    if (!res || !res.needs_consent) return Promise.resolve(res);
+    return new Promise((resolve, reject) => {
+      const bg = document.createElement("div");
+      bg.style.cssText = "position:fixed;inset:0;z-index:100000;background:rgba(15,23,42,.6);display:flex;align-items:center;justify-content:center;padding:14px;overflow-y:auto;";
+      bg.innerHTML = `<div style="background:#fff;color:#0f172a;border-radius:16px;max-width:460px;width:100%;padding:18px 16px;line-height:1.6;">
+        <div style="font-weight:800;font-size:17px;margin-bottom:6px;">${esc(res.user.name)}님, 동의가 필요합니다</div>
+        <div style="font-size:13px;margin-bottom:10px;">서비스를 이용하려면 아래 내용을 확인하고 동의해 주세요.</div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;">
+          <input type="checkbox" id="csPrivacy" style="margin-top:3px;">
+          <span><strong>(필수)</strong> 개인정보 수집·이용에 동의합니다. <a href="privacy.html" target="_blank" rel="noopener">전문 보기</a></span>
+        </label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:8px;">
+          <input type="checkbox" id="csSupport" style="margin-top:3px;">
+          <span><strong>(선택)</strong> 관리인 원격 지원 접속에 동의합니다. 도움을 요청하신 때에 한해 관리인이 <strong>보기만</strong> 하며 금전·계약 기록은 고칠 수 없고, 접속 기록이 남습니다. 메뉴에서 언제든 끌 수 있습니다.</span>
+        </label>
+        <div style="display:flex;gap:8px;margin-top:14px;">
+          <button type="button" id="csOk" class="or-btn or-btn--green" style="flex:1;padding:11px;">동의하고 계속</button>
+          <button type="button" id="csNo" class="or-btn" style="padding:11px;">취소</button>
+        </div></div>`;
+      document.body.appendChild(bg);
+      const close = () => bg.remove();
+      bg.querySelector("#csNo").addEventListener("click", () => { close(); reject(new Error("동의하지 않아 로그인을 취소했습니다.")); });
+      bg.querySelector("#csOk").addEventListener("click", async function () {
+        if (!bg.querySelector("#csPrivacy").checked) {
+          Bass.updateAppAlert("warning", "개인정보 수집·이용(필수)에 동의해 주세요.");
+          return;
+        }
+        try {
+          const done = await Bass.api(APP_ID, "/pool/auth/consent", {
+            method: "POST",
+            body: { ticket: res.consent_ticket, agree_privacy: true, agree_support: bg.querySelector("#csSupport").checked },
+          });
+          close();
+          resolve(done);
+        } catch (e) { close(); reject(e); }
       });
     });
   }
@@ -545,10 +587,11 @@
             target_hint: hint,
           },
         });
-        saveSession(res.user, res.token);
+        const done = await resolveConsent(res);
+        saveSession(done.user, done.token);
         closeAuthModal();
-        Bass.updateAppAlert("success", res.message, `자동 이동: ${res.redirect_url}`);
-        window.location.href = res.redirect_url;
+        Bass.updateAppAlert("success", done.message, `자동 이동: ${done.redirect_url}`);
+        window.location.href = done.redirect_url;
       } catch (err) {
         if (alertBox) {
           const isNotFound = (err.message || "").includes("찾을 수 없습니다");
@@ -596,6 +639,10 @@
     const alertBox = $("authModalAlert");
     if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
 
+    if (!$("regAgreePrivacy").checked) {
+      Bass.updateAppAlert("warning", "개인정보 수집·이용(필수)에 동의해 주세요.", "동의하지 않으면 가입할 수 없습니다.");
+      return;
+    }
     Bass.withLock($("btnSubmitRegister"), async () => {
       try {
         const res = await Bass.api(APP_ID, "/pool/auth/register", {
@@ -609,6 +656,8 @@
             address: $("regAddress").value,
             password: $("regPassword").value,
             target_hint: $("loginTargetHint").value || "",
+            agree_privacy: $("regAgreePrivacy").checked,
+            agree_support: $("regAgreeSupport").checked,
           },
         });
         saveSession(res.user, res.token);

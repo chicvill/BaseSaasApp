@@ -22,6 +22,14 @@
 
   const elMyhome = document.getElementById("viewMyhome");
   const elListings = document.getElementById("viewListings");
+  const btnSupportSetting = document.getElementById("btnSupportSetting");
+  if (btnSupportSetting) {
+    btnSupportSetting.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      R3Shell.openSupportSettings();
+    });
+  }
   const btnMyhome = document.getElementById("btnModeMyhome");
   const btnListings = document.getElementById("btnModeListings");
 

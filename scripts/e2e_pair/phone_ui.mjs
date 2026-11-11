@@ -151,6 +151,10 @@ async function api(method, url, body, token) {
 }
 async function loginUser(ident, pw) {
   const { json } = await api("POST", "/api/rent3/pool/auth/login", { login_mode: "account", identifier: ident, password: pw });
+  if (json && json.needs_consent) {   // 운영 모드: 동의 화면을 거쳐야 토큰을 받는다 — 시험에서는 동의하고 진행
+    const r = await api("POST", "/api/rent3/pool/auth/consent", { ticket: json.consent_ticket, agree_privacy: true, agree_support: false });
+    return r.json;
+  }
   return json;
 }
 async function asUser(dev, user, token, url) {

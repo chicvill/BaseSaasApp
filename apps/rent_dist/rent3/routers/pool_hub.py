@@ -15,6 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
+from apps.rent_dist._rent3_core import consent as cs
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -75,6 +76,18 @@ class PortalRegisterReq(BaseModel):
     address: str = ""
     branch: str = ""
     target_hint: str = ""
+    agree_privacy: bool = False          # (필수) 개인정보 수집·이용 동의
+    agree_support: bool = False          # (선택) 관리인 원격 지원 접속 동의
+
+
+class ConsentReq(BaseModel):
+    ticket: str
+    agree_privacy: bool = False
+    agree_support: bool = False
+
+
+class SupportToggleReq(BaseModel):
+    allow: bool
 
 
 class PortalInquiryReq(BaseModel):
@@ -371,9 +384,79 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         ratelimit.fail("login", keys)
         raise
     ratelimit.clear("login", keys[:1])
+    out = _gate_consent(out)
     from apps.rent_dist._rent3_core.authz import unrevoke_token
     unrevoke_token(out.get("token", ""))
     return out
+
+
+def _gate_consent(out: Dict[str, Any]) -> Dict[str, Any]:
+    """동의 기록이 없는 임대인·임차인은 토큰을 받기 전에 동의 화면을 거친다(운영 모드). 관리인·공동계약 입장은 해당 없음."""
+    role = str((out.get("user") or {}).get("role") or out.get("role") or "")
+    if not cs.consent_required() or role not in ("lessor", "tenant", "prospect") or not out.get("token"):
+        return out
+    uid = str((out.get("user") or {}).get("id") or "")
+    user = cs.find_user(role, uid)
+    if user is None or cs.has_valid_consent(user):
+        return out
+    return {
+        "success": True,
+        "needs_consent": True,
+        "consent_ticket": cs.hold_login(out, role, uid),
+        "consent_version": cs.CONSENT_VERSION,
+        "role": role,
+        "user": {"name": (out.get("user") or {}).get("name", ""), "role": role},
+        "message": "서비스를 이용하려면 개인정보 수집·이용에 동의해 주세요.",
+    }
+
+
+@router.post("/auth/consent")
+def portal_consent(req: ConsentReq) -> Dict[str, Any]:
+    """동의 화면에서 동의를 마치면 보류해 둔 로그인 결과(토큰 포함)를 돌려준다."""
+    if not req.agree_privacy:
+        raise DomainError(
+            "개인정보 수집·이용에 동의하지 않으면 서비스를 이용할 수 없습니다.",
+            hint="동의는 필수입니다. 원격 지원 접속 동의는 선택입니다.",
+        )
+    held = cs.take_login(req.ticket)
+    if held is None:
+        raise Unauthorized("동의 시간이 지났습니다. 다시 로그인해 주세요.")
+    out, kind, uid = held
+    user = cs.find_user(kind, uid)
+    if user is None:
+        raise NotFound("계정을 찾을 수 없습니다.")
+    cs.record_consent(user, True, bool(req.agree_support))
+    from apps.rent_dist._rent3_core.authz import unrevoke_token
+    unrevoke_token(out.get("token", ""))
+    return out
+
+
+@router.get("/auth/consents")
+def my_consents(request: Request) -> Dict[str, Any]:
+    """내 동의 상태(개인정보 동의, 관리인 원격 지원 허용 여부)."""
+    from apps.rent_dist._rent3_core.authz import need_claims
+    user = cs.user_from_claims(need_claims(request))
+    if user is None:
+        return {"success": True, "applicable": False, "message": "관리인 계정에는 해당하지 않습니다."}
+    return {"success": True, "applicable": True, **cs.consent_status(user)}
+
+
+@router.post("/auth/consents/support")
+def set_my_support_access(req: SupportToggleReq, request: Request) -> Dict[str, Any]:
+    """관리인 원격 지원 접속 허용을 켜고 끈다(언제든)."""
+    from apps.rent_dist._rent3_core.authz import need_claims
+    user = cs.user_from_claims(need_claims(request))
+    if user is None:
+        raise DomainError("관리인 계정에는 해당하지 않습니다.")
+    if not cs.has_valid_consent(user):
+        raise DomainError("먼저 개인정보 수집·이용에 동의해 주세요.", hint="다시 로그인하면 동의 화면이 나옵니다.")
+    cs.set_support_access(user, req.allow)
+    return {
+        "success": True,
+        "applicable": True,
+        **cs.consent_status(user),
+        "message": "관리인 원격 지원 접속을 허용했습니다." if req.allow else "관리인 원격 지원 접속을 허용하지 않도록 바꿨습니다.",
+    }
 
 
 def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
@@ -713,6 +796,9 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
     phone_digits = _digits(phone)
     if len(phone_digits) < 8:
         raise DomainError("올바른 휴대폰 번호 형식을 입력해 주세요.", hint="예: 010-1234-5678")
+    if cs.consent_required() and not req.agree_privacy:
+        raise DomainError("개인정보 수집·이용 동의는 필수입니다.", hint="가입 화면의 '(필수) 개인정보 수집·이용' 항목에 체크해 주세요.")
+    new_consents = cs.new_consents(req.agree_privacy, req.agree_support)
 
     if req.role == "lessor":
         uname = (req.username.strip() or f"host_{phone_digits[-4:]}").lower()
@@ -729,6 +815,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
             email=req.email.strip(),
             branch=branch_code,
             status="PENDING_APPROVAL",  # 가맹 심사 통과 전에는 매물 공개·직거래 불가
+            consents=new_consents,
             password=pwd.hash_password(pw),
         ).save("portal_lessor_registered", app_source="rent3_portal")
 
@@ -776,6 +863,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
         phone=phone,
         email=req.email.strip(),
         status="PROSPECT",
+        consents=new_consents,
         password=pwd.hash_password(pw),
     ).save("portal_prospect_registered", app_source="rent3_portal")
 

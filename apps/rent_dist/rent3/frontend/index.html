@@ -397,6 +397,17 @@
           <label for="regPassword">비밀번호 설정</label>
           <input id="regPassword" type="password" class="or-input" placeholder="8자 이상, 영문과 숫자를 모두 포함" autocomplete="new-password" required>
         </div>
+
+        <div class="or-field" style="font-size:12.5px; line-height:1.6;">
+          <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400;">
+            <input type="checkbox" id="regAgreePrivacy" style="margin-top:3px;">
+            <span><strong>(필수)</strong> 개인정보 수집·이용에 동의합니다. <a href="privacy.html" target="_blank" rel="noopener">전문 보기</a></span>
+          </label>
+          <label style="display:flex; gap:8px; align-items:flex-start; font-weight:400; margin-top:6px;">
+            <input type="checkbox" id="regAgreeSupport" style="margin-top:3px;">
+            <span><strong>(선택)</strong> 관리인 원격 지원 접속에 동의합니다. 도움을 요청하신 때에 한해 관리인이 <strong>보기만</strong> 하며 금전·계약 기록은 고칠 수 없고, 접속 기록이 남습니다. 나중에 메뉴에서 언제든 끌 수 있습니다.</span>
+          </label>
+        </div>
         <button type="submit" id="btnSubmitRegister" class="or-btn or-btn--green" style="width:100%; padding:12px;">
           ✨ 본인인증 가입 완료 및 이동 →
         </button>

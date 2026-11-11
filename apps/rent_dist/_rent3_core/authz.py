@@ -158,6 +158,40 @@ def is_admin(c: Dict[str, Any]) -> bool:
     return c.get("r") in ADMIN_ROLES
 
 
+# ── 관리인 대리 접속은 '보기 전용' ──
+# 관리인(admin)이 임대인·임차인·계약 화면에 들어가 사용자를 돕더라도, 당사자 본인의 법적 행위(본인인증·동의·서명·체결)와
+# 금전·계약 기록(수납·경비·계약 내용·정산 등)은 대신할 수 없다. 읽기(GET)는 그대로 허용하고, 쓰기는 아래 허용 목록만 통과한다.
+# 허용 목록 방식이라 나중에 새 기능이 생겨도 기본은 '막힘'이다.
+ADMIN_PROXY_WRITE_ALLOW = (
+    re.compile(r"/tickets/[^/]+/assign/?$"),        # 임대인 앱: A/S 협력업체 배정
+    re.compile(r"/myhome/[^/]+/tickets/?$"),        # 임차인 앱: A/S 접수
+    re.compile(r"/support(/|$)"),                    # 지원 채팅·접속 기록 (4A-3)
+)
+
+
+def proxy_strict() -> bool:
+    """RENT3_ADMIN_PROXY_STRICT: 기본 켜짐(엄격). '0' 이면 예전처럼 관리인이 모든 요청을 할 수 있다(기존 시험 묶음 호환용)."""
+    return os.environ.get("RENT3_ADMIN_PROXY_STRICT", "1").strip() != "0"
+
+
+def admin_proxy_guard(request: Request) -> None:
+    """관리인 토큰의 쓰기 요청을 허용 목록으로 제한한다(엄격 모드에서만)."""
+    if not proxy_strict() or request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    path = request.url.path
+    if any(rx.search(path) for rx in ADMIN_PROXY_WRITE_ALLOW):
+        return
+    if "/rent3_contract/" in path:
+        raise Forbidden(
+            "관리인은 계약 당사자의 본인인증·동의·서명을 대신할 수 없습니다.",
+            hint="계약 화면은 볼 수만 있습니다. 당사자(임대인·임차인) 본인이 직접 진행해야 합니다.",
+        )
+    raise Forbidden(
+        "관리인은 보기 전용입니다. 금전·계약 기록은 임대인 본인이 직접 처리해야 합니다.",
+        hint="전화로 안내하거나 지원 채팅으로 방법을 알려 주세요.",
+    )
+
+
 def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
@@ -195,6 +229,7 @@ async def lessor_scope(request: Request) -> Dict[str, Any]:
         return {}  # 상태 확인은 공개 (민감 정보 없음)
     c = need_claims(request)
     if is_admin(c):
+        admin_proxy_guard(request)
         return c
     if c.get("r") not in LESSOR_ROLES:
         raise Forbidden("임대인 계정으로 로그인해야 합니다.", hint="임차인 계정으로는 임대인 기능을 쓸 수 없습니다.")
@@ -213,6 +248,7 @@ def tenant_scope(request: Request) -> Dict[str, Any]:
     """임차인 마이홈 API: 본인(tenant_id 일치) 또는 본사 관리자만."""
     c = need_claims(request)
     if is_admin(c):
+        admin_proxy_guard(request)
         return c
     tid = request.path_params.get("tenant_id")
     if c.get("r") == "tenant" and tid and c.get("u") == f"tenant:{tid}":
@@ -221,8 +257,11 @@ def tenant_scope(request: Request) -> Dict[str, Any]:
 
 
 def any_user(request: Request) -> Dict[str, Any]:
-    """로그인한 누구나(임대인·임차인·관리자)."""
-    return need_claims(request)
+    """로그인한 누구나(임대인·임차인·관리자). 관리자의 쓰기는 보기 전용 규칙을 따른다."""
+    c = need_claims(request)
+    if is_admin(c):
+        admin_proxy_guard(request)
+    return c
 
 
 def staff_only(request: Request) -> Dict[str, Any]:
@@ -272,6 +311,7 @@ async def contract_scope(request: Request) -> Optional[Dict[str, Any]]:
         return None
     c = need_claims(request)
     if is_admin(c):
+        admin_proxy_guard(request)
         return c
     body = await _body(request)
 

@@ -54,6 +54,7 @@
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
     { title: "도움말 · 이동", items: [
+      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting" },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
       { label: "🔑 임차인 앱", href: "/rent3_tenant/" },
       { label: "👑 관리인 앱", href: "/rent3_admin/" },
@@ -696,6 +697,14 @@
         closeModal();
         await refresh();
       });
+    });
+  }
+  const btnSupportSetting = document.getElementById("btnSupportSetting");
+  if (btnSupportSetting) {
+    btnSupportSetting.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      R3Shell.openSupportSettings();
     });
   }
   const btnEditBuilding = document.getElementById("btnEditBuilding");
