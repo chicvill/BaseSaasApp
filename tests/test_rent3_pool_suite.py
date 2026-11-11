@@ -3117,6 +3117,38 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(prog_est["progressive_deduction"], 5_760_000)
         self.assertGreater(prog_est["total_tax_inc_local"], 0)
 
+    def test_52_lessor_menu_reaches_every_screen(self):
+        """52. 임대인 첫 화면은 수납 현황 하나뿐이고, 나머지 기능은 모두 ☰ 메뉴에서 닿는다(빠진 기능 0개). 공통 틀 파일이 서빙된다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        # 공통 틀(r3_modal / r3_shell)이 /shared/ui 로 서빙되고 화면이 불러온다
+        for name in ("r3_modal.js", "r3_shell.js"):
+            self.assertEqual(self.client.get(f"/shared/ui/{name}", headers=self.NOAUTH).status_code, 200, name)
+            self.assertIn(f"/shared/ui/{name}", idx)
+        # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
+        menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
+        tabs = set(re.findall(r'tab: "(\w+)"', menu))
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "notice", "bldgtax"})
+        for t in tabs - {"ledger"}:
+            self.assertIn(f'currentTab === "{t}"', app, t)
+            self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
+        # 이동 링크와 단추
+        for needle in ('href: "/rent3_contract/?role=lessor"', 'href: "manual.html"', 'href: "/rent3_tenant/"',
+                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"'):
+            self.assertIn(needle, menu, needle)
+        # 첫 화면에는 상단 탭 줄이 없다 (메뉴 서랍만)
+        self.assertNotIn('data-tab="rooms"', idx)
+        self.assertNotIn('data-tab="ledger"', idx)
+        self.assertIn("data-r3-drawer", idx)
+        # 퇴실정산은 호실 카드 '전출' 창이 맡는다 — 운영 화면에는 따로 두지 않는다
+        self.assertNotIn("btnCalcCo", app)
+        self.assertIn("showMoveOutModal", app)
+        # 대상 호실 설정은 건물 메뉴 한 곳에만 입력칸이 있다 (세무 화면에는 바로가기만)
+        self.assertEqual(app.count('id="txVatRooms"'), 1)
+        self.assertIn('id="btnGoBldgTax"', app)
+
 
 if __name__ == "__main__":
     unittest.main()

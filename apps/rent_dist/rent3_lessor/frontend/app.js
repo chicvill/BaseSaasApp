@@ -36,6 +36,33 @@
   const elBranch = document.getElementById("branchSelect");
   const elTabContent = document.getElementById("tabContent");
 
+  // ☰ 메뉴: 첫 화면(수납 현황) 외의 모든 기능은 여기서 들어간다. 항목을 빼면 기능에 닿을 수 없으니 test_52 가 목록을 점검한다.
+  const LESSOR_MENU = [
+    { items: [{ label: "💰 수납 현황", tab: "ledger" }] },
+    { title: "계약 · 매물", items: [
+      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
+      { label: "📸 중개 계약서 사진 등록", tab: "broker" },
+      { label: "🏷️ 임대매물 등록", tab: "rooms" },
+    ] },
+    { title: "세무 · 경비", items: [{ label: "🧾 부가세 · 종소세 · 경비", tab: "tax" }] },
+    { title: "운영", items: [
+      { label: "🔧 A/S · 메시지", tab: "ops" },
+      { label: "🔔 일괄 납입 통보", tab: "notice" },
+    ] },
+    { title: "건물", items: [
+      { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
+      { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
+    ] },
+    { title: "도움말 · 이동", items: [
+      { label: "📘 이용 매뉴얼", href: "manual.html" },
+      { label: "🔑 임차인 앱", href: "/rent3_tenant/" },
+      { label: "👑 관리인 앱", href: "/rent3_admin/" },
+      { label: "🌐 Data Pool 관제", href: "/rent3/pool.html" },
+    ] },
+  ];
+  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), LESSOR_MENU);
+  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "부가세 · 종소세 · 경비", ops: "A/S · 메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
+
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
   }
@@ -140,14 +167,7 @@
 
   // 머리글: 건물이름[아이디] 현재 일시 (1분마다 갱신)
   let hdrName = "";
-  function tickClock() {
-    const n = new Date();
-    const p = (v) => String(v).padStart(2, "0");
-    const t = `${n.getFullYear()}.${p(n.getMonth() + 1)}.${p(n.getDate())} ${p(n.getHours())}:${p(n.getMinutes())}`;
-    const el = document.getElementById("bldgTitle");
-    if (el && hdrName) el.textContent = `🏢 ${hdrName} ${t}`;
-  }
-  setInterval(tickClock, 30000);
+  const tickClock = R3Shell.startClock(document.getElementById("bldgTitle"), () => hdrName);
 
   async function refresh() {
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
@@ -167,12 +187,9 @@
     elBranch.hidden = !isAdmin;   // 건물 선택은 본사 관리자만
 
     const fin = dash.financial_summary || {};
-    document.getElementById("kpiGrid").innerHTML = `
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">가동 호실 / 전체</div><div class="kpi-val">${fin.occupied_rooms || 0} / ${fin.total_rooms || 0}실 (${fin.occupancy_rate || 0}%)</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">지점 미납 합계 (가짜체납 0)</div><div class="kpi-val" style="color:${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">${fmtWon(dash.total_unpaid_branch)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">연간 누적 수납액</div><div class="kpi-val">${fmtWon(fin.gross_revenue)}</div></div>
-      <div class="kpi-box"><div class="bass-muted" style="font-size:12px;">순운영이익 (NOI)</div><div class="kpi-val" style="color:var(--primary-2);">${fmtWon(fin.noi)}</div></div>
-    `;
+    document.getElementById("kpiGrid").innerHTML =
+      `<span>미납 합계 <strong style="color:${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">${fmtWon(dash.total_unpaid_branch)}</strong></span>` +
+      `<span class="bass-muted">가동 ${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실 (${fin.occupancy_rate || 0}%)</span>`;
 
     renderTab();
   }
@@ -196,23 +213,25 @@
 
   function renderTab() {
     if (!dash) return;
+    if (currentTab !== "ledger" && !TAB_TITLES[currentTab]) currentTab = "ledger";
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === currentTab));
+    document.getElementById("backBar").hidden = currentTab === "ledger";
+    document.getElementById("backTitle").textContent = TAB_TITLES[currentTab] || "";
     if (currentTab === "ledger") renderLedgerTab();
     else if (currentTab === "broker") renderBrokerTab();
     else if (currentTab === "tax") renderTaxTab();
     else if (currentTab === "ops") renderOpsTab();
-    else renderRoomsTab();
+    else if (currentTab === "notice") renderNoticeTab();
+    else if (currentTab === "bldgtax") renderBldgTaxTab();
+    else if (currentTab === "rooms") renderRoomsTab();
   }
+  document.getElementById("btnBackLedger").addEventListener("click", () => switchTab("ledger"));
 
   // ── 수납 현황 탭: 호실 풀다운 하나 + 버튼 네 개(수납내역·계약내용·만기통보·전출). 자세한 설명은 이용 매뉴얼에 둔다. ──
   // 호실 카드·모달 스타일: index.html 이 브라우저에 캐시돼도 화면이 깨지지 않도록 app.js 가 직접 넣는다
   (function () {
     const st = document.createElement("style");
     st.textContent = `
-    .r3-lbl { display: block; font-size: 13px; font-weight: 700; margin: 2px 0 4px; }
-    .r3-fld { display: grid; gap: 3px; font-size: 12.5px; }
-    .r3-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-    .r3-msg { width: 100%; font-size: 13px; line-height: 1.5; }
     .rc-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
     .rc-title { font-size: 17px; }
     .rc-title span { font-size: 15px; margin-left: 4px; }
@@ -222,11 +241,6 @@
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
     .rc-info { font-size: 13px; line-height: 1.7; }
-    .r3-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; align-items: flex-end; justify-content: center; }
-    .r3-modal__box { width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto; background: #17172e; color: #eceaf7; border: 1px solid var(--border); border-radius: 16px 16px 0 0; padding: 14px 14px 22px; }
-    @media (min-width: 640px) { .r3-modal { align-items: center; } .r3-modal__box { border-radius: 16px; } }
-    .r3-modal__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 15px; }
-    .r3-modal__x { min-width: 40px; min-height: 40px; font-size: 18px; }
     .pr { display: grid; grid-template-columns: 44px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 40px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
@@ -258,53 +272,10 @@
     }).length;
   }
 
-  async function copyText(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (_) {
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.cssText = "position:fixed;opacity:0;";
-      document.body.appendChild(ta);
-      ta.select();
-      let ok = false;
-      try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
-      ta.remove();
-      return ok;
-    }
-  }
-
-  // 복사 후 휴대폰이면 임차인 문자창을 연다(붙여넣기만 하면 됨)
-  async function copyAndSms(text, phone) {
-    const ok = await copyText(text);
-    Bass.updateAppAlert(ok ? "success" : "warning", ok ? "복사했습니다 — 임차인 문자창에 붙여넣어 보내세요." : "복사에 실패했습니다. 글을 직접 길게 눌러 복사해 주세요.");
-    const d = digitsOf(phone);
-    if (ok && d && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
-      const a = document.createElement("a");
-      a.href = "sms:" + d;
-      a.click();
-    }
-  }
-
-  function closeModal() {
-    const m = document.getElementById("r3Modal");
-    if (m) m.remove();
-  }
-
-  function openModal(title, html) {
-    closeModal();
-    const bg = document.createElement("div");
-    bg.className = "r3-modal";
-    bg.id = "r3Modal";
-    bg.innerHTML = `<div class="r3-modal__box" role="dialog" aria-modal="true">
-      <div class="r3-modal__head"><strong>${title}</strong><button type="button" class="bass-btn r3-modal__x" aria-label="닫기">✕</button></div>
-      <div class="r3-modal__body">${html}</div></div>`;
-    bg.addEventListener("mousedown", (e) => { if (e.target === bg) closeModal(); });
-    bg.querySelector(".r3-modal__x").addEventListener("click", closeModal);
-    document.body.appendChild(bg);
-    return bg.querySelector(".r3-modal__body");
-  }
+  const copyText = R3.copyText;
+  const copyAndSms = R3.copyAndSms;
+  const closeModal = R3.closeModal;
+  const openModal = R3.openModal;
 
   const $m = (id) => document.getElementById(id);
   const msgOf = (n, v) => `<textarea id="${n}" class="bass-input r3-msg" rows="6">${Bass.escapeHtml(v)}</textarea>`;
@@ -789,7 +760,6 @@
 
   function renderLedgerTab() {
     const rooms = dash.rooms || [];
-    const noticeRooms = dash.expiry_notice_rooms || [];
     if (!roomOf(selRoomNo)) {
       const late = rooms.find((x) => unpaidCount(x) > 0);
       selRoomNo = (late || rooms[0] || {}).room_no || "";
@@ -805,9 +775,15 @@
         <select id="roomPick" class="bass-select" style="flex:1;min-width:0;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
       </div>
       <div id="roomPanel"></div>
+    `;
+    document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
+    renderRoomPanel();
+  }
 
-      <details style="margin-bottom:14px;">
-        <summary style="cursor:pointer;font-weight:800;padding:12px 4px;">📂 그 밖의 안내 (만기 예고 · 납입일 사전/미납 통보)</summary>
+  // 운영 ▸ 일괄 납입 통보: 만기 6~2개월 구간 호실 현황 + D-3 사전 통보 · D+1 미납 통보 일괄 실행
+  function renderNoticeTab() {
+    const noticeRooms = dash.expiry_notice_rooms || [];
+    elTabContent.innerHTML = `
         <div style="margin-top:12px;">
       ${noticeRooms.length > 0 ? `
         <div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
@@ -861,10 +837,7 @@
       </div>
 
         </div>
-      </details>
     `;
-    document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
-    renderRoomPanel();
 
     const elRefDate = document.getElementById("billingRefDate");
     if (elRefDate) {
@@ -1255,26 +1228,9 @@
         <button id="btnDlExemptCsv" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📥 면세 사업장현황신고 CSV</button>
       </div>
 
-      <div class="bass-card" style="margin-bottom:12px;">
-        <h3 style="margin:0 0 6px;">🏢 건물 부가세 · 종합소득세 대상 호실 설정</h3>
-        <div class="r3-grid">
-          <label class="r3-fld">부가세 납부 대상 호실 (사무실·상가)
-            <input id="txVatRooms" class="bass-input" value="${Bass.escapeHtml(vatRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303">
-          </label>
-          <label class="r3-fld">종합소득세 신고 대상 호실
-            <input id="txIncRooms" class="bass-input" value="${Bass.escapeHtml(incRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303, 401~703">
-          </label>
-        </div>
-        <div class="bass-row" style="gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;">
-          <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-            <input id="txSyncContracts" type="checkbox"> 현재 입주 계약에도 과세 여부 즉시 동기화
-          </label>
-          <button id="btnSaveTaxRooms" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 대상 호실 저장</button>
-        </div>
-        <div class="bass-muted" style="font-size:12px;margin-top:6px;">
-          현재 설정: 부가세 대상 <strong>${vatRoomsList.length}개 호실</strong> (${Bass.escapeHtml(vatRoomsList.join(", ") || "없음")}) ·
-          종소세 대상 <strong>${incRoomsList.length}개 호실</strong>
-        </div>
+      <div class="bass-row" style="justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <span class="bass-muted" style="font-size:13px;">부가세 대상 ${vatRoomsList.length}개 호실 · 종소세 대상 ${incRoomsList.length}개 호실</span>
+        <button id="btnGoBldgTax" class="bass-btn bass-btn--sm" type="button">📑 대상 호실 설정 →</button>
       </div>
 
       <div class="bass-card" style="margin-bottom:12px;">
@@ -1555,21 +1511,7 @@
       });
     });
 
-    document.getElementById("btnSaveTaxRooms").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/building/tax-rooms", {
-          method: "POST",
-          body: {
-            branch: currentBranch,
-            vat_rooms: document.getElementById("txVatRooms").value,
-            income_tax_rooms: document.getElementById("txIncRooms").value,
-            sync_contracts: Boolean(document.getElementById("txSyncContracts").checked),
-          },
-        });
-        Bass.updateAppAlert("success", res.message);
-        await refresh();
-      });
-    });
+    document.getElementById("btnGoBldgTax").addEventListener("click", () => switchTab("bldgtax"));
     document.getElementById("btnAddOutlay").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, "/outlays", {
@@ -1596,6 +1538,58 @@
       const o = (d.outlays || []).find((x) => x.id === row.dataset.id);
       if (o) showOutlayModal(o, cats);
     }));
+  }
+
+  // 건물 ▸ 부가세 · 소득세 대상 호실 설정 (설정 화면은 이곳 한 곳에만 둔다)
+  async function renderBldgTaxTab() {
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    let d;
+    try {
+      d = await Bass.api(APP_ID, `/tax/summary?branch=${encodeURIComponent(currentBranch)}&year=${taxYear || Number((dash.today || "").slice(0, 4))}`);
+    } catch (e) { Bass.showError(e); return; }
+    if (currentTab !== "bldgtax") return;
+    const fin = d.summary || {};
+    const bCfg = d.building_tax_config || {};
+    const vatRoomsList = bCfg.vat_rooms || fin.vat_rooms || [];
+    const incRoomsList = bCfg.income_tax_rooms || fin.income_tax_rooms || [];
+    elTabContent.innerHTML = `
+      <div class="bass-card" style="margin-bottom:12px;">
+        <h3 style="margin:0 0 6px;">🏢 건물 부가세 · 종합소득세 대상 호실 설정</h3>
+        <div class="r3-grid">
+          <label class="r3-fld">부가세 납부 대상 호실 (사무실·상가)
+            <input id="txVatRooms" class="bass-input" value="${Bass.escapeHtml(vatRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303">
+          </label>
+          <label class="r3-fld">종합소득세 신고 대상 호실
+            <input id="txIncRooms" class="bass-input" value="${Bass.escapeHtml(incRoomsList.join(", "))}" placeholder="예: 201, 202, 203, 301, 302, 303, 401~703">
+          </label>
+        </div>
+        <div class="bass-row" style="gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap;">
+          <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input id="txSyncContracts" type="checkbox"> 현재 입주 계약에도 과세 여부 즉시 동기화
+          </label>
+          <button id="btnSaveTaxRooms" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 대상 호실 저장</button>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+          현재 설정: 부가세 대상 <strong>${vatRoomsList.length}개 호실</strong> (${Bass.escapeHtml(vatRoomsList.join(", ") || "없음")}) ·
+          종소세 대상 <strong>${incRoomsList.length}개 호실</strong>
+        </div>
+      </div>
+    `;
+    document.getElementById("btnSaveTaxRooms").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/building/tax-rooms", {
+          method: "POST",
+          body: {
+            branch: currentBranch,
+            vat_rooms: document.getElementById("txVatRooms").value,
+            income_tax_rooms: document.getElementById("txIncRooms").value,
+            sync_contracts: Boolean(document.getElementById("txSyncContracts").checked),
+          },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+      });
+    });
   }
 
   function showInvoiceStatusModal(inv) {
@@ -1761,9 +1755,7 @@
 
   function renderOpsTab() {
     const tickets = dash.tickets || [];
-    const checkouts = dash.checkouts || [];
     const chats = dash.chats || [];
-    const occRooms = (dash.rooms || []).filter((r) => r.is_occupied);
 
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
@@ -1782,34 +1774,6 @@
             ` : `<div style="font-size:12.5px;color:var(--ok);">완료 내역: ${fmtWon(t.repair_cost)} (${t.cost_burden})</div>`}
           </div>
         `).join("") : `<p class="bass-muted">접수된 A/S 티켓이 없습니다.</p>`}
-      </div>
-
-      <div class="bass-card" style="margin-bottom:14px;">
-        <h3>🚪 퇴실 보증금 공제 정산 & 공실 자동 전환</h3>
-        <div class="field-grid" style="margin:10px 0;">
-          <div>
-            <label class="bass-label">퇴실 대상 호실</label>
-            <select id="coRoomSel" class="bass-select">
-              ${occRooms.map((r) => `<option value="${r.room_no}">${r.room_no}호 (${Bass.escapeHtml(r.tenant ? r.tenant.name : "")})</option>`).join("")}
-            </select>
-          </div>
-          <div><label class="bass-label">당일 공과금 정산액(원)</label><input id="coUtil" type="number" class="bass-input" value="35000"></div>
-          <div><label class="bass-label">약정 입주청소비(원)</label><input id="coClean" type="number" class="bass-input" value="70000"></div>
-        </div>
-        <button id="btnCalcCo" class="bass-btn bass-btn--primary" type="button">📋 미납월세 자동합산 & 퇴실 정산서 발행</button>
-
-        <div style="margin-top:12px;">
-          ${checkouts.map((c) => `
-            <div class="room-card">
-              <div class="bass-row" style="justify-content:space-between;">
-                <strong>${c.room_no}호 (${Bass.escapeHtml(c.tenant_name)}) — 실반환액 ${fmtWon(c.refund_amount)}</strong>
-                <span class="bass-badge ${c.status === "COMPLETED" ? "bass-badge--ok" : "bass-badge--info"}">${c.status}</span>
-              </div>
-              <div class="bass-muted" style="font-size:12.5px;margin:4px 0;">원보증금 ${fmtWon(c.deposit_original)} − 미납월세 ${fmtWon(c.unpaid_rent_deduction)} − 공과금 ${fmtWon(c.utility_settlement)} − 청소비 ${fmtWon(c.cleaning_fee)}</div>
-              ${c.status !== "COMPLETED" ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-complete-co" data-id="${c.id}" type="button">💸 보증금 반환 완료 & 호실 즉시 공실 전환</button>` : ""}
-            </div>
-          `).join("")}
-        </div>
       </div>
 
       <div class="bass-card">
@@ -1847,40 +1811,6 @@
             method: "POST",
             body: { repair_cost: 60000, cost_burden: "LANDLORD", resolution_note: "노후 부품 신품 무상 교체 완료" },
           });
-          Bass.updateAppAlert("success", res.message);
-          await refresh();
-        });
-      });
-    });
-
-    const btnCalc = document.getElementById("btnCalcCo");
-    if (btnCalc) {
-      btnCalc.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const roomNo = document.getElementById("coRoomSel").value;
-          if (!roomNo) {
-            Bass.updateAppAlert("warning", "퇴실 정산할 입주 호실이 없습니다.");
-            return;
-          }
-          const res = await Bass.api(APP_ID, "/checkout/calculate", {
-            method: "POST",
-            body: {
-              branch: currentBranch,
-              room_no: roomNo,
-              utility_settlement: Number(document.getElementById("coUtil").value || 0),
-              cleaning_fee: Number(document.getElementById("coClean").value || 0),
-            },
-          });
-          Bass.updateAppAlert("success", res.message);
-          await refresh();
-        });
-      });
-    }
-
-    elTabContent.querySelectorAll(".btn-complete-co").forEach((btn) => {
-      btn.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          const res = await Bass.api(APP_ID, `/checkout/${btn.dataset.id}/complete`, { method: "POST" });
           Bass.updateAppAlert("success", res.message);
           await refresh();
         });
