@@ -15,7 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs, support as sup
+from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -385,6 +385,7 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         raise
     ratelimit.clear("login", keys[:1])
     sup.purge_expired()   # 스케줄러가 없으므로 로그인 때 기한 지난 지원 채팅·접속 기록을 지운다
+    contract_chat.purge_expired()   # 계약방 대화: 취소 후 90일 · 체결 계약 종료 후 5년(10분에 한 번만 실제로 훑는다)
     out = _gate_consent(out)
     from apps.rent_dist._rent3_core.authz import unrevoke_token
     unrevoke_token(out.get("token", ""))

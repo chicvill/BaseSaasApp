@@ -39,6 +39,10 @@ REQUEST_FIELDS: Dict[str, str] = {"special_terms": "특약사항", "other": "기
 CONTRACT_KINDS = ("question", "proposal", "change_request", "system")
 MAX_BODY = 1000
 LAST_NEGOTIATION_STEP = 3
+CANCELLED_RETENTION_DAYS = 90        # 체결되지 못하고 취소된 계약방 대화: 취소 후 90일
+CONCLUDED_RETENTION_DAYS = 1825      # 체결된 계약의 협상 대화: 계약 종료(퇴실·해지·재계약 마감) 후 5년
+PURGED_NOTE = "보관 기간(계약 종료 후 5년)이 지나 삭제되었습니다. 체결 당시 기록한 해시만 남아 있습니다."
+_last_purge = 0.0
 
 
 def _won(n: Any) -> str:
@@ -113,6 +117,62 @@ def system_note(session: Any, text: str, step: Optional[int] = None) -> DirectCh
     return _sys(session, text, step)
 
 
+def _day(iso: str) -> Optional[date]:
+    try:
+        return date.fromisoformat(str(iso)[:10])
+    except ValueError:
+        return None
+
+
+def purge_expired(force: bool = False) -> Dict[str, int]:
+    """보관 기간이 지난 계약방 대화를 지운다(지연 삭제: 로그인·목록 조회 때 호출, 스케줄러 없음).
+    - 취소된 계약방: 취소 시각(cancelled_at, 없으면 updated_at)으로부터 90일이 지나면 삭제.
+    - 체결된 계약: 계약이 ACTIVE 인 동안에는 절대 지우지 않고, 종료(ended_at → move_out_date → updated_at) 후 5년이 지나면 삭제.
+      이때 Contract.chat_purged_at 을 남겨, 해시가 달라진 것(변조)과 기간 만료로 지운 것을 구분한다.
+    조회가 잦아 10분에 한 번만 실제로 훑는다(force=True 는 항상)."""
+    import time
+    from .cosign import CoSignSession
+    from .models import Contract, date_today
+    global _last_purge
+    now_t = time.time()
+    if not force and now_t - _last_purge < 600:
+        return {"cancelled_sessions": 0, "contracts": 0, "messages": 0}
+    _last_purge = now_t
+    today = date_today()
+    n_msg = n_sess = n_ct = 0
+
+    def wipe(session_id: str) -> int:
+        n = 0
+        for m in messages_of(session_id):
+            m.delete(action="contract_chat_expired", app_source="rent3_contract")
+            n += 1
+        return n
+
+    for s in CoSignSession.all():
+        if s.status != "CANCELLED" or getattr(s, "chat_purged_at", ""):
+            continue
+        d = _day(s.cancelled_at or s.updated_at)
+        if d is not None and (today - d).days > CANCELLED_RETENTION_DAYS:
+            n_msg += wipe(s.id)
+            s.chat_purged_at = now_iso()
+            s.save(action="contract_chat_purged", app_source="rent3_contract")
+            n_sess += 1
+    for ct in Contract.all():
+        if ct.status == "ACTIVE" or not ct.cosign_session_id or ct.chat_purged_at:
+            continue                                   # 유효한 계약의 대화는 지우지 않는다
+        d = _day(ct.ended_at or ct.move_out_date or ct.updated_at)
+        if d is not None and (today - d).days > CONCLUDED_RETENTION_DAYS:
+            n_msg += wipe(ct.cosign_session_id)
+            ct.chat_purged_at = now_iso()
+            ct.save(action="contract_chat_purged", app_source="rent3_contract")
+            sess = CoSignSession.get(ct.cosign_session_id)      # 계약방 화면도 '삭제됨'을 알 수 있게 표시
+            if sess is not None and not sess.chat_purged_at:
+                sess.chat_purged_at = ct.chat_purged_at
+                sess.save(action="contract_chat_purged", app_source="rent3_contract")
+            n_ct += 1
+    return {"cancelled_sessions": n_sess, "contracts": n_ct, "messages": n_msg}
+
+
 def messages_of(session_id: str) -> List[DirectChat]:
     return sorted((m for m in DirectChat.find(session_id=session_id) if m.kind in CONTRACT_KINDS), key=lambda m: (m.created_at, m.id))
 
@@ -169,6 +229,8 @@ def list_for(session: Any, role: Optional[str], mark_read: bool = True) -> Dict[
         "open_count": len(open_items(session.id)),
         "can_negotiate": session.status == "IN_PROGRESS" and session.current_step <= LAST_NEGOTIATION_STEP,
         "read_only": session.status != "IN_PROGRESS",
+        "purged": bool(getattr(session, "chat_purged_at", "")),
+        "purged_note": "보관 기간이 지나 삭제되었습니다." if getattr(session, "chat_purged_at", "") else "",
         "negotiable_fields": {k: v[0] for k, v in PROPOSAL_FIELDS.items()},
         "request_fields": REQUEST_FIELDS,
         "unread": unread,

@@ -291,6 +291,7 @@ class BrokerContractOnboarding:
             old_ct = Contract.get(room.active_contract_id)
             if old_ct and old_ct.status == "ACTIVE":
                 old_ct.status = "RENEWED"
+                old_ct.ended_at = date_today().isoformat()
                 old_ct.save(action="contract_replaced_by_broker_paper", app_source=app_source)
 
         # 1) Tenant 생성 또는 활성화 -> users.json 즉시 업데이트

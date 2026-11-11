@@ -118,6 +118,7 @@ class CoSignSession(PoolObj):
     cancel_reason: str = ""                  # 취소 사유(당사자 취소·재열람 변동·자동 해제) — 상대방 화면에 그대로 보인다
     cancelled_by: str = ""                   # lessor / tenant / system
     cancelled_at: str = ""
+    chat_purged_at: str = ""                 # 취소 후 90일(보관 기간) 만료로 계약방 대화를 지운 시각
     registry_ai_times: List[str] = Field(default_factory=list)  # AI 읽기 호출 시각(월별 집계용)
     registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
     registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
@@ -1192,6 +1193,7 @@ class CoSignSession(PoolObj):
             old_ct = Contract.get(self.prev_contract_id)
             if old_ct:
                 old_ct.status = "RENEWED"
+                old_ct.ended_at = date_today().isoformat()
                 old_ct.save(action="contract_renewed_replaced", app_source=app_source)
 
         # 2) Contract 원장 객체 생성 -> contracts.json 즉시 업데이트

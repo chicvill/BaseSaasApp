@@ -1824,7 +1824,7 @@
     try { d = await Bass.api(APP_ID, `/messages/rooms/${encodeURIComponent(room)}?branch=${encodeURIComponent(currentBranch)}`); } catch (e) { Bass.showError(e); msgRoom = ""; return; }
     if (currentTab !== "messages" || msgRoom !== room) return;
     const neg = d.negotiation || { count: 0, items: [] };
-    const digestLine = neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다"
+    const digestLine = neg.purged ? (neg.purged_note || "보관 기간이 지나 삭제되었습니다.") : neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다"
       : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다 — 기록이 바뀌었을 수 있습니다"
       : "체결 전 기록입니다";
     const bubble = (m) => m.kind === "system"
@@ -1835,7 +1835,7 @@
       <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
       <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
       <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
-      <details style="margin-top:14px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.count}건 ${neg.count ? "보기" : ""}</summary>
+      <details style="margin-top:14px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.purged ? `(보관 기간 만료로 삭제됨 · 당시 ${neg.original_count}건)` : `${neg.count}건 ${neg.count ? "보기" : ""}`}</summary>
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
         ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "임차인" : "안내")}: ${Bass.escapeHtml(m.body)}${m.status ? ` <span class="bass-badge">${Bass.escapeHtml(({ open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" })[m.status] || m.status)}</span>` : ""}</div>`).join("")}
       </details>`;

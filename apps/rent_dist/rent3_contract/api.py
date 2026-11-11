@@ -456,6 +456,7 @@ def _chat_actor(request: Request, s) -> Dict[str, str]:
 @router.get("/sessions/{session_id}/messages")
 def contract_messages(session_id: str, request: Request, mark_read: bool = True):
     """계약방 대화 목록(문의·제안·수정 요청·안내). 당사자만. mark_read=false 면 읽음 처리하지 않는다(주기적 확인용)."""
+    contract_chat.purge_expired()        # 보관 기간 지난 대화 정리(10분에 한 번)
     s = CoSignSession.by_code_or_id(session_id)
     who = _chat_actor(request, s)
     return {"success": True, **contract_chat.list_for(s, who["role"] or None, mark_read=mark_read)}
@@ -476,10 +477,13 @@ def contract_chat_digest(session_id: str):
     """체결 때 기록한 협상 기록 해시와 지금 내용이 맞는지 확인한다(읽음 표시는 해시에 영향이 없다). 당사자만."""
     s = CoSignSession.by_code_or_id(session_id)
     ct = Contract.get(s.created_contract_id) if s.created_contract_id else None
-    computed, n = contract_chat.compute_digest(s.id)
     stored = ct.chat_digest if ct else ""
+    if ct and ct.chat_purged_at:         # 보관 기간 만료로 지웠다 — 변조(match=false)와 구분한다
+        return {"success": True, "concluded": True, "stored": stored, "computed": "", "count": 0, "match": None, "purged": True,
+                "purged_at": ct.chat_purged_at, "original_count": ct.chat_digest_count, "note": contract_chat.PURGED_NOTE}
+    computed, n = contract_chat.compute_digest(s.id)
     return {"success": True, "concluded": bool(ct), "stored": stored, "computed": computed, "count": n,
-            "match": (computed == stored) if stored else None}
+            "match": (computed == stored) if stored else None, "purged": False}
 
 
 @router.post("/sessions/{session_id}/messages/{msg_id}/respond")

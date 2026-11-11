@@ -3773,6 +3773,104 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         import re
         self.assertIsNone(re.search(r"import[^\n]*\bsupport\b|SupportMessage[.(]", rm))   # 관리인 지원 채팅 모델을 가져다 쓰지 않는다
 
+    def test_63_contract_chat_retention_purge(self):
+        """63. 계약방 대화 보관: 취소 후 90일, 체결 계약은 ACTIVE 동안 보존·종료 후 5년. 기간 만료 삭제는 해시 변조와 구분(purged)."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import CoSignSession, Contract, DirectChat, Lessor, contract_chat as cc
+        from apps.rent_dist._rent3_core.authz import lessor_token
+        from apps.rent_dist._rent3_core.models import date_today
+        c = self.client
+        today = date_today()
+        days_ago = lambda n: (today - timedelta(days=n)).isoformat() + "T09:00:00"
+
+        def make_session(room, status="IN_PROGRESS"):
+            sid = self._policy_session(room, 5000000, 300000)
+            ses = CoSignSession.get(sid)
+            ses.status = status
+            ses.save(action="t")
+            for body in ("문의 하나", "문의 둘"):
+                DirectChat(branch="main", room_no=room, session_id=sid, kind="question", sender_role="tenant", sender_name="t", message=body, step=2).save(action="t")
+            return ses
+
+        # ── 취소된 계약방: 90일 ──
+        young, old, live = make_session("971", "CANCELLED"), make_session("972", "CANCELLED"), make_session("973", "IN_PROGRESS")
+        young.cancelled_at = days_ago(89)
+        young.save(action="t")
+        old.cancelled_at = days_ago(91)
+        old.save(action="t")
+        live_old = live.created_at
+        r = cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(young.id)), 2)              # 89일: 보존
+        self.assertEqual(len(cc.messages_of(old.id)), 0)                # 91일: 삭제
+        self.assertEqual(len(cc.messages_of(live.id)), 2)               # 진행 중인 계약방은 삭제하지 않는다
+        self.assertTrue(CoSignSession.get(old.id).chat_purged_at)
+        self.assertFalse(CoSignSession.get(young.id).chat_purged_at)
+        self.assertGreaterEqual(r["cancelled_sessions"], 1)
+        # 90일 경계: 정확히 90일째는 아직 보존(90일을 넘겨야 삭제)
+        edge = make_session("974", "CANCELLED")
+        edge.cancelled_at = days_ago(90)
+        edge.save(action="t")
+        cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(edge.id)), 2)
+        # 삭제 로그(풀 이벤트)에는 본문이 없다
+        self.assertNotIn("문의 하나", open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read())
+
+        # ── 체결된 계약: ACTIVE 면 오래돼도 보존, 종료 후 5년(1,825일) 지나야 삭제 ──
+        def make_contract(room, status, ended_days_ago, msg_days_ago=2500):
+            ses = make_session(room, "COMPLETED")
+            for m in cc.messages_of(ses.id):                              # 대화 자체는 아주 오래된 것으로(ACTIVE 보존 확인용)
+                m.created_at = days_ago(msg_days_ago)
+                m.save(action="t")
+            digest, n = cc.compute_digest(ses.id)
+            ct = Contract(branch="main", room_no=room, cosign_session_id=ses.id, chat_digest=digest, chat_digest_count=n,
+                          status=status, ended_at=(days_ago(ended_days_ago)[:10] if ended_days_ago is not None else ""))
+            ct.save(action="t")
+            ses.created_contract_id = ct.id
+            ses.save(action="t")
+            return ses, ct
+
+        s_active, ct_active = make_contract("975", "ACTIVE", None)
+        s_recent, ct_recent = make_contract("976", "TERMINATED", 1824)       # 종료 후 5년 미만
+        s_over, ct_over = make_contract("977", "TERMINATED", 1826)           # 5년 경과
+        s_ren, ct_ren = make_contract("978", "RENEWED", 1900)                # 재계약으로 마감된 오래된 계약도 같은 기준
+        cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(s_active.id)), 2)                # ACTIVE: 절대 삭제하지 않는다
+        self.assertEqual(len(cc.messages_of(s_recent.id)), 2)                # 종료 후 5년 미만: 보존
+        self.assertEqual(len(cc.messages_of(s_over.id)), 0)                  # 종료 후 5년 경과: 삭제
+        self.assertEqual(len(cc.messages_of(s_ren.id)), 0)
+        self.assertEqual(Contract.get(ct_active.id).chat_purged_at, "")
+        self.assertEqual(Contract.get(ct_recent.id).chat_purged_at, "")
+        self.assertTrue(Contract.get(ct_over.id).chat_purged_at)
+
+        # ── 삭제 표시: 해시 변조(⚠️)와 구분 ──
+        from apps.rent_dist._rent3_core import room_messages as rm
+        hist = rm.negotiation_history(Contract.get(ct_over.id))
+        self.assertTrue(hist["purged"])
+        self.assertIsNone(hist["digest_ok"])                                 # 변조(False)로 오해하지 않는다
+        self.assertEqual((hist["count"], hist["original_count"], hist["digest"]), (0, 2, ct_over.chat_digest))
+        self.assertIn("보관 기간", hist["purged_note"])
+        keep = rm.negotiation_history(Contract.get(ct_recent.id))
+        self.assertFalse(keep["purged"])
+        self.assertIs(keep["digest_ok"], True)                               # 남아 있는 대화는 해시가 그대로 일치
+        lh = {"Authorization": f"Bearer {lessor_token(Lessor.first(branch='main'))}"}
+        v = c.get(f"/api/rent3_contract/sessions/{s_over.id}/chat-digest", headers=lh).json()
+        self.assertEqual((v["purged"], v["match"], v["original_count"]), (True, None, 2))
+        self.assertIn("보관 기간", v["note"])
+        v2 = c.get(f"/api/rent3_contract/sessions/{s_recent.id}/chat-digest", headers=lh).json()
+        self.assertEqual((v2["purged"], v2["match"]), (False, True))
+        lst = c.get(f"/api/rent3_contract/sessions/{s_over.id}/messages", headers=lh).json()
+        self.assertTrue(lst["purged"])
+        self.assertEqual(lst["messages"], [])
+        # 보관 중에 누군가 대화를 지우면(기간 만료 표시 없이) 변조로 보인다
+        for m in cc.messages_of(s_recent.id):
+            m.delete(action="t")
+        tampered = rm.negotiation_history(Contract.get(ct_recent.id))
+        self.assertFalse(tampered["purged"])
+        self.assertIs(tampered["digest_ok"], False)
+        # 같은 로그인 정리 경로: 이미 지운 것은 다시 지우지 않고, 던져 둔 호출은 오류 없이 끝난다
+        self.assertEqual(cc.purge_expired(force=True)["messages"], 0)
+        self.assertEqual(cc.purge_expired()["messages"], 0)                  # 10분 안 재호출은 훑지 않는다
+
 
 if __name__ == "__main__":
     unittest.main()

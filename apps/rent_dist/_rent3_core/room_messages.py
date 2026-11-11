@@ -82,7 +82,10 @@ def post(branch: str, room_no: str, role: str, sender_name: str, body: str, tena
 def negotiation_history(contract: Optional[Contract]) -> Dict[str, Any]:
     """현재 계약의 계약방 협상 기록(접어서 보여 줄 것)과 chat_digest 무결성 확인 결과."""
     if contract is None or not contract.cosign_session_id:
-        return {"count": 0, "items": [], "digest": "", "digest_ok": None}
+        return {"count": 0, "items": [], "digest": "", "digest_ok": None, "purged": False}
+    if contract.chat_purged_at:          # 보관 기간 만료로 지운 것 — 해시 변조가 아니다
+        return {"count": 0, "items": [], "digest": contract.chat_digest, "digest_ok": None, "purged": True,
+                "purged_at": contract.chat_purged_at, "original_count": contract.chat_digest_count, "purged_note": contract_chat.PURGED_NOTE}
     items = contract_chat.messages_of(contract.cosign_session_id)
     digest, n = contract_chat.compute_digest(contract.cosign_session_id)
     return {
@@ -90,6 +93,7 @@ def negotiation_history(contract: Optional[Contract]) -> Dict[str, Any]:
         "items": [contract_chat.public_item(m) for m in items],
         "digest": contract.chat_digest,
         "digest_ok": (digest == contract.chat_digest) if contract.chat_digest else None,
+        "purged": False,
     }
 
 

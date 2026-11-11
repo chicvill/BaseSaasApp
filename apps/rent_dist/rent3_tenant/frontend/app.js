@@ -90,8 +90,8 @@
     if (atBottom || !keepComposer) box.scrollTop = box.scrollHeight;
     const negBox = document.getElementById("tnMsgNeg");
     if (negBox) {
-      const digestLine = neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다" : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다" : "";
-      negBox.innerHTML = neg.count ? `<details style="margin-top:12px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.count}건 보기</summary>
+      const digestLine = neg.purged ? (neg.purged_note || "보관 기간이 지나 삭제되었습니다.") : neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다" : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다" : "";
+      negBox.innerHTML = (neg.count || neg.purged) ? `<details style="margin-top:12px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.purged ? `(보관 기간 만료로 삭제됨 · 당시 ${neg.original_count}건)` : `${neg.count}건 보기`}</summary>
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
         ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "나" : "안내")}: ${Bass.escapeHtml(m.body)}</div>`).join("")}</details>` : "";
     }

@@ -10,7 +10,7 @@ from apps.rent_dist._rent3_core.pool import now_iso
 
 from core.errors import DomainError, NotFound
 from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
-from apps.rent_dist._rent3_core import room_messages
+from apps.rent_dist._rent3_core import room_messages, contract_chat
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -246,6 +246,7 @@ def _tenant_since(t: Tenant):
 def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
     """임대인과의 메시지(내 호실). 계약 협상 기록은 접어서 따로 준다. 관리인 지원 채팅·계약방 대화는 섞지 않는다."""
     ensure_pool_seeded()
+    contract_chat.purge_expired()
     t = _tenant_by_id(tenant_id)
     room, ct, since = _tenant_since(t)
     msgs = room_messages.room_messages(t.branch, t.room_no, t, since) if t.room_no else []

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_admin, is_local_request, lessor_scope
-from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages
+from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat
 from apps.rent_dist._rent3_core.pool import now_iso
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -1189,6 +1189,7 @@ def send_lessor_chat(req: ChatReplyReq):
 def messages_rooms(branch: str = "main"):
     """메시지 화면 목록: 호실별 마지막 글·안 읽은 수 (관리인 지원 채팅·계약방 대화는 섞지 않는다)."""
     ensure_pool_seeded()
+    contract_chat.purge_expired()
     return {"success": True, "rooms": room_messages.rooms_overview(branch)}
 
 

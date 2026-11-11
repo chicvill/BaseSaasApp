@@ -630,7 +630,8 @@
       if (atBottom) list.scrollTop = list.scrollHeight;
       const readOnly = d.read_only || adminProxy;
       body.querySelector("#cmComposer").style.display = readOnly ? "none" : "";
-      body.querySelector("#cmNote").textContent = d.read_only ? "체결되었거나 취소된 계약방입니다. 지난 대화는 읽을 수만 있습니다."
+      body.querySelector("#cmNote").textContent = d.purged ? "보관 기간이 지나 이 대화는 삭제되었습니다."
+        : d.read_only ? "체결되었거나 취소된 계약방입니다. 지난 대화는 읽을 수만 있습니다."
         : adminProxy ? "관리인은 읽기만 할 수 있습니다."
         : d.can_negotiate ? "조건 제안·수정 요청은 ③ 계약 조건 화면에서 보냅니다. 서명(④) 이후에는 문의만 가능합니다."
         : "서명(④) 이후에는 문의만 남길 수 있습니다. 조건을 바꾸려면 ‘조건 다시 열기’를 쓰세요.";

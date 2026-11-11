@@ -472,6 +472,8 @@ class Contract(PoolObj):
     cosign_session_id: str = ""
     chat_digest: str = ""                    # 체결 때 계약방 협상 기록(불변 필드만)의 SHA-256 — 열람해도 바뀌지 않는다
     chat_digest_count: int = 0
+    chat_purged_at: str = ""                # 보관 기간(계약 종료 후 5년) 만료로 협상 대화를 지운 시각 — 있으면 '해시 변조'가 아니라 '기간 만료 삭제'
+    ended_at: str = ""                       # 계약 종료(퇴실·해지·재계약 마감) 확정일 — 대화 보관 5년의 기준
     contract_channel: str = "DIRECT"         # DIRECT (직거래 공동계약) / BROKER_PAPER (공인중개사 지면계약 사진등록)
     contract_photo_file: str = ""            # data/rent3_pool/ 기준 상대 경로 (예: uploads/contracts/ct_xxx.jpg)
     contract_photo_name: str = ""            # 원본 업로드 파일명
@@ -796,6 +798,7 @@ class Contract(PoolObj):
 
     def terminate(self, move_out_date: Optional[str] = None, app_source: str = "rent3_lessor") -> "Contract":
         self.move_out_date = move_out_date or date_today().isoformat()
+        self.ended_at = self.move_out_date
         self.status = "TERMINATED"
         return self.save(action="contract_terminated", app_source=app_source)
 
