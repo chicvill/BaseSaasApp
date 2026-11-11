@@ -287,6 +287,44 @@ class TaxAndCertificateService:
         return ""
 
     @classmethod
+    def estimate_progressive_income_tax(cls, net_income: int, basic_deduction: int = 1_500_000) -> Dict[str, Any]:
+        """소득세법 제55조 종합소득 과세표준 구간별 누진세율(6% ~ 45%) 및 지방소득세(10%) 참고용 추정.
+        - net_income: 필요경비 차감 후 순임대소득금액 (타 소득 합산 전 단독 임대소득 기준)
+        - basic_deduction: 본인 기본 인적공제(150만 원) 기본 반영
+        """
+        taxable_base = max(0, net_income - max(0, basic_deduction))
+        brackets = [
+            (14_000_000, 0.06, 0, "1,400만 원 이하 (기본세율 6% · 지방세 포함 6.6%)"),
+            (50_000_000, 0.15, 1_260_000, "1,400만~5,000만 원 이하 (세율 15% · 지방세 포함 16.5% · 누진공제 126만)"),
+            (88_000_000, 0.24, 5_760_000, "5,000만~8,800만 원 이하 (세율 24% · 지방세 포함 26.4% · 누진공제 576만)"),
+            (150_000_000, 0.35, 15_440_000, "8,800만~1억5,000만 원 이하 (세율 35% · 지방세 포함 38.5% · 누진공제 1,544만)"),
+            (300_000_000, 0.38, 19_940_000, "1억5,000만~3억 원 이하 (세율 38% · 지방세 포함 41.8% · 누진공제 1,994만)"),
+            (500_000_000, 0.40, 25_940_000, "3억~5억 원 이하 (세율 40% · 지방세 포함 44.0% · 누진공제 2,594만)"),
+            (1_000_000_000, 0.42, 35_940_000, "5억~10억 원 이하 (세율 42% · 지방세 포함 46.2% · 누진공제 3,594만)"),
+            (10**15, 0.45, 65_940_000, "10억 원 초과 (세율 45% · 지방세 포함 49.5% · 누진공제 6,594만)"),
+        ]
+        chosen = brackets[0]
+        for limit_amt, rate, ded, label in brackets:
+            chosen = (limit_amt, rate, ded, label)
+            if taxable_base <= limit_amt:
+                break
+        _, rate, prog_ded, bracket_label = chosen
+        income_tax = max(0, round(taxable_base * rate) - prog_ded) if taxable_base > 0 else 0
+        local_tax = round(income_tax * 0.1)
+        return {
+            "net_income": max(0, net_income),
+            "basic_deduction": basic_deduction if net_income > 0 else 0,
+            "taxable_base": taxable_base,
+            "rate_pct": round(rate * 100, 1),
+            "rate_with_local_pct": round(rate * 110, 1),
+            "progressive_deduction": prog_ded,
+            "bracket_label": bracket_label,
+            "income_tax": income_tax,
+            "local_income_tax": local_tax,
+            "total_tax_inc_local": income_tax + local_tax,
+        }
+
+    @classmethod
     def branch_financial_summary(cls, branch: str, year: Optional[int] = None) -> Dict[str, Any]:
         b_id = normalize_branch_id(branch)
         yr = year or date_today().year
@@ -371,14 +409,22 @@ class TaxAndCertificateService:
 
         # 주택임대 분리과세(연 2,000만 원 이하 선택 가능): 실제 경비가 아닌 필요경비율(미등록 50%, 등록 60%) 및 기본공제(200만/400만) 적용
         housing_separate_eligible = housing_revenue <= 20_000_000
-        housing_taxable_general = max(0, round(housing_revenue * 0.50) - 2_000_000)
-        housing_separate_tax_general = round(housing_taxable_general * 0.154)
-        housing_taxable_registered = max(0, round(housing_revenue * 0.40) - 4_000_000)
-        housing_separate_tax_registered = round(housing_taxable_registered * 0.154)
+        housing_taxable_general = max(0, round(housing_revenue * 0.50) - 2_000_000) if housing_separate_eligible else 0
+        housing_separate_tax_general = round(housing_taxable_general * 0.154) if housing_separate_eligible else 0
+        housing_taxable_registered = max(0, round(housing_revenue * 0.40) - 4_000_000) if housing_separate_eligible else 0
+        housing_separate_tax_registered = round(housing_taxable_registered * 0.154) if housing_separate_eligible else 0
 
         # 상가·사무실 임대는 분리과세 불가 -> 실제 경비 차감 후 종합과세(6.6% ~ 49.5% 누진세율)
         commercial_expense_allocated = round(total_expense * taxable_supply_ratio) if len(rooms) > len(vat_rooms) else total_expense
+        housing_expense_allocated = max(0, total_expense - commercial_expense_allocated)
         commercial_noi = commercial_revenue - commercial_expense_allocated
+        housing_noi = housing_revenue - housing_expense_allocated
+
+        # 시크빌 등 주택임대 연 수입 2,000만 원 초과 시: 주택+상가 전체 순임대소득을 합산해 종합과세 누진세율 구간(6.6%~49.5%)으로 산출
+        income_tax_noi_val = income_tax_revenue - total_expense
+        comprehensive_all_est = cls.estimate_progressive_income_tax(income_tax_noi_val)
+        comprehensive_commercial_est = cls.estimate_progressive_income_tax(commercial_noi)
+        comprehensive_housing_only_est = cls.estimate_progressive_income_tax(housing_noi)
 
         def _build_room_breakdown(target_pays: List[Pay], room_filter: List[str]) -> List[Dict[str, Any]]:
             grouped: Dict[str, Dict[str, Any]] = {}
@@ -469,8 +515,14 @@ class TaxAndCertificateService:
             by_cat_vat[o.category] = by_cat_vat.get(o.category, 0) + o.effective_input_vat(taxable_supply_ratio)
 
         income_tax_noi = income_tax_revenue - total_expense
-        # 주택임대 분리과세 추정세액 (주거 수입이 있으면 법정 필요경비율 50% 기준, 상가는 종합과세 대상 안내)
+        # 주택임대 연 2,000만 원 이하이면 분리과세(일반 50% 경비율) + 상가 종합과세 추정, 2,000만 원 초과(시크빌 등)이면 전체 합산 종합과세 누진세율 추정
         estimated_separate_tax = housing_separate_tax_general
+        estimated_comprehensive_tax = (
+            comprehensive_commercial_est["total_tax_inc_local"]
+            if housing_separate_eligible
+            else comprehensive_all_est["total_tax_inc_local"]
+        )
+        estimated_total_income_tax = estimated_separate_tax + estimated_comprehensive_tax
         prop_val = bldg.property_value if bldg else 1000000000
         cap_rate = round((noi / prop_val) * 100, 2) if prop_val > 0 else 0.0
 
@@ -496,14 +548,21 @@ class TaxAndCertificateService:
             "income_tax_revenue": income_tax_revenue,
             "income_tax_noi": income_tax_noi,
             "housing_revenue": housing_revenue,
+            "housing_expense_allocated": housing_expense_allocated,
+            "housing_noi": housing_noi,
             "housing_separate_eligible": housing_separate_eligible,
             "housing_taxable_general": housing_taxable_general,
             "housing_separate_tax_general": housing_separate_tax_general,
             "housing_taxable_registered": housing_taxable_registered,
             "housing_separate_tax_registered": housing_separate_tax_registered,
+            "housing_comprehensive_estimate": comprehensive_housing_only_est,
             "commercial_revenue": commercial_revenue,
             "commercial_expense_allocated": commercial_expense_allocated,
             "commercial_noi": commercial_noi,
+            "commercial_comprehensive_estimate": comprehensive_commercial_est,
+            "comprehensive_combined_estimate": comprehensive_all_est,
+            "estimated_comprehensive_tax": estimated_comprehensive_tax,
+            "estimated_total_income_tax": estimated_total_income_tax,
             "commercial_tax_method": "상가·사무실 임대는 분리과세(15.4%) 대상이 아니며 실제 필요경비 차감 후 종합과세(6.6~49.5%) 대상입니다.",
             "vat_room_revenue": vat_room_revenue,
             "vat_collected": vat_collected,
@@ -518,7 +577,7 @@ class TaxAndCertificateService:
             "noi": noi,
             "expense_ratio_pct": round((total_expense / gross_revenue) * 100, 1) if gross_revenue > 0 else 0.0,
             "estimated_separate_tax": estimated_separate_tax,
-            "net_after_tax": noi - estimated_separate_tax,
+            "net_after_tax": noi - estimated_total_income_tax,
             "cap_rate_pct": cap_rate,
             "tax_disclaimer": cls.TAX_DISCLAIMER,
             "expenses_by_category": [
@@ -659,7 +718,13 @@ class TaxAndCertificateService:
         writer.writerow(["  - 상가·사무실 임대 수입금액 (과세 호실)", summary["commercial_revenue"], "실제 필요경비 차감 후 종합과세(6.6~49.5%) 대상"])
         writer.writerow(["법정 필요경비 합계", summary["total_operating_expense"], f"지출 {summary['outlay_count']}건 합계"])
         writer.writerow(["순임대소득금액 (NOI, 부가세 제외)", summary["noi"], f"수익률 {summary['cap_rate_pct']}%"])
-        writer.writerow(["주택임대 분리과세 예상세액 (미등록 50% 경비율·15.4%)", summary["estimated_separate_tax"], "참고용 추정치 (상가임대는 종합과세 별도 산출)"])
+        comp_est = summary.get("comprehensive_combined_estimate") or {}
+        if summary.get("housing_separate_eligible"):
+            writer.writerow(["주택임대 분리과세 예상세액 (미등록 50% 경비율·15.4%)", summary["estimated_separate_tax"], "연 2,000만원 이하 분리과세 선택 시 참고용 추정치"])
+            comm_est = summary.get("commercial_comprehensive_estimate") or {}
+            writer.writerow(["상가임대 종합과세 예상세액 (누진세율·지방세 포함)", comm_est.get("total_tax_inc_local", 0), comm_est.get("bracket_label", "")])
+        else:
+            writer.writerow(["종합소득세 누진세율 예상세액 (주택+상가 합산·지방세 포함)", comp_est.get("total_tax_inc_local", 0), f"주택수입 2,000만원 초과 종합과세 대상 · {comp_est.get('bracket_label', '')}"])
         writer.writerow([])
         writer.writerow(["[8대 표준 공용 운영비 항목별 집계]"])
         writer.writerow(["코드", "항목명", "연간 지출액(원)", "안분후 공제매입세액(원)"])
@@ -792,6 +857,10 @@ class TaxAndCertificateService:
                 (ct.tenant_email if ct and ct.tenant_email else "")
                 or (tn.email if tn and tn.email else "")
             ).strip()
+            custom_addr = (
+                (ct.tenant_business_address if ct and ct.tenant_business_address else "")
+                or (tn.business_address if tn and tn.business_address else "")
+            ).strip()
             missing: List[str] = []
             if not biz_val["valid"]:
                 missing.append("사업자등록번호" if not biz_no_raw else f"사업자등록번호({biz_val['reason']})")
@@ -810,6 +879,7 @@ class TaxAndCertificateService:
                 "comp_name": comp_name,
                 "ceo_name": ceo_name,
                 "email": email,
+                "custom_addr": custom_addr,
                 "missing": missing,
             }
 
@@ -839,6 +909,8 @@ class TaxAndCertificateService:
                 "company_name": buyer["comp_name"],
                 "ceo_name": buyer["ceo_name"],
                 "email": buyer["email"],
+                "business_address": buyer["custom_addr"],
+                "effective_address": buyer["custom_addr"] or f"{supplier_addr} {r_no}호".strip(),
                 "vat_target": ct.vat_target if ct else True,
                 "vat_separate": ct.vat_separate if ct else True,
                 "monthly_rent": m_rent,
@@ -941,14 +1013,17 @@ class TaxAndCertificateService:
             purpose_label = "사무실·상가 임대료 및 관리비" if is_office else "기숙사·주거용 임대료 및 관리비"
             item_name = f"{ym}월분 {purpose_label} ({r_no}호)"
 
-            # 영수(01)/청구(02): 해당 월 입금이 완료되었으면 영수(01), 미입금 청구 발행이면 청구(02)
+            # 영수(01)/청구(02): 공급가액과 세액을 합친 합계금액(supply_amt + tax_amt) 이상 입금되었을 때만 영수(01), 미입금·일부입금은 청구(02)
             paid_sum = sum(p.total_amount for p in ym_pays)
-            invoice_charge_code = "01" if paid_sum >= supply_amt else "02"
+            total_invoice_amt = supply_amt + tax_amt
+            invoice_charge_code = "01" if (total_invoice_amt > 0 and paid_sum >= total_invoice_amt) else "02"
             last_paid_date = max((p.paid_date for p in ym_pays), default="")
 
             inv_status = rec.status if rec else "DRAFT"
             nts_no = rec.nts_confirm_no if rec else ""
             ready_for_hometax = len(buyer["missing"]) == 0
+            fallback_addr = f"{supplier_addr} {r_no}호".strip()
+            buyer_addr = buyer["custom_addr"] or fallback_addr
 
             invoices.append({
                 "invoice_key": f"{b_id}:{r_no}:{ym}",
@@ -969,10 +1044,12 @@ class TaxAndCertificateService:
                 "buyer_company_name": buyer["comp_name"],
                 "buyer_ceo_name": buyer["ceo_name"],
                 "buyer_email": buyer["email"],
-                "buyer_address": f"{supplier_addr} {r_no}호".strip(),
+                "buyer_address": buyer_addr,
+                "buyer_business_address_custom": buyer["custom_addr"],
+                "buyer_address_is_fallback": not bool(buyer["custom_addr"]),
                 "supply_amount": supply_amt,
                 "tax_amount": tax_amt,
-                "total_amount": supply_amt + tax_amt,
+                "total_amount": total_invoice_amt,
                 "item_name": item_name,
                 "charge_type": invoice_charge_code,
                 "charge_type_label": "영수(01)" if invoice_charge_code == "01" else "청구(02)",

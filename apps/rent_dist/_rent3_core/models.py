@@ -219,7 +219,8 @@ class Tenant(PoolObj):
     account_number: str = ""
     business_number: str = ""
     company_name: str = ""                   # 사업자 상호/법인명 (세금계산서 공급받는자 상호)
-    ceo_name: str = ""                       # 사업자 대표자명 (미입력 시 임차인 실명 사용)
+    ceo_name: str = ""                       # 사업자 대표자명 (세금계산서 공급받는자 성명)
+    business_address: str = ""               # 사업자등록증상 사업장 주소 (미입력 시 호실 주소 사용)
     car_number: str = ""
     car_model: str = ""
     doorlock_pwd: str = "1234*"
@@ -434,6 +435,7 @@ class Contract(PoolObj):
     tenant_company_name: str = ""            # 임차인 상호/법인명
     tenant_ceo_name: str = ""                # 임차인 대표자명
     tenant_email: str = ""                   # 임차인 세금계산서 수신 이메일
+    tenant_business_address: str = ""        # 임차인 사업자등록증상 사업장 주소 (미입력 시 해당 호실 주소 사용)
     contract_date: str = Field(default_factory=lambda: date_today().isoformat())
     move_in_date: str = ""
     expiry_date: str = ""

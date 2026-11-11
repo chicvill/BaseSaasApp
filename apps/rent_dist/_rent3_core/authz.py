@@ -5,7 +5,7 @@ apps/rent_dist/_rent3_core/authz.py — rent3 앱 공통 접근 통제.
  - 본사 관리자(superadmin/admin): 모두 허용
  - 임대인(lessor/branch_admin): 자기 지점(branch)의 자료만
  - 임차인(tenant): 자기 계정과 자기가 당사자인 계약만
-토큰은 `Authorization: Bearer ...` 헤더, 또는 링크로 열어야 하는 파일(이미지·CSV)용 `?token=` 쿼리로 받는다.
+토큰은 `Authorization: Bearer ...` 헤더로만 받는다 (URL `?token=` 쿼리 파라미터는 보안상 허용하지 않음).
 """
 from __future__ import annotations
 
@@ -122,8 +122,8 @@ def is_revoked(raw: str) -> bool:
 
 
 def raw_token(request: Request) -> str:
-    raw = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
-    return raw or (request.query_params.get("token") or "").strip()
+    """인증 토큰은 URL 쿼리스트링(?token=) 노출을 원천 차단하고 Authorization 헤더로만 받는다."""
+    return request.headers.get("authorization", "").removeprefix("Bearer ").strip()
 
 
 def not_revoked(request: Request) -> None:

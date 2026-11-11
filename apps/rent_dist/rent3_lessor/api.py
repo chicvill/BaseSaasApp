@@ -566,6 +566,7 @@ class ContractEditReq(BaseModel):
     tenant_company_name: Optional[str] = None
     tenant_ceo_name: Optional[str] = None
     tenant_email: Optional[str] = None
+    tenant_business_address: Optional[str] = None
     vat_target: Optional[bool] = None
     tax_invoice_requested: Optional[bool] = None
 
@@ -600,6 +601,8 @@ def edit_contract(req: ContractEditReq):
         ct.tenant_ceo_name = req.tenant_ceo_name.strip()
     if req.tenant_email is not None:
         ct.tenant_email = req.tenant_email.strip()
+    if req.tenant_business_address is not None:
+        ct.tenant_business_address = req.tenant_business_address.strip()
     if req.tax_invoice_requested is not None:
         ct.tax_invoice_requested = req.tax_invoice_requested
     elif req.tenant_business_number:
@@ -628,6 +631,8 @@ def edit_contract(req: ContractEditReq):
             tenant.ceo_name = req.tenant_ceo_name.strip()
         if req.tenant_email is not None:
             tenant.email = req.tenant_email.strip()
+        if req.tenant_business_address is not None:
+            tenant.business_address = req.tenant_business_address.strip()
         tenant.save(action="tenant_phone_edited", app_source=APP_SRC)
     return {"success": True, "message": f"{ct.room_no}호 계약 내용을 저장했습니다.", "contract": ct.model_dump()}
 
@@ -672,6 +677,7 @@ class TenantTaxBizReq(BaseModel):
     company_name: str = ""
     ceo_name: str = ""
     email: str = ""
+    business_address: Optional[str] = None
     vat_target: Optional[bool] = None
     vat_separate: Optional[bool] = None
     tax_invoice_requested: Optional[bool] = None
@@ -768,12 +774,15 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
     comp_name = req.company_name.strip()
     ceo_name = req.ceo_name.strip()
     email = req.email.strip()
+    biz_addr = req.business_address.strip() if req.business_address is not None else None
 
     if ct:
         ct.tenant_business_number = biz_no
         ct.tenant_company_name = comp_name
         ct.tenant_ceo_name = ceo_name
         ct.tenant_email = email
+        if biz_addr is not None:
+            ct.tenant_business_address = biz_addr
         ct.tax_invoice_requested = req.tax_invoice_requested if req.tax_invoice_requested is not None else bool(biz_no or comp_name or req.vat_target)
         if req.vat_target is not None:
             ct.vat_target = req.vat_target
@@ -790,6 +799,8 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
         tenant.ceo_name = ceo_name
         if email:
             tenant.email = email
+        if biz_addr is not None:
+            tenant.business_address = biz_addr
         tenant.save(action="tenant_biz_updated", app_source=APP_SRC)
     elif ct:
         tenant = Tenant(

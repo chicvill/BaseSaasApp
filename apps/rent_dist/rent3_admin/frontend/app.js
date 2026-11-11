@@ -37,7 +37,7 @@
     return `<div style="font-size:12.5px;margin:4px 0;line-height:1.6;">
       ${mark(s.identity)} 본인인증${idn.verified ? ` (${Bass.escapeHtml(idn.name)}${idn.fake ? " · <b>시연용 가짜 인증</b>" : ""})` : ""}
       · ${mark(s.building)} 건물 주소 · ${mark(s.registry)} 등기부 · ${mark(s.submitted)} 제출
-      ${s.registry ? ` · <a href="${Bass.apiBase(APP_ID)}/lessors/${encodeURIComponent(l.id)}/registry-attachment?token=${encodeURIComponent(Bass.token())}" target="_blank" rel="noopener">등기부 원본 보기</a>` : ""}
+      ${s.registry ? ` · <button class="bass-btn bass-btn--sm btn-view-reg-att" data-id="${Bass.escapeHtml(l.id)}" type="button">등기부 원본 보기</button>` : ""}
       ${chk ? `<div style="border-left:4px solid ${col};padding:4px 8px;margin-top:4px;">${chk.auto_pass ? "🟢 자동 대조 일치 (심사 우선)" : "🟠 수동 확인 필요"} — ${Bass.escapeHtml(chk.message)}</div>` : ""}
       ${s.registry ? iirosHtml(l, a) : ""}
     </div>`;
@@ -185,6 +185,21 @@
       btn.addEventListener("click", () => {
         if (btn.dataset.num && navigator.clipboard) navigator.clipboard.writeText(btn.dataset.num).catch(() => {});
         window.open("https://www.iros.go.kr/", "_blank", "noopener");
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-view-reg-att").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const tk = Bass.token();
+          const resp = await fetch(`${Bass.apiBase(APP_ID)}/lessors/${encodeURIComponent(btn.dataset.id)}/registry-attachment`, {
+            headers: tk ? { Authorization: "Bearer " + tk } : {},
+          });
+          if (!resp.ok) throw new Error(`등기부 원본을 불러오지 못했습니다 (${resp.status})`);
+          const blobUrl = URL.createObjectURL(await resp.blob());
+          window.open(blobUrl, "_blank", "noopener");
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        });
       });
     });
 

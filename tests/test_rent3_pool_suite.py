@@ -1943,12 +1943,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(up(ten, "tenant", data="data:application/pdf;base64,AAAA").status_code, 400)
         self.assertEqual(up(ten, "lessor").status_code, 403)                       # 임차인 토큰으로 임대인 행세 금지
         self.assertEqual(up(sunho, "lessor").status_code, 403)                     # 다른 지점
-        # 사진은 당사자만 본다 (img 태그용 ?token= 도 동일)
+        # 사진은 당사자만 본다 (Authorization 헤더 필수, ?token= 쿼리 파라미터는 보안상 거부)
         url = f"{base}/sessions/{sid}/facility-photos/{pid}"
         self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
         self.assertEqual(c.get(url, headers=sunho).status_code, 403)
         self.assertEqual(c.get(url, headers=chic).status_code, 200)
-        self.assertEqual(c.get(url, headers=self.NOAUTH, params={"token": ten["Authorization"].split()[1]}).status_code, 200)
+        self.assertEqual(c.get(url, headers=ten).status_code, 200)
+        self.assertEqual(c.get(url, headers=self.NOAUTH, params={"token": ten["Authorization"].split()[1]}).status_code, 401)
         # 임대인이 올리면 임차인 잠금이 풀리고, 남의 사진은 못 지운다
         rl = up(chic, "lessor", "싱크대")
         self.assertEqual(rl.status_code, 200)
@@ -3056,6 +3057,65 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(cert["estimated_tax_credit_17pct"], round(cert["deductible_rent_base"] * 0.17))
         self.assertEqual(cert["estimated_tax_credit_15pct"], round(cert["deductible_rent_base"] * 0.15))
         self.assertIn("계좌이체", cert["guidance_notice"])
+
+        # (7) Claude 2차 검토 반영 검증:
+        # 7-1. 서버가 ?token= 쿼리 파라미터 인증을 전면 거부하는지 확인
+        raw_tok = chic["Authorization"].split()[1]
+        self.assertEqual(
+            c.get(f"/api/rent3_lessor/tax/export-csv?branch=main&year=2026&token={raw_tok}", headers=self.NOAUTH).status_code,
+            401,
+        )
+        # 7-2. 공급가액만 입금되고 부가세가 미납된 경우 영수("01")가 아닌 청구("02")로 분류되는지 확인
+        # (본 테스트에서 직접 계약을 설정한 401호: 월세 450,000 + 관리비 50,000 = 공급가액 500,000, 세액 50,000)
+        Pay(
+            branch="main",
+            room_no="401",
+            payer_name="(주)한빛기숙사",
+            billing_month="2026-11",
+            paid_date="2026-11-05",
+            rent_amount=450000,
+            maintenance_amount=50000,
+            vat_amount=0,  # 계약 공급가액(500,000)만 입금되고 부가세(50,000) 미입금
+            total_amount=500000,
+            payment_kind="MONTHLY_RENT",
+            idempotency_key="test51:401:nov_supply_only",
+        ).save(action="test_supply_only", app_source="test")
+        reg_nov = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=11", headers=chic).json()
+        inv_401_nov = next(i for i in reg_nov["invoices"] if i["room_no"] == "401")
+        self.assertEqual(inv_401_nov["supply_amount"], 500000)
+        self.assertEqual(inv_401_nov["tax_amount"], 50000)
+        self.assertEqual(inv_401_nov["paid_amount"], 500000)
+        self.assertEqual(inv_401_nov["charge_type"], "02")  # 세액 미납 상태이므로 청구(02)
+
+        # 7-3. 기숙사 임차 법인의 별도 사업장 주소(business_address) 저장 시 세금계산서 공급받는자 주소에 반영되는지 확인
+        c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "business_number": "120-81-55555",
+                "company_name": "(주)한빛기숙사",
+                "ceo_name": "정대표",
+                "email": "dorm@hanbit.co.kr",
+                "business_address": "서울시 강남구 테헤란로 999 한빛타워 10층",
+                "vat_target": True,
+                "tax_invoice_requested": True,
+            },
+        )
+        reg_oct2 = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
+        inv_401_updated = next(i for i in reg_oct2["invoices"] if i["room_no"] == "401")
+        self.assertEqual(inv_401_updated["buyer_address"], "서울시 강남구 테헤란로 999 한빛타워 10층")
+        self.assertTrue(inv_401_updated["ready_for_hometax"])
+
+        # 7-4. 종합과세 누진세율(6%~45%) 추정치가 summary에 포함되고 구간 계산이 정확한지 확인
+        from apps.rent_dist._rent3_core.billing import TaxAndCertificateService
+        self.assertIn("comprehensive_combined_estimate", fin)
+        self.assertIn("rate_pct", fin["comprehensive_combined_estimate"])
+        prog_est = TaxAndCertificateService.estimate_progressive_income_tax(60_000_000)
+        self.assertEqual(prog_est["rate_pct"], 24)
+        self.assertEqual(prog_est["progressive_deduction"], 5_760_000)
+        self.assertGreater(prog_est["total_tax_inc_local"], 0)
 
 
 if __name__ == "__main__":

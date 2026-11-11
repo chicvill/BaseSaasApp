@@ -1446,7 +1446,6 @@
   function facilityPhotosHtml(s) {
     const photos = s.facility_photos || [];
     const base = `${Bass.apiBase(APP_ID)}/sessions/${encodeURIComponent(s.id)}/facility-photos`;
-    const tok = encodeURIComponent(Bass.token());
     return `<div class="bass-card" style="padding:12px;margin:12px 0;">
       <div style="font-weight:800;">📷 현장 사진 <span class="bass-muted" style="font-weight:400;font-size:12px;">(${photos.length}/12 · 합의 후에는 바꿀 수 없고 퇴실 정산 때 비교 자료가 됩니다)</span></div>
       <input id="facPhotoCaption" class="bass-input" placeholder="사진 설명 (예: 욕실 천장 곰팡이, 싱크대 상판 흠집)" style="margin:8px 0 6px;">
@@ -1454,8 +1453,8 @@
       <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">휴대폰에서는 카메라가 바로 열립니다. 사진을 올리거나 지우면 상대방 화면에도 바로 보이고, 양쪽 점검 확인을 다시 받습니다.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:10px;">
         ${photos.map((p) => `<div style="font-size:11.5px;">
-          <a href="${base}/${encodeURIComponent(p.id)}?token=${tok}" target="_blank" rel="noopener">
-            <img src="${base}/${encodeURIComponent(p.id)}?token=${tok}" alt="${Bass.escapeHtml(p.caption || "점검 사진")}" loading="lazy"
+          <a href="#" class="js-open-fac-photo" data-photo-url="${base}/${encodeURIComponent(p.id)}" target="_blank" rel="noopener">
+            <img class="js-auth-fac-img" data-photo-url="${base}/${encodeURIComponent(p.id)}" alt="${Bass.escapeHtml(p.caption || "점검 사진")}" loading="lazy"
                  style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>
           <div>${p.by_role === "lessor" ? "🏢" : "🔑"} ${Bass.escapeHtml(p.caption || "-")}</div>
           ${p.by_role === currentRole ? `<button class="bass-btn bass-btn--sm js-del-photo" data-pid="${Bass.escapeHtml(p.id)}" type="button">삭제</button>` : ""}
@@ -1467,6 +1466,20 @@
   function bindFacilityPhotos(s) {
     const input = document.getElementById("facPhotoInput");
     if (!input) return;
+    const tok = Bass.token();
+    const hdrs = tok ? { Authorization: "Bearer " + tok } : {};
+    document.querySelectorAll(".js-auth-fac-img").forEach(async (img) => {
+      const u = img.dataset.photoUrl;
+      if (!u) return;
+      try {
+        const resp = await fetch(u, { headers: hdrs });
+        if (!resp.ok) return;
+        const blobUrl = URL.createObjectURL(await resp.blob());
+        img.src = blobUrl;
+        const a = img.closest(".js-open-fac-photo");
+        if (a) a.href = blobUrl;
+      } catch (_) {}
+    });
     const notes = document.getElementById("facNotes");
     if (notes) notes.addEventListener("input", () => { pendingFacNotes = notes.value; });
     input.addEventListener("change", async () => {

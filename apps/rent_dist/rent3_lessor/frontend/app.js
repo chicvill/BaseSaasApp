@@ -452,6 +452,7 @@
     const compName = ct.tenant_company_name || (r.tenant && r.tenant.company_name) || "";
     const ceoName = ct.tenant_ceo_name || (r.tenant && r.tenant.ceo_name) || "";
     const bizEmail = ct.tenant_email || (r.tenant && r.tenant.email) || "";
+    const bizAddr = ct.tenant_business_address || (r.tenant && r.tenant.business_address) || "";
     const taxReq = Boolean(ct.tax_invoice_requested || bizNo || compName);
     const f = (id, label, val, type, ph) => `<label class="r3-fld">${label}<input id="${id}" class="bass-input" type="${type || "text"}" value="${Bass.escapeHtml(String(val ?? ""))}" ${ph ? `placeholder="${Bass.escapeHtml(ph)}"` : ""}></label>`;
     const body = openModal(`📄 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 계약내용`, `
@@ -473,6 +474,7 @@
           ${f("cmComp", "상호(법인명)", compName, "text", "예: (주)시크디자인")}
           ${f("cmCeo", "대표자명 (필수·임차인명 자동대체 안함)", ceoName, "text", "예: 홍길동")}
           ${f("cmEmail", "세금계산서 수신 이메일", bizEmail, "email", "예: tax@company.co.kr")}
+          ${f("cmBizAddr", "사업자등록상 주소 (미입력 시 호실 주소)", bizAddr, "text", "법인 본점 등 주소가 다를 때 입력")}
         </div>
       </div>
       <label class="r3-fld" style="margin-top:8px;">메모<textarea id="cmMemo" class="bass-input" rows="3">${Bass.escapeHtml(ct.lessor_memo || "")}</textarea></label>
@@ -513,6 +515,7 @@
             tenant_company_name: reqInv ? $m("cmComp").value.trim() : "",
             tenant_ceo_name: reqInv ? $m("cmCeo").value.trim() : "",
             tenant_email: reqInv ? $m("cmEmail").value.trim() : "",
+            tenant_business_address: reqInv && $m("cmBizAddr") ? $m("cmBizAddr").value.trim() : "",
           },
         });
         Bass.updateAppAlert("success", res.message);
@@ -1377,18 +1380,30 @@
 
       <div class="bass-card" style="margin-bottom:12px;">
         <h3 style="margin:0 0 6px;">🧮 종합소득세 자료 (${d.year}년 약정 귀속월 기준 · 부가세 제외 공급가액)</h3>
-        <div style="font-size:13.5px;line-height:1.8;">
-          • 연간 총수입금액(부가세 제외 공급가액) <strong>${fmtWon(fin.gross_revenue)}</strong>
-            <span class="bass-muted" style="font-size:12px;">(부가세 포함 총수납액 ${fmtWon(fin.gross_receipts_inc_vat ?? fin.gross_revenue)} 중 부가세 예수금 ${fmtWon(fin.vat_collected || 0)} 제외 · 수납 ${fin.payment_count || 0}건)</span><br>
-          ${fin.carryover_excluded_amount ? `• <span style="color:var(--warn, #f59e0b);font-size:12.5px;">장부이관 과거 누적 이월 수납분(<strong>${fmtWon(fin.carryover_excluded_amount)}</strong>, ${fin.carryover_excluded_count || 0}건)은 연간 수입 왜곡 방지를 위해 당해 수입에서 자동 제외되었습니다.</span><br>` : ""}
-          • <strong>① 주택임대 수입 (주거용 면세 호실)</strong>: <strong>${fmtWon(fin.housing_revenue || 0)}</strong>
-            ${fin.housing_separate_eligible
-              ? `→ 연 2,000만 원 이하 분리과세(15.4%) 선택 가능: 일반(필요경비율 50%·공제 200만) 예상 <strong>${fmtWon(fin.housing_separate_tax_general || 0)}</strong> / 등록임대(60%·400만) 예상 <strong>${fmtWon(fin.housing_separate_tax_registered || 0)}</strong>`
-              : `→ 연 2,000만 원 초과로 종합과세 대상`}<br>
-          • <strong>② 상가·사무실 임대 수입 (과세 호실)</strong>: <strong>${fmtWon(fin.commercial_revenue || 0)}</strong>
-            → 분리과세 불가 · 실제 필요경비(안분 ${fmtWon(fin.commercial_expense_allocated || 0)}) 차감 후 순소득 <strong>${fmtWon(fin.commercial_noi || 0)}</strong>에 대해 다른 소득과 합산하여 <strong>종합소득세 기본세율(6.6% ~ 49.5%)</strong> 적용<br>
-          • 건물 전체 실제 필요경비 합계: <strong>${fmtWon(fin.total_operating_expense)}</strong> (전체 순임대소득 NOI <strong style="color:var(--primary-2);">${fmtWon(fin.noi)}</strong>)
-        </div>
+        ${(() => {
+          const compAll = fin.comprehensive_combined_estimate || {};
+          const compComm = fin.commercial_comprehensive_estimate || {};
+          return `<div style="font-size:13.5px;line-height:1.8;">
+            • 연간 총수입금액(부가세 제외 공급가액) <strong>${fmtWon(fin.gross_revenue)}</strong>
+              <span class="bass-muted" style="font-size:12px;">(부가세 포함 총수납액 ${fmtWon(fin.gross_receipts_inc_vat ?? fin.gross_revenue)} 중 부가세 예수금 ${fmtWon(fin.vat_collected || 0)} 제외 · 수납 ${fin.payment_count || 0}건)</span><br>
+            ${fin.carryover_excluded_amount ? `• <span style="color:var(--warn, #f59e0b);font-size:12.5px;">장부이관 과거 누적 이월 수납분(<strong>${fmtWon(fin.carryover_excluded_amount)}</strong>, ${fin.carryover_excluded_count || 0}건)은 연간 수입 왜곡 방지를 위해 당해 수입에서 자동 제외되었습니다.</span><br>` : ""}
+            • <strong>① 주택임대 수입 (주거용 면세 호실)</strong>: <strong>${fmtWon(fin.housing_revenue || 0)}</strong>
+              ${fin.housing_separate_eligible
+                ? `→ 연 2,000만 원 이하 분리과세(15.4%) 선택 가능: 일반(필요경비율 50%·공제 200만) 예상 <strong>${fmtWon(fin.housing_separate_tax_general || 0)}</strong> / 등록임대(60%·400만) 예상 <strong>${fmtWon(fin.housing_separate_tax_registered || 0)}</strong>`
+                : `→ 연 2,000만 원 초과로 분리과세 대상 아님 (아래 <strong>종합과세 누진세율 구간</strong>으로 합산 산출)`}<br>
+            • <strong>② 상가·사무실 임대 수입 (과세 호실)</strong>: <strong>${fmtWon(fin.commercial_revenue || 0)}</strong>
+              → 분리과세 불가 · 실제 필요경비(안분 ${fmtWon(fin.commercial_expense_allocated || 0)}) 차감 후 순소득 <strong>${fmtWon(fin.commercial_noi || 0)}</strong>
+              ${fin.housing_separate_eligible && (fin.commercial_noi || 0) > 0
+                ? `(상가 단독 종합과세 추정: <strong>${fmtWon(compComm.total_tax_inc_local || 0)}</strong> · ${Bass.escapeHtml(compComm.bracket_label || "")})`
+                : ""}<br>
+            • 건물 전체 실제 필요경비 합계: <strong>${fmtWon(fin.total_operating_expense)}</strong> · 전체 순임대소득(NOI): <strong style="color:var(--primary-2);">${fmtWon(fin.noi)}</strong><br>
+            • <strong>③ 종합소득세 누진세율 추정 (주택+상가 합산 순임대소득 ${fmtWon(compAll.net_income || 0)} · 기본공제 ${fmtWon(compAll.basic_deduction || 0)} 반영 과세표준 ${fmtWon(compAll.taxable_base || 0)})</strong>:<br>
+              &nbsp;&nbsp;적용 구간: <strong>${Bass.escapeHtml(compAll.bracket_label || "-")}</strong> →
+              산출세액 ${fmtWon(compAll.income_tax || 0)} + 지방소득세(10%) ${fmtWon(compAll.local_income_tax || 0)} =
+              예상 종합소득세 합계 <strong style="color:var(--primary-2);">${fmtWon(compAll.total_tax_inc_local || 0)}</strong>
+              <span class="bass-muted" style="font-size:12px;">(타 소득 미합산 단독 임대소득 기준 참고용 추정치)</span>
+          </div>`;
+        })()}
         <div style="font-weight:700;font-size:13px;margin:8px 0 4px;">📊 종합소득세 호실별 수입 산출내역 (5줄 스크롤)</div>
         ${incRoomBreakdown.length ? `<div ${scrollBox5}>
           <table class="bass-table" style="width:100%;font-size:12.5px;margin:0;">
