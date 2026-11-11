@@ -1315,6 +1315,27 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "limitb", "room_no": "103"}).status_code, 400)
         self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "limitb", "room_no": "101", "deposit": 7000000}).status_code, 200)
 
+    def _admin_enter(self, user, view, session_id=""):
+        """관리인이 원격 지원으로 입장한 상태를 만든다(사용자 허용 ON + 지원 채팅 글 + 입장 기록). 엄격 모드에서 관리인이 읽으려면 필요."""
+        from apps.rent_dist._rent3_core import support as sup
+        old_consents, key = dict(user.consents or {}), sup.thread_key(user)
+
+        def undo():                                   # 다른 시험이 깨끗한 상태를 기대하므로 입장 준비로 남긴 것을 치운다
+            for m in sup.SupportMessage.find(thread_user=key):
+                m.delete(action="t")
+            for g in sup.SupportAccessLog.find(target_user=key):
+                g.delete(action="t")
+            u = type(user).get(user.id)
+            u.consents = old_consents
+            u.save(action="t")
+        self.addCleanup(undo)
+        user.consents = {**old_consents, "support_access": True}
+        user.save(action="t")
+        sup.post_user_message(user, "도와주세요")
+        r = self.client.post("/api/rent3_admin/support/enter", json={"user": key, "view": view, "session_id": session_id})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
     def _login(self, ident, pw="1212"):
         r = self.client.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
                              json={"login_mode": "account", "identifier": ident, "password": pw})
@@ -3225,10 +3246,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         c = self.client                       # 기본 헤더 = admin 토큰
         chic = self._login("chic")
         with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
-            # 읽기는 된다
+            # 입장 없이 주소를 직접 쳐서 읽는 것은 막힌다(66 에서 자세히). 대상이 없는 목록은 그대로
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_tenant/myhome/tenant_201").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
+            from apps.rent_dist._rent3_core import Lessor, Tenant
+            self._admin_enter(Tenant.get("tenant_201"), "tenant")             # 입장하면 읽기는 된다
+            self._admin_enter(Lessor.first(branch="main"), "lessor")
             self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 200)
             self.assertEqual(c.get("/api/rent3_tenant/myhome/tenant_201").status_code, 200)
-            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
             # 금전·계약 기록은 403 (임대인 앱)
             money = [
                 ("/api/rent3_lessor/payments/collect", {"branch": "main", "room_no": "201", "amount": 1000}),
@@ -3527,8 +3553,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
         self.assertEqual(c.get(url).status_code, 200)                              # admin 기본 토큰: 읽기
         with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.get(url).status_code, 403)                              # 입장 없이는 못 읽는다
+            self._admin_enter(tenant, "contract", session_id=sid)
             self.assertEqual(c.get(url).status_code, 200)
             self.assertEqual(c.post(url, json={"kind": "question", "body": "관리인이 끼어듦"}).status_code, 403)
+        from apps.rent_dist._rent3_core import support as _sup
+        for m in _sup.SupportMessage.find(thread_user=_sup.thread_key(tenant)):      # 입장 준비로 남긴 지원 채팅 글은 치운다(아래에서 지원 채팅이 비어 있어야 한다)
+            m.delete(action="t")
 
         # ── 제안: 6개 항목만, 값 검증 ──
         prop = lambda h, field, val, **kw: c.post(url, headers=h, json={"kind": "proposal", "field": field, "new_value": val, **kw})
@@ -3743,6 +3774,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post("/api/rent3_lessor/chats", headers=sunho, json={"branch": "main", "room_no": "201", "message": "x"}).status_code, 403)
         self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=self.NOAUTH).status_code, 401)
         with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self._admin_enter(t201, "tenant")
             self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages").status_code, 200)
             self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", json={"body": "관리인이 끼어듦"}).status_code, 403)
         # 관리인 지원 채팅은 그대로 따로 있다
@@ -4033,6 +4065,69 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for name in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
             data = open(os.path.join(fe, "icons", name), "rb").read()
             self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n", name)
+
+    def test_66_admin_direct_read_needs_support_entry(self):
+        """66. 관리인 직접 읽기 제한(엄격 모드): 원격 지원 입장(허용+채팅+기록) 없이 임대인·임차인·계약 앱 자료를 읽을 수 없고,
+        입장하면 그 대상만 일정 시간 읽을 수 있다. 사용자가 허용을 끄거나 기록이 오래되면 다시 닫힌다. 관리인 전용 API 는 영향 없음."""
+        from datetime import datetime, timedelta
+        from unittest import mock
+        from apps.rent_dist._rent3_core import CoSignSession, Lessor, Tenant, authz, support as sup
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        c = self.client
+        t202, t201 = Tenant.get("tenant_202"), Tenant.get("tenant_201")
+        lessor_main = Lessor.first(branch="main")
+        sid = self._policy_session("981", 5000000, 300000)
+        ses_other = self._policy_session("982", 5000000, 300000)
+        for g in sup.SupportAccessLog.all():                       # 앞선 시험이 남긴 입장 기록은 치운다
+            g.delete(action="t")
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            direct = ["/api/rent3_lessor/dashboard?branch=main", f"/api/rent3_tenant/myhome/{t202.id}", f"/api/rent3_tenant/myhome/{t202.id}/messages",
+                      f"/api/rent3_contract/sessions/{sid}", f"/api/rent3_contract/sessions/{sid}/messages"]
+            for u in direct:                                        # 주소를 직접 쳐서 읽기: 모두 막힘
+                r = c.get(u)
+                self.assertEqual(r.status_code, 403, u)
+                self.assertIn("원격 지원", r.json()["message"])
+            # 관리인 전용 API·대상이 없는 목록은 그대로
+            self.assertEqual(c.get("/api/rent3_admin/support/directory").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
+
+            # 임차인 입장: 그 임차인만 열린다(다른 임차인·임대인 앱은 여전히 막힘)
+            self._admin_enter(t202, "tenant")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 200)
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 403)
+            # 임대인 입장: 그 건물만(다른 건물은 막힘)
+            self._admin_enter(lessor_main, "lessor")
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=sinbi").status_code, 403)
+            # 계약 입장: 그 계약방만
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}").status_code, 403)
+            s_obj = CoSignSession.get(sid)
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,        # 계약 상대(예비 임차인): 계약방에 적은 번호로 가입한 계정
+                         json={"role": "prospect", "name": "입장시험", "phone": (s_obj.terms or {}).get("tenant_phone", ""), "password": "Pw123456"})
+            self.assertEqual(reg.status_code, 200, reg.text)
+            self._admin_enter(Tenant.get(reg.json()["user"]["id"]), "contract", session_id=sid)
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}").status_code, 200)
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{ses_other}").status_code, 403)
+
+            # 사용자가 원격 지원 허용을 끄면 곧바로 닫힌다
+            t202 = Tenant.get(t202.id)
+            t202.consents = {**t202.consents, "support_access": False}
+            t202.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 403)
+            t202.consents = {**t202.consents, "support_access": True}
+            t202.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 200)
+            # 입장 기록이 허용 시간보다 오래되면 닫힌다
+            for g in sup.SupportAccessLog.find(target_user=f"tenant:{t202.id}"):
+                g.entered_at = (datetime.now() - timedelta(minutes=authz.GRANT_MINUTES + 5)).isoformat(timespec="seconds")
+                g.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 403)
+            # 임차인 본인은 영향 없음
+            th = {"Authorization": f"Bearer {tenant_token(t202)}"}
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}", headers=th).status_code, 200)
+        # 호환 모드(기존 시험 묶음)에서는 관리인이 입장 없이도 읽는다
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}").status_code, 200)
 
 
 if __name__ == "__main__":

@@ -218,6 +218,42 @@ def admin_proxy_guard(request: Request) -> None:
     )
 
 
+# ── 관리인의 읽기도 '입장 절차'를 거쳐야 한다 ──
+# 임대인·임차인·계약 앱의 자료는 사용자가 원격 지원을 허용했고 관리인이 입장(지원 채팅 + 접속 기록)한 건에 한해, 입장 후 GRANT_MINUTES 동안만 볼 수 있다.
+# 주소를 직접 쳐서 읽는 것을 막는다. 관리인 앱·Data Pool 탐색기 같은 관리인 전용 API 는 영향이 없다. 엄격 모드(RENT3_ADMIN_PROXY_STRICT)에서만 적용.
+GRANT_MINUTES = 120
+
+
+def admin_read_guard(c: Dict[str, Any], *, view: str, tenant_id: str = "", branch: str = "", session_id: str = "") -> None:
+    if not proxy_strict():
+        return
+    from datetime import datetime, timedelta
+    from . import consent as cs, support as sup
+    since = datetime.now() - timedelta(minutes=GRANT_MINUTES)
+    for g in sup.SupportAccessLog.find(admin_user=str(c.get("u") or "")):
+        try:
+            if datetime.fromisoformat(g.entered_at) < since or g.view != view:
+                continue
+        except ValueError:
+            continue
+        if view == "tenant" and g.target_user != f"tenant:{tenant_id}":
+            continue
+        if view == "lessor" and _norm_branch(g.branch) != _norm_branch(branch):
+            continue
+        if view == "contract" and g.session_id != session_id:
+            continue
+        try:
+            target = sup.user_by_thread(g.target_user)
+        except Exception:  # noqa: BLE001 — 사용자가 사라졌으면 입장은 무효
+            continue
+        if cs.support_allowed(target):          # 사용자가 허용을 끄면 곧바로 닫힌다
+            return
+    raise Forbidden(
+        "원격 지원으로 입장한 건이 아니면 사용자 자료를 볼 수 없습니다.",
+        hint="관리인 앱의 원격 지원 카드에서 사용자의 허용·지원 채팅을 확인한 뒤 입장해 주세요(입장 후 %d분간)." % GRANT_MINUTES,
+    )
+
+
 def _digits(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
@@ -256,6 +292,12 @@ async def lessor_scope(request: Request) -> Dict[str, Any]:
     c = need_claims(request)
     if is_admin(c):
         admin_proxy_guard(request)
+        q = request.query_params.get("branch") or _branch_of_path(request.path_params)
+        if q is None:
+            q = (await _body(request)).get("branch")
+        if q is None and any(k in request.path_params for k in ("room_id", "ticket_id", "settlement_id", "contract_id")):
+            return c  # 대상이 없는 경로 — 엔드포인트가 404 로 답한다
+        admin_read_guard(c, view="lessor", branch=q or "main")
         return c
     if c.get("r") not in LESSOR_ROLES:
         raise Forbidden("임대인 계정으로 로그인해야 합니다.", hint="임차인 계정으로는 임대인 기능을 쓸 수 없습니다.")
@@ -275,6 +317,7 @@ def tenant_scope(request: Request) -> Dict[str, Any]:
     c = need_claims(request)
     if is_admin(c):
         admin_proxy_guard(request)
+        admin_read_guard(c, view="tenant", tenant_id=str(request.path_params.get("tenant_id") or ""))
         return c
     tid = request.path_params.get("tenant_id")
     if c.get("r") == "tenant" and tid and c.get("u") == f"tenant:{tid}":
@@ -338,6 +381,12 @@ async def contract_scope(request: Request) -> Optional[Dict[str, Any]]:
     c = need_claims(request)
     if is_admin(c):
         admin_proxy_guard(request)
+        sid0 = request.path_params.get("session_id") or request.path_params.get("token")
+        if sid0:
+            from .cosign import CoSignSession
+            s0 = CoSignSession.first(session_code=sid0) or CoSignSession.get(sid0)
+            if s0 is not None:
+                admin_read_guard(c, view="contract", session_id=s0.id)
         return c
     body = await _body(request)
 
