@@ -3434,10 +3434,17 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # ── 문의: 양쪽 모두 가능, 읽음 처리 ──
         r = c.post(url, headers=th, json={"kind": "question", "body": secret})
         self.assertEqual(r.status_code, 200, r.text)
-        got = c.get(url, headers=lh).json()
+        # 주기적 확인(폴링)은 읽음 처리하지 않는다: 세션 조회의 요약과 mark_read=false 목록은 몇 번을 불러도 배지가 유지된다
+        for _ in range(3):
+            self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=lh).json()["chat"], {"unread": 1, "open_count": 0})
+            self.assertEqual(c.get(url + "?mark_read=false", headers=lh).json()["unread"], 1)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=th).json()["chat"]["unread"], 0)   # 보낸 사람 쪽은 안 읽은 글 없음
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["chat"]["unread"], 0)                  # 관리인(읽기 전용)은 읽음 처리도 배지도 없음
+        got = c.get(url, headers=lh).json()                                      # 대화창을 열면 그때 읽음 처리
         self.assertEqual([m["body"] for m in got["messages"]], [secret])
         self.assertEqual(got["unread"], 1)
         self.assertEqual(c.get(url, headers=lh).json()["unread"], 0)             # 읽으면 줄어든다
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=lh).json()["chat"]["unread"], 0)
         self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": " "}).status_code, 400)
         self.assertEqual(c.post(url, headers=th, json={"kind": "gossip", "body": "x"}).status_code, 400)
         # 풀 이벤트 로그에 본문이 남지 않는다

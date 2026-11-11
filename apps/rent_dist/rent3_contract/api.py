@@ -414,18 +414,20 @@ def verify_counterparty_id(session_id: str, req: VerifyIdReq):
 
 
 @router.get("/sessions/{token}")
-def get_session(token: str):
+def get_session(token: str, request: Request):
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(token)
     if s.is_idle_expired():
         CoSignSession.expire_idle(s.branch, s.room_no)
         s = CoSignSession.by_code_or_id(token)
     contract = Contract.get(s.created_contract_id) if s.created_contract_id else None
+    who = _chat_actor(request, s) if claims_from(request) else {"role": ""}
     return {
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
         "session": s.model_dump(),
         "contract": contract.model_dump() if contract else None,
+        "chat": contract_chat.summary_for(s, who["role"] or None),   # 읽음 처리 없이 안 읽은 수·열린 요청 수 (2.5초 갱신에 포함)
     }
 
 
@@ -452,11 +454,11 @@ def _chat_actor(request: Request, s) -> Dict[str, str]:
 
 
 @router.get("/sessions/{session_id}/messages")
-def contract_messages(session_id: str, request: Request):
-    """계약방 대화 목록(문의·제안·수정 요청·안내). 당사자만."""
+def contract_messages(session_id: str, request: Request, mark_read: bool = True):
+    """계약방 대화 목록(문의·제안·수정 요청·안내). 당사자만. mark_read=false 면 읽음 처리하지 않는다(주기적 확인용)."""
     s = CoSignSession.by_code_or_id(session_id)
     who = _chat_actor(request, s)
-    return {"success": True, **contract_chat.list_for(s, who["role"] or None)}
+    return {"success": True, **contract_chat.list_for(s, who["role"] or None, mark_read=mark_read)}
 
 
 @router.post("/sessions/{session_id}/messages")

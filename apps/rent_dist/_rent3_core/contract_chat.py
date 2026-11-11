@@ -124,8 +124,18 @@ def public_item(m: DirectChat) -> Dict[str, Any]:
     }
 
 
-def list_for(session: Any, role: Optional[str]) -> Dict[str, Any]:
-    """대화 목록. role 이 있으면 그 사람이 읽은 것으로 표시한다(관리인 열람은 role=None 이라 읽음 처리 안 함)."""
+def summary_for(session: Any, role: Optional[str]) -> Dict[str, Any]:
+    """읽음 처리 없이 세는 요약(화면이 주기적으로 확인하는 값): 안 읽은 글 수, 답하지 않은 제안·수정 요청 수."""
+    unread = 0
+    if role in ("lessor", "tenant"):
+        unread = sum(1 for m in messages_of(session.id) if m.sender_role != role and not getattr(m, f"read_by_{role}"))
+    return {"unread": unread, "open_count": len(open_items(session.id))}
+
+
+def list_for(session: Any, role: Optional[str], mark_read: bool = True) -> Dict[str, Any]:
+    """대화 목록. mark_read 이고 role 이 있으면 그 사람이 읽은 것으로 표시한다.
+    주기적 확인(폴링)은 mark_read=False 로 부르거나 summary_for 만 쓴다 — 대화창을 열기 전에 배지가 사라지면 안 된다.
+    관리인 열람은 role=None 이라 읽음 처리하지 않는다."""
     items = messages_of(session.id)
     unread = 0
     if role in ("lessor", "tenant"):
@@ -133,8 +143,9 @@ def list_for(session: Any, role: Optional[str]) -> Dict[str, Any]:
         for m in items:
             if m.sender_role != role and not getattr(m, attr):
                 unread += 1                       # 이번에 처음 읽는 글 수(읽음 처리 전에 센다)
-                setattr(m, attr, True)
-                m.save(action="contract_chat_read", app_source="rent3_contract")
+                if mark_read:
+                    setattr(m, attr, True)
+                    m.save(action="contract_chat_read", app_source="rent3_contract")
     return {
         "messages": [public_item(m) for m in items],
         "open_count": len(open_items(session.id)),
