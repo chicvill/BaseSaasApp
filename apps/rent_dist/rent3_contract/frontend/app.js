@@ -1993,6 +1993,7 @@
         <span class="bass-badge ${s.tenant_signature ? "bass-badge--ok" : "bass-badge--warn"}">임차인 서명: ${s.tenant_signature ? "날인 완료 ✓" : "대기"}</span>
       </div>
       ${s.integrity_hash ? `<div class="bass-card" style="padding:12px;margin-bottom:12px;font-size:12px;">🔐 <strong>SHA-256 무결성 봉인 해시:</strong> <code>${Bass.escapeHtml(s.integrity_hash)}</code></div>` : ""}
+      ${sealedContract && sealedContract.chat_digest ? `<div class="bass-card" style="padding:12px;margin-bottom:12px;font-size:12px;">💬 <strong>협상 대화 기록 ${Number(sealedContract.chat_digest_count || 0)}건 해시:</strong> <code>${Bass.escapeHtml(sealedContract.chat_digest)}</code></div>` : ""}
 
       <label class="bass-label">${currentRole === "lessor" ? "🏢 임대인(갑)" : "🔑 임차인(을)"} 자필 서명 패드 (마우스/터치 드로잉)</label>
       <canvas id="sigCanvas" class="sig-pad" width="600" height="110"></canvas>

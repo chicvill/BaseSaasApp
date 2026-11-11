@@ -2,14 +2,15 @@
 apps/rent3_tenant/api.py — 임차인 및 예비 세입자 전용 API 라우터.
 """
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from apps.rent_dist._rent3_core.pool import now_iso
 
 from core.errors import DomainError, NotFound
-from apps.rent_dist._rent3_core.authz import any_user, api_headers, public_room, staff_only, tenant_scope
+from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
+from apps.rent_dist._rent3_core import room_messages
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -214,6 +215,7 @@ def get_myhome(tenant_id: str):
         "tickets": [tk.model_dump() for tk in tickets],
         "pending_checkout": checkouts[0].model_dump() if checkouts else None,
         "chats": [c.model_dump() for c in chats],
+        "messages_unread": (room_messages.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else "") if t.room_no else 0),   # 임대인 메시지 안 읽은 수(읽음 처리 없음)
     }
 
 
@@ -221,6 +223,48 @@ class BalanceRegistryReq(BaseModel):
     changed: bool                 # 직접 열람해 보니 계약일 이후 변동이 있다
     issue_number: str = ""        # 이번에 열람한 등기부의 발급확인번호
     mortgage_cleared: bool = False  # (말소 특약 계약) 열람한 등기부에서 선순위 근저당이 모두 말소된 것을 확인했다
+
+
+class TenantMsgReq(BaseModel):
+    body: str
+
+
+def _tenant_by_id(tenant_id: str) -> Tenant:
+    t = Tenant.get(tenant_id) or Tenant.first(phone=tenant_id)
+    if not t:
+        raise NotFound("임차인을 찾을 수 없습니다.")
+    return t
+
+
+def _tenant_since(t: Tenant):
+    room = Room.first(branch=t.branch, room_no=t.room_no) if t.room_no else None
+    ct = room_messages.active_contract(room)
+    return room, ct, (ct.created_at if ct else "")
+
+
+@router.get("/myhome/{tenant_id}/messages", dependencies=[Depends(tenant_scope)])
+def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
+    """임대인과의 메시지(내 호실). 계약 협상 기록은 접어서 따로 준다. 관리인 지원 채팅·계약방 대화는 섞지 않는다."""
+    ensure_pool_seeded()
+    t = _tenant_by_id(tenant_id)
+    room, ct, since = _tenant_since(t)
+    msgs = room_messages.room_messages(t.branch, t.room_no, t, since) if t.room_no else []
+    unread = sum(1 for m in msgs if room_messages._unread(m, "tenant"))
+    c = claims_from(request)
+    if mark_read and not (c and is_admin(c)):
+        room_messages.mark_read(msgs, "tenant")
+    return {"success": True, "room_no": t.room_no, "unread": unread, "messages": [room_messages.public(m) for m in msgs],
+            "negotiation": room_messages.negotiation_history(ct)}
+
+
+@router.post("/myhome/{tenant_id}/messages", dependencies=[Depends(tenant_scope)])
+def tenant_message_send(tenant_id: str, req: TenantMsgReq):
+    ensure_pool_seeded()
+    t = _tenant_by_id(tenant_id)
+    if not t.room_no:
+        raise DomainError("입주한 호실이 없어 메시지를 보낼 수 없습니다.", hint="빈 집 찾기의 1:1 방문문의를 이용해 주세요.")
+    m = room_messages.post(t.branch, t.room_no, "tenant", t.name, req.body, tenant_id=t.id)
+    return {"success": True, "message": "임대인에게 보냈습니다.", "item": room_messages.public(m)}
 
 
 @router.post("/myhome/{tenant_id}/balance-registry-check", dependencies=[Depends(tenant_scope)])

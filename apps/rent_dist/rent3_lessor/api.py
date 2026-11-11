@@ -5,8 +5,8 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
-from apps.rent_dist._rent3_core.authz import api_headers, is_local_request, lessor_scope
-from apps.rent_dist._rent3_core import franchise as fr, registry_ai
+from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_admin, is_local_request, lessor_scope
+from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages
 from apps.rent_dist._rent3_core.pool import now_iso
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -1180,15 +1180,37 @@ def send_lessor_chat(req: ChatReplyReq):
     b_id = normalize_branch_id(req.branch)
     room = Room.first(branch=b_id, room_no=req.room_no)
     lessor = Lessor.first(branch=b_id)
-    msg = DirectChat(
-        branch=b_id,
-        id_room=room.id if room else "",
-        room_no=req.room_no,
-        sender_role="lessor",
-        sender_name=lessor.name if lessor else "임대인",
-        message=req.message.strip(),
-    ).save(action="lessor_chat_sent", app_source=APP_SRC)
+    msg = room_messages.post(b_id, req.room_no, "lessor", lessor.name if lessor else "임대인", req.message,
+                             tenant_id=(room.id_tenant if room else "") or "")
     return {"success": True, "message": "메시지가 전송되었습니다.", "chat": msg.model_dump()}
+
+
+@router.get("/messages/rooms")
+def messages_rooms(branch: str = "main"):
+    """메시지 화면 목록: 호실별 마지막 글·안 읽은 수 (관리인 지원 채팅·계약방 대화는 섞지 않는다)."""
+    ensure_pool_seeded()
+    return {"success": True, "rooms": room_messages.rooms_overview(branch)}
+
+
+@router.get("/messages/rooms/{room_no}")
+def messages_room(room_no: str, request: Request, branch: str = "main", mark_read: bool = True):
+    """한 호실의 대화와 계약 협상 기록(접어서 보여 줄 것, 체결 때 기록한 해시 무결성 포함)."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    room = Room.first(branch=b_id, room_no=room_no)
+    if not room:
+        raise DomainError(f"{room_no}호를 찾을 수 없습니다.")
+    msgs = room_messages.room_messages(b_id, room_no)
+    unread = sum(1 for m in msgs if room_messages._unread(m, "lessor"))
+    c = claims_from(request)
+    if mark_read and not (c and is_admin(c)):
+        room_messages.mark_read(msgs, "lessor")
+    tenant = Tenant.get(room.id_tenant) if room.id_tenant else None
+    return {
+        "success": True, "room_no": room_no, "tenant_name": tenant.name if tenant else "", "unread": unread,
+        "messages": [room_messages.public(m) for m in msgs],
+        "negotiation": room_messages.negotiation_history(room_messages.active_contract(room)),
+    }
 
 
 class BrokerTextParseReq(BaseModel):

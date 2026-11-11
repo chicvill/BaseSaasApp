@@ -470,6 +470,8 @@ class Contract(PoolObj):
     tenant_signature: str = ""
     integrity_hash: str = ""
     cosign_session_id: str = ""
+    chat_digest: str = ""                    # 체결 때 계약방 협상 기록(불변 필드만)의 SHA-256 — 열람해도 바뀌지 않는다
+    chat_digest_count: int = 0
     contract_channel: str = "DIRECT"         # DIRECT (직거래 공동계약) / BROKER_PAPER (공인중개사 지면계약 사진등록)
     contract_photo_file: str = ""            # data/rent3_pool/ 기준 상대 경로 (예: uploads/contracts/ct_xxx.jpg)
     contract_photo_name: str = ""            # 원본 업로드 파일명

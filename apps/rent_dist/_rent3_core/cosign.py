@@ -1199,6 +1199,9 @@ class CoSignSession(PoolObj):
         months = int(t_info.get("lease_term_months", 12))
         expiry = add_months_str(move_in, months)
 
+        from . import contract_chat
+        contract_chat.system_note(self, "계약이 체결되었습니다. 이 대화는 이제 읽기 전용으로 보관됩니다.", step=5)
+        chat_digest, chat_digest_count = contract_chat.compute_digest(self.id)   # 안내 글까지 포함해 체결 시점의 협상 기록을 봉인
         ct = Contract(
             branch=self.branch,
             id_building=self.id_building,
@@ -1250,6 +1253,8 @@ class CoSignSession(PoolObj):
             tenant_signature=self.tenant_signature,
             integrity_hash=self.integrity_hash,
             cosign_session_id=self.id,
+            chat_digest=chat_digest,
+            chat_digest_count=chat_digest_count,
             status="ACTIVE",
         )
         ct.vat = ct.compute_vat()

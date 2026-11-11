@@ -121,6 +121,19 @@ def open_items(session_id: str) -> List[DirectChat]:
     return [m for m in messages_of(session_id) if m.kind in ("proposal", "change_request") and m.status == "open"]
 
 
+# 해시 입력에는 불변 내용 필드만 쓴다. 읽음 표시(read_by_*)·updated_at 같은 열람 상태는 넣지 않아, 체결 뒤 당사자가 읽어도 값이 바뀌지 않는다.
+DIGEST_FIELDS = ("id", "kind", "sender_role", "message", "step", "field", "proposal", "status", "resolved_by", "resolved_at", "created_at")
+
+
+def compute_digest(session_id: str) -> tuple:
+    """계약방 대화의 (SHA-256 16진수, 글 수). 같은 내용이면 언제 계산해도 같다."""
+    import hashlib
+    import json
+    rows = [{k: getattr(m, k) for k in DIGEST_FIELDS} for m in messages_of(session_id)]
+    blob = json.dumps(rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest(), len(rows)
+
+
 def public_item(m: DirectChat) -> Dict[str, Any]:
     return {
         "id": m.id, "kind": m.kind, "sender_role": m.sender_role, "sender_name": m.sender_name, "body": m.message, "step": m.step,

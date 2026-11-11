@@ -471,6 +471,17 @@ def contract_message_post(session_id: str, req: ContractMsgReq, request: Request
     return {"success": True, "message": msg, "item": contract_chat.public_item(m), "open_count": len(contract_chat.open_items(s.id))}
 
 
+@router.get("/sessions/{session_id}/chat-digest")
+def contract_chat_digest(session_id: str):
+    """체결 때 기록한 협상 기록 해시와 지금 내용이 맞는지 확인한다(읽음 표시는 해시에 영향이 없다). 당사자만."""
+    s = CoSignSession.by_code_or_id(session_id)
+    ct = Contract.get(s.created_contract_id) if s.created_contract_id else None
+    computed, n = contract_chat.compute_digest(s.id)
+    stored = ct.chat_digest if ct else ""
+    return {"success": True, "concluded": bool(ct), "stored": stored, "computed": computed, "count": n,
+            "match": (computed == stored) if stored else None}
+
+
 @router.post("/sessions/{session_id}/messages/{msg_id}/respond")
 def contract_message_respond(session_id: str, msg_id: str, req: ContractMsgRespondReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)

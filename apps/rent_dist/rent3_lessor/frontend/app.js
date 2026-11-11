@@ -45,7 +45,8 @@
     ] },
     { title: "세무 · 경비", items: [{ label: "🧾 세무 허브 (종소세·부가세·세금계산서·경비)", tab: "tax" }] },
     { title: "운영", items: [
-      { label: "🔧 A/S · 메시지", tab: "ops" },
+      { label: "💬 메시지", tab: "messages" },
+      { label: "🔧 A/S 접수", tab: "ops" },
       { label: "🔔 일괄 납입 통보", tab: "notice" },
     ] },
     { title: "건물", items: [
@@ -66,7 +67,7 @@
   const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
   R3Shell.watchSupport();
-  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S · 메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
+  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
@@ -195,6 +196,7 @@
   }
 
   function switchTab(tabName) {
+    if (tabName !== "messages") { msgRoom = ""; }
     if (tabName === "tax" && currentTab !== "tax") { taxView = "hub"; taxMonth = 0; }   // 메뉴에서 들어오면 세무 허브부터
     currentTab = tabName;
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === tabName));
@@ -218,6 +220,7 @@
     else if (currentTab === "tax") renderTaxTab();
     else if (currentTab === "ops") renderOpsTab();
     else if (currentTab === "notice") renderNoticeTab();
+    else if (currentTab === "messages") renderMessagesTab();
     else if (currentTab === "bldgtax") renderBldgTaxTab();
     else if (currentTab === "rooms") renderRoomsTab();
   }
@@ -1789,9 +1792,82 @@
     });
   }
 
+  // ── 운영 ▸ 메시지: 호실별 1:1 대화(임차인과) + 접어 둔 계약 협상 기록. 관리인 지원 채팅·계약방 대화는 섞지 않는다 ──
+  let msgRoom = "";
+  let msgTimer = null;
+  const fmtMsgTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
+
+  async function renderMessagesTab() {
+    clearInterval(msgTimer);
+    if (msgRoom) { await renderMessageThread(); return; }
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    let d;
+    try { d = await Bass.api(APP_ID, `/messages/rooms?branch=${encodeURIComponent(currentBranch)}`); } catch (e) { Bass.showError(e); return; }
+    if (currentTab !== "messages") return;
+    const rows = d.rooms.filter((r) => r.count > 0 || r.is_occupied).sort((a, b) => (b.unread - a.unread) || String(b.last_at).localeCompare(String(a.last_at)) || String(a.room_no).localeCompare(String(b.room_no), "ko", { numeric: true }));
+    elTabContent.innerHTML = `
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">호실을 누르면 입주자와의 대화가 열립니다. 수납·미납 안내문은 [수납 현황]에서 문자로 보내고, 이곳은 앱 안 대화입니다.</div>
+      ${rows.map((r) => `
+        <button type="button" class="bass-btn msg-room" data-room="${Bass.escapeHtml(r.room_no)}" style="display:block;width:100%;text-align:left;margin-bottom:6px;padding:10px 12px;">
+          <div class="bass-row" style="justify-content:space-between;gap:8px;">
+            <strong>${Bass.escapeHtml(r.room_no)}호 ${Bass.escapeHtml(r.tenant_name || "공실")}</strong>
+            ${r.unread > 0 ? `<span class="bass-badge bass-badge--err">안 읽음 ${r.unread}</span>` : ""}
+          </div>
+          <div class="bass-muted" style="font-size:12.5px;margin-top:2px;">${r.count ? `${Bass.escapeHtml(r.last_role === "lessor" ? "나: " : "")}${Bass.escapeHtml(r.last_body)} · ${fmtMsgTime(r.last_at)}` : "대화 없음"}</div>
+        </button>`).join("") || '<div class="bass-muted">대화할 호실이 없습니다.</div>'}`;
+    elTabContent.querySelectorAll(".msg-room").forEach((b) => b.addEventListener("click", () => { msgRoom = b.dataset.room; renderMessagesTab(); }));
+  }
+
+  async function renderMessageThread() {
+    const room = msgRoom;
+    let d;
+    try { d = await Bass.api(APP_ID, `/messages/rooms/${encodeURIComponent(room)}?branch=${encodeURIComponent(currentBranch)}`); } catch (e) { Bass.showError(e); msgRoom = ""; return; }
+    if (currentTab !== "messages" || msgRoom !== room) return;
+    const neg = d.negotiation || { count: 0, items: [] };
+    const digestLine = neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다"
+      : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다 — 기록이 바뀌었을 수 있습니다"
+      : "체결 전 기록입니다";
+    const bubble = (m) => m.kind === "system"
+      ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${fmtMsgTime(m.created_at)}</span></div>`
+      : `<div class="cm-b ${m.sender_role === "lessor" ? "is-mine" : ""}"><div><div class="cm-meta">${Bass.escapeHtml(m.sender_role === "lessor" ? "나" : m.sender_name || "임차인")} · ${fmtMsgTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
+    elTabContent.innerHTML = `
+      <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong></div>
+      <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
+      <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
+      <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
+      <details style="margin-top:14px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.count}건 ${neg.count ? "보기" : ""}</summary>
+        <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
+        ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "임차인" : "안내")}: ${Bass.escapeHtml(m.body)}${m.status ? ` <span class="bass-badge">${Bass.escapeHtml(({ open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" })[m.status] || m.status)}</span>` : ""}</div>`).join("")}
+      </details>`;
+    const list = document.getElementById("msgList");
+    list.scrollTop = list.scrollHeight;
+    document.getElementById("btnMsgBack").addEventListener("click", () => { msgRoom = ""; renderMessagesTab(); });
+    document.getElementById("btnMsgSend").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const text = document.getElementById("msgInput").value.trim();
+        if (!text) { Bass.updateAppAlert("warning", "내용을 입력해 주세요."); return; }
+        await Bass.api(APP_ID, "/chats", { method: "POST", body: { branch: currentBranch, room_no: room, message: text } });
+        await renderMessageThread();
+      });
+    });
+    // 열어 둔 동안 새 글만 가져온다(입력 중인 글은 건드리지 않는다)
+    msgTimer = setInterval(async () => {
+      if (currentTab !== "messages" || msgRoom !== room || !document.getElementById("msgList")) { clearInterval(msgTimer); return; }
+      try {
+        const nd = await Bass.api(APP_ID, `/messages/rooms/${encodeURIComponent(room)}?branch=${encodeURIComponent(currentBranch)}`);
+        const box = document.getElementById("msgList");
+        if (box && nd.messages.length !== d.messages.length) {
+          d = nd;
+          const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+          box.innerHTML = nd.messages.map(bubble).join("");
+          if (atBottom) box.scrollTop = box.scrollHeight;
+        }
+      } catch (_) { /* 다음에 다시 */ }
+    }, 8000);
+  }
+
   function renderOpsTab() {
     const tickets = dash.tickets || [];
-    const chats = dash.chats || [];
 
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
@@ -1810,20 +1886,6 @@
             ` : `<div style="font-size:12.5px;color:var(--ok);">완료 내역: ${fmtWon(t.repair_cost)} (${t.cost_burden})</div>`}
           </div>
         `).join("") : `<p class="bass-muted">접수된 A/S 티켓이 없습니다.</p>`}
-      </div>
-
-      <div class="bass-card">
-        <h3>💬 비용 0원 1:1 인앱 직통 메신저</h3>
-        <div class="bass-row" style="margin:10px 0;">
-          <input id="chatRoomNo" class="bass-input" style="width:100px;" value="203" placeholder="호실">
-          <input id="chatMsg" class="bass-input" style="flex:1;" placeholder="세입자/예비임차인에게 보낼 답변 입력">
-          <button id="btnSendChat" class="bass-btn bass-btn--primary" type="button">전송</button>
-        </div>
-        ${chats.slice(0, 8).map((m) => `
-          <div style="padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;">
-            <strong>[${Bass.escapeHtml(m.room_no)}호 · ${Bass.escapeHtml(m.sender_name)}]</strong> ${Bass.escapeHtml(m.message)}
-          </div>
-        `).join("")}
       </div>
     `;
 
@@ -1853,18 +1915,6 @@
       });
     });
 
-    document.getElementById("btnSendChat").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const msg = document.getElementById("chatMsg").value.trim();
-        if (!msg) return;
-        const res = await Bass.api(APP_ID, "/chats", {
-          method: "POST",
-          body: { branch: currentBranch, room_no: document.getElementById("chatRoomNo").value.trim(), message: msg },
-        });
-        Bass.updateAppAlert("success", res.message);
-        await refresh();
-      });
-    });
   }
 
   function renderRoomsTab() {

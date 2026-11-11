@@ -32,6 +32,7 @@
       { label: "🚪 퇴실 정산", id: "btnSvcCheckout" },
     ] },
     { title: "요청", items: [
+      { label: "✉️ 임대인과 메시지", id: "btnSvcMsg" },
       { label: "🔧 A/S 요청", id: "btnSvcAs" },
       { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
       { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
@@ -49,7 +50,7 @@
   const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
 
-  const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
+  const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", messages: "임대인과 메시지", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
   let svcView = SVC_TITLES[params.get("svc")] !== undefined ? params.get("svc") : "home";
 
   function closeDrawer() {
@@ -69,6 +70,36 @@
       back.style.display = svcView === "home" ? "none" : "flex";
       document.getElementById("svcTitle").textContent = SVC_TITLES[svcView] || "";
     }
+    clearInterval(tnMsgTimer);
+    if (svcView === "messages") loadTenantMessages();
+  }
+
+  // ── 임대인과 메시지 (내 호실 1:1 대화 + 접어 둔 계약 협상 기록). 관리인 지원 문의·계약방 대화는 섞지 않는다 ──
+  let tnMsgTimer = null;
+  const tnTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
+  async function loadTenantMessages(keepComposer) {
+    const box = document.getElementById("tnMsgList");
+    if (!box || !selectedTenantId) return;
+    const d = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/messages`);
+    const neg = d.negotiation || { count: 0, items: [] };
+    const bubble = (m) => m.kind === "system"
+      ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${tnTime(m.created_at)}</span></div>`
+      : `<div class="cm-b ${m.sender_role === "tenant" ? "is-mine" : ""}"><div><div class="cm-meta">${m.sender_role === "tenant" ? "나" : Bass.escapeHtml(m.sender_name || "임대인")} · ${tnTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다. 궁금한 점을 남겨 보세요.</div>';
+    if (atBottom || !keepComposer) box.scrollTop = box.scrollHeight;
+    const negBox = document.getElementById("tnMsgNeg");
+    if (negBox) {
+      const digestLine = neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다" : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다" : "";
+      negBox.innerHTML = neg.count ? `<details style="margin-top:12px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.count}건 보기</summary>
+        <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
+        ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "나" : "안내")}: ${Bass.escapeHtml(m.body)}</div>`).join("")}</details>` : "";
+    }
+    clearInterval(tnMsgTimer);
+    tnMsgTimer = setInterval(() => {
+      if (svcView !== "messages" || !document.getElementById("tnMsgList")) { clearInterval(tnMsgTimer); return; }
+      loadTenantMessages(true).catch(() => {});
+    }, 8000);
   }
   function go(view) {
     svcView = SVC_TITLES[view] !== undefined ? view : "home";
@@ -76,7 +107,7 @@
     else applyView();
     window.scrollTo(0, 0);
   }
-  const MENU_VIEWS = { btnSvcHome: "home", btnSvcCert: "cert", btnSvcPaper: "paper", btnSvcExpiry: "expiry", btnSvcCheckout: "checkout", btnSvcAs: "as", btnSvcDoor: "door" };
+  const MENU_VIEWS = { btnSvcHome: "home", btnSvcCert: "cert", btnSvcPaper: "paper", btnSvcExpiry: "expiry", btnSvcCheckout: "checkout", btnSvcAs: "as", btnSvcDoor: "door", btnSvcMsg: "messages" };
   Object.entries(MENU_VIEWS).forEach(([id, view]) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener("click", () => { closeDrawer(); go(view); });
@@ -163,6 +194,7 @@
     if (ec && ec.status === "AWAITING_TENANT") todos.push({ icon: "📅", text: "만기 후 전출 계획을 알려 주세요", label: "답변하기", go: "expiry", hot: true });
     else if (ec && ec.status === "RENEWAL_PREVIEWED") todos.push({ icon: "📝", text: "연장 재계약 예고가 도착했습니다", label: "확인하기", go: "expiry", hot: true });
     else if (ew && ew.in_6_to_2_months_window && !ec) todos.push({ icon: "📅", text: "만기가 다가옵니다. 전출 계획을 알릴 수 있습니다", label: "열기", go: "expiry", hot: false });
+    if ((data.messages_unread || 0) > 0) todos.push({ icon: "✉️", text: `임대인 메시지 ${data.messages_unread}건이 있습니다`, label: "보기", go: "messages", hot: false });
     if (activeBns.some((x) => x.status !== "ACKNOWLEDGED")) todos.push({ icon: "🔔", text: "납입 안내가 도착했습니다", label: "보기", go: "notice", hot: false });
     const todoHtml = todos.length ? `<div class="bass-card no-print" style="margin-bottom:14px;padding:10px 12px;">${todos.slice(0, 2).map((x) => `
       <div class="bass-row" style="justify-content:space-between;align-items:center;gap:8px;padding:4px 0;">
@@ -185,6 +217,7 @@
             <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
             ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
             <span class="bass-badge ${ew && ew.in_6_to_2_months_window ? "bass-badge--warn" : "bass-badge--info"}">만기 D-${lg.days_to_expiry ?? "-"}${ew && ew.in_6_to_2_months_window ? " (6~2개월 통지구간)" : ""}</span>
+            ${(data.messages_unread || 0) > 0 ? `<span class="bass-badge bass-badge--info">✉️ 새 메시지 ${data.messages_unread}</span>` : ""}
           </div>
         </div>
 
@@ -402,6 +435,18 @@
       ` : ""}
 `, "납부확인서를 만들 월세 납부 내역이 아직 없습니다.")}
       </section>
+      <section class="svc" data-svc="messages">
+        <div class="bass-card no-print">
+          <h3 style="margin:0 0 6px;">✉️ 임대인과 메시지</h3>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">내 호실의 임대인과 주고받는 앱 안 대화입니다. 관리인에게 도움을 청할 때는 메뉴의 ‘관리인에게 문의’를 쓰세요.</div>
+          <div id="tnMsgList" class="cm-list" style="max-height:50vh;"></div>
+          <div id="tnMsgComposer"${R3Shell.isAdminSession() ? " hidden" : ""}>
+            <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
+            <button id="btnTnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
+          </div>
+          <div id="tnMsgNeg"></div>
+        </div>
+      </section>
       <section class="svc" data-svc="door">
         <div class="bass-card no-print" style="margin-bottom:14px;">
         <div class="field-grid" style="margin-top:14px;">
@@ -427,7 +472,19 @@
       </section>
     `;
 
+    const msgMenuBtn = document.getElementById("btnSvcMsg");
+    if (msgMenuBtn) msgMenuBtn.textContent = "✉️ 임대인과 메시지" + ((data.messages_unread || 0) > 0 ? ` (${data.messages_unread})` : "");   // 안 읽은 수는 메뉴에도 보인다
     applyView();
+    document.getElementById("btnTnMsgSend").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const inp = document.getElementById("tnMsgInput");
+        const text = inp.value.trim();
+        if (!text) { Bass.updateAppAlert("warning", "내용을 입력해 주세요."); return; }
+        await Bass.api(APP_ID, `/myhome/${encodeURIComponent(t.id)}/messages`, { method: "POST", body: { body: text } });
+        inp.value = "";
+        await loadTenantMessages();
+      });
+    });
     document.getElementById("btnSvcBack").addEventListener("click", () => go("home"));
     elMyhome.querySelectorAll(".btn-todo").forEach((bt) => bt.addEventListener("click", () => {
       if (bt.dataset.go === "pay") {

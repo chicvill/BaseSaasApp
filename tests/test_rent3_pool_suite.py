@@ -282,6 +282,28 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         sealed = r_seal.json()
         self.assertTrue(sealed["contract"]["fixed_date_no"].startswith("FIX-"))
 
+        # 체결 때 협상 기록(제안·수락·시스템 안내)의 해시가 계약에 기록되고, 당사자가 읽어도 바뀌지 않는다
+        from apps.rent_dist._rent3_core import Contract as _Ct, contract_chat as _cc
+        sealed_ct = _Ct.get(sealed["contract"]["id"])
+        self.assertEqual(len(sealed_ct.chat_digest), 64)
+        self.assertEqual(sealed_ct.chat_digest_count, len(_cc.messages_of(sid)))
+        self.assertGreaterEqual(sealed_ct.chat_digest_count, 5)
+        lh_s, th_s = self._party_headers(sid)
+        base_s = f"/api/rent3_contract/sessions/{sid}"
+        v0 = self.client.get(f"{base_s}/chat-digest", headers=lh_s).json()
+        self.assertEqual((v0["match"], v0["stored"]), (True, sealed_ct.chat_digest))
+        for h in (lh_s, th_s, lh_s):                                   # 양쪽이 대화를 열람(읽음 표시 변경)해도
+            got_s = self.client.get(f"{base_s}/messages", headers=h).json()
+            self.assertTrue(got_s["read_only"])
+        v1 = self.client.get(f"{base_s}/chat-digest", headers=th_s).json()
+        self.assertEqual((v1["match"], v1["computed"]), (True, sealed_ct.chat_digest))
+        self.assertEqual(self.client.post(f"{base_s}/messages", headers=th_s, json={"kind": "question", "body": "체결 뒤 문의"}).status_code, 409)   # 읽기 전용
+        self.assertEqual(self.client.get(f"{base_s}/chat-digest", headers=lh_s).json()["computed"], sealed_ct.chat_digest)
+        # 해시 입력에서 읽음 표시·갱신시각은 제외된다
+        self.assertNotIn("read_by_lessor", _cc.DIGEST_FIELDS)
+        self.assertNotIn("read_by_tenant", _cc.DIGEST_FIELDS)
+        self.assertNotIn("updated_at", _cc.DIGEST_FIELDS)
+
         # 디스크 JSON Data Pool 4개 파일 동시 업데이트 확인
         ct_disk = self._read_disk_json("contracts")
         self.assertTrue(any(c["id"] == sealed["contract"]["id"] for c in ct_disk["items"]))
@@ -3178,7 +3200,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
         menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
         tabs = set(re.findall(r'tab: "(\w+)"', menu))
-        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "notice", "bldgtax"})
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "notice", "bldgtax", "messages"})
         for t in tabs - {"ledger"}:
             self.assertIn(f'currentTab === "{t}"', app, t)
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
@@ -3397,7 +3419,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
         self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
-                               "btnSupportChat", "btnMenuListings", "btnSupportSetting"})
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg"})
         for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
                        'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
             self.assertIn(needle, menu, needle)
@@ -3666,6 +3688,90 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         routes = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "api.py"), encoding="utf-8").read()
         for r in ('"/sessions/{session_id}/messages"', '"/sessions/{session_id}/messages/{msg_id}/respond"', '"/sessions/{session_id}/reopen-terms"'):
             self.assertIn(r, routes, r)
+
+    def test_61_messages_menu_room_threads(self):
+        """61. 메시지(7단계): 호실별 1:1 대화(임대인↔임차인). 계약방 협상 기록·관리인 지원 채팅과 섞이지 않고, 새 입주자에게 옛 문의가 보이지 않으며, 당사자만 열람."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import DirectChat, Lessor, Tenant, Room, support as sup
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        c = self.client
+        lessor = Lessor.first(username="chic")
+        t201 = Tenant.first(room_no="201", branch="main")
+        t202 = Tenant.first(room_no="202", branch="main")
+        lh = {"Authorization": f"Bearer {lessor_token(lessor)}"}
+        th = {"Authorization": f"Bearer {tenant_token(t201)}"}
+        th2 = {"Authorization": f"Bearer {tenant_token(t202)}"}
+        # 세 가지가 섞이지 않는지 보려고 다른 종류의 글을 미리 만들어 둔다
+        sup.post_user_message(t201, "지원 채팅 글-섞이면 안 됨")
+        DirectChat(branch="main", room_no="201", session_id="cs_other", kind="question", sender_role="tenant", sender_name="계약방", message="계약방 글-섞이면 안 됨").save(action="t")
+        old = DirectChat(branch="main", room_no="201", sender_role="tenant", sender_name="예전 문의자", message="입주 전에 문의했던 사람의 글").save(action="t")
+        old.created_at = "2000-01-01T00:00:00"                         # 현재 계약보다 훨씬 이전
+        old.save(action="t_old")
+        # 임대인이 보내면 임차인에게 보이고 안 읽은 수가 하나 늘어난다 (앞선 시험이 남긴 안내 글이 있을 수 있어 기준값을 먼저 잰다)
+        unread0 = c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"]
+        r = c.post("/api/rent3_lessor/chats", headers=lh, json={"branch": "main", "room_no": "201", "message": "관리비 고지서 확인 부탁드려요"})
+        self.assertEqual(r.status_code, 200, r.text)
+        rooms = c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"]
+        r201 = next(x for x in rooms if x["room_no"] == "201")
+        self.assertEqual(r201["last_body"], "관리비 고지서 확인 부탁드려요")
+        mine0 = c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()
+        self.assertEqual(mine0["messages_unread"], unread0 + 1)
+        got = c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages?mark_read=false", headers=th).json()
+        bodies = [m["body"] for m in got["messages"]]
+        self.assertIn("관리비 고지서 확인 부탁드려요", bodies)
+        for hidden in ("지원 채팅 글-섞이면 안 됨", "계약방 글-섞이면 안 됨", "입주 전에 문의했던 사람의 글"):
+            self.assertNotIn(hidden, bodies)                               # 지원 채팅·계약방 대화·이전 문의자의 글은 안 보인다
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"], unread0 + 1)   # mark_read=false 는 읽음 처리 안 함
+        c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th)                                           # 열면 읽음 처리
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"], 0)
+        # 임차인이 답하면 임대인에게 안 읽은 글로 보이고, 임대인이 열면 읽음 처리
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th, json={"body": "네 확인했습니다"}).status_code, 200)
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th, json={"body": " "}).status_code, 400)
+        r201 = next(x for x in c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"] if x["room_no"] == "201")
+        self.assertGreaterEqual(r201["unread"], 1)
+        thread = c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=lh).json()
+        self.assertIn("네 확인했습니다", [m["body"] for m in thread["messages"]])
+        self.assertIn("입주 전에 문의했던 사람의 글", [m["body"] for m in thread["messages"]])   # 임대인은 호실 전체 기록을 본다
+        self.assertEqual(next(x for x in c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"] if x["room_no"] == "201")["unread"], 0)
+        self.assertIn("negotiation", thread)
+        # 당사자만: 다른 호실 임차인·타 지점 임대인·비로그인은 거부, 관리인은 읽기만(엄격 모드에서 쓰기 403)
+        sunho = self._login("sunho")
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th2).status_code, 403)
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th2, json={"body": "x"}).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=sunho).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=sunho).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/chats", headers=sunho, json={"branch": "main", "room_no": "201", "message": "x"}).status_code, 403)
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=self.NOAUTH).status_code, 401)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages").status_code, 200)
+            self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", json={"body": "관리인이 끼어듦"}).status_code, 403)
+        # 관리인 지원 채팅은 그대로 따로 있다
+        sup_bodies = [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]]   # (앞선 시험이 남긴 접속 안내가 있을 수 있다)
+        self.assertIn("지원 채팅 글-섞이면 안 됨", sup_bodies)
+        for room_chat in ("관리비 고지서 확인 부탁드려요", "네 확인했습니다"):
+            self.assertNotIn(room_chat, sup_bodies)                        # 호실 대화는 지원 채팅에 나오지 않는다
+
+    def test_62_messages_screens_and_digest_display(self):
+        """62. 메시지 화면(7단계): 임대인 ▸ 메시지(호실 목록·대화·접힌 협상 기록), 임차인 ▸ 임대인과 메시지, 옛 메신저 제거, 체결 계약서에 대화 해시 표시."""
+        rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
+        lessor, tenant, contract = rd("rent3_lessor", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js"), rd("rent3_contract", "frontend", "app.js")
+        for needle in ("function renderMessagesTab", "function renderMessageThread", "btnMsgSend", "msg-room", "계약 협상 기록", "digest_ok", "/messages/rooms"):
+            self.assertIn(needle, lessor, needle)
+        self.assertNotIn("btnSendChat", lessor)                       # A/S 화면 안의 옛 메신저는 없어졌다
+        self.assertIn("A/S 접수", lessor)
+        for needle in ("loadTenantMessages", "btnTnMsgSend", 'data-svc="messages"', "tnMsgNeg", "digest_ok", "messages_unread", "/messages`"):
+            self.assertIn(needle, tenant, needle)
+        self.assertIn("chat_digest", contract)                         # 체결된 계약서에 협상 대화 기록 해시 표시
+        # 서버 약속: 임대인·임차인 메시지 주소와 계약 앱 해시 확인 주소
+        for fname, route in (("rent3_lessor", '"/messages/rooms"'), ("rent3_lessor", '"/messages/rooms/{room_no}"'),
+                             ("rent3_tenant", '"/myhome/{tenant_id}/messages"'), ("rent3_contract", '"/sessions/{session_id}/chat-digest"')):
+            self.assertIn(route, rd(fname, "api.py"), route)
+        # 메시지 화면의 대화는 호실 대화(session_id 없음)만 쓰고, 계약방 협상 기록은 접어서 따로 준다
+        rm = rd("_rent3_core", "room_messages.py")
+        self.assertIn("not m.session_id", rm)
+        self.assertIn("negotiation_history", rm)
+        import re
+        self.assertIsNone(re.search(r"import[^\n]*\bsupport\b|SupportMessage[.(]", rm))   # 관리인 지원 채팅 모델을 가져다 쓰지 않는다
 
 
 if __name__ == "__main__":
