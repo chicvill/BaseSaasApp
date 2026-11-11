@@ -4129,6 +4129,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 호환 모드(기존 시험 묶음)에서는 관리인이 입장 없이도 읽는다
         self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}").status_code, 200)
 
+    def test_67_contract_step12_dots_and_docs_wording(self):
+        """67. 계약 앱 ①② 단계 진행 표시는 점 두 개로 통일(옛 '미체크·미확인' 배지 없음), 계약 앱 매뉴얼·QA 체크리스트는 새 3단계(제안→수락, 전체 동의 한 버튼)를 설명한다."""
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        app = rd("apps", "rent_dist", "rent3_contract", "frontend", "app.js")
+        self.assertIn("function pairDots(", app)
+        self.assertEqual(app.count("pairDots("), 4)                       # 정의 1 + ① 두 줄 + ② 한 줄
+        for gone in ("미체크", "미확인", "임차인 확인 잠금", "임대인 확인: "):
+            self.assertNotIn(gone, app, gone)
+        manual = rd("apps", "rent_dist", "rent3_contract", "frontend", "manual.html")
+        for needle in ("제안", "수락", "[계약 조건 전체 동의]", "조건 다시 열기", "계약방 대화", "90일", "5년"):
+            self.assertIn(needle, manual, needle)
+        self.assertNotIn("공동 편집", manual)
+        qa = rd("scripts", "generate_rent3_qa_pdf.py")
+        for needle in ("CON-F10", "CON-F11", "CON-F12", "제안 → 상대 수락", "[계약 조건 전체 동의]"):
+            self.assertIn(needle, qa, needle)
+        self.assertNotIn("최종 합의 잠금", qa)
+        self.assertIn('"apps", "rent_dist", "rent3", "frontend", "Rent3_QA_Test_Checklist.pdf"', qa)   # 사본이 추적되는 위치로 만든다
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1132,6 +1132,12 @@
   }
 
   // ── 등기부 위험 정책 (서버 cosign.py 와 같은 기준. 화면은 미리 알려 주는 용도이고 최종 판단은 서버) ──
+  // ① ② 단계의 진행 표시도 대기창·③과 같이 '점 두 개'(임대인·임차인, 초록=완료·주황=대기)로 통일한다
+  function pairDots(title, lessorDone, tenantDone) {
+    const d = (role, done) => `<span class="dotline__item"><span class="dot ${done ? "dot--ok" : "dot--wait"}"></span>${role === "lessor" ? "임대인" : "임차인"}${role === currentRole ? " (나)" : ""}</span>`;
+    return `<div style="margin:6px 0;"><div class="bass-muted" style="font-size:12px;">${title}</div><div class="dotline" style="margin:2px 0 0;">${d("lessor", lessorDone)}${d("tenant", tenantDone)}</div></div>`;
+  }
+
   const HIGH_DEPOSIT = 50000000;   // 초과: 선순위 근저당이 있으면 보증보험 가입 완료 또는 말소 특약 필요
   const LOW_DEPOSIT = 20000000;    // 이하 월세: 근저당이 있으면 강한 위험 확인 필요
   const normName = (v) => String(v || "").replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
@@ -1581,18 +1587,8 @@
       </div>
 
       <div class="bass-row" style="margin-bottom:12px; flex-wrap:wrap; gap:6px;">
-        <span class="bass-badge ${s.lessor_checked_tenant_id ? "bass-badge--ok" : "bass-badge--warn"}">
-          임대인→임차인 신분증 확인: ${s.lessor_checked_tenant_id ? "완료 ✓" : "미체크"}
-        </span>
-        <span class="bass-badge ${s.tenant_checked_lessor_id ? "bass-badge--ok" : "bass-badge--warn"}">
-          임차인→임대인 신분증 확인: ${s.tenant_checked_lessor_id ? "완료 ✓" : "미체크"}
-        </span>
-        <span class="bass-badge ${s.step1_lessor_confirmed ? "bass-badge--ok" : "bass-badge--warn"}">
-          임대인 등기부 제시: ${s.step1_lessor_confirmed ? "완료 ✓" : "대기"}
-        </span>
-        <span class="bass-badge ${s.step1_tenant_locked ? "bass-badge--ok" : "bass-badge--warn"}">
-          임차인 등기부 확인 잠금: ${s.step1_tenant_locked ? "완료 ✓" : "미확인"}
-        </span>
+        ${pairDots("서로 신분증 확인 (상대방 신분증을 확인했는지)", s.lessor_checked_tenant_id, s.tenant_checked_lessor_id)}
+        ${pairDots("등기부 확인 (임대인 제시 · 임차인 직접 열람)", s.step1_lessor_confirmed, s.step1_tenant_locked)}
       </div>
 
       ${step1AllDone ? `
@@ -1774,8 +1770,7 @@
       </div>
       ${facilityPhotosHtml(s)}
       <div class="bass-row" style="margin:12px 0;">
-        <span class="bass-badge ${s.step2_lessor_confirmed ? "bass-badge--ok" : "bass-badge--warn"}">임대인 확인: ${s.step2_lessor_confirmed ? "완료" : "대기"}</span>
-        <span class="bass-badge ${s.step2_tenant_locked ? "bass-badge--ok" : "bass-badge--warn"}">임차인 확인 잠금: ${s.step2_tenant_locked ? "완료" : "대기"}</span>
+        ${pairDots("시설·옵션 점검 확인", s.step2_lessor_confirmed, s.step2_tenant_locked)}
       </div>
       <button id="btnStep2Confirm" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
         ${currentRole === "lessor" ? "🏢 시설 점검표 확인 완료" : "🔑 실물 옵션 이상 없음 상호 동의 잠금"}
