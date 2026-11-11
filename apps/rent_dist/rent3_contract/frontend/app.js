@@ -34,6 +34,33 @@
     : (loggedUser.role === "tenant" || loggedUser.role === "prospect")
       ? "tenant"
       : (loggedUser.role === "cosign" && params.get("role") === "tenant" ? "tenant" : "lessor");
+  (function () {
+    const st = document.createElement("style");
+    st.textContent = `
+    .turn-line { margin-top: 8px; padding: 7px 10px; border-radius: 10px; font-size: 13px; font-weight: 700; background: var(--surface); border: 1px solid var(--border); color: var(--muted, #94a3b8); }
+    .turn-line.is-mine { background: hsl(258 90% 60% / .22); border-color: var(--primary); color: inherit; }
+    .dotline { display: flex; gap: 18px; margin: 10px 0 2px; font-size: 14px; }
+    .dotline__item { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+    .dot--ok { background: #22c55e; } .dot--wait { background: #f59e0b; }
+    .term-grid { display: grid; gap: 6px; margin: 10px 0; }
+    .term-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; font-size: 14px; }
+    .term-row b { font-size: 15px; }
+    .chat-fab { position: fixed; right: 14px; bottom: 16px; z-index: 900; width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--border); background: linear-gradient(120deg, var(--primary), var(--primary-2)); color: #fff; font-size: 24px; box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; }
+    .chat-fab__n, .chat-fab__o { position: absolute; top: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; font-size: 12px; font-weight: 800; line-height: 20px; text-align: center; }
+    .chat-fab__n { right: -4px; background: #ef4444; color: #fff; } .chat-fab__o { left: -4px; background: #f59e0b; color: #1f1500; }
+    .cm-list { max-height: 46vh; overflow-y: auto; padding: 2px 2px 6px; }
+    .cm-b { margin: 6px 0; display: flex; } .cm-b.is-mine { justify-content: flex-end; }
+    .cm-b > div { max-width: 88%; padding: 8px 10px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; background: rgba(148,163,184,.22); }
+    .cm-b.is-mine > div { background: rgba(99,102,241,.35); }
+    .cm-meta { font-size: 11px; opacity: .7; margin-bottom: 2px; }
+    .cm-sys { margin: 8px 0; text-align: center; font-size: 12px; opacity: .8; }
+    .cm-card { margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 12px; font-size: 13.5px; line-height: 1.55; }
+    .cm-card.is-open { border-color: #f59e0b; }
+    .reopen-box { margin-top: 16px; padding-top: 10px; border-top: 1px dashed var(--border); }
+    `;
+    document.head.appendChild(st);
+  })();
   if (adminProxy) {
     const st = document.createElement("style");
     st.textContent = ".r3-proxy #stepPanel button,.r3-proxy #stepPanel input,.r3-proxy #stepPanel select,.r3-proxy #stepPanel textarea,.r3-proxy #dlgHost button,.r3-proxy #btnCancelContract{pointer-events:none;opacity:.5}";
@@ -55,6 +82,7 @@
   let lastRevision = null;
   let lastCallStatus = null;
   let isEditingForm = false;
+  let chatSummary = { unread: 0, open_count: 0 };   // 읽음 처리 없이 서버가 알려 주는 값(세션 조회에 포함)
   let myhome = null;          // 임차인: 기존 입주 호실 납부 현황
   let lessorDash = null;      // 임대인: 호실별 미납 현황
   let homeSig = "";
@@ -474,6 +502,9 @@
     const prevStatus = activeSession ? activeSession.status : "";
     activeSession = res.session;
     sealedContract = res.contract;
+    chatSummary = res.chat || chatSummary;
+    updateChatFab();
+    updateTurnLine();
 
     const idx = allSessions.findIndex((x) => x.id === activeSession.id);
     if (idx >= 0) allSessions[idx] = activeSession;
@@ -493,6 +524,214 @@
       renderWorkspace();
     }
   }
+
+  // 단계별로 "내 차례"인지, 이미 마쳐서 상대를 기다려야 하는지 판단한다.
+  // ───────────── 지금 내 차례 · 계약방 대화(💬) · 제안 · 조건 다시 열기 (6단계) ─────────────
+  function turnInfo(s) {
+    if (s.status === "CANCELLED") return { mine: false, text: "취소된 계약입니다" };
+    if (s.status === "COMPLETED") return { mine: false, text: "체결이 완료되었습니다" };
+    if (s.call_status === "CALLING") {
+      return currentRole !== s.initiated_by_role
+        ? { mine: true, text: "지금 내 차례: 호출에 응답하세요" }
+        : { mine: false, text: `상대 차례: ${OTHER_KO}의 응답을 기다리는 중` };
+    }
+    const step = s.current_step;
+    const prog = stepProgress(s, step);
+    const blocked = blockedMessage(s, step);
+    const mine = Boolean(prog[currentRole]);
+    const other = Boolean(prog[currentRole === "lessor" ? "tenant" : "lessor"]);
+    let info;
+    if (!mine && !blocked) info = { mine: true, text: `지금 내 차례: ${prog.label}` };
+    else if (blocked) info = { mine: false, text: `상대 차례: ${OTHER_KO}이(가) 먼저 진행해야 합니다` };
+    else if (!other) info = { mine: false, text: `상대 차례: ${OTHER_KO}이(가) ${prog.label} 중` };
+    else info = { mine: false, text: "다음 단계로 넘어가는 중입니다" };
+    if (step === 3 && chatSummary.open_count > 0) info.text += ` · 답할 제안·수정 요청 ${chatSummary.open_count}건`;
+    return info;
+  }
+
+  function updateTurnLine() {
+    const el = document.getElementById("turnLine");
+    if (!el || !activeSession) return;
+    const t = turnInfo(activeSession);
+    el.textContent = t.text;
+    el.classList.toggle("is-mine", t.mine);
+  }
+
+  const chatFab = document.createElement("button");
+  chatFab.type = "button";
+  chatFab.id = "chatFab";
+  chatFab.className = "chat-fab no-print";
+  chatFab.setAttribute("aria-label", "계약방 대화");
+  chatFab.hidden = true;
+  chatFab.innerHTML = '💬<span class="chat-fab__n" hidden></span><span class="chat-fab__o" hidden></span>';
+  document.body.appendChild(chatFab);
+  chatFab.addEventListener("click", () => openChatDrawer());
+
+  function updateChatFab() {
+    chatFab.hidden = elContract.hidden || !activeSession;
+    const n = chatFab.querySelector(".chat-fab__n");
+    const o = chatFab.querySelector(".chat-fab__o");
+    n.hidden = !(chatSummary.unread > 0);
+    n.textContent = String(chatSummary.unread);
+    o.hidden = !(chatSummary.open_count > 0);
+    o.textContent = `!${chatSummary.open_count}`;
+  }
+
+  const FIELD_LABEL = { deposit: "보증금", contract_deposit: "계약금", monthly_rent: "월세", maintenance_fee: "관리비", move_in_date: "입주일", lease_term_months: "계약기간" };
+  const fmtField = (f, v) => (f === "move_in_date" ? String(v) : f === "lease_term_months" ? `${v}개월` : fmtWon(v));
+  const hhmm = (iso) => (iso ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
+  const STATUS_KO = { open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" };
+
+  async function openChatDrawer() {
+    if (!activeSession) return;
+    const sid = activeSession.id;
+    const body = R3.openModal(`💬 계약방 대화 · ${esc(activeSession.building_name)} ${esc(activeSession.room_no)}호`, `
+      <div id="cmList" class="cm-list"></div>
+      <div id="cmNote" class="bass-muted" style="font-size:12px;margin:4px 0;"></div>
+      <div id="cmComposer">
+        <textarea id="cmMsg" class="bass-input" rows="2" placeholder="궁금한 점을 적어 주세요" style="width:100%;"></textarea>
+        <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <button id="cmSend" type="button" class="bass-btn bass-btn--sm bass-btn--primary">보내기</button>
+          <button type="button" class="bass-btn bass-btn--sm cm-quick" data-t="확인했습니다">확인했습니다</button>
+          <button type="button" class="bass-btn bass-btn--sm cm-quick" data-t="나중에 얘기해요">나중에 얘기해요</button>
+        </div>
+      </div>`);
+    const list = body.querySelector("#cmList");
+    let busy = false;
+
+    const itemHtml = (m, d) => {
+      const mine = m.sender_role === currentRole;
+      const who = m.sender_role === "system" ? "안내" : `${m.sender_role === "lessor" ? "임대인" : "임차인"}${mine ? "(나)" : ""}`;
+      if (m.kind === "system") return `<div class="cm-sys">${esc(m.body)} <span>${hhmm(m.created_at)}</span></div>`;
+      if (m.kind === "question") {
+        return `<div class="cm-b ${mine ? "is-mine" : ""}"><div><div class="cm-meta">${who} · ${hhmm(m.created_at)} · ${m.step}단계</div>${esc(m.body)}</div></div>`;
+      }
+      const isProp = m.kind === "proposal";
+      const head = isProp
+        ? `💡 <strong>${esc(m.proposal.label)}</strong> ${esc(fmtField(m.field, m.proposal.old))} → <strong>${esc(fmtField(m.field, m.proposal.new))}</strong> 제안`
+        : `✏️ <strong>${esc(d.request_fields[m.field] || "수정")}</strong> 수정 요청`;
+      const canAct = m.status === "open" && d.can_negotiate && !adminProxy && currentRole;
+      const buttons = !canAct ? "" : (mine
+        ? `<button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="withdraw" type="button">철회</button>`
+        : `<button class="bass-btn bass-btn--sm bass-btn--primary cm-act" data-id="${esc(m.id)}" data-act="accept" data-kind="${m.kind}" type="button">${isProp ? "수락" : "확인·반영"}</button>
+           <button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="decline" type="button">거절</button>`);
+      return `<div class="cm-card ${m.status === "open" ? "is-open" : ""}">
+        <div class="cm-meta">${who} · ${hhmm(m.created_at)} · ${m.step}단계</div>
+        <div>${head}</div>${m.body && !(isProp && m.body.includes("제안합니다.")) ? `<div class="bass-muted" style="font-size:12.5px;">${esc(m.body)}</div>` : ""}
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="bass-badge ${m.status === "open" ? "bass-badge--warn" : (m.status === "accepted" ? "bass-badge--ok" : "")}">${STATUS_KO[m.status] || m.status}</span>${buttons}</div>
+      </div>`;
+    };
+
+    const load = async () => {
+      if (busy) return;
+      const d = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sid)}/messages?mark_read=true`);
+      const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+      list.innerHTML = d.messages.map((m) => itemHtml(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px 0;">아직 대화가 없습니다. 궁금한 점을 남겨 보세요.</div>';
+      if (atBottom) list.scrollTop = list.scrollHeight;
+      const readOnly = d.read_only || adminProxy;
+      body.querySelector("#cmComposer").style.display = readOnly ? "none" : "";
+      body.querySelector("#cmNote").textContent = d.read_only ? "체결되었거나 취소된 계약방입니다. 지난 대화는 읽을 수만 있습니다."
+        : adminProxy ? "관리인은 읽기만 할 수 있습니다."
+        : d.can_negotiate ? "조건 제안·수정 요청은 ③ 계약 조건 화면에서 보냅니다. 서명(④) 이후에는 문의만 가능합니다."
+        : "서명(④) 이후에는 문의만 남길 수 있습니다. 조건을 바꾸려면 ‘조건 다시 열기’를 쓰세요.";
+      chatSummary = { unread: 0, open_count: d.open_count };
+      updateChatFab();
+    };
+    const send = async (text) => {
+      const t = (text || "").trim();
+      if (!t) { Bass.updateAppAlert("warning", "내용을 입력해 주세요."); return; }
+      await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sid)}/messages`, { method: "POST", body: { kind: "question", body: t } });
+      body.querySelector("#cmMsg").value = "";
+      await load();
+    };
+    body.querySelector("#cmSend").addEventListener("click", function () { Bass.withLock(this, () => send(body.querySelector("#cmMsg").value)); });
+    body.querySelectorAll(".cm-quick").forEach((b) => b.addEventListener("click", function () { Bass.withLock(this, () => send(b.dataset.t)); }));
+    list.addEventListener("click", (ev) => {
+      const b = ev.target.closest(".cm-act");
+      if (!b) return;
+      Bass.withLock(b, async () => {
+        if (b.dataset.act === "accept" && b.dataset.kind === "proposal" && !window.confirm("수락하면 계약 조건이 바뀌고 양측의 3단계 동의·서명이 초기화됩니다. 수락할까요?")) return;
+        busy = true;
+        try {
+          const res = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sid)}/messages/${encodeURIComponent(b.dataset.id)}/respond`, { method: "POST", body: { action: b.dataset.act } });
+          Bass.updateAppAlert(res.level || "success", res.message);
+          if (res.session) { activeSession = res.session; lastRevision = activeSession.revision; }
+        } finally { busy = false; }
+        await load();
+        await fetchActiveSession(true);
+      });
+    });
+    await load();
+    const timer = setInterval(() => {
+      if (!document.getElementById("cmList")) { clearInterval(timer); return; }   // 창이 닫혔다
+      load().catch(() => {});
+    }, 3000);
+  }
+
+  // 항목 제안 창 (보증금 등 6개 항목 — 상대가 수락해야 바뀐다)
+  function openProposeDialog(s, field) {
+    const label = FIELD_LABEL[field];
+    const cur = (s.terms || {})[field];
+    const isDate = field === "move_in_date";
+    const body = R3.openModal(`💡 ${label} 제안`, `
+      <div style="font-size:14px;margin-bottom:8px;">현재 ${label}: <strong>${esc(fmtField(field, cur))}</strong></div>
+      <label class="r3-fld">제안할 값${field === "lease_term_months" ? " (개월)" : isDate ? "" : " (원)"}
+        <input id="pfVal" class="bass-input" type="${isDate ? "date" : "number"}" value="${esc(String(cur ?? ""))}"></label>
+      <label class="r3-fld" style="margin-top:8px;">사유 (선택)<textarea id="pfWhy" class="bass-input" rows="2" placeholder="예: 이사 일정 때문에 5일 늦추고 싶습니다"></textarea></label>
+      <button id="pfSend" class="bass-btn bass-btn--primary" type="button" style="width:100%;margin-top:10px;">제안 보내기</button>
+      <p class="bass-muted" style="font-size:12px;margin:8px 0 0;">상대가 수락하면 이 값으로 바뀌고, 양측의 3단계 동의가 초기화됩니다. 같은 항목에 다시 제안하면 이전 제안은 대체됩니다.</p>`);
+    body.querySelector("#pfSend").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/messages`, {
+          method: "POST", body: { kind: "proposal", field, new_value: body.querySelector("#pfVal").value, body: body.querySelector("#pfWhy").value.trim() },
+        });
+        R3.closeModal();
+        Bass.updateAppAlert("success", res.message);
+        await fetchActiveSession(true);
+      });
+    });
+  }
+
+  // 특약 수정 요청 창 (문구 협의 — 자동 반영 없음)
+  function openRequestDialog(s) {
+    const body = R3.openModal("✏️ 특약 수정 요청", `
+      <label class="r3-fld">상대에게 요청할 내용<textarea id="rqText" class="bass-input" rows="4" placeholder="예: 반려동물 관련 문구를 ‘소형견 1마리 허용’으로 바꿔 주세요"></textarea></label>
+      <button id="rqSend" class="bass-btn bass-btn--primary" type="button" style="width:100%;margin-top:10px;">요청 보내기</button>
+      <p class="bass-muted" style="font-size:12px;margin:8px 0 0;">상대가 확인하고 특약을 직접 고친 뒤 ‘확인·반영’으로 닫습니다. 처리되기 전에는 최종 동의를 할 수 없습니다.</p>`);
+    body.querySelector("#rqSend").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/messages`, {
+          method: "POST", body: { kind: "change_request", field: "special_terms", body: body.querySelector("#rqText").value.trim() },
+        });
+        R3.closeModal();
+        Bass.updateAppAlert("success", res.message);
+        await fetchActiveSession(true);
+      });
+    });
+  }
+
+  // 서명 이후 조건 변경은 '조건 다시 열기' 하나로만 한다
+  function decoratePanel(s) {
+    if (adminProxy || s.status !== "IN_PROGRESS" || s.call_status === "CALLING" || s.current_step < 4) return;
+    const box = document.createElement("div");
+    box.className = "reopen-box";
+    box.innerHTML = `<button id="btnReopen" class="bass-btn bass-btn--sm" type="button">↩️ 조건 다시 열기</button>
+      <div class="bass-muted" style="font-size:12px;margin-top:4px;">조건을 바꿔야 할 때만 누르세요. 양측 서명과 3단계 동의가 초기화되고 3단계로 돌아갑니다.</div>`;
+    elStepPanel.appendChild(box);
+    box.querySelector("#btnReopen").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        if (!window.confirm("조건을 다시 열까요?\n양측 서명과 3단계 동의가 초기화되고 3단계로 돌아갑니다.")) return;
+        const res = await Bass.api(APP_ID, `/sessions/${s.id}/reopen-terms`, { method: "POST", body: { role: currentRole, confirm: true } });
+        activeSession = res.session;
+        viewStep = activeSession.current_step;
+        lastRevision = activeSession.revision;
+        Bass.updateAppAlert(res.level || "diff", res.message);
+        renderWorkspace();
+        await fetchActiveSession(true);
+      });
+    });
+  }
+
 
   // 단계별로 "내 차례"인지, 이미 마쳐서 상대를 기다려야 하는지 판단한다.
   function stepProgress(s, step) {
@@ -527,17 +766,17 @@
     }
     const step = viewStep;
     if (step === 5 && s.current_step === 5 && currentRole === "tenant" && !s.tenant_recheck_at) {
-      return { key: `${s.id}:s5:recheck`, render: () => renderRecheckTenant(s) };
+      return { key: `${s.id}:s5:recheck`, render: () => { renderRecheckTenant(s); decoratePanel(s); } };
     }
     if (step === s.current_step) {
       const prog = stepProgress(s, step);
       const mine = prog[currentRole];
       const blocked = blockedMessage(s, step);
       if (mine || blocked) {
-        return { key: `${s.id}:s${step}:wait`, render: () => renderWaiting(s, step, prog, mine, blocked) };
+        return { key: `${s.id}:s${step}:wait`, render: () => { renderWaiting(s, step, prog, mine, blocked); decoratePanel(s); } };
       }
     }
-    return { key: `${s.id}:s${step}:act`, render: () => renderStepN(s, step) };
+    return { key: `${s.id}:s${step}:act`, render: () => { renderStepN(s, step); decoratePanel(s); } };
   }
 
   function renderStepN(s, step) {
@@ -549,17 +788,13 @@
   }
 
   function renderWaiting(s, step, prog, mine, blocked) {
-    const row = (role, done) => `
-      <div class="wait-row">
-        <span>${role === "lessor" ? "🏢 임대인" : "🔑 임차인"}${role === currentRole ? " (나)" : ""}</span>
-        ${done ? `<span class="bass-badge bass-badge--ok">완료 ✓</span>` : `<span class="bass-badge bass-badge--warn">진행 중<span class="wait-dots"></span></span>`}
-      </div>`;
+    const dot = (role, done) => `<span class="dotline__item"><span class="dot ${done ? "dot--ok" : "dot--wait"}"></span>${role === "lessor" ? "임대인" : "임차인"}${role === currentRole ? " (나)" : ""}</span>`;
     elStepPanel.innerHTML = `
       <h3 style="margin:0 0 6px;">${mine ? "✅ 내 차례를 마쳤습니다" : `⏳ ${OTHER_KO}의 차례입니다`}</h3>
       <p class="bass-muted" style="font-size:13px;margin:0 0 6px;">
         ${esc(blocked || `${OTHER_KO}이 [${prog.label}]을 마치면 자동으로 다음 단계가 열립니다. 이 화면을 닫지 말고 기다려 주세요.`)}
       </p>
-      ${row("lessor", prog.lessor)}${row("tenant", prog.tenant)}`;
+      <div class="dotline">${dot("lessor", prog.lessor)}${dot("tenant", prog.tenant)}</div>`;
   }
 
   function positionModal() {
@@ -582,7 +817,7 @@
     const plan = planModal(s);
     elModal.hidden = false;
     positionModal();
-    const stamp = `${s.updated_at || ""}:${s.revision}`;
+    const stamp = `${s.updated_at || ""}:${s.revision}:${chatSummary.open_count}`;   // 열린 제안 수가 바뀌어도 단계 화면(동의 단추 상태)을 다시 그린다
     if (plan.key === modalKey) {
       if (stamp !== lastStamp) { lastStamp = stamp; plan.render(); }
       return;
@@ -616,6 +851,8 @@
       `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}`;
 
     document.getElementById("btnCancelContract").hidden = s.status !== "IN_PROGRESS";
+    updateTurnLine();
+    updateChatFab();
     const callBadge = document.getElementById("callStateBadge");
     if (s.status === "COMPLETED") {
       callBadge.className = "bass-badge bass-badge--ok";
@@ -652,10 +889,8 @@
     const isCalleeView = currentRole !== s.initiated_by_role;
 
     elStepPanel.innerHTML = `
-      <h3>📞 매물 선택 호출 · 응답 연결 대기실</h3>
-      <p class="bass-muted" style="font-size:13px;">
-        공동계약은 임대인과 임차인이 각자 본인인증 로그인 후, 먼저 입장한 당사자의 <strong>호출(Call)</strong>에 상대방이 <strong>응답(Respond)</strong>함으로써 시작됩니다.
-      </p>
+      <h3>📞 상대방 연결</h3>
+      <p class="bass-muted" style="font-size:13px;">먼저 입장한 쪽이 호출하고, 상대가 로그인해 응답하면 시작됩니다.</p>
 
       <div class="id-verify-grid">
         <div class="id-card-box ${s.lessor_login_verified ? "is-verified" : ""}">
@@ -685,7 +920,7 @@
             🔔 ${Bass.escapeHtml(callerKo)}님이 [${Bass.escapeHtml(s.building_name)} ${Bass.escapeHtml(s.room_no)}호] 공동계약을 호출했습니다!
           </div>
           <div class="bass-muted" style="font-size:12.5px; margin-bottom:10px;">
-            아래 응답 버튼을 누르면 본인인증 계정이 즉시 연결되며, ① 상호 신분증 확인 및 등기부등본 열람 단계가 시작됩니다.
+            응답하면 ① 신분증·등기부 확인 단계가 시작됩니다.
           </div>
           <button id="btnRespondMain" type="button" class="bass-btn bass-btn--primary" style="width:100%;">
             ✅ 호출에 응답하고 공동계약 시작하기 (${currentRole === "lessor" ? "임대인" : "임차인"} 본인인증 연결)
@@ -695,7 +930,7 @@
         <div class="bass-card" style="padding:14px; margin-top:12px; border:1px dashed var(--border-strong);">
           <div style="font-weight:800; margin-bottom:4px;">📡 ${Bass.escapeHtml(calleeKo)}님의 호출 응답을 기다리고 있습니다...</div>
           <div class="bass-muted" style="font-size:12.5px;">
-            상대방이 로그인 후 <strong>[호출 응답 및 공동계약 시작]</strong>을 클릭하면 자동으로 ① 신분증 확인 및 등기부등본 열람 화면으로 전환됩니다.
+            상대가 응답하면 자동으로 다음 화면이 열립니다.
           </div>
         </div>
       `}
@@ -814,19 +1049,19 @@
       qr.make();
       svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
     } catch (_) { svg = ""; }
+    const invite = `[${s.building_name} ${s.room_no}호] 공동 임대계약에 초대합니다. 아래 링크로 들어와 본인 계정으로 로그인한 뒤 '응답'을 눌러 주세요.\n${joinUrl}\n참여코드 ${s.session_code || ""}`;
     const box = document.createElement("div");
     box.className = "bass-card";
     box.style.cssText = "padding:14px;margin-top:12px;text-align:center;";
     box.innerHTML = `
-      <div style="font-weight:800;margin-bottom:4px;">📱 대면 참여 QR</div>
-      <div class="bass-muted" style="font-size:12.5px;line-height:1.55;margin-bottom:8px;">
-        ${Bass.escapeHtml(calleeKo)}님이 옆에 있다면 <strong>본인 휴대폰 카메라로 이 QR을 찍게</strong> 하세요.<br>
-        본인 계정으로 로그인하면 이 계약 응답 화면으로 들어옵니다.
-      </div>
-      ${svg ? `<div style="width:190px;max-width:70%;margin:0 auto;background:#fff;padding:6px;border-radius:10px;">${svg}</div>` : `<div class="bass-muted">QR을 만들지 못했습니다. 참여코드를 알려 주세요.</div>`}
+      <div style="font-weight:800;margin-bottom:6px;">${Bass.escapeHtml(calleeKo)}님 초대</div>
+      <button id="btnCopyInvite" type="button" class="bass-btn bass-btn--primary" style="width:100%;">📋 초대 문자 복사</button>
+      <div class="bass-muted" style="font-size:12px;margin:6px 0 10px;">복사해서 상대에게 문자로 보내세요. 옆에 있다면 아래 QR을 찍게 해도 됩니다.</div>
+      ${svg ? `<div style="width:170px;max-width:60%;margin:0 auto;background:#fff;padding:6px;border-radius:10px;">${svg}</div>` : ""}
       <div style="margin-top:8px;font-size:13px;">참여코드 <strong style="letter-spacing:2px;">${Bass.escapeHtml(s.session_code || "")}</strong></div>
-      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">QR·코드만으로는 입장할 수 없습니다. 계약 당사자 계정으로 로그인해야 합니다.</div>`;
+      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">링크·QR·코드만으로는 입장할 수 없습니다. 계약 당사자 계정으로 로그인해야 합니다.</div>`;
     elStepPanel.appendChild(box);
+    box.querySelector("#btnCopyInvite").addEventListener("click", () => R3.copyText(invite).then((ok) => Bass.updateAppAlert(ok ? "success" : "warning", ok ? "초대 문자를 복사했습니다. 상대에게 붙여넣어 보내세요." : "복사에 실패했습니다.")));
   }
 
   // ───────────── 등기부 직접 확인 (임차인) ─────────────
@@ -1573,12 +1808,18 @@
     const t = s.terms || {};
     elStepPanel.innerHTML = `
       <h3>③ 계약 조건 및 특약사항 공동 작성 (Revision v${s.revision})</h3>
-      <p class="bass-muted" style="font-size:13px;">어느 한쪽이라도 금액·날짜·특약을 1글자라도 수정하면 리비전이 올라가고 기존 동의가 자동 해제됩니다(위변조 원천 차단).</p>
+      <p class="bass-muted" style="font-size:13px;">보증금·계약금·월세·관리비·입주일·계약기간은 상대에게 <strong>제안</strong>하고 <strong>수락</strong>을 받아야 바뀝니다. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.</p>
+      <div class="term-grid">
+        ${[["deposit", "보증금", fmtWon(t.deposit)], ["contract_deposit", "계약금", fmtWon(t.contract_deposit)], ["monthly_rent", "월세", fmtWon(t.monthly_rent)],
+           ["maintenance_fee", "관리비", fmtWon(t.maintenance_fee)], ["move_in_date", "입주일", Bass.escapeHtml(t.move_in_date || "-")],
+           ["lease_term_months", "계약기간", `${Number(t.lease_term_months || 0)}개월`]].map(([f, label, val]) => `
+          <div class="term-row"><span class="bass-muted">${label}</span><b>${val}</b>
+            <button type="button" class="bass-btn bass-btn--sm btn-propose" data-field="${f}"${currentRole && !adminProxy ? "" : " disabled"}>제안</button></div>`).join("")}
+      </div>
       <div class="field-grid" style="margin:12px 0;">
         <div><label class="bass-label">임차인 성명 *</label><input id="tName" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_name || "")}"></div>
         <div><label class="bass-label">임차인 연락처 *</label><input id="tPhone" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_phone || "")}"></div>
         <div><label class="bass-label">차량 번호 (주차 등록용)</label><input id="tCar" class="bass-input term-input" value="${Bass.escapeHtml(t.tenant_car_number || "")}" placeholder="예: 12가 3456"></div>
-        <div><label class="bass-label">입주(전입)일</label><input id="tMoveIn" type="date" class="bass-input term-input" value="${Bass.escapeHtml(t.move_in_date || "")}"></div>
         <div>
           <label class="bass-label">임대 구분 / 납부 시점 (rent2 엔진 직결)</label>
           <select id="tPayTiming" class="bass-select term-input">
@@ -1586,11 +1827,6 @@
             <option value="선불" ${t.pay_timing === "선불" ? "selected" : ""}>월세 선불 (입주월부터 당월 청구)</option>
           </select>
         </div>
-        <div><label class="bass-label">계약 기간(개월)</label><input id="tMonths" type="number" class="bass-input term-input" value="${Number(t.lease_term_months || 12)}"></div>
-        <div><label class="bass-label">보증금(원)</label><input id="tDeposit" type="number" class="bass-input term-input" value="${Number(t.deposit || 0)}"></div>
-        <div><label class="bass-label">월 임차료(원)</label><input id="tRent" type="number" class="bass-input term-input" value="${Number(t.monthly_rent || 0)}"></div>
-        <div><label class="bass-label">월 관리비(원)</label><input id="tMaint" type="number" class="bass-input term-input" value="${Number(t.maintenance_fee || 0)}"></div>
-        <div><label class="bass-label">당일 계약금(원)</label><input id="tConDep" type="number" class="bass-input term-input" value="${Number(t.contract_deposit || 0)}"></div>
       </div>
       <div class="bass-card" style="padding:10px 12px;margin:10px 0;">
         <label class="check-row" style="margin-bottom:0;cursor:pointer;">
@@ -1624,15 +1860,14 @@
         <label class="bass-label">상호 합의 특약사항</label>
         <textarea id="tSpecial" rows="4" class="bass-input term-input">${Bass.escapeHtml(t.special_terms || "")}</textarea>
       </div>
-      <div class="bass-row" style="margin:12px 0;justify-content:space-between;">
-        <div class="bass-row">
-          <span class="bass-badge ${s.step3_lessor_agreed ? "bass-badge--ok" : "bass-badge--warn"}">임대인 합의: ${s.step3_lessor_agreed ? "잠금 완료" : "미동의"}</span>
-          <span class="bass-badge ${s.step3_tenant_agreed ? "bass-badge--ok" : "bass-badge--warn"}">임차인 합의: ${s.step3_tenant_agreed ? "잠금 완료" : "미동의"}</span>
-        </div>
-        <button id="btnSaveTerms" class="bass-btn" type="button">✏️ 조건 수정 반영 (공동 화면 갱신)</button>
+      <div class="bass-row" style="margin:6px 0 0;"><button id="btnReqSpecial" type="button" class="bass-btn bass-btn--sm"${adminProxy ? " disabled" : ""}>✏️ 상대에게 특약 수정 요청</button></div>
+      <div class="bass-row" style="margin:12px 0;justify-content:space-between;align-items:center;">
+        <div class="dotline" style="margin:0;"><span class="dotline__item"><span class="dot ${s.step3_lessor_agreed ? "dot--ok" : "dot--wait"}"></span>임대인${currentRole === "lessor" ? " (나)" : ""}</span><span class="dotline__item"><span class="dot ${s.step3_tenant_agreed ? "dot--ok" : "dot--wait"}"></span>임차인${currentRole === "tenant" ? " (나)" : ""}</span></div>
+        <button id="btnSaveTerms" class="bass-btn bass-btn--sm" type="button">✏️ 인적사항·특약 등 저장</button>
       </div>
-      <button id="btnAgreeStep3" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
-        🔒 현재 조건(v${s.revision})에 ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"} 최종 합의 잠금
+      ${chatSummary.open_count > 0 ? `<div class="call-banner" style="margin:8px 0;"><div style="font-weight:800;margin-bottom:4px;">답하지 않은 제안·수정 요청이 ${chatSummary.open_count}건 있습니다</div><div style="font-size:12.5px;margin-bottom:8px;">모두 처리(수락·거절·철회)해야 최종 동의할 수 있습니다.</div><button id="btnOpenChat3" type="button" class="bass-btn bass-btn--sm bass-btn--primary">💬 대화 열기</button></div>` : ""}
+      <button id="btnAgreeStep3" class="bass-btn bass-btn--primary" style="width:100%;" type="button"${chatSummary.open_count > 0 ? " disabled" : ""}>
+        🔒 계약 조건 전체 동의 (v${s.revision}) · ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"}
       </button>
     `;
 
@@ -1661,17 +1896,17 @@
         tenant_company_name: reqInv ? ((document.getElementById("tCompName") && document.getElementById("tCompName").value.trim()) || "") : "",
         tenant_ceo_name: reqInv ? ((document.getElementById("tCeoName") && document.getElementById("tCeoName").value.trim()) || "") : "",
         tenant_email: reqInv ? ((document.getElementById("tBizEmail") && document.getElementById("tBizEmail").value.trim()) || "") : "",
-        move_in_date: document.getElementById("tMoveIn").value,
         pay_timing: document.getElementById("tPayTiming").value,
-        lease_term_months: Number(document.getElementById("tMonths").value || 12),
-        deposit: Number(document.getElementById("tDeposit").value || 0),
-        monthly_rent: Number(document.getElementById("tRent").value || 0),
-        maintenance_fee: Number(document.getElementById("tMaint").value || 0),
-        contract_deposit: Number(document.getElementById("tConDep").value || 0),
         special_terms: document.getElementById("tSpecial").value,
         ...(document.getElementById("tCleanup") && !document.getElementById("tCleanup").disabled ? { mortgage_cleanup_clause: document.getElementById("tCleanup").checked } : {}),
       };
     };
+
+    elStepPanel.querySelectorAll(".btn-propose").forEach((b) => b.addEventListener("click", () => openProposeDialog(s, b.dataset.field)));
+    const btnReqSp = document.getElementById("btnReqSpecial");
+    if (btnReqSp) btnReqSp.addEventListener("click", () => openRequestDialog(s));
+    const btnChat3 = document.getElementById("btnOpenChat3");
+    if (btnChat3) btnChat3.addEventListener("click", () => openChatDrawer());
 
     document.getElementById("btnSaveTerms").addEventListener("click", function () {
       Bass.withLock(this, async () => {

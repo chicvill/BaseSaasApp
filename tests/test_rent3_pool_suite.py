@@ -3644,6 +3644,29 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
             self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True}).status_code, 403)
 
+    def test_60_contract_screen_pieces(self):
+        """60. 계약 화면(6단계): 지금 내 차례 한 줄, 💬 대화창, 3단계 제안·수정 요청·전체 동의, 조건 다시 열기, 호출 단계 초대 문자 복사가 있고 옛 직접 입력칸은 없다."""
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        self.assertIn('id="turnLine"', idx)
+        self.assertIn("/shared/ui/r3_modal.js", idx)
+        for needle in ("function turnInfo", "chatFab", "function openChatDrawer", "mark_read=true", "function openProposeDialog",
+                       "function openRequestDialog", "function decoratePanel", "/reopen-terms", "btnCopyInvite",
+                       "계약 조건 전체 동의", "btn-propose", "btnReqSpecial", "dotline", "chatSummary.open_count"):
+            self.assertIn(needle, app, needle)
+        # 열린 제안 수가 바뀌면 단계 화면을 다시 그린다(동의 단추 상태가 낡지 않게)
+        self.assertIn("${chatSummary.open_count}`;", app[app.index("function switchModal"):])
+        # 6개 항목은 직접 입력칸이 없다 (보기 + 제안)
+        for gone in ('id="tDeposit"', 'id="tRent"', 'id="tMaint"', 'id="tConDep"', 'id="tMoveIn"', 'id="tMonths"'):
+            self.assertNotIn(gone, app, gone)
+        for field in ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "move_in_date", "lease_term_months"):
+            self.assertIn(f'["{field}", "', app, field)
+        # 서버 약속과 맞는 호출: 대화·제안·응답·다시 열기 주소가 모두 서버에 있다
+        routes = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "api.py"), encoding="utf-8").read()
+        for r in ('"/sessions/{session_id}/messages"', '"/sessions/{session_id}/messages/{msg_id}/respond"', '"/sessions/{session_id}/reopen-terms"'):
+            self.assertIn(r, routes, r)
+
 
 if __name__ == "__main__":
     unittest.main()
