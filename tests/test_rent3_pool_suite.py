@@ -4008,7 +4008,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             # 같은 요청이 일반 로그인 토큰에서는 이 가드로 막히지 않는다(다른 이유로 실패할 수는 있다)
             self.assertNotEqual(getattr(c, _m)(url, headers=full, json=js).json().get("message", ""), authz.PIN_BLOCK_MESSAGE)
         self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv['device']['id']}/revoke", headers=pinh, json={}).status_code, 403)   # 기기 해제도 비밀번호 로그인 필요
-        self.assertTrue(any(rx.search("/api/rent3_contract/sessions/ab12/messages") for rx in authz.PIN_WRITE_ALLOW))   # 계약방 글쓰기만 허용
+        self.assertFalse(any(rx.search("/api/rent3_contract/sessions/ab12/messages") for rx in authz.PIN_WRITE_ALLOW))   # 계약방 글쓰기(제안·수정 요청 포함)도 비밀번호 로그인
+        for tail in ("balance-registry-check", "insurance-proof"):                                                        # 도어락 교부와 이어지는 확인도 마찬가지
+            self.assertFalse(any(rx.search(f"/api/rent3_tenant/myhome/t/{tail}") for rx in authz.PIN_WRITE_ALLOW), tail)
         self.assertFalse(any(rx.search("/api/rent3_contract/sessions/ab12/messages/m1/respond") for rx in authz.PIN_WRITE_ALLOW))
 
         # ── 해제·퇴실·동의·다른 역할 ──

@@ -154,9 +154,8 @@ def claims_from(request: Request) -> Optional[Dict[str, Any]]:
 # ── 간편 비밀번호(PIN)로 들어온 토큰은 '열람 + 일상 업무'만 ──
 # 허용 목록 방식: 아래에 없는 쓰기(공동계약 동의·서명·수락, 퇴실 정산 동의, 계좌 변경, 원격 지원 허용·동의 변경, PIN·기기 관리 등)는 모두 막힌다.
 PIN_WRITE_ALLOW = (
-    re.compile(r"/myhome/[^/]+/(messages|pay|vehicle|checkin|tickets|balance-registry-check|insurance-proof)/?$"),
+    re.compile(r"/myhome/[^/]+/(messages|pay|vehicle|checkin|tickets)/?$"),
     re.compile(r"/myhome/[^/]+/billing-notices/[^/]+/acknowledge/?$"),
-    re.compile(r"/rent3_contract/sessions/[^/]+/messages/?$"),      # 계약방 대화 글쓰기만(제안 수락 /respond 는 막힘)
     re.compile(r"/support/messages/?$"),
     re.compile(r"/auth/logout/?$"),
 )
@@ -221,7 +220,7 @@ def admin_proxy_guard(request: Request) -> None:
 # ── 관리인의 읽기도 '입장 절차'를 거쳐야 한다 ──
 # 임대인·임차인·계약 앱의 자료는 사용자가 원격 지원을 허용했고 관리인이 입장(지원 채팅 + 접속 기록)한 건에 한해, 입장 후 GRANT_MINUTES 동안만 볼 수 있다.
 # 주소를 직접 쳐서 읽는 것을 막는다. 관리인 앱·Data Pool 탐색기 같은 관리인 전용 API 는 영향이 없다. 엄격 모드(RENT3_ADMIN_PROXY_STRICT)에서만 적용.
-GRANT_MINUTES = 120
+GRANT_MINUTES = 60
 
 
 def admin_read_guard(c: Dict[str, Any], *, view: str, tenant_id: str = "", branch: str = "", session_id: str = "") -> None:
