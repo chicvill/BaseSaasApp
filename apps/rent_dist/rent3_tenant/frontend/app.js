@@ -234,15 +234,12 @@
 
       ${todoHtml}
       <div class="bass-card no-print" style="margin-bottom:14px;">
-        <h3 style="margin:0 0 8px;">💳 월세 납부</h3>
+        <h3 style="margin:0 0 8px;">💳 월세 납부 · 이체 알리기</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">임대인 계좌로 이체한 뒤 아래 [이체했어요]를 누르세요. <strong>임대인이 입금을 확인하면 납부로 기록됩니다.</strong></div>
+        ${(() => { const n = data.transfer_notice; if (!n) return ""; return n.status === "PENDING" ? `<div class="bass-badge bass-badge--warn" style="margin-bottom:8px;">⏳ ${fmtWon(n.amount)} 이체 확인 대기 중</div>` : n.status === "REJECTED" ? `<div class="bass-badge bass-badge--err" style="margin-bottom:8px;">입금 확인이 안 되어 반려되었습니다${n.reject_reason ? ` — ${Bass.escapeHtml(n.reject_reason)}` : ""}. 임대인에게 문의해 주세요.</div>` : ""; })()}
         <div class="bass-row">
           <input id="payAmtInput" type="number" class="bass-input" style="width:170px;" value="${lg.total_unpaid > 0 ? lg.total_unpaid : (Number(ct.monthly_rent || 0) + Number(ct.maintenance_fee || 0))}">
-          <select id="payMethodSel" class="bass-select" style="width:160px;">
-            <option value="KAKAOPAY">카카오페이</option>
-            <option value="CARD">신용/체크카드</option>
-            <option value="TRANSFER">계좌이체</option>
-          </select>
-          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button">⚡ 월세 즉시 납부</button>
+          <button id="btnPayNow" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">💸 이체했어요</button>
         </div>
         <div class="bass-muted" style="font-size:12.5px;margin:12px 0 2px;">월별 납부 현황</div>
         <div style="margin:10px 0;">
@@ -569,14 +566,18 @@
       });
     });
 
+    if (window.R3Shell && R3Shell.isViaPin && R3Shell.isViaPin()) {
+      // 간편 비밀번호로 들어온 상태: 서버가 막는 작업은 미리 비활성화하고 이유를 알려 준다
+      ["btnAgreeCo", "btnPlanStay", "btnPlanMoveOut", "btnAckRenewal"].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b) { b.disabled = true; b.title = "아이디·비밀번호로 로그인해야 할 수 있습니다"; b.insertAdjacentHTML("afterend", '<div class="bass-muted" style="font-size:12px;">🔐 이 작업은 아이디·비밀번호로 로그인해야 합니다.</div>'); }
+      });
+    }
     document.getElementById("btnPayNow").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, `/myhome/${t.id}/pay`, {
+        const res = await Bass.api(APP_ID, `/myhome/${t.id}/transfer-notice`, {
           method: "POST",
-          body: {
-            amount: Number(document.getElementById("payAmtInput").value || 0),
-            method: document.getElementById("payMethodSel").value,
-          },
+          body: { amount: Number(document.getElementById("payAmtInput").value || 0) },
         });
         Bass.updateAppAlert(res.level || "success", res.message);
         await loadMyhome();

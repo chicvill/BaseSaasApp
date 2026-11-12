@@ -8,6 +8,7 @@ from core.errors import DomainError, Forbidden
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_admin, is_local_request, lessor_scope
 from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat
 from apps.rent_dist._rent3_core.pool import now_iso
+from apps.rent_dist._rent3_core.ops import TransferNotice
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -375,6 +376,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         "lessor": lessor.model_dump() if lessor else None,
         "total_unpaid_branch": total_unpaid_branch,
         "rooms": room_cards,
+        "transfer_notices": [n.model_dump() for n in sorted(TransferNotice.find(branch=b_id), key=lambda x: x.created_at) if n.status == "PENDING"],
         "expiry_notice_rooms": expiry_notice_rooms,
         "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],
         "payments": [p.model_dump() for p in payments[:30]],
@@ -702,9 +704,64 @@ def edit_building(req: BuildingEditReq):
     return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).", "building": b.model_dump()}
 
 
+class TransferConfirmReq(BaseModel):
+    branch: str = "main"
+    amount: Optional[int] = None          # 실제 입금액이 다르면 고쳐서 수납
+    paid_date: Optional[str] = None
+
+
+class TransferRejectReq(BaseModel):
+    branch: str = "main"
+    reason: str = ""
+
+
+def _notice_of(notice_id: str, branch: str):
+    n = TransferNotice.get(notice_id)
+    if n is None or normalize_branch_id(n.branch) != normalize_branch_id(branch):
+        raise DomainError("이체 확인 요청을 찾을 수 없습니다.")
+    if n.status != "PENDING":
+        raise DomainError("이미 처리한 요청입니다.")
+    return n
+
+
+@router.post("/transfer-notices/{notice_id}/confirm")
+def confirm_transfer_notice(notice_id: str, req: TransferConfirmReq, request: Request):
+    """임대인이 통장에서 입금을 확인한 뒤 수납으로 반영한다(선입선출 수납)."""
+    ensure_pool_seeded()
+    n = _notice_of(notice_id, req.branch)
+    res = FifoPaymentEngine.collect(branch=n.branch, room_no=n.room_no, amount=int(req.amount or n.amount), payer_name=n.tenant_name,
+                                    paid_date=req.paid_date, method="TRANSFER", app_source=APP_SRC)
+    n.status, n.handled_at, n.handled_by = "CONFIRMED", now_iso(), str((claims_from(request) or {}).get("u") or "lessor")
+    n.save(action="transfer_notice_confirmed", app_source=APP_SRC)
+    return {"success": True, **res}
+
+
+@router.post("/transfer-notices/{notice_id}/reject")
+def reject_transfer_notice(notice_id: str, req: TransferRejectReq, request: Request):
+    ensure_pool_seeded()
+    n = _notice_of(notice_id, req.branch)
+    n.status, n.handled_at, n.reject_reason = "REJECTED", now_iso(), (req.reason or "").strip()[:100]
+    n.handled_by = str((claims_from(request) or {}).get("u") or "lessor")
+    n.save(action="transfer_notice_rejected", app_source=APP_SRC)
+    return {"success": True, "message": "입금 확인이 되지 않아 반려했습니다. 임차인 화면에 표시됩니다."}
+
+
 class TenantInviteReq(BaseModel):
     branch: str = "main"
     room_no: str
+
+
+@router.post("/tenant-shortcuts/revoke-all")
+def revoke_tenant_shortcuts(req: TenantInviteReq):
+    """임차인이 폰을 잃어버렸을 때: 그 임차인의 간편 비밀번호·바로가기 기기를 모두 해제한다(이미 열린 화면도 바로 막힌다). 비밀번호 로그인은 그대로 된다."""
+    from apps.rent_dist._rent3_core import quicklogin as ql
+    ensure_pool_seeded()
+    room = Room.first(branch=normalize_branch_id(req.branch), room_no=req.room_no)
+    t = Tenant.get(room.id_tenant) if (room and room.id_tenant) else None
+    if t is None:
+        raise DomainError(f"{req.room_no}호에 입주한 임차인이 없습니다.")
+    n = ql.revoke_all(t)
+    return {"success": True, "message": f"{t.name}님의 바로가기 {n}대와 간편 비밀번호를 해제했습니다. 새 폰에서는 비밀번호로 로그인해 다시 설정하게 하세요."}
 
 
 @router.post("/tenant-invite")

@@ -701,7 +701,7 @@ def pin_login(req: PinLoginReq, request: Request) -> Dict[str, Any]:
     ratelimit.clear("pinlogin", keys)
     ql.record_success(t, d["id"])
     from apps.rent_dist._rent3_core.authz import unrevoke_token
-    tok = tenant_token(t, via_pin=True)
+    tok = tenant_token(t, via_pin=True, device_id=d["id"])
     unrevoke_token(tok)
     url = f"/rent3_tenant/?tenant={t.id}"
     return {
@@ -773,7 +773,7 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             a for a in Admin.all()
             if a.username.lower() == ident_low
             or (a.email and a.email.lower() == ident_low)
-            or a.name == ident
+            or (demo and a.name == ident)    # 성명 로그인은 시연 환경에서만(운영에서는 동명이인 충돌·추측 대입 위험)
             or (len(ident_num) >= 8 and _digits(a.phone) == ident_num)
         ),
         None,
@@ -821,7 +821,7 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             if (lsr.username and lsr.username.lower() == ident_low)
             or lsr.id.lower() == ident_low
             or (lsr.email and lsr.email.lower() == ident_low)
-            or lsr.name == ident
+            or (demo and lsr.name == ident)
             or (len(ident_num) >= 8 and _digits(lsr.phone) == ident_num)
         ),
         None,
@@ -880,7 +880,7 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             t for t in ordered_tenants
             if t.id.lower() == ident_low
             or (t.email and t.email.lower() == ident_low)
-            or t.name == ident
+            or (demo and t.name == ident)
             or (len(ident_num) >= 8 and _digits(t.phone) == ident_num)
         ),
         None,

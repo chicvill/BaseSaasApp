@@ -43,9 +43,16 @@ def lessor_token(lessor: Any) -> str:
     return issue_claims_token(f"lessor:{lessor.id}", "lessor", lessor.branch)
 
 
-def tenant_token(tenant: Any, via_pin: bool = False) -> str:
-    """via_pin=True: 간편 비밀번호로 들어온 토큰(m="pin") — 법적·민감 행위는 막힌다(아래 pin_guard)."""
-    return issue_claims_token(f"tenant:{tenant.id}", "tenant", getattr(tenant, "branch", None), extra=({"m": "pin"} if via_pin else None))
+PIN_TOKEN_SECONDS = 3 * 3600
+
+
+def tenant_token(tenant: Any, via_pin: bool = False, device_id: str = "") -> str:
+    """via_pin=True: 간편 비밀번호로 들어온 토큰(m="pin", 3시간) — 법적·민감 행위는 막힌다(아래 pin_guard).
+    d = 바로가기 기기 id: 그 기기를 해제하거나 PIN 을 전체 해제하면 이 토큰도 바로 못 쓴다."""
+    if not via_pin:
+        return issue_claims_token(f"tenant:{tenant.id}", "tenant", getattr(tenant, "branch", None))
+    return issue_claims_token(f"tenant:{tenant.id}", "tenant", getattr(tenant, "branch", None), ttl=PIN_TOKEN_SECONDS,
+                              extra={"m": "pin", "d": device_id})
 
 
 # ── 토큰 읽기 ──
@@ -154,7 +161,7 @@ def claims_from(request: Request) -> Optional[Dict[str, Any]]:
 # ── 간편 비밀번호(PIN)로 들어온 토큰은 '열람 + 일상 업무'만 ──
 # 허용 목록 방식: 아래에 없는 쓰기(공동계약 동의·서명·수락, 퇴실 정산 동의, 계좌 변경, 원격 지원 허용·동의 변경, PIN·기기 관리 등)는 모두 막힌다.
 PIN_WRITE_ALLOW = (
-    re.compile(r"/myhome/[^/]+/(messages|pay|vehicle|checkin|tickets)/?$"),
+    re.compile(r"/myhome/[^/]+/(messages|transfer-notice|vehicle|checkin|tickets)/?$"),
     re.compile(r"/myhome/[^/]+/billing-notices/[^/]+/acknowledge/?$"),
     re.compile(r"/support/messages/?$"),
     re.compile(r"/auth/logout/?$"),
@@ -163,7 +170,15 @@ PIN_BLOCK_MESSAGE = "이 작업은 간편 비밀번호로 들어온 상태에서
 
 
 def pin_guard(request: Request, c: Dict[str, Any]) -> None:
-    if c.get("m") != "pin" or request.method in ("GET", "HEAD", "OPTIONS"):
+    if c.get("m") != "pin":
+        return
+    # 기기를 해제했거나(분실 폰 포함) PIN 을 전체 해제했거나, 퇴실했으면 이미 받은 PIN 토큰도 바로 무효
+    from .models import Tenant
+    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+    live = t is not None and t.status == "ACTIVE" and t.room_no and any(d.get("id") == c.get("d") and not d.get("locked") for d in (t.quick_devices or []))
+    if not live:
+        raise Unauthorized("바로가기가 해제되었거나 사용할 수 없습니다.", hint="아이디·비밀번호로 다시 로그인해 주세요.")
+    if request.method in ("GET", "HEAD", "OPTIONS"):
         return
     path = request.url.path
     if any(rx.search(path) for rx in PIN_WRITE_ALLOW):

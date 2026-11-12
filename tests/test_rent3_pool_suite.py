@@ -348,12 +348,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_dup.json()["level"], "warning")
 
         # 임차인 앱에서 잔여 440,000원 온라인 납부 -> 완납 및 17% 세액공제 증명서 확인
-        r_tpay = self.client.post("/api/rent3_tenant/myhome/tenant_202/pay", json={
-            "amount": 440000,
-            "method": "KAKAOPAY",
-        })
-        self.assertEqual(r_tpay.status_code, 200)
+        self.assertIn(self.client.post("/api/rent3_tenant/myhome/tenant_202/pay", json={"amount": 440000, "method": "KAKAOPAY"}).status_code, (404, 405))   # 임차인이 스스로 납부 처리하는 길은 없다
+        r_note = self.client.post("/api/rent3_tenant/myhome/tenant_202/transfer-notice", json={"amount": 440000})
+        self.assertEqual(r_note.status_code, 200, r_note.text)
+        self.assertEqual(self.client.get("/api/rent3_tenant/myhome/tenant_202").json()["ledger"]["total_unpaid"], 440000)    # 알림만으로는 장부가 바뀌지 않는다
+        nid = r_note.json()["notice"]["id"]
+        self.assertEqual(self.client.get("/api/rent3_lessor/dashboard?branch=main").json()["transfer_notices"][0]["id"], nid)
+        r_tpay = self.client.post(f"/api/rent3_lessor/transfer-notices/{nid}/confirm", json={"branch": "main"})   # 임대인이 입금 확인 후 수납
+        self.assertEqual(r_tpay.status_code, 200, r_tpay.text)
         self.assertEqual(r_tpay.json()["ledger"]["total_unpaid"], 0)
+        self.assertEqual(self.client.post(f"/api/rent3_lessor/transfer-notices/{nid}/confirm", json={"branch": "main"}).status_code, 400)   # 두 번 수납 금지
 
         myhome = self.client.get("/api/rent3_tenant/myhome/tenant_202").json()
         self.assertEqual(myhome["certificate"]["total_paid"], 1140000)
@@ -3276,7 +3280,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     self.assertEqual(r.status_code, 403, (suffix, role))
                     self.assertIn("대신할 수 없습니다", r.text)
             # 임차인 앱: 납부·정산 동의도 대신할 수 없다
-            self.assertEqual(c.post("/api/rent3_tenant/myhome/tenant_201/pay", json={}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3_tenant/myhome/tenant_201/transfer-notice", json={"amount": 1}).status_code, 403)
             self.assertEqual(c.post("/api/rent3_tenant/checkout/ghost/agree", json={}).status_code, 403)
             # 허용 목록(A/S 배정·접수)은 가드를 통과한다 (대상이 없어 다른 오류가 나도 403 은 아니다)
             self.assertNotEqual(c.post("/api/rent3_lessor/tickets/ghost/assign", json={}).status_code, 403)
@@ -4252,6 +4256,102 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("qrcode.min.js", rd("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"))
         self.assertIn("아이디·비밀번호로 다시 로그인", rd("shared_ui", "rent3_session_guard.js"))
         self.assertIn("showInviteSetup", rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js") + shell)
+
+    def test_69_phase2_pay_notice_lost_phone_pin_ttl_name_login(self):
+        """69. Phase 2: 임차인 스스로 납부 처리 불가(이체 알림→임대인 확인), PIN 토큰 3시간·기기 해제 즉시 반영, 분실 폰 전체 해제(임대인·관리인), 운영 환경 성명 로그인 차단."""
+        import time as _t
+        from apps.rent_dist._rent3_core import Tenant, passwords as pwd, authz
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        t = Tenant.first(room_no="202", branch="main")
+        old = (t.password, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices))
+        t.password, t.pin_hash, t.quick_devices, t.status = pwd.hash_password("Pw123456"), "", [], "ACTIVE"
+        t.save(action="t")
+        from apps.rent_dist._rent3_core import Room
+        room202 = Room.first(branch="main", room_no="202")
+        old_room_tenant = room202.id_tenant
+        room202.id_tenant = t.id                                   # 앞선 시험이 호실 연결을 풀었을 수 있다
+        room202.save(action="t")
+        tid, PL = t.id, "/api/rent3/pool"
+        login = lambda: {"Authorization": "Bearer " + c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"}).json()["token"]}
+        full = login()
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": "2846"}).status_code, 200)
+
+        def new_device(label):
+            dv = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": label}).json()
+            r = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": dv["qk"], "pin": "2846"})
+            self.assertEqual(r.status_code, 200, r.text)
+            return dv, {"Authorization": f"Bearer {r.json()['token']}"}, r.json()["token"]
+
+        dv1, pin1, tok1 = new_device("폰1")
+        cl = verify_token(tok1)
+        self.assertEqual(cl["d"], dv1["device"]["id"])
+        self.assertLessEqual(cl["exp"] - int(_t.time()), 3 * 3600 + 5)                                       # PIN 토큰은 3시간
+        self.assertGreater(cl["exp"] - int(_t.time()), 3 * 3600 - 60)
+        self.assertGreater(verify_token(full["Authorization"].split()[1])["exp"] - int(_t.time()), 6 * 3600)  # 정식 로그인은 그대로(12시간)
+        # 이체 알림은 PIN 으로도 되지만 장부는 안 바뀐다. 납부 처리 API 는 없다
+        base = f"/api/rent3_tenant/myhome/{tid}"
+        before = (c.get(base, headers=pin1).json().get("ledger") or {}).get("total_unpaid")
+        self.assertEqual(c.post(f"{base}/transfer-notice", headers=pin1, json={"amount": 12345}).status_code, 200)
+        self.assertEqual((c.get(base, headers=pin1).json().get("ledger") or {}).get("total_unpaid"), before)
+        self.assertEqual(c.get(base, headers=pin1).json()["transfer_notice"]["status"], "PENDING")
+        self.assertIn(c.post(f"{base}/pay", headers=pin1, json={"amount": 1}).status_code, (403, 404, 405))
+        self.assertEqual(c.post(f"{base}/transfer-notice", headers=pin1, json={"amount": 0}).status_code, 400)
+        nid = c.get(base, headers=pin1).json()["transfer_notice"]["id"]
+        self.assertEqual(c.post(f"/api/rent3_lessor/transfer-notices/{nid}/reject", headers=self._login("chic"), json={"branch": "main", "reason": "확인 안 됨"}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin1).json()["transfer_notice"]["status"], "REJECTED")
+        # 기기를 해제하면 이미 받은 PIN 토큰도 바로 무효
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv1['device']['id']}/revoke", headers=full, json={}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin1).status_code, 401)
+        # 분실 폰 전체 해제: 임대인(자기 건물만)·관리인
+        dv2, pin2, _ = new_device("폰2")
+        chic, sunho = self._login("chic"), self._login("sunho")
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-shortcuts/revoke-all", headers=sunho, json={"branch": "main", "room_no": "202"}).status_code, 403)
+        self.assertEqual(c.get(base, headers=pin2).status_code, 200)
+        r = c.post("/api/rent3_lessor/tenant-shortcuts/revoke-all", headers=chic, json={"branch": "main", "room_no": "202"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(c.get(base, headers=pin2).status_code, 401)                                         # 열려 있던 화면도 막힘
+        self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": dv2["qk"], "pin": "2846"}).status_code, 401)
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=login()).json()["has_pin"], False)           # 비밀번호 로그인은 그대로, PIN 은 없어짐
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=login(), json={"pin": "2846"}).status_code, 200)
+        dv3, pin3, _ = new_device("폰3")
+        self.assertEqual(c.post("/api/rent3_admin/accounts/revoke-shortcuts", json={"id": tid}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin3).status_code, 401)
+        self.assertIn(c.post("/api/rent3_admin/accounts/revoke-shortcuts", headers=chic, json={"id": tid}).status_code, (401, 403))
+        # 퇴실하면 이미 받은 PIN 토큰도 무효
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=login(), json={"pin": "2846"}).status_code, 200)
+        dv4, pin4, _ = new_device("폰4")
+        tt = Tenant.get(tid)
+        tt.status = "MOVED_OUT"
+        tt.save(action="t")
+        self.assertEqual(c.get(base, headers=pin4).status_code, 401)
+        tt = Tenant.get(tid)
+        tt.status = "ACTIVE"
+        tt.save(action="t")
+
+        # ── 운영 환경(프록시 헤더가 붙은 접속): 성명 로그인 차단, 아이디는 가능. 로컬 시연에서는 예전처럼 ──
+        remote = {**NA, "X-Forwarded-For": "203.0.113.9"}
+        by_name = c.post(f"{PL}/auth/login", headers=remote, json={"login_mode": "account", "identifier": Tenant.get(tid).name, "password": "Pw123456"})
+        self.assertEqual(by_name.status_code, 401)
+        by_id = c.post(f"{PL}/auth/login", headers=remote, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"})
+        self.assertEqual(by_id.status_code, 200, by_id.text)
+        self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": Tenant.get(tid).name, "password": "Pw123456"}).status_code, 200)
+
+        # ── 화면: 사전 비활성·안내, 운영 입력칸 안내문, 납부 카드 문구 ──
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        tapp = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
+        for needle in ("isViaPin", "btnAgreeCo", "이체했어요", "/transfer-notice"):
+            self.assertIn(needle, tapp, needle)
+        self.assertNotIn("월세 즉시 납부", tapp)
+        self.assertNotIn("/pay`", tapp)
+        self.assertIn("아이디, 이메일 또는 휴대폰 번호", rd("apps", "rent_dist", "rent3", "frontend", "app.js"))
+        self.assertIn("nt-ok", rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"))
+        t = Tenant.get(tid)
+        t.password, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices = old
+        t.save(action="t")
+        room202 = Room.get(room202.id)
+        room202.id_tenant = old_room_tenant
+        room202.save(action="t")
 
 
 if __name__ == "__main__":

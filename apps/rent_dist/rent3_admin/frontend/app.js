@@ -429,7 +429,8 @@
         </select>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button id="btnOpsInvite" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">입주 안내 링크 만들기</button>
-          <button id="btnOpsTemp" class="bass-btn" type="button" style="min-height:44px;">임시 비밀번호 발급</button></div>
+          <button id="btnOpsTemp" class="bass-btn" type="button" style="min-height:44px;">임시 비밀번호 발급</button>
+          <button id="btnOpsRevoke" class="bass-btn" type="button" style="min-height:44px;">📵 분실 폰 바로가기 전체 해제</button></div>
         <div id="opsResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
       </div>`;
     document.getElementById("btnBkRun").addEventListener("click", function () {
@@ -442,6 +443,14 @@
         const r = await Bass.api(APP_ID, "/accounts/invite", { method: "POST", body: { id: document.getElementById("opsTenant").value } });
         const link = window.location.origin + r.url;
         out.innerHTML = `<strong>${Bass.escapeHtml(r.tenant_name)}님 (${Bass.escapeHtml(r.room_no)}호)</strong> — 아래 링크를 문자로 보내거나 QR 로 보여 주세요. 지금만 보입니다.<br><input class="bass-input" readonly value="${Bass.escapeHtml(link)}" style="width:100%;margin-top:6px;" onclick="this.select()">`;
+      });
+    });
+    document.getElementById("btnOpsRevoke").addEventListener("click", function () {
+      if (!window.confirm("이 임차인의 간편 비밀번호와 바로가기 기기를 모두 해제합니다. 계속할까요?")) return;
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/accounts/revoke-shortcuts", { method: "POST", body: { id: document.getElementById("opsTenant").value } });
+        out.textContent = r.message;
+        await renderOpsTab();
       });
     });
     document.getElementById("btnOpsTemp").addEventListener("click", function () {

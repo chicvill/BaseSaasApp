@@ -290,6 +290,15 @@
     return `[${bldgName()}] ${r.room_no}호 ${(r.contract && r.contract.tenant_name) || ""}님, 아래 월세가 아직 확인되지 않았습니다.\n${list}\n합계 ${fmtWon(r.ledger.total_unpaid)}. 확인 후 입금 부탁드립니다.`;
   }
 
+  // 📵 분실 폰: 그 임차인의 간편 비밀번호·바로가기를 모두 해제
+  function revokeShortcuts(no) {
+    if (!window.confirm(`${no}호 임차인의 간편 비밀번호와 바로가기를 모두 해제할까요? (비밀번호 로그인은 그대로 됩니다)`)) return;
+    Bass.withLock(null, async () => {
+      const r = await Bass.api(APP_ID, "/tenant-shortcuts/revoke-all", { method: "POST", body: { branch: currentBranch, room_no: no } });
+      Bass.updateAppAlert("success", r.message);
+    });
+  }
+
   // 📲 입주 안내 카드: 1회용 링크(QR). 임차인이 비밀번호·간편 비밀번호를 정하고 홈 화면에 추가하도록 안내한다. 링크 원문은 지금 한 번만 보인다.
   function showInviteModal(no) {
     Bass.withLock(null, async () => {
@@ -345,7 +354,15 @@
     const oldest = (lg.months || []).find((m) => m.unpaid > 0);
     const defAmt = oldest ? oldest.unpaid : Number(r.monthly_rent || 0) + Number(r.maintenance_fee || 0);
     const draft = receiptMsg[no] || (lg.total_unpaid > 0 ? unpaidText(r) : "");
+    const notices = (dash.transfer_notices || []).filter((n) => n.room_no === no);
+    const noticeHtml = notices.map((n) => `<div class="bass-card" style="padding:10px;margin-bottom:10px;border-color:var(--warn);" data-notice="${Bass.escapeHtml(n.id)}">
+        <div style="font-size:13.5px;font-weight:700;">📨 임차인이 ${fmtWon(n.amount)} 이체했다고 알렸습니다</div>
+        <div class="bass-muted" style="font-size:12px;margin:2px 0 6px;">통장에서 입금을 확인한 뒤 수납하세요.${n.memo ? ` 메모: ${Bass.escapeHtml(n.memo)}` : ""}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;"><input type="number" class="bass-input nt-amt" value="${n.amount}" style="width:120px;" aria-label="실제 입금액">
+        <button class="bass-btn bass-btn--sm bass-btn--primary nt-ok" type="button" style="min-height:44px;">✅ 입금 확인·수납</button>
+        <button class="bass-btn bass-btn--sm nt-no" type="button" style="min-height:44px;">반려</button></div></div>`).join("");
     const body = openModal(`💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역`, `
+      ${noticeHtml}
       <label class="r3-lbl">입금 알림문자 붙여넣기</label>
       <textarea id="pmSms" class="bass-input" rows="2" placeholder="[은행] 10/28 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} ${(defAmt).toLocaleString("ko-KR")}원 입금"></textarea>
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px;">
@@ -369,6 +386,25 @@
       await refresh();
       showPayModal(rn);
     };
+    body.querySelectorAll("[data-notice]").forEach((card) => {
+      const id = card.dataset.notice;
+      card.querySelector(".nt-ok").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/transfer-notices/${encodeURIComponent(id)}/confirm`, { method: "POST", body: { branch: currentBranch, amount: Number(card.querySelector(".nt-amt").value || 0) } });
+          await after(res);
+        });
+      });
+      card.querySelector(".nt-no").addEventListener("click", function () {
+        const why = window.prompt("반려 사유(임차인에게 보입니다)", "입금 내역이 확인되지 않습니다");
+        if (why === null) return;
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/transfer-notices/${encodeURIComponent(id)}/reject`, { method: "POST", body: { branch: currentBranch, reason: why } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+          showPayModal(no);
+        });
+      });
+    });
     $m("pmParse").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         let t = $m("pmSms").value.trim();
@@ -789,13 +825,14 @@
         <button class="bass-btn bass-btn--sm ${need ? "rc-warn" : ""}" data-act="expiry" type="button">만기통보</button>
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
       </div>
-      <div style="margin-bottom:8px;"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;">📲 입주 안내 카드 (QR)</button></div>
+      <div style="margin-bottom:8px;"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;">📲 입주 안내 카드 (QR)</button>
+        <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;">📵 분실 폰 해제</button></div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>`;
-    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal };
+    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
   }
 

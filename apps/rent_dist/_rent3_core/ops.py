@@ -956,3 +956,25 @@ class RentBillingNotice(PoolObj):
         return resolved_cnt
 
 
+class TransferNotice(PoolObj):
+    """임차인의 '이체했어요' 알림. 돈이 들어온 것을 임대인이 확인(수납)하기 전에는 장부(Pay)에 아무것도 쓰지 않는다."""
+    collection: ClassVar[str] = "ops"
+    label: ClassVar[str] = "이체 확인 요청"
+
+    id: str = Field(default_factory=lambda: f"trn_{uuid4().hex[:8]}")
+    branch: str = "main"
+    room_no: str = ""
+    tenant_id: str = ""
+    tenant_name: str = ""
+    amount: int = 0
+    method: str = "TRANSFER"
+    memo: str = ""
+    status: str = "PENDING"                  # PENDING | CONFIRMED | REJECTED
+    handled_at: str = ""
+    handled_by: str = ""
+    reject_reason: str = ""
+    pay_id: str = ""
+
+    def summary(self) -> str:
+        return f"이체 확인 요청 {self.room_no}호 {self.amount:,}원 ({self.status})"
+

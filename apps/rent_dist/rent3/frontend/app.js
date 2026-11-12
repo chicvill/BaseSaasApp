@@ -469,6 +469,7 @@
       if (!$("loginPassword").value) $("loginPassword").value = "1212";
       if (!$("regPassword").value) $("regPassword").value = "1212";
     }
+    if (!demoOn) $("loginIdentifier").placeholder = "아이디, 이메일 또는 휴대폰 번호";   // 운영: 성명 로그인·시연 계정 안내 없음
     const demoBox = $("demoAccountGrid") && $("demoAccountGrid").parentElement;
     if (demoBox) demoBox.style.display = demoOn ? "" : "none";
 

@@ -300,6 +300,17 @@ def issue_invite(req: InviteIssueReq, request: Request):
             "message": "입주 안내 링크를 만들었습니다(7일 안에 1회 사용)."}
 
 
+@router.post("/accounts/revoke-shortcuts", dependencies=ADMIN_ONLY)
+def revoke_shortcuts(req: InviteIssueReq):
+    """분실 폰 대응(전화 요청): 임차인의 간편 비밀번호·바로가기를 모두 해제한다. 접근을 줄이는 조치라 입장 절차 없이 가능하다."""
+    from apps.rent_dist._rent3_core import quicklogin as ql
+    t = Tenant.get(req.id)
+    if t is None:
+        raise DomainError("임차인을 찾을 수 없습니다.")
+    n = ql.revoke_all(t)
+    return {"success": True, "message": f"{t.name}님의 바로가기 {n}대와 간편 비밀번호를 해제했습니다."}
+
+
 @router.get("/backups", dependencies=ADMIN_ONLY)
 def list_backups():
     from apps.rent_dist._rent3_core import backup as bk

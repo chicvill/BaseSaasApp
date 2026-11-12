@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from apps.rent_dist._rent3_core.pool import now_iso
+from apps.rent_dist._rent3_core.ops import TransferNotice
 
 from core.errors import DomainError, NotFound
 from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
@@ -44,9 +45,9 @@ class InquiryReq(BaseModel):
     message: str
 
 
-class OnlinePayReq(BaseModel):
+class TransferNoticeReq(BaseModel):
     amount: int
-    method: str = "KAKAOPAY"
+    memo: str = ""
 
 
 class VehicleReq(BaseModel):
@@ -212,6 +213,7 @@ def get_myhome(tenant_id: str):
         "ledger": ledger,
         "certificate": cert,
         "payments": [p.model_dump() for p in payments],
+        "transfer_notice": (lambda ns: ns[-1].model_dump() if ns else None)(sorted(TransferNotice.find(tenant_id=t.id), key=lambda x: x.created_at)),
         "tickets": [tk.model_dump() for tk in tickets],
         "pending_checkout": checkouts[0].model_dump() if checkouts else None,
         "chats": [c.model_dump() for c in chats],
@@ -315,20 +317,22 @@ def insurance_proof(tenant_id: str, req: InsuranceProofReq):
     return {"success": True, "message": "보증보험 증빙을 제출했습니다. 임대인이 확인한 뒤 잔금일에 출입 정보를 교부합니다.", "insurance_proof": ct.insurance_proof}
 
 
-@router.post("/myhome/{tenant_id}/pay", dependencies=[Depends(tenant_scope)])
-def pay_monthly_rent(tenant_id: str, req: OnlinePayReq):
+@router.post("/myhome/{tenant_id}/transfer-notice", dependencies=[Depends(tenant_scope)])
+def send_transfer_notice(tenant_id: str, req: TransferNoticeReq):
+    """'이체했어요' 알림. 장부(수납)는 임대인이 입금을 확인하고 반영할 때만 바뀐다(임차인이 스스로 납부 처리를 할 수 없다).
+    같은 호실의 대기 중인 알림이 있으면 금액·메모를 고쳐 하나만 둔다."""
     t = Tenant.require(tenant_id)
     if not t.room_no:
         raise DomainError("현재 입주 중인 호실이 없습니다.")
-    res = FifoPaymentEngine.collect(
-        branch=t.branch,
-        room_no=t.room_no,
-        amount=req.amount,
-        payer_name=t.name,
-        method=req.method,
-        app_source=APP_SRC,
-    )
-    return {"success": True, **res}
+    if req.amount <= 0 or req.amount > 100_000_000:
+        raise DomainError("이체한 금액을 확인해 주세요.", hint="0원보다 크고 1억 원 이하로 입력합니다.")
+    memo = (req.memo or "").strip()[:100]
+    n = next((x for x in TransferNotice.find(branch=t.branch, room_no=t.room_no, tenant_id=t.id) if x.status == "PENDING"), None)
+    if n is None:
+        n = TransferNotice(branch=t.branch, room_no=t.room_no, tenant_id=t.id, tenant_name=t.name)
+    n.amount, n.memo = req.amount, memo
+    n.save(action="transfer_notice_sent", app_source=APP_SRC)
+    return {"success": True, "message": f"임대인에게 {req.amount:,}원 이체 사실을 알렸습니다. 임대인이 입금을 확인하면 납부로 기록됩니다.", "notice": n.model_dump()}
 
 
 @router.post("/myhome/{tenant_id}/vehicle", dependencies=[Depends(tenant_scope)])

@@ -289,6 +289,10 @@
     });
   }
 
+  function isViaPin() {
+    try { var tok = global.localStorage.getItem("bass_token") || ""; return JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).m === "pin"; } catch (e) { return false; }
+  }
+
   function installHelp() {
     var ua = global.navigator.userAgent || "";
     var ios = /iPhone|iPad|iPod/.test(ua);
@@ -484,7 +488,7 @@
   }
 
   global.R3Shell = {
-    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings, openShortcutSettings: openShortcutSettings, pinPending: pinPending, installHelp: installHelp,
+    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings, openShortcutSettings: openShortcutSettings, pinPending: pinPending, installHelp: installHelp, isViaPin: isViaPin,
     isAdminSession: isAdminSession, isAdminProxy: isAdminProxy, proxyBanner: proxyBanner, openSupportChat: openSupportChat, watchSupport: watchSupport
   };
 })(window);

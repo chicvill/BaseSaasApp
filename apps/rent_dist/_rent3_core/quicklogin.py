@@ -132,6 +132,14 @@ def record_success(t: Any, device_id: str) -> None:
     t.save(action="quick_pin_login", app_source="rent3_portal")
 
 
+def revoke_all(t: Any) -> int:
+    """분실·도난 대응: 이 임차인의 간편 비밀번호와 바로가기 기기를 모두 없앤다. 이미 받은 PIN 토큰도 바로 무효가 된다. 해제한 기기 수를 돌려준다."""
+    n = len(devices_of(t))
+    t.pin_hash, t.quick_devices = "", []
+    t.save(action="quick_revoked_all", app_source="rent3_portal")
+    return n
+
+
 def unlock_all(t: Any) -> None:
     """아이디·비밀번호 로그인에 성공하면 잠긴 바로가기를 푼다."""
     devs = devices_of(t)
