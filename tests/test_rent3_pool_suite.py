@@ -4421,6 +4421,48 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("월 목표액", "수납액", "미납액", "monthly_collection_rate"):
             self.assertIn(needle, lapp, needle)
 
+    def test_73_payment_delete_recalculates_fifo_and_guards(self):
+        """73. 수납 내역 삭제(/payments/delete): 권한 경계(타 지점·엄격 관리인 403), 삭제 후 FIFO 원장·대시보드 즉시 재계산."""
+        from unittest import mock
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        d0 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        target = next(
+            (rc for rc in d0["rooms"] if rc.get("is_occupied") and (rc.get("ledger") or {}).get("total_unpaid", 0) >= 100000),
+            None,
+        )
+        fallback = target or next((rc for rc in d0["rooms"] if rc.get("is_occupied") and rc.get("contract")), None)
+        self.assertIsNotNone(fallback, "활성 임차 호실이 필요합니다.")
+        room_no = fallback["room_no"]
+        amt = min(250000, int(target["ledger"]["total_unpaid"])) if target else 250000
+        r_col = c.post("/api/rent3_lessor/payments/collect", headers=chic,
+                       json={"branch": "main", "room_no": room_no, "amount": amt})
+        self.assertEqual(r_col.status_code, 200, r_col.text)
+        pid = r_col.json()["payment"]["id"]
+        self.assertIsNotNone(Pay.get(pid))
+        d1 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        if target:
+            self.assertEqual(d1["total_unpaid_branch"], d0["total_unpaid_branch"] - amt)
+
+        # 다른 지점 임대인·엄격 관리인은 삭제 불가
+        self.assertEqual(c.post("/api/rent3_lessor/payments/delete", headers=sunho,
+                                json={"branch": "main", "pay_id": pid}).status_code, 403)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.post("/api/rent3_lessor/payments/delete",
+                                    json={"branch": "main", "pay_id": pid}).status_code, 403)
+
+        # 본인 임대인이 삭제하면 Pay 에서 사라지고 미납 합계가 원상 복구된다
+        r_del = c.post("/api/rent3_lessor/payments/delete", headers=chic,
+                       json={"branch": "main", "pay_id": pid})
+        self.assertEqual(r_del.status_code, 200, r_del.text)
+        self.assertIsNone(Pay.get(pid))
+        d2 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        self.assertEqual(d2["total_unpaid_branch"], d0["total_unpaid_branch"])
+        with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+            lapp = fp.read()
+        self.assertIn("/payments/delete", lapp)
+        self.assertIn("pr-del", lapp)
+
 
 if __name__ == "__main__":
     unittest.main()

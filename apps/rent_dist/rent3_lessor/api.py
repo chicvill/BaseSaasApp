@@ -570,6 +570,23 @@ def edit_payment(req: PayEditReq):
     return {"success": True, "message": f"{pay.room_no}호 수납 내역을 고쳤습니다 ({pay.paid_date}, {pay.total_amount:,}원).", "payment": pay.model_dump()}
 
 
+class PayDeleteReq(BaseModel):
+    branch: str = "main"
+    pay_id: str
+
+
+@router.post("/payments/delete")
+def delete_payment(req: PayDeleteReq):
+    """수납 내역 한 건을 삭제한다 (중복·오입력 수납 정정용, 이벤트 로그에 기록)."""
+    ensure_pool_seeded()
+    pay = Pay.require(req.pay_id)
+    if normalize_branch_id(pay.branch) != normalize_branch_id(req.branch):
+        raise Forbidden("다른 지점의 수납 내역은 지울 수 없습니다.")
+    room_no, p_date, amt = pay.room_no, pay.paid_date, pay.total_amount
+    pay.delete(action="payment_deleted", app_source=APP_SRC)
+    return {"success": True, "message": f"{room_no}호 수납 내역({p_date}, {amt:,}원)을 삭제했습니다."}
+
+
 class ContractEditReq(BaseModel):
     branch: str = "main"
     contract_id: str

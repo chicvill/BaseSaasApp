@@ -256,8 +256,9 @@
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
     .rc-info { font-size: 13px; line-height: 1.7; }
-    .pr { display: grid; grid-template-columns: 44px minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 40px; }
+    .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
+    .pr .pr-del { padding: 4px; min-height: 40px; font-size: 12.5px; color: var(--err); width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
     .pr--un, .pr--ok { grid-template-columns: 44px 1fr; }
     .pr--un .pr__un { color: var(--err); font-weight: 800; }
@@ -359,10 +360,11 @@
         rows.push(`<div class="pr pr--un"><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">미납 ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}</span></div>`);
       }
       const ps = byYm[m.ym] || [];
-      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}"><span class="pr__ym">${shortYm(m.ym)}</span>
+      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}" data-total="${p.total}"><span class="pr__ym">${shortYm(m.ym)}</span>
         <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
         <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
-        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비"></div>`));
+        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비">
+        <button type="button" class="bass-btn bass-btn--sm pr-del" aria-label="수납 내역 삭제">삭제</button></div>`));
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
@@ -387,7 +389,7 @@
         <button id="pmDirect" class="bass-btn bass-btn--sm" type="button">💰 직접수납</button>
       </div>
       <div class="r3-lbl">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span></div>
-      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span></div>
+      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>
       <label class="r3-lbl" style="margin-top:12px;">임차인에게 보낼 메시지</label>
       ${msgOf("pmMsg", draft)}
@@ -436,6 +438,24 @@
     });
     $m("pmCopy").addEventListener("click", () => copyAndSms($m("pmMsg").value, ct.tenant_phone || (r.tenant && r.tenant.phone)));
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
+      const delBtn = row.querySelector(".pr-del");
+      if (delBtn) {
+        delBtn.addEventListener("click", () => {
+          const dt = row.querySelector(".pr-date").value;
+          const tot = Number(row.dataset.total || (Number(row.querySelector(".pr-rent").value || 0) + Number(row.querySelector(".pr-fee").value || 0)));
+          if (!window.confirm(`${no}호 ${dt} (${fmtWon(tot)}) 수납 내역을 삭제할까요?`)) return;
+          Bass.withLock(delBtn, async () => {
+            const res = await Bass.api(APP_ID, "/payments/delete", {
+              method: "POST",
+              body: { branch: currentBranch, pay_id: row.dataset.pay },
+            });
+            Bass.updateAppAlert("success", res.message);
+            delete receiptMsg[no];
+            await refresh();
+            showPayModal(no);
+          });
+        });
+      }
       row.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
         Bass.withLock(inp, async () => {
           const res = await Bass.api(APP_ID, "/payments/edit", {
