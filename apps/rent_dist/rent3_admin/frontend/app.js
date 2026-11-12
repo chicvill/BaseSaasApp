@@ -75,6 +75,7 @@
     if (currentTab === "support") renderSupportTab();
     else if (currentTab === "lessors") renderLessorsTab();
     else if (currentTab === "portfolio") renderPortfolioTab();
+    else if (currentTab === "ops") renderOpsTab().catch(Bass.showError);
     else renderPoolTab();
   }
 
@@ -392,6 +393,64 @@
         `).join("")}
       </div>
     `;
+  }
+
+  // ───────── 운영 안전: 백업 · 입주 안내 링크 · 임시 비밀번호 ─────────
+  const fmtKb = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)}MB` : `${Math.max(1, Math.round(n / 1024))}KB`);
+  async function downloadBackup(name) {
+    const r = await fetch(`/api/rent3_admin/backups/${encodeURIComponent(name)}/download`, { headers: { Authorization: `Bearer ${Bass.token()}` } });
+    if (!r.ok) { Bass.updateAppAlert("error", "내려받지 못했습니다."); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(await r.blob());
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  }
+
+  async function renderOpsTab() {
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    const [bk, tn] = await Promise.all([Bass.api(APP_ID, "/backups"), Bass.api(APP_ID, "/accounts/tenants")]);
+    const rows = bk.backups.map((b) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
+      <span><code>${Bass.escapeHtml(b.name)}</code><br><span class="bass-muted" style="font-size:12px;">${Bass.escapeHtml(b.created_at.replace("T", " "))} · ${fmtKb(b.size)}</span></span>
+      <button class="bass-btn bass-btn--sm btn-bk-dl" data-name="${Bass.escapeHtml(b.name)}" type="button" style="min-height:44px;">내려받기</button></div>`).join("") || '<div class="bass-muted" style="font-size:13px;">아직 백업이 없습니다.</div>';
+    elTabContent.innerHTML = `
+      <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🛟 Data Pool 백업</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">풀 전체(JSON·감사 로그·업로드 파일)를 하루 한 번 자동으로 압축해 최근 ${bk.keep}개를 남깁니다${bk.daily ? "" : " (지금은 자동 실행이 꺼져 있습니다)"}.
+          <strong>같은 디스크에만 두면 디스크 고장 때 함께 사라집니다 — 가끔 내려받아 다른 곳에 보관하세요.</strong> 백업에는 개인정보가 들어 있습니다.</div>
+        <button id="btnBkRun" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">지금 백업 만들기</button>
+        <div style="margin-top:8px;">${rows}</div>
+      </div>
+      <div class="bass-card">
+        <h3>🔑 입주 임차인 계정</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">가져온 임차인은 쓸 수 있는 비밀번호가 없습니다. <strong>입주 안내 링크</strong>(7일·1회)를 만들어 전해 주거나, 임대인이 호실 화면의 [입주 안내 카드]로 직접 만들 수도 있습니다. 링크를 못 쓰는 사정이면 <strong>임시 비밀번호</strong>를 발급하세요(본인에게만 전달).</div>
+        <select id="opsTenant" class="bass-select" style="width:100%;min-height:44px;margin-bottom:8px;">
+          ${tn.tenants.map((t) => `<option value="${Bass.escapeHtml(t.id)}">${Bass.escapeHtml(t.branch)} ${Bass.escapeHtml(t.room_no)}호 ${Bass.escapeHtml(t.name)}${t.invite ? " · 안내 링크 대기" : ""}${t.devices ? ` · 바로가기 ${t.devices}대` : ""}</option>`).join("")}
+        </select>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="btnOpsInvite" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">입주 안내 링크 만들기</button>
+          <button id="btnOpsTemp" class="bass-btn" type="button" style="min-height:44px;">임시 비밀번호 발급</button></div>
+        <div id="opsResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
+      </div>`;
+    document.getElementById("btnBkRun").addEventListener("click", function () {
+      Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
+    });
+    elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    const out = document.getElementById("opsResult");
+    document.getElementById("btnOpsInvite").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/accounts/invite", { method: "POST", body: { id: document.getElementById("opsTenant").value } });
+        const link = window.location.origin + r.url;
+        out.innerHTML = `<strong>${Bass.escapeHtml(r.tenant_name)}님 (${Bass.escapeHtml(r.room_no)}호)</strong> — 아래 링크를 문자로 보내거나 QR 로 보여 주세요. 지금만 보입니다.<br><input class="bass-input" readonly value="${Bass.escapeHtml(link)}" style="width:100%;margin-top:6px;" onclick="this.select()">`;
+      });
+    });
+    document.getElementById("btnOpsTemp").addEventListener("click", function () {
+      if (!window.confirm("임시 비밀번호를 발급하면 기존 비밀번호는 못 씁니다. 계속할까요?")) return;
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/accounts/reset-password", { method: "POST", body: { kind: "tenant", id: document.getElementById("opsTenant").value } });
+        out.innerHTML = `${Bass.escapeHtml(r.message)}<br>임시 비밀번호: <code style="font-size:16px;">${Bass.escapeHtml(r.temporary_password)}</code>`;
+      });
+    });
   }
 
   async function renderPoolTab() {

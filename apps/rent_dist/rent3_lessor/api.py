@@ -702,6 +702,27 @@ def edit_building(req: BuildingEditReq):
     return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).", "building": b.model_dump()}
 
 
+class TenantInviteReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+
+
+@router.post("/tenant-invite")
+def issue_tenant_invite(req: TenantInviteReq, request: Request):
+    """입주 임차인에게 줄 1회용 입주 안내 카드(링크·QR)를 발급한다. 이전 링크는 무효가 된다. 링크 원문은 이 응답에서만 보인다."""
+    from apps.rent_dist._rent3_core import invite as inv
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    room = Room.first(branch=b_id, room_no=req.room_no)
+    t = Tenant.get(room.id_tenant) if (room and room.id_tenant) else None
+    if t is None:
+        raise DomainError(f"{req.room_no}호에 입주한 임차인이 없습니다.", hint="계약이 체결되어 입주한 호실에서만 발급할 수 있습니다.")
+    tok = inv.issue(t, str((claims_from(request) or {}).get("u") or "lessor"))
+    b = Building.first(branch=b_id)
+    return {"success": True, "url": f"/rent3_tenant/?invite={tok}", "expires": t.invite_expires, "tenant_name": t.name,
+            "room_no": t.room_no, "building_name": b.building_name if b else "", "message": "입주 안내 카드를 만들었습니다(7일 안에 1회 사용)."}
+
+
 @router.post("/building/tax-rooms")
 def update_building_tax_rooms(req: BuildingTaxRoomsReq):
     """건물의 부가가치세 납부 대상 호실 리스트 및 종합소득세 신고 대상 호실 리스트를 저장하고 호실 속성에 동기화한다."""

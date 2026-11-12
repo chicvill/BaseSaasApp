@@ -272,6 +272,59 @@ def reset_account_password(req: AccountResetReq):
             "temporary_password": temp}
 
 
+class InviteIssueReq(BaseModel):
+    id: str
+
+
+@router.get("/accounts/tenants", dependencies=ADMIN_ONLY)
+def list_resident_tenants():
+    """입주 안내 링크·임시 비밀번호 발급 화면용: 입주 중인 임차인 목록."""
+    from apps.rent_dist._rent3_core import invite as inv, quicklogin as ql
+    ensure_pool_seeded()
+    items = [{"id": t.id, "name": t.name, "room_no": t.room_no, "branch": t.branch, "invite": inv.status(t)["pending"], "has_pin": bool(t.pin_hash),
+              "devices": len(ql.devices_of(t))} for t in Tenant.all() if ql.eligible(t)]
+    return {"success": True, "tenants": sorted(items, key=lambda x: (x["branch"], x["room_no"]))}
+
+
+@router.post("/accounts/invite", dependencies=ADMIN_ONLY)
+def issue_invite(req: InviteIssueReq, request: Request):
+    """입주 임차인용 1회용 입주 안내 링크 발급(임대인이 못 하는 경우의 대행). 링크 원문은 이 응답에서만 보인다."""
+    from apps.rent_dist._rent3_core import invite as inv, quicklogin as ql
+    t = Tenant.get(req.id)
+    if t is None:
+        raise DomainError("임차인을 찾을 수 없습니다.")
+    if not ql.eligible(t):
+        raise DomainError("입주 중인 호실이 있는 임차인에게만 발급할 수 있습니다.")
+    tok = inv.issue(t, _admin_name(request))
+    return {"success": True, "url": f"/rent3_tenant/?invite={tok}", "expires": t.invite_expires, "tenant_name": t.name, "room_no": t.room_no,
+            "message": "입주 안내 링크를 만들었습니다(7일 안에 1회 사용)."}
+
+
+@router.get("/backups", dependencies=ADMIN_ONLY)
+def list_backups():
+    from apps.rent_dist._rent3_core import backup as bk
+    return {"success": True, "backups": bk.list_backups(), "keep": bk.keep_count(), "daily": __import__("os").getenv("RENT3_BACKUP_DAILY", "1") != "0"}
+
+
+@router.post("/backups/run", dependencies=ADMIN_ONLY)
+def run_backup():
+    from apps.rent_dist._rent3_core import backup as bk
+    info = bk.create()
+    v = bk.verify(bk.path_for(info["name"]))
+    return {"success": True, "message": f"백업을 만들었습니다({info['name']}). 검사: {'이상 없음' if v['ok'] else '문제 있음'}", "backup": info, "verify": v}
+
+
+@router.get("/backups/{name}/download", dependencies=ADMIN_ONLY)
+def download_backup(name: str):
+    """백업 내려받기 — 개인정보가 들어 있으므로 안전하게 보관할 것."""
+    from apps.rent_dist._rent3_core import backup as bk
+    try:
+        p = bk.path_for(name)
+    except (ValueError, FileNotFoundError):
+        raise DomainError("백업 파일을 찾을 수 없습니다.")
+    return FileResponse(p, media_type="application/gzip", filename=name)
+
+
 @router.post("/lessors/{lessor_id}/ai-limit", dependencies=ADMIN_ONLY)
 def set_ai_limit(lessor_id: str, req: AiLimitReq):
     """가맹점당 월 AI(Gemini) 등기부 읽기 호출 상한 변경."""

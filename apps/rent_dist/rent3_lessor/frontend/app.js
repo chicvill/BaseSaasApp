@@ -290,6 +290,31 @@
     return `[${bldgName()}] ${r.room_no}호 ${(r.contract && r.contract.tenant_name) || ""}님, 아래 월세가 아직 확인되지 않았습니다.\n${list}\n합계 ${fmtWon(r.ledger.total_unpaid)}. 확인 후 입금 부탁드립니다.`;
   }
 
+  // 📲 입주 안내 카드: 1회용 링크(QR). 임차인이 비밀번호·간편 비밀번호를 정하고 홈 화면에 추가하도록 안내한다. 링크 원문은 지금 한 번만 보인다.
+  function showInviteModal(no) {
+    Bass.withLock(null, async () => {
+      const d = await Bass.api(APP_ID, "/tenant-invite", { method: "POST", body: { branch: currentBranch, room_no: no } });
+      const link = window.location.origin + d.url;
+      let svg = "";
+      try { const qr = qrcode(0, "M"); qr.addData(link); qr.make(); svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }); } catch (_) { svg = ""; }
+      const msg = `[${d.building_name} ${d.room_no}호] ${d.tenant_name}님, 입주를 환영합니다. 아래 링크에서 비밀번호를 정하면 바로 시작할 수 있습니다(7일 안, 1회).\n${link}`;
+      const body = openModal(`📲 ${Bass.escapeHtml(no)}호 입주 안내 카드`, `
+        <div style="text-align:center;"><div style="max-width:220px;margin:0 auto;background:#fff;padding:6px;border-radius:8px;">${svg || "QR 을 만들지 못했습니다. 아래 링크를 보내 주세요."}</div></div>
+        <div class="bass-muted" style="font-size:12.5px;margin:8px 0;">${Bass.escapeHtml(d.tenant_name)}님에게 QR 을 보여 주거나 문자로 보내세요. <strong>7일 안에 한 번</strong> 쓸 수 있고, 다시 만들면 이전 링크는 못 씁니다.</div>
+        <textarea id="invMsg" class="bass-input r3-msg" rows="5" readonly>${Bass.escapeHtml(msg)}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button id="invCopy" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">문구 복사</button>
+          <button id="invPrint" class="bass-btn" type="button" style="min-height:44px;">🖨 인쇄</button></div>`);
+      body.querySelector("#invCopy").addEventListener("click", () => copyText(msg));
+      body.querySelector("#invPrint").addEventListener("click", () => {
+        const w = window.open("", "_blank");
+        if (!w) return;
+        w.document.write(`<title>입주 안내 카드</title><body style="font-family:sans-serif;text-align:center;padding:30px;"><h2>${Bass.escapeHtml(d.building_name)} ${Bass.escapeHtml(d.room_no)}호 입주 안내</h2><p>${Bass.escapeHtml(d.tenant_name)}님, 입주를 환영합니다.</p><div style="width:260px;margin:0 auto;">${svg}</div><p>QR 을 카메라로 찍어 비밀번호를 정해 주세요.<br>(7일 안, 1회 사용)</p><p style="font-size:12px;word-break:break-all;">${Bass.escapeHtml(link)}</p></body>`);
+        w.document.close(); w.focus(); w.print();
+      });
+    }).catch(Bass.showError);
+  }
+
   // ① 수납내역: 알림문자 붙여넣기 · 직접수납 · 월별 납부 내역(날짜·금액 고치기)
   function showPayModal(no) {
     const r = roomOf(no);
@@ -764,12 +789,13 @@
         <button class="bass-btn bass-btn--sm ${need ? "rc-warn" : ""}" data-act="expiry" type="button">만기통보</button>
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
       </div>
+      <div style="margin-bottom:8px;"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;">📲 입주 안내 카드 (QR)</button></div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>`;
-    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal };
+    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
   }
 

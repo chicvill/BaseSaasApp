@@ -237,9 +237,12 @@ class Tenant(PoolObj):
     consents: Dict[str, Any] = Field(default_factory=dict)  # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
     pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py)
     quick_devices: List[Dict[str, Any]] = Field(default_factory=list)  # 바로가기 기기 목록(키는 해시만 저장)
+    invite_hash: str = ""                    # 입주 안내 카드(1회용 링크) 토큰의 해시(invite.py)
+    invite_expires: str = ""
+    invite_issued_by: str = ""
     password: str = "1212"
 
-    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices")
+    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash")
 
     def safe_dump(self) -> Dict[str, Any]:
         """화면·API 로 내려보낼 때 쓰는 model_dump — 간편 비밀번호 해시와 바로가기 키 해시는 뺀다(디스크 저장은 model_dump 그대로)."""

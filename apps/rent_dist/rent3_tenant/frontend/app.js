@@ -124,6 +124,10 @@
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
   R3Shell.watchSupport();
+  if (params.get("welcome")) {    // 입주 안내 링크로 가입을 마친 직후: 홈 화면 추가 방법을 한 번 보여 주고 주소에서 welcome 을 뺀다
+    try { const u = new URL(window.location.href); u.searchParams.delete("welcome"); window.history.replaceState(null, "", u.toString()); } catch (_) { /* 무시 */ }
+    setTimeout(() => R3Shell.installHelp(), 600);
+  }
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";

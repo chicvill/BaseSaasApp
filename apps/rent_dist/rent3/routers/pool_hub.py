@@ -15,7 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql
+from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -389,6 +389,7 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         if _t is not None:
             ql.unlock_all(_t)   # 아이디·비밀번호로 정상 로그인하면 잠긴 바로가기를 푼다
     sup.purge_expired()   # 스케줄러가 없으므로 로그인 때 기한 지난 지원 채팅·접속 기록을 지운다
+    bk.daily()   # 하루 한 번 풀 전체 백업(별도 스레드, 실패해도 로그인에는 영향 없음)
     contract_chat.purge_expired()   # 계약방 대화: 취소 후 90일 · 체결 계약 종료 후 5년(10분에 한 번만 실제로 훑는다)
     out = _gate_consent(out)
     from apps.rent_dist._rent3_core.authz import unrevoke_token
@@ -605,6 +606,69 @@ def shortcut_manifest(qk: str, request: Request):
     body = {"name": label, "short_name": label[:12], "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}", "scope": "/rent3_tenant/",
             "display": "standalone", "background_color": "#ffffff", "theme_color": "#2563eb", "lang": "ko", "icons": icons}
     return JSONResponse(body, media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
+
+
+# ── 입주 안내 카드(1회용 링크): 임차인이 비밀번호·PIN 을 정하고 들어온다 ──
+class InviteAcceptReq(BaseModel):
+    token: str
+    password: str
+    pin: str = ""
+    agree_privacy: bool = False
+
+
+@router.get("/invite/identify")
+def invite_identify(token: str, request: Request) -> Dict[str, Any]:
+    t = _invite_lookup(token, request)
+    b = Building.get(t.id_building) if t.id_building else None
+    return {"success": True, "masked_name": ql.mask_name(t.name), "room_no": t.room_no, "building_name": (b.building_name if b else ""),
+            "expires": t.invite_expires, "consent_required": cs.consent_required()}
+
+
+def _invite_lookup(token: str, request: Request) -> Tenant:
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("invite", keys)
+    t = inv.find(token)
+    if t is None:
+        ratelimit.fail("invite", keys)
+        raise NotFound("사용할 수 없는 입주 안내 링크입니다.", hint="이미 사용했거나 기간(7일)이 지났습니다. 임대인에게 새 안내 카드를 요청해 주세요.")
+    if not ql.eligible(t):
+        raise DomainError("입주 중인 호실이 있어야 쓸 수 있는 링크입니다.")
+    return t
+
+
+@router.post("/auth/invite-accept")
+def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
+    """입주 안내 링크로 비밀번호(필수)·PIN(선택)을 정하고 로그인한다. 링크는 한 번만 쓸 수 있다."""
+    t = _invite_lookup(req.token, request)
+    pwd.validate_new_password(req.password)
+    if cs.consent_required() and not req.agree_privacy:
+        raise DomainError("개인정보 수집·이용에 동의해야 이용할 수 있습니다.", hint="동의는 필수입니다.")
+    pin = (req.pin or "").strip()
+    if pin:
+        why = ql.weak_pin_reason(pin, t)
+        if why:
+            raise DomainError(why, hint="다른 4자리 숫자를 입력해 주세요(간편 비밀번호는 비워 두고 나중에 정해도 됩니다).")
+    t.password = pwd.hash_password(req.password.strip())
+    t.save(action="password_set_by_invite", app_source="rent3_invite")
+    if req.agree_privacy:
+        cs.record_consent(t, True, bool((t.consents or {}).get("support_access")))
+    inv.consume(t)
+    ql.unlock_all(t)
+    extra: Dict[str, Any] = {}
+    if pin:
+        ql.set_pin(t, pin)
+        dev, qk = ql.new_device(t, "내 휴대폰")
+        extra = {"qk": qk, "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}&welcome=1", "device": {"id": dev["id"]}}
+    from apps.rent_dist._rent3_core.authz import unrevoke_token
+    tok = tenant_token(t)
+    unrevoke_token(tok)
+    url = f"/rent3_tenant/?tenant={t.id}"
+    return {
+        "success": True, "role": "tenant", "role_label": f"입주 임차인 ({t.room_no}호)", "redirect_url": url, "token": tok,
+        "user": {"id": t.id, "username": t.id, "name": t.name, "phone": t.phone, "role": "tenant", "role_label": f"입주 임차인 ({t.room_no}호)",
+                 "branch": t.branch, "room_no": t.room_no, "tenant_id": t.id, "login_auth_verified": True, "redirect_url": url},
+        "message": f"{t.name}님, 가입을 마쳤습니다.", **extra,
+    }
 
 
 class PinLoginReq(BaseModel):

@@ -13,6 +13,15 @@
         var url = typeof input === "string" ? input : (input && input.url) || "";
         var isRent3Api = url.indexOf("/api/rent3") !== -1;
         var isAuthCall = url.indexOf("/auth/") !== -1 || url.indexOf("/verify") !== -1;
+        if (res.status === 403 && isRent3Api && window.R3 && window.R3.openModal) {
+          res.clone().json().then(function (d) {
+            if (d && /간편 비밀번호로 들어온/.test(d.message || "") && !document.getElementById("r3PinBlock")) {
+              var body = window.R3.openModal("🔐 비밀번호 로그인이 필요합니다",
+                '<div id="r3PinBlock" style="font-size:14px;line-height:1.7;">' + String(d.message || "").replace(/[<>&]/g, "") +
+                '<div style="margin-top:12px;"><a class="bass-btn bass-btn--primary" style="display:inline-block;min-height:44px;line-height:44px;padding:0 16px;" href="/rent3/?logout=1">아이디·비밀번호로 다시 로그인</a></div></div>');
+            }
+          }).catch(function () {});
+        }
         if (res.status === 401 && isRent3Api && !isAuthCall && !redirecting) {
           var hadLogin = window.localStorage.getItem("bass_token") || window.localStorage.getItem("rent3_session");
           if (hadLogin) {

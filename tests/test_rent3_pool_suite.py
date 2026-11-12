@@ -4149,6 +4149,110 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn("최종 합의 잠금", qa)
         self.assertIn('"apps", "rent_dist", "rent3", "frontend", "Rent3_QA_Test_Checklist.pdf"', qa)   # 사본이 추적되는 위치로 만든다
 
+    def test_68_backup_invite_and_drawer_footer(self):
+        """68. Phase 1: Data Pool 백업·검증·복구(관리인 내려받기), 입주 안내 카드(1회용 링크 → 비밀번호·PIN 설정), ☰ 서랍 하단 포털 홈·로그아웃."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant, backup as bk, invite as inv, passwords as pwd, quicklogin as ql
+        from apps.rent_dist._rent3_core.authz import lessor_token
+        c, NA = self.client, self.NOAUTH
+        # ── 백업: 만들기 → 검사 → 새 폴더에 복구, 백업 폴더 자체는 담지 않는다 ──
+        bdir = tempfile.mkdtemp(prefix="rent3_bk_")
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir, "RENT3_BACKUP_KEEP": "2"}):
+            r = c.post("/api/rent3_admin/backups/run", json={})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["verify"]["ok"])
+            name = r.json()["backup"]["name"]
+            self.assertEqual(c.get("/api/rent3_admin/backups").json()["backups"][0]["name"], name)
+            dl = c.get(f"/api/rent3_admin/backups/{name}/download")
+            self.assertEqual(dl.status_code, 200)
+            self.assertEqual(dl.content[:2], b"\x1f\x8b")                                        # gzip
+            self.assertIn(c.get("/api/rent3_admin/backups/..%2Fusers.json/download").status_code, (400, 404))
+            self.assertEqual(c.get("/api/rent3_admin/backups/rent3_pool_20000101_000000.tar.gz/download").status_code, 400)
+            t0 = Tenant.get("tenant_202")
+            self.assertIn(c.get("/api/rent3_admin/backups", headers=self._login("chic")).status_code, (401, 403))   # 임대인은 못 본다
+            target = os.path.join(tempfile.mkdtemp(prefix="rent3_rs_"), "restored")
+            out = bk.restore(bk.path_for(name), target)
+            self.assertGreater(out["files"], 3)
+            self.assertTrue(os.path.exists(os.path.join(target, "users.json")))
+            self.assertFalse(any(x.startswith("rent3_pool_") for x in os.listdir(target)))              # 백업 파일이 백업 안에 들어가지 않는다
+            with self.assertRaises(ValueError):
+                bk.restore(bk.path_for(name), target)                                                    # 비어 있지 않은 폴더에는 복구하지 않는다
+            # 보관 개수: 3번째를 만들면 가장 오래된 것이 지워진다
+            import time as _t
+            for fake in ("rent3_pool_20200101_000001.tar.gz", "rent3_pool_20200101_000002.tar.gz"):
+                open(os.path.join(bdir, fake), "wb").write(b"x")
+            bk.create()
+            self.assertLessEqual(len(bk.list_backups()), 2)
+            bad = os.path.join(bdir, "rent3_pool_20990101_000000.tar.gz")
+            open(bad, "wb").write(b"not a tar")
+            self.assertFalse(bk.verify(bad)["ok"])
+            # 하루 한 번 자동: 최근 백업이 있으면 시작하지 않는다
+            os.remove(bad)
+            bk._last_check = 0
+            self.assertIsNone(bk.daily())
+
+        # ── 입주 안내 카드: 임대인이 발급 → 링크로 비밀번호·PIN → 로그인, 1회용 ──
+        t = Tenant.get("tenant_201")
+        old = (t.password, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices), t.invite_hash)
+        t.password, t.pin_hash, t.quick_devices = "", "", []
+        t.save(action="t")
+        chic = self._login("chic")
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-invite", headers=chic, json={"branch": "main", "room_no": "999"}).status_code, 400)
+        r = c.post("/api/rent3_lessor/tenant-invite", headers=chic, json={"branch": "main", "room_no": "201"})
+        self.assertEqual(r.status_code, 200, r.text)
+        link = r.json()["url"]
+        tok = link.split("invite=")[1]
+        self.assertNotIn(tok, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())      # 원문은 저장하지 않는다
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-invite", headers=self._login("sunho"), json={"branch": "main", "room_no": "201"}).status_code, 403)   # 남의 건물
+        self.assertNotIn(Tenant.get("tenant_201").invite_hash, c.get("/api/rent3_tenant/myhome/tenant_201").text)
+        idn = c.get(f"/api/rent3/pool/invite/identify?token={tok}", headers=NA).json()
+        self.assertEqual((idn["room_no"], idn["masked_name"]), ("201", ql.mask_name(t.name)))
+        self.assertEqual(c.get("/api/rent3/pool/invite/identify?token=wrong-token-0000000000", headers=NA).status_code, 404)
+        acc = lambda **kw: c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, **kw})
+        self.assertEqual(acc(password="short", agree_privacy=True).status_code, 400)                          # 비밀번호 규칙
+        self.assertEqual(acc(password="Invite2026x", pin="1234", agree_privacy=True).status_code, 400)       # 약한 PIN
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
+            self.assertEqual(acc(password="Invite2026x", agree_privacy=False).status_code, 400)             # 동의 필수(운영 모드)
+        ok = acc(password="Invite2026x", pin="2846", agree_privacy=True)
+        self.assertEqual(ok.status_code, 200, ok.text)
+        d = ok.json()
+        self.assertTrue(d["token"] and "qk=" in d["start_url"] and "welcome=1" in d["start_url"])
+        from core.auth import verify_token
+        self.assertNotIn("m", verify_token(d["token"]))                                                     # 비밀번호를 정한 정식 로그인
+        self.assertEqual(acc(password="Another2026x").status_code, 404)                                    # 1회용
+        login = c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x"})
+        self.assertEqual(login.status_code, 200, login.text)                                                 # 새 비밀번호로 정상 로그인
+        pl = c.post("/api/rent3/pool/auth/pin-login", headers=NA, json={"qk": d["start_url"].split("qk=")[1].split("&")[0], "pin": "2846"})
+        self.assertEqual(pl.status_code, 200, pl.text)                                                       # 정한 PIN·기기로 바로가기 로그인
+        self.assertTrue(Tenant.get("tenant_201").consents)
+        # 관리인 발급: 목록·링크, 퇴실자는 불가
+        lst = c.get("/api/rent3_admin/accounts/tenants").json()["tenants"]
+        self.assertTrue(any(x["id"] == "tenant_201" for x in lst))
+        self.assertEqual(c.post("/api/rent3_admin/accounts/invite", json={"id": "tenant_201"}).status_code, 200)
+        self.assertIn(c.post("/api/rent3_admin/accounts/invite", headers=chic, json={"id": "tenant_201"}).status_code, (401, 403))
+        t = Tenant.get("tenant_201")
+        t.status = "MOVED_OUT"
+        t.save(action="t")
+        self.assertEqual(c.post("/api/rent3_admin/accounts/invite", json={"id": "tenant_201"}).status_code, 400)
+        t = Tenant.get("tenant_201")
+        t.password, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices, t.invite_hash = old
+        t.save(action="t")
+
+        # ── 화면: 서랍 하단 포털 홈·로그아웃, 가입 화면, 관리인 운영 탭, PIN 차단 안내 ──
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        shell = rd("shared_ui", "r3_shell.js")
+        for needle in ("🌐 포털 홈", "🚪 로그아웃", "/rent3/?logout=1", "showInviteSetup", "/auth/invite-accept", "installHelp"):
+            self.assertIn(needle, shell, needle)
+        admin_idx = rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html")
+        self.assertIn("/rent3/?logout=1", admin_idx)
+        self.assertIn('data-tab="ops"', admin_idx)
+        self.assertIn("renderOpsTab", rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"))
+        self.assertIn("showInviteModal", rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"))
+        self.assertIn("qrcode.min.js", rd("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"))
+        self.assertIn("아이디·비밀번호로 다시 로그인", rd("shared_ui", "rent3_session_guard.js"))
+        self.assertIn("showInviteSetup", rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js") + shell)
+
 
 if __name__ == "__main__":
     unittest.main()
