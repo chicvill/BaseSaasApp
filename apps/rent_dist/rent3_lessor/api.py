@@ -315,12 +315,21 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
 
     room_cards: List[Dict[str, Any]] = []
     expiry_notice_rooms: List[Dict[str, Any]] = []
+    target_ym = up_to_ym or date_today().isoformat()[:7]
     total_unpaid_branch = 0
+    monthly_target = 0
+    monthly_collected = 0
+    monthly_unpaid = 0
     for r in rooms:
         ct = Contract.get(r.active_contract_id) if r.active_contract_id else None
         ledger = ct.ledger(up_to_ym=up_to_ym) if ct else None
         if ledger:
             total_unpaid_branch += int(ledger["total_unpaid"])
+            cur_row = next((m for m in ledger.get("months", []) if m.get("ym") == target_ym), None)
+            if cur_row:
+                monthly_target += int(cur_row.get("due", 0))
+                monthly_collected += int(cur_row.get("paid", 0))
+                monthly_unpaid += int(cur_row.get("unpaid", 0))
         tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
         exp_win = ct.expiry_window_status() if ct else None
         exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
@@ -365,6 +374,8 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
     )[:15]
     fin = TaxAndCertificateService.branch_financial_summary(b_id)
 
+    monthly_rate = round(monthly_collected * 100 / monthly_target) if monthly_target > 0 else 0
+
     return {
         "success": True,
         "today": date_today().isoformat(),
@@ -374,6 +385,11 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         "branches": [{"branch": b.branch, "building_name": b.building_name} for b in buildings],
         "building": bldg.model_dump() if bldg else None,
         "lessor": lessor.model_dump() if lessor else None,
+        "target_ym": target_ym,
+        "monthly_target": monthly_target,
+        "monthly_collected": monthly_collected,
+        "monthly_unpaid": monthly_unpaid,
+        "monthly_collection_rate": monthly_rate,
         "total_unpaid_branch": total_unpaid_branch,
         "rooms": room_cards,
         "transfer_notices": [n.model_dump() for n in sorted(TransferNotice.find(branch=b_id), key=lambda x: x.created_at) if n.status == "PENDING"],

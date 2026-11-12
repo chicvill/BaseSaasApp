@@ -190,8 +190,20 @@
     R3Shell.proxyBanner(`${b.building_name || ""} ${selRoomNo ? selRoomNo + "호 " : ""}(임대인 입장)`);   // 관리인 대리 접속 때만 보인다
 
     const fin = dash.financial_summary || {};
+    const ymMonth = Number((dash.target_ym || "").slice(5, 7)) || (new Date().getMonth() + 1);
+    const mTarget = Number(dash.monthly_target || 0);
+    const mPaid = Number(dash.monthly_collected || 0);
+    const mRate = Number(dash.monthly_collection_rate ?? (mTarget > 0 ? Math.round((mPaid * 100) / mTarget) : 0));
+    const mUnpaid = Number(dash.monthly_unpaid || 0);
+    const totalUnpaid = Number(dash.total_unpaid_branch || 0);
+    const unpaidColor = totalUnpaid > 0 ? "var(--err)" : "var(--ok)";
+    const unpaidExtra = totalUnpaid > mUnpaid
+      ? ` <span class="bass-muted" style="font-size:12.5px;">(당월 ${fmtWon(mUnpaid)})</span>`
+      : "";
     document.getElementById("kpiGrid").innerHTML =
-      `<span>미납 합계 <strong style="color:${dash.total_unpaid_branch > 0 ? "var(--err)" : "var(--ok)"};">${fmtWon(dash.total_unpaid_branch)}</strong></span>` +
+      `<span>${ymMonth}월 목표액 <strong>${fmtWon(mTarget)}</strong></span>` +
+      `<span>수납액 <strong style="color:var(--ok);">${fmtWon(mPaid)} (${mRate}%)</strong></span>` +
+      `<span>미납액 <strong style="color:${unpaidColor};">${fmtWon(totalUnpaid)}</strong>${unpaidExtra}</span>` +
       `<span class="bass-muted">가동 ${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실 (${fin.occupancy_rate || 0}%)</span>`;
 
     renderTab();

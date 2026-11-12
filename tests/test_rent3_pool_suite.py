@@ -4402,6 +4402,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("Authorization: `Bearer ${tok}`", bar)               # 토큰 없이 부르면 401 → 세션 가드가 로그인을 풀어 버린다
         self.assertIn("if (!tok) return;", bar)
 
+    def test_72_lessor_dashboard_monthly_target_kpi(self):
+        """72. 임대인 대시보드 헤더 KPI: 당월 목표액·수납액(수납률%)·미납액 반환 및 일관성 검증."""
+        c = self.client
+        hdrs = self._login("chic")
+        res = c.get("/api/rent3_lessor/dashboard?branch=main", headers=hdrs)
+        self.assertEqual(res.status_code, 200, res.text)
+        d = res.json()
+        self.assertRegex(d["target_ym"], r"^\d{4}-\d{2}$")
+        self.assertGreater(d["monthly_target"], 0)
+        self.assertEqual(d["monthly_collected"] + d["monthly_unpaid"], d["monthly_target"])
+        expected_rate = round(d["monthly_collected"] * 100 / d["monthly_target"])
+        self.assertEqual(d["monthly_collection_rate"], expected_rate)
+        self.assertGreaterEqual(d["total_unpaid_branch"], d["monthly_unpaid"])
+        with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+            lapp = fp.read()
+        for needle in ("월 목표액", "수납액", "미납액", "monthly_collection_rate"):
+            self.assertIn(needle, lapp, needle)
+
 
 if __name__ == "__main__":
     unittest.main()
