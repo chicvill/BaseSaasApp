@@ -39,7 +39,9 @@
     styled = true;
     var st = document.createElement("style");
     // 서랍 뒤 화면이 비쳐 글이 겹쳐 보이지 않도록 바탕을 꽉 채운다
-    st.textContent = ".r3-drawer{background:#17172e!important;color:#eceaf7!important}";
+    st.textContent = ".r3-drawer{background:#17172e!important;color:#eceaf7!important}" +
+      "label:not(.check-row):has(>input[type=checkbox]),label:not(.check-row):has(>input[type=radio]){min-height:44px;display:flex;align-items:center;gap:10px;cursor:pointer}" +
+      "input[type=checkbox],input[type=radio]{width:22px;height:22px;flex:none}";
     document.head.appendChild(st);
   }
 
@@ -352,7 +354,7 @@
         }
         html += st.devices.length ? st.devices.map(function (d) {
           return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.35);font-size:13px;">' +
-            "<span>📱 " + esc(d.label) + (d.locked ? ' <b style="color:#dc2626;">잠김</b>' : "") + '<br><span style="opacity:.7;font-size:11.5px;">' + esc((d.created_at || "").slice(0, 10)) + " 등록" + (d.last_used_at ? " · 최근 " + esc(d.last_used_at.slice(0, 16).replace("T", " ")) : "") + "</span></span>" +
+            "<span>📱 " + esc(d.label) + (d.locked ? ' <b style="color:#dc2626;">잠김</b>' : "") + '<br><span style="opacity:.7;font-size:12.5px;">' + esc((d.created_at || "").slice(0, 10)) + " 등록" + (d.last_used_at ? " · 최근 " + esc(d.last_used_at.slice(0, 16).replace("T", " ")) : "") + "</span></span>" +
             (st.via_pin ? "" : '<button type="button" class="bass-btn bass-btn--sm" data-rev="' + esc(d.id) + '">해제</button>') + "</div>";
         }).join("") : '<div style="font-size:12.5px;opacity:.7;">등록된 기기가 없습니다.</div>';
         var body = global.R3.openModal("📲 바로가기 · 간편 비밀번호", html);
@@ -433,7 +435,7 @@
         return '<div style="margin:6px 0;text-align:' + (mine ? "right" : "left") + ';">' +
           '<div style="display:inline-block;max-width:88%;text-align:left;padding:8px 10px;border-radius:12px;font-size:13.5px;line-height:1.5;background:' +
           (m.sender_role === "system" ? "rgba(245,158,11,.18)" : (mine ? "rgba(99,102,241,.35)" : "rgba(148,163,184,.22)")) + ';">' +
-          '<div style="font-size:11px;opacity:.7;margin-bottom:2px;">' + esc(who) + " · " + esc(fmtMd(m.created_at)) + "</div>" + esc(m.body) + "</div></div>";
+          '<div style="font-size:12.5px;opacity:.7;margin-bottom:2px;">' + esc(who) + " · " + esc(fmtMd(m.created_at)) + "</div>" + esc(m.body) + "</div></div>";
       }).join("") || '<div style="opacity:.7;font-size:13px;padding:8px 0;">아직 대화가 없습니다. 도움이 필요한 내용을 남겨 주세요.</div>';
       var body = global.R3.openModal("💬 관리인에게 문의",
         '<div id="r3SupList" style="max-height:44vh;overflow-y:auto;padding:2px 2px 6px;">' + rows + "</div>" +

@@ -50,7 +50,9 @@
     ] },
   ];
   const ME_ADMIN = R3Shell.isAdminSession();
-  const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
+  // 관리인: 다른 앱으로 건너가는 링크(임대인·임차인 앱)는 입장 없이는 막히므로 숨기고, 원격 지원 입장 중일 때만 돌아갈 곳(관리인 앱·Data Pool)을 보인다
+  const adminLinkOk = (i) => R3Shell.isAdminProxy() && /^\/(rent3_admin\/|rent3\/pool)/.test(i.href || "");
+  const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
 
   const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", messages: "임대인과 메시지", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
@@ -407,7 +409,7 @@
                 공제대상 순수 월세: <strong>${fmtWon(cert.rent_only_paid ?? cert.total_paid)}</strong> (관리비 ${fmtWon(cert.maintenance_paid || 0)} 제외) ·
                 예상 세액공제: 총급여 5,500만 이하(17%) <strong>${fmtWon(cert.estimated_tax_credit_17pct)}</strong> / 5,500만~8,000만 이하(15%) <strong>${fmtWon(cert.estimated_tax_credit_15pct || 0)}</strong>
               </div>
-              <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">
+              <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">
                 💡 ${Bass.escapeHtml(cert.guidance_notice || "월세 세액공제는 임대차계약서 사본과 계좌이체 내역으로 신청하며, 임대인의 법정 증명서 발급 의무는 없습니다.")}
               </div>
             </div>

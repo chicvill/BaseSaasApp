@@ -26,7 +26,7 @@
     ".cm-b{margin:6px 0;display:flex}.cm-b.is-mine{justify-content:flex-end}",
     ".cm-b>div{max-width:88%;padding:8px 10px;border-radius:12px;font-size:13.5px;line-height:1.5;background:rgba(148,163,184,.22)}",
     ".cm-b.is-mine>div{background:rgba(99,102,241,.35)}",
-    ".cm-meta{font-size:11px;opacity:.7;margin-bottom:2px}",
+    ".cm-meta{font-size:12.5px;opacity:.7;margin-bottom:2px}",
     ".cm-sys{margin:8px 0;text-align:center;font-size:12px;opacity:.8}"
   ].join("");
 

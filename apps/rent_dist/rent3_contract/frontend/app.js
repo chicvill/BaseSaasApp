@@ -53,7 +53,7 @@
     .cm-b { margin: 6px 0; display: flex; } .cm-b.is-mine { justify-content: flex-end; }
     .cm-b > div { max-width: 88%; padding: 8px 10px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; background: rgba(148,163,184,.22); }
     .cm-b.is-mine > div { background: rgba(99,102,241,.35); }
-    .cm-meta { font-size: 11px; opacity: .7; margin-bottom: 2px; }
+    .cm-meta { font-size:12.5px; opacity: .7; margin-bottom: 2px; }
     .cm-sys { margin: 8px 0; text-align: center; font-size: 12px; opacity: .8; }
     .cm-card { margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 12px; font-size: 13.5px; line-height: 1.55; }
     .cm-card.is-open { border-color: #f59e0b; }
@@ -1060,7 +1060,7 @@
       <div class="bass-muted" style="font-size:12px;margin:6px 0 10px;">복사해서 상대에게 문자로 보내세요. 옆에 있다면 아래 QR을 찍게 해도 됩니다.</div>
       ${svg ? `<div style="width:170px;max-width:60%;margin:0 auto;background:#fff;padding:6px;border-radius:10px;">${svg}</div>` : ""}
       <div style="margin-top:8px;font-size:13px;">참여코드 <strong style="letter-spacing:2px;">${Bass.escapeHtml(s.session_code || "")}</strong></div>
-      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">링크·QR·코드만으로는 입장할 수 없습니다. 계약 당사자 계정으로 로그인해야 합니다.</div>`;
+      <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">링크·QR·코드만으로는 입장할 수 없습니다. 계약 당사자 계정으로 로그인해야 합니다.</div>`;
     elStepPanel.appendChild(box);
     box.querySelector("#btnCopyInvite").addEventListener("click", () => R3.copyText(invite).then((ok) => Bass.updateAppAlert(ok ? "success" : "warning", ok ? "초대 문자를 복사했습니다. 상대에게 붙여넣어 보내세요." : "복사에 실패했습니다.")));
   }
@@ -1210,7 +1210,7 @@
           }).join("")}
         </div>
         ${e.notes ? `<div class="bass-muted" style="font-size:12px;margin-top:6px;">AI 메모: ${esc(e.notes)}</div>` : ""}
-        <div class="bass-muted" style="font-size:11.5px;margin-top:6px;">※ 위험 신호의 기준(담보 비율 등)은 참고용입니다. AI는 서류의 진위를 가리지 못하니, 인터넷등기소 원본과 직접 대조하세요.</div>
+        <div class="bass-muted" style="font-size:12.5px;margin-top:6px;">※ 위험 신호의 기준(담보 비율 등)은 참고용입니다. AI는 서류의 진위를 가리지 못하니, 인터넷등기소 원본과 직접 대조하세요.</div>
       </div>`;
   }
 
@@ -1531,7 +1531,7 @@
           </div>
           <div style="font-size:13px; margin-bottom:8px;">
             성명: <strong>${Bass.escapeHtml(s.lessor_name)}</strong> · 연락처: ${Bass.escapeHtml(s.lessor_phone || "-")}
-            <div class="bass-muted" style="font-size:11.5px;">등기부 소유자 대조: ${Bass.escapeHtml(r.owner_name || s.lessor_name)} (일치)</div>
+            <div class="bass-muted" style="font-size:12.5px;">등기부 소유자 대조: ${Bass.escapeHtml(r.owner_name || s.lessor_name)} (일치)</div>
           </div>
           <label class="check-row" style="margin-bottom:0; cursor:${currentRole === "tenant" ? "pointer" : "default"};">
             <span style="font-size:12.5px;">
@@ -1553,7 +1553,7 @@
           </div>
           <div style="font-size:13px; margin-bottom:8px;">
             성명: <strong>${Bass.escapeHtml((s.terms && s.terms.tenant_name) || "-")}</strong> · 연락처: ${Bass.escapeHtml((s.terms && s.terms.tenant_phone) || "-")}
-            <div class="bass-muted" style="font-size:11.5px;">로그인 본인인증 휴대폰 명의 일치 확인됨</div>
+            <div class="bass-muted" style="font-size:12.5px;">로그인 본인인증 휴대폰 명의 일치 확인됨</div>
           </div>
           <label class="check-row" style="margin-bottom:0; cursor:${currentRole === "lessor" ? "pointer" : "default"};">
             <span style="font-size:12.5px;">
@@ -1693,9 +1693,9 @@
       <div style="font-weight:800;">📷 현장 사진 <span class="bass-muted" style="font-weight:400;font-size:12px;">(${photos.length}/12 · 합의 후에는 바꿀 수 없고 퇴실 정산 때 비교 자료가 됩니다)</span></div>
       <input id="facPhotoCaption" class="bass-input" placeholder="사진 설명 (예: 욕실 천장 곰팡이, 싱크대 상판 흠집)" style="margin:8px 0 6px;">
       <input id="facPhotoInput" type="file" accept="image/*" capture="environment" multiple class="bass-input">
-      <div class="bass-muted" style="font-size:11.5px;margin-top:4px;">휴대폰에서는 카메라가 바로 열립니다. 사진을 올리거나 지우면 상대방 화면에도 바로 보이고, 양쪽 점검 확인을 다시 받습니다.</div>
+      <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">휴대폰에서는 카메라가 바로 열립니다. 사진을 올리거나 지우면 상대방 화면에도 바로 보이고, 양쪽 점검 확인을 다시 받습니다.</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-top:10px;">
-        ${photos.map((p) => `<div style="font-size:11.5px;">
+        ${photos.map((p) => `<div style="font-size:12.5px;">
           <a href="#" class="js-open-fac-photo" data-photo-url="${base}/${encodeURIComponent(p.id)}" target="_blank" rel="noopener">
             <img class="js-auth-fac-img" data-photo-url="${base}/${encodeURIComponent(p.id)}" alt="${Bass.escapeHtml(p.caption || "점검 사진")}" loading="lazy"
                  style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;border:1px solid var(--border);"></a>
@@ -1904,12 +1904,28 @@
     const btnChat3 = document.getElementById("btnOpenChat3");
     if (btnChat3) btnChat3.addEventListener("click", () => openChatDrawer());
 
+    // 내가 실제로 고친 항목만 보낸다(고치지 않은 항목까지 보내 상대가 방금 바꾼 값을 되돌리는 일을 막는다). 서버에는 화면이 근거로 삼은 리비전도 같이 보낸다.
+    const norm = (v) => String(v === undefined || v === null ? "" : v).trim();
+    const changedUpdates = () => {
+      const ups = collectUpdates();
+      const out = {};
+      Object.keys(ups).forEach((k) => { if (norm(ups[k]) !== norm((s.terms || {})[k])) out[k] = ups[k]; });
+      return out;
+    };
+    const postTerms = async () => {
+      const updates = changedUpdates();
+      if (!Object.keys(updates).length) return { session: activeSession, unchanged: true };
+      try {
+        return await Bass.api(APP_ID, `/sessions/${s.id}/terms`, { method: "POST", body: { role: currentRole, updates, expected_revision: s.revision } });
+      } catch (err) {
+        if (err && err.status === 409 && /상대방이 계약 조건을 바꿨/.test(err.message || "")) { isEditingForm = false; await fetchActiveSession(true); }
+        throw err;
+      }
+    };
+
     document.getElementById("btnSaveTerms").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, `/sessions/${s.id}/terms`, {
-          method: "POST",
-          body: { role: currentRole, updates: collectUpdates() },
-        });
+        const res = await postTerms();
         activeSession = res.session;
         lastRevision = activeSession.revision;
         isEditingForm = false;
@@ -1920,10 +1936,7 @@
 
     document.getElementById("btnAgreeStep3").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const editRes = await Bass.api(APP_ID, `/sessions/${s.id}/terms`, {
-          method: "POST",
-          body: { role: currentRole, updates: collectUpdates() },
-        });
+        const editRes = await postTerms();
         activeSession = editRes.session;
         const res = await Bass.api(APP_ID, `/sessions/${s.id}/step3/agree`, {
           method: "POST",

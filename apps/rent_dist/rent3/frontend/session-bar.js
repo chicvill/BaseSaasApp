@@ -26,7 +26,9 @@
       if (user.name) params.set("name", user.name);
     }
     try {
-      const resp = await window.fetch(`/api/rent3_contract/incoming-calls?${params.toString()}`);
+      const tok = window.localStorage.getItem("bass_token") || "";
+      if (!tok) return;   // 로그인 토큰 없이 부르면 401 이 되어 로그인이 풀린다
+      const resp = await window.fetch(`/api/rent3_contract/incoming-calls?${params.toString()}`, { headers: { Authorization: `Bearer ${tok}` } });
       if (!resp.ok) return;
       const data = await resp.json();
       let callLink = container.querySelector("[data-incoming-cosign]");
@@ -53,9 +55,22 @@
     }
   }
 
+  // ☰ 메뉴 체계에는 .nav-pills 가 없다 — 공동계약 호출이 오면 화면 위쪽에 띠로 알린다(호출이 없으면 보이지 않는다)
+  function mountCallBarOnly() {
+    const user = readSession();
+    if (!user || !user.name || user.role === "admin" || user.role === "superadmin") return;
+    const bar = document.createElement("div");
+    bar.id = "r3CallBar";
+    bar.style.cssText = "position:sticky;top:0;z-index:99980;display:none;padding:8px 10px;background:#fff7e6;text-align:center;";
+    document.body.insertBefore(bar, document.body.firstChild);
+    new MutationObserver(() => { bar.style.display = bar.childElementCount ? "block" : "none"; }).observe(bar, { childList: true });
+    refreshIncomingCallBadge(bar, user);
+    window.setInterval(() => refreshIncomingCallBadge(bar, user), 5000);
+  }
+
   function mountBar() {
     const pills = document.querySelector(".nav-pills");
-    if (!pills) return;
+    if (!pills) { mountCallBarOnly(); return; }
 
     pills.style.alignItems = "center";
 

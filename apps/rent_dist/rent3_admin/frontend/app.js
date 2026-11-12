@@ -139,7 +139,7 @@
       <div class="bass-card">
         <h3 style="margin:0 0 6px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
         <div id="spList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:6px 8px;">${msgs.map((m) => `
-          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:11px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>'}</div>
+          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>'}</div>
         <div class="bass-row" style="gap:6px;margin-top:8px;"><input id="spMsg" class="bass-input" style="flex:1;" placeholder="사용자에게 보낼 글"><button id="btnSpSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">보내기</button></div>
         <div class="bass-muted" style="font-size:12px;margin-top:4px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
 

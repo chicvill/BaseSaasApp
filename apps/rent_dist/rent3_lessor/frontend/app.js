@@ -43,7 +43,7 @@
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
     ] },
-    { title: "세무 · 경비", items: [{ label: "🧾 세무 허브 (종소세·부가세·세금계산서·경비)", tab: "tax" }] },
+    { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }] },
     { title: "운영", items: [
       { label: "💬 메시지", tab: "messages" },
       { label: "🔧 A/S 접수", tab: "ops" },
@@ -64,7 +64,9 @@
   ];
   // 사용자 전용 항목(문의·원격 지원 설정)은 관리인에게, 이동 링크(다른 앱)는 일반 임대인에게 보이지 않는다
   const ME_ADMIN = R3Shell.isAdminSession();
-  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? !i.userOnly : !i.adminOnly)) })).filter((g) => g.items.length);
+  // 관리인: 다른 앱으로 건너가는 링크(임대인·임차인 앱)는 입장 없이는 막히므로 숨기고, 원격 지원 입장 중일 때만 돌아갈 곳(관리인 앱·Data Pool)을 보인다
+  const adminLinkOk = (i) => R3Shell.isAdminProxy() && /^\/(rent3_admin\/|rent3\/pool)/.test(i.href || "");
+  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
   R3Shell.watchSupport();
   const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
@@ -847,7 +849,17 @@
       const who = x.is_occupied && x.contract ? ` ${x.contract.tenant_name || ""}` : " 공실";
       return `<option value="${Bass.escapeHtml(x.room_no)}" ${x.room_no === selRoomNo ? "selected" : ""}>${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}${n > 0 ? ` · 미납 ${n}` : ""}</option>`;
     };
+    // 지금 챙길 일: 임차인이 이체했다고 알린 건, 미납 호실(많이 밀린 순). 누르면 그 호실의 수납내역이 바로 열린다.
+    const lateRows = rooms.filter((x) => x.is_occupied && x.contract && unpaidCount(x) > 0)
+      .sort((a, b) => ((b.ledger && b.ledger.total_unpaid) || 0) - ((a.ledger && a.ledger.total_unpaid) || 0));
+    const pend = dash.transfer_notices || [];
+    const todoHtml = (pend.length || lateRows.length) ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;">
+        ${pend.length ? `<div style="font-weight:800;font-size:14px;margin-bottom:6px;">📨 이체 확인 요청 ${pend.length}건</div>${pend.map((n) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(n.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;border-color:var(--warn);">${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} · ${fmtWon(n.amount)} 이체했다고 알림 → 확인하기</button>`).join("")}` : ""}
+        ${lateRows.length ? `<div style="font-weight:800;font-size:14px;margin:${pend.length ? "8px" : "0"} 0 6px;">⚠️ 미납 호실 ${lateRows.length}곳</div><div style="max-height:34vh;overflow-y:auto;">${lateRows.map((x) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(x.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;"><span>${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.contract.tenant_name || "")}</span><span style="color:var(--err);font-weight:800;white-space:nowrap;">${unpaidCount(x)}개월 · ${fmtWon((x.ledger && x.ledger.total_unpaid) || 0)}</span></button>`).join("")}</div>` : ""}
+      </div>` : "";
     elTabContent.innerHTML = `
+      ${todoHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <label class="r3-lbl" for="roomPick" style="margin:0;white-space:nowrap;">호실 선택</label>
         <select id="roomPick" class="bass-select" style="flex:1;min-width:0;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
@@ -855,6 +867,12 @@
       <div id="roomPanel"></div>
     `;
     document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
+    elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => {
+      selRoomNo = b.dataset.room;
+      document.getElementById("roomPick").value = selRoomNo;
+      renderRoomPanel();
+      showPayModal(selRoomNo);
+    }));
     renderRoomPanel();
   }
 
@@ -1033,7 +1051,7 @@
         <div class="room-card">
           <label class="bass-label">💡 선택 기능 · 스마트폰 카메라 텍스트 복사(OCR) 붙여넣기 자동 입력</label>
           <div class="bass-row" style="margin-top:6px;">
-            <input id="brkOcrText" class="bass-input" style="flex:1;" placeholder="예: ${Bass.escapeHtml(selRoom.room_no || "203")}호 보증금 1,000만원 월세 52만원 관리비 5만원 후불 입주일 ${todayIso} 임차인 최중개 010-7788-9900 한강공인중개사사무소 대표 박공인">
+            <input id="brkOcrText" class="bass-input" style="flex:1 1 180px;min-width:180px;" placeholder="예: ${Bass.escapeHtml(selRoom.room_no || "203")}호 보증금 1,000만원 월세 52만원 관리비 5만원 후불 입주일 ${todayIso} 임차인 최중개 010-7788-9900 한강공인중개사사무소 대표 박공인">
             <button id="btnParseOcr" class="bass-btn bass-btn--sm" type="button">✨ 문구에서 계약조건 자동 채우기</button>
           </div>
         </div>
@@ -1482,12 +1500,12 @@
             <tbody>
               ${invoices.map((inv, idx) => `
                 <tr>
-                  <td><strong>${Bass.escapeHtml(inv.billing_month)}</strong><br><span class="bass-muted" style="font-size:11px;">작성일 ${Bass.escapeHtml(inv.write_date)}</span></td>
-                  <td><strong>${Bass.escapeHtml(inv.room_no)}호</strong><br><span class="bass-muted" style="font-size:11px;">${Bass.escapeHtml(inv.item_name || "")}</span></td>
-                  <td>${Bass.escapeHtml(inv.buyer_business_number || "-")}${inv.buyer_biz_checksum_warning ? `<br><span style="color:var(--warn);font-size:11px;">${Bass.escapeHtml(inv.buyer_biz_checksum_warning)}</span>` : ""}</td>
+                  <td><strong>${Bass.escapeHtml(inv.billing_month)}</strong><br><span class="bass-muted" style="font-size:12.5px;">작성일 ${Bass.escapeHtml(inv.write_date)}</span></td>
+                  <td><strong>${Bass.escapeHtml(inv.room_no)}호</strong><br><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(inv.item_name || "")}</span></td>
+                  <td>${Bass.escapeHtml(inv.buyer_business_number || "-")}${inv.buyer_biz_checksum_warning ? `<br><span style="color:var(--warn);font-size:12.5px;">${Bass.escapeHtml(inv.buyer_biz_checksum_warning)}</span>` : ""}</td>
                   <td>${Bass.escapeHtml(inv.buyer_company_name || "-")} (${Bass.escapeHtml(inv.buyer_ceo_name || "-")})</td>
                   <td>${Bass.escapeHtml(inv.buyer_email || "-")}</td>
-                  <td>${fmtWon(inv.supply_amount)}<br><span class="bass-muted" style="font-size:11px;">세액 ${fmtWon(inv.tax_amount)}</span><br><span class="bass-badge ${inv.charge_type === "02" ? "bass-badge--warn" : "bass-badge--ok"}">${Bass.escapeHtml(inv.charge_type_label || (inv.charge_type === "02" ? "청구(02)" : "영수(01)"))}</span></td>
+                  <td>${fmtWon(inv.supply_amount)}<br><span class="bass-muted" style="font-size:12.5px;">세액 ${fmtWon(inv.tax_amount)}</span><br><span class="bass-badge ${inv.charge_type === "02" ? "bass-badge--warn" : "bass-badge--ok"}">${Bass.escapeHtml(inv.charge_type_label || (inv.charge_type === "02" ? "청구(02)" : "영수(01)"))}</span></td>
                   <td>${statusBadge(inv)}</td>
                   <td><button type="button" class="bass-btn bass-btn--sm btn-inv-status" data-idx="${idx}">발행기록</button></td>
                 </tr>
@@ -1566,7 +1584,7 @@
         <div id="outlayList" style="margin-top:8px;">${(d.outlays || []).map((o) => `
           <button type="button" class="outlay-row bass-btn" data-id="${o.id}" style="display:grid;grid-template-columns:78px 1fr auto;gap:6px;width:100%;text-align:left;margin-bottom:4px;font-size:13px;">
             <span>${Bass.escapeHtml(o.expense_date.slice(2).replace(/-/g, "."))}</span>
-            <span>${Bass.escapeHtml(o.title)}<br><span class="bass-muted" style="font-size:11.5px;">${Bass.escapeHtml(o.category_label)}${o.vendor ? " · " + Bass.escapeHtml(o.vendor) : ""} · ${o.is_vat_deductible === false ? "부가세 불공제(종소세 경비)" : `공제 매입세액 ${fmtWon(o.effective_input_vat ?? o.input_vat ?? 0)}`}</span></span>
+            <span>${Bass.escapeHtml(o.title)}<br><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(o.category_label)}${o.vendor ? " · " + Bass.escapeHtml(o.vendor) : ""} · ${o.is_vat_deductible === false ? "부가세 불공제(종소세 경비)" : `공제 매입세액 ${fmtWon(o.effective_input_vat ?? o.input_vat ?? 0)}`}</span></span>
             <strong>${fmtWon(o.amount)}</strong></button>`).join("") || '<div class="bass-muted">등록된 경비가 없습니다.</div>'}</div>
       </div>`,
     };
@@ -1717,7 +1735,7 @@
       <label class="r3-fld" style="margin-top:8px;">비고 / 수정·취소 사유
         <input id="isMemo" class="bass-input" placeholder="예: 홈택스 일괄발급 완료">
       </label>
-      ${hist.length ? `<div class="bass-muted" style="font-size:11.5px;margin-top:8px;">
+      ${hist.length ? `<div class="bass-muted" style="font-size:12.5px;margin-top:8px;">
         <strong>상태 변경 이력:</strong><br>
         ${hist.map((h) => `• ${Bass.escapeHtml((h.at || "").slice(0, 16))} : ${Bass.escapeHtml(h.from_status)} → <strong>${Bass.escapeHtml(h.to_status)}</strong> ${h.nts_confirm_no ? `(${Bass.escapeHtml(h.nts_confirm_no)})` : ""} ${Bass.escapeHtml(h.memo || "")}`).join("<br>")}
       </div>` : ""}

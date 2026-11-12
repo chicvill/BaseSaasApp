@@ -97,6 +97,7 @@ class FacilityPhotoDeleteReq(BaseModel):
 class TermsUpdateReq(BaseModel):
     role: str = "lessor"
     updates: Dict[str, Any] = Field(default_factory=dict)
+    expected_revision: Optional[int] = None      # 화면이 근거로 삼은 리비전. 그 사이 상대가 조건을 바꿨으면 덮어쓰지 않고 거절한다
 
 
 class Step3AgreeReq(BaseModel):
@@ -699,6 +700,11 @@ def reopen_terms(session_id: str, req: ReopenTermsReq):
 @router.post("/sessions/{session_id}/terms")
 def update_terms(session_id: str, req: TermsUpdateReq):
     s = CoSignSession.by_code_or_id(session_id)
+    if req.expected_revision is not None and req.expected_revision != s.revision and s.terms_changes(req.updates):
+        raise Conflict(
+            "그 사이 상대방이 계약 조건을 바꿨습니다. 화면을 새로 불러왔으니 확인한 뒤 다시 진행해 주세요.",
+            hint="내가 고치던 값이 있다면 최신 조건과 비교해서 다시 입력하세요.",
+        )
     if terms_lock_enabled() and s.call_status != "CALLING" and s.status == "IN_PROGRESS":
         changed_keys = s.terms_changes(req.updates)      # 지금 값과 같게 넘어온 항목은 그대로 통과한다
         if changed_keys and s.current_step >= 4:

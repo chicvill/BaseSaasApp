@@ -4353,6 +4353,55 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         room202.id_tenant = old_room_tenant
         room202.save(action="t")
 
+    def test_70_phase3_terms_overwrite_guard_first_screen_admin_links(self):
+        """70. Phase 3: 계약 조건은 내가 고친 항목만, 화면이 근거로 삼은 리비전이 낡았으면 덮어쓰지 않고 거절. 임대인 첫 화면에 이체 확인 요청·미납 호실 바로가기. 관리인 타 앱 링크는 입장 중에만."""
+        c = self.client
+        sid = self._policy_session("983", 5000000, 300000)
+        base = f"/api/rent3_contract/sessions/{sid}"
+        rev0 = c.get(base).json()["session"]["revision"]
+        r1 = c.post(f"{base}/terms", json={"role": "lessor", "updates": {"special_terms": "특약 A"}, "expected_revision": rev0})
+        self.assertEqual(r1.status_code, 200, r1.text)
+        rev1 = r1.json()["session"]["revision"]
+        self.assertGreater(rev1, rev0)
+        # 낡은 화면(rev0)에서 다른 값을 보내면 상대(앞선 변경)를 덮어쓰지 않고 거절한다
+        r2 = c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 B"}, "expected_revision": rev0})
+        self.assertEqual(r2.status_code, 409, r2.text)
+        self.assertIn("상대방이 계약 조건을 바꿨", r2.json()["message"])
+        self.assertEqual(c.get(base).json()["session"]["terms"]["special_terms"], "특약 A")
+        # 같은 값이거나 리비전이 맞으면 통과, 리비전을 안 보내는 옛 호출도 그대로(호환)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 A"}, "expected_revision": rev0}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 C"}, "expected_revision": rev1}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 D"}}).status_code, 200)
+
+        rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
+        capp = rd("rent3_contract", "frontend", "app.js")
+        for needle in ("changedUpdates", "postTerms", "expected_revision: s.revision", "상대방이 계약 조건을 바꿨"):
+            self.assertIn(needle, capp, needle)
+        self.assertEqual(capp.count("collectUpdates()"), 1)                # changedUpdates 안에서만 부른다 — 저장·동의 단추가 폼 전체를 직접 보내지 않는다
+        lapp = rd("rent3_lessor", "frontend", "app.js")
+        for needle in ("todo-row", "이체 확인 요청", "미납 호실", "adminLinkOk"):
+            self.assertIn(needle, lapp, needle)
+        self.assertIn("adminLinkOk", rd("rent3_tenant", "frontend", "app.js"))
+
+    def test_71_phase4_mobile_ui_polish(self):
+        """71. Phase 4: 메뉴 이름 축약, 체크박스 누름 영역·긴 입력칸, 본문 글자 12px 이상(인쇄 표 제외), 공동계약 호출 띠(토큰을 실어 부른다)."""
+        import re
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        lapp = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+        self.assertIn('"🧾 세무 허브"', lapp)
+        self.assertNotIn("세무 허브 (종소세", lapp)
+        self.assertIn("flex:1 1 180px;min-width:180px", lapp)
+        shell = rd("shared_ui", "r3_shell.js")
+        self.assertIn("min-height:44px;display:flex;align-items:center", shell)
+        small = re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+        for parts in (("shared_ui", "r3_shell.js"), ("shared_ui", "r3_modal.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"),
+                      ("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")):
+            self.assertFalse(small.search(rd(*parts)), "/".join(parts))
+        bar = rd("apps", "rent_dist", "rent3", "frontend", "session-bar.js")
+        self.assertIn("mountCallBarOnly", bar)
+        self.assertIn("Authorization: `Bearer ${tok}`", bar)               # 토큰 없이 부르면 401 → 세션 가드가 로그인을 풀어 버린다
+        self.assertIn("if (!tok) return;", bar)
+
 
 if __name__ == "__main__":
     unittest.main()
