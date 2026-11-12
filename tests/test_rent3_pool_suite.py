@@ -4463,6 +4463,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("/payments/delete", lapp)
         self.assertIn("pr-del", lapp)
 
+    def test_72_mobile_big_text_narrow_margins(self):
+        """72. 스마트폰 화면: 바깥·카드 여백을 줄이고 글자를 키우며 자간을 좁힌다(모든 앱이 쓰는 rent3_mobile.css), 목록 한 줄은 줄바꿈 금지."""
+        css = open(os.path.join(ROOT, "shared_ui", "rent3_mobile.css"), encoding="utf-8").read()
+        for needle in ("font-size: 17px", "letter-spacing: -0.03em", ".app-shell, body .app-shell", "padding-left: 6px !important",
+                       ".bass-card { padding: 12px !important", ".todo-row, .todo-row span { white-space: nowrap", "min-width: 44px"):
+            self.assertIn(needle, css, needle)
+        for app in ("rent3", "rent3_admin", "rent3_contract", "rent3_lessor", "rent3_tenant"):
+            html = open(os.path.join(ROOT, "apps", "rent_dist", app, "frontend", "index.html"), encoding="utf-8").read()
+            self.assertIn("/shared/ui/rent3_mobile.css", html, app)
+
 
 if __name__ == "__main__":
     unittest.main()
