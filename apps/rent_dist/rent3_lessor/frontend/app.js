@@ -47,6 +47,7 @@
     { title: "운영", items: [
       { label: "💬 메시지", tab: "messages" },
       { label: "🔧 A/S 접수", tab: "ops" },
+      { label: "⚖️ 만기 통보", tab: "expiry" },
       { label: "🔔 일괄 납입 통보", tab: "notice" },
     ] },
     { title: "건물", items: [
@@ -69,7 +70,7 @@
   const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
   R3Shell.watchSupport();
-  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
+  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
@@ -233,6 +234,7 @@
     else if (currentTab === "broker") renderBrokerTab();
     else if (currentTab === "tax") renderTaxTab();
     else if (currentTab === "ops") renderOpsTab();
+    else if (currentTab === "expiry") renderExpiryTab();
     else if (currentTab === "notice") renderNoticeTab();
     else if (currentTab === "messages") renderMessagesTab();
     else if (currentTab === "bldgtax") renderBldgTaxTab();
@@ -886,6 +888,78 @@
       showPayModal(selRoomNo);
     }));
     renderRoomPanel();
+  }
+
+  // 운영 ▸ 만기 통보: 만기 6~2개월 법정 통보 대상 목록 + 전체 입주 호실 만기 임박 순 현황 (클릭 시 만기통보 창)
+  function renderExpiryTab() {
+    const noticeRooms = [...(dash.expiry_notice_rooms || [])]
+      .sort((a, b) => (a.days_to_expiry ?? 9999) - (b.days_to_expiry ?? 9999));
+    const stLabel = (st) => ({
+      UNREQUESTED: "미통보",
+      AWAITING_TENANT: "회신 대기",
+      MOVEOUT_PLANNED: "전출 예정",
+      STAY_CONFIRMED: "연장 희망",
+      RENEWAL_PREVIEWED: "예고 발송",
+      RENEWAL_ACKNOWLEDGED: "동의 완료",
+    }[st] || st || "미통보");
+    const stBadge = (st) => {
+      if (st === "STAY_CONFIRMED" || st === "RENEWAL_PREVIEWED" || st === "RENEWAL_ACKNOWLEDGED") return "bass-badge--ok";
+      if (st === "AWAITING_TENANT" || st === "MOVEOUT_PLANNED") return "bass-badge--info";
+      return "bass-badge--warn";
+    };
+    const allOccupied = (dash.rooms || [])
+      .filter((r) => r.is_occupied && r.contract)
+      .sort((a, b) => ((a.ledger && a.ledger.days_to_expiry) ?? 99999) - ((b.ledger && b.ledger.days_to_expiry) ?? 99999));
+
+    elTabContent.innerHTML = `
+      <div class="bass-card" style="margin-bottom:14px;${noticeRooms.length ? "border-left:4px solid var(--warn);" : ""}">
+        <div class="bass-row" style="justify-content:space-between;gap:8px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0;">⚖️ 만기 6~2개월 법정 통보 대상 (${noticeRooms.length}실)</h3>
+            <p class="bass-muted" style="font-size:13px;margin:4px 0 0;">
+              만기 <strong>6개월 ~ 2개월 전</strong> 호실입니다. 눌러서 전출계획 확인이나 연장 예고를 보내세요.
+            </p>
+          </div>
+          ${noticeRooms.length ? `<span class="bass-badge bass-badge--warn">법정 통지구간</span>` : ""}
+        </div>
+        <div style="margin-top:10px;">
+          ${noticeRooms.length ? noticeRooms.map((nr) => `
+            <button type="button" class="bass-btn exp-room-btn" data-room="${Bass.escapeHtml(nr.room_no)}"
+              style="width:100%;min-height:52px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;padding:10px 12px;">
+              <div>
+                <strong>${Bass.escapeHtml(nr.room_no)}호 ${Bass.escapeHtml(nr.tenant_name || "")}</strong>
+                <div class="bass-muted" style="font-size:12.5px;margin-top:2px;">만기 ${Bass.escapeHtml(dotDate(nr.expiry_date))}${nr.days_to_expiry != null ? ` (D-${nr.days_to_expiry})` : ""} · 마감 ${Bass.escapeHtml(dotDate(nr.notice_deadline_date))}</div>
+              </div>
+              <span class="bass-badge ${stBadge(nr.check_status)}" style="white-space:nowrap;">${Bass.escapeHtml(stLabel(nr.check_status))}</span>
+            </button>
+          `).join("") : `<div class="bass-muted" style="font-size:13px;">현재 만기 6~2개월 전 구간에 해당하는 호실이 없습니다.</div>`}
+        </div>
+      </div>
+
+      <div class="bass-card">
+        <h3 style="margin:0 0 8px;">📅 전체 입주 호실 만기 현황 (${allOccupied.length}실 · 임박 순)</h3>
+        <div style="max-height:42vh;overflow-y:auto;">
+          ${allOccupied.map((r) => {
+            const ct = r.contract;
+            const days = r.ledger && r.ledger.days_to_expiry;
+            const inWin = Boolean(r.expiry_window && r.expiry_window.in_6_to_2_months_window);
+            const ec = r.expiry_check;
+            return `
+              <button type="button" class="bass-btn exp-room-btn" data-room="${Bass.escapeHtml(r.room_no)}"
+                style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;${inWin ? "border-color:var(--warn);" : ""}">
+                <span><strong>${Bass.escapeHtml(r.room_no)}호</strong> ${Bass.escapeHtml(ct.tenant_name || "")} · ${Bass.escapeHtml(dotDate(ct.expiry_date))}</span>
+                <span class="bass-badge ${inWin ? "bass-badge--warn" : ""}" style="white-space:nowrap;">${days != null ? (days >= 0 ? `D-${days}` : `만기+${Math.abs(days)}일`) : "-"}${ec ? ` · ${Bass.escapeHtml(stLabel(ec.status))}` : ""}</span>
+              </button>`;
+          }).join("") || `<div class="bass-muted" style="font-size:13px;">입주 중인 호실이 없습니다.</div>`}
+        </div>
+      </div>
+    `;
+    elTabContent.querySelectorAll(".exp-room-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        selRoomNo = btn.dataset.room;
+        showExpiryModal(btn.dataset.room);
+      });
+    });
   }
 
   // 운영 ▸ 일괄 납입 통보: 만기 6~2개월 구간 호실 현황 + D-3 사전 통보 · D+1 미납 통보 일괄 실행

@@ -3225,10 +3225,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
         menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
         tabs = set(re.findall(r'tab: "(\w+)"', menu))
-        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "notice", "bldgtax", "messages"})
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "expiry", "notice", "bldgtax", "messages"})
         for t in tabs - {"ledger"}:
             self.assertIn(f'currentTab === "{t}"', app, t)
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
+        self.assertIn("renderExpiryTab", app)
         # 이동 링크와 단추
         for needle in ('href: "/rent3_contract/?role=lessor"', 'href: "manual.html"', 'href: "/rent3_tenant/"',
                        'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"', 'id: "btnSupportSetting"', 'id: "btnSupportChat"'):
