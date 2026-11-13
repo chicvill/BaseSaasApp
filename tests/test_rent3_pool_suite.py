@@ -322,14 +322,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         """4. rent2 계승 은행문자 파싱, FIFO 순차 상계, 중복입금 차단, 5% 재계약 상한, 퇴실 후 공실 자동 복귀 검증."""
         # 시크빌 202호: 2026-08 입주(후불) -> 8월 비과세, 9월(57만) + 10월(57만) = 총 114만 미납 상태
         sms_text = "[신한은행] 10/28 202호 정서연 700,000원 입금 잔액 9,500,000원"
+        r_ask = self.client.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": sms_text, "up_to_ym": "2026-10"})
+        self.assertEqual(r_ask.status_code, 200, r_ask.text)
+        self.assertTrue(r_ask.json()["needs_confirm"])                                       # 금액이 청구액과 달라 저장 전에 확인을 요청
         r_sms = self.client.post("/api/rent3_lessor/payments/sms-paste", json={
             "branch": "main",
             "sms_text": sms_text,
             "up_to_ym": "2026-10",
+            "force": True,
         })
         self.assertEqual(r_sms.status_code, 200)
         body = r_sms.json()
-        self.assertEqual(body["level"], "diff")
+        self.assertEqual(body["level"], "diff", body)
         self.assertEqual(body["ledger"]["total_unpaid"], 440000)
         # 9월은 완납(PAID), 10월은 부분납부(PARTIAL)인지 FIFO 검증
         months_by_ym = {m["ym"]: m for m in body["ledger"]["months"]}
@@ -343,6 +347,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "branch": "main",
             "sms_text": sms_text,
             "up_to_ym": "2026-10",
+            "force": True,
         })
         self.assertEqual(r_dup.status_code, 409)
         self.assertEqual(r_dup.json()["level"], "warning")
@@ -4621,6 +4626,46 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
         self.assertIn(r.status_code, (400, 404))
         self.assertIn("호실", r.json()["message"])
+
+    def test_76_sms_mismatch_confirm_then_apply_by_payer_name(self):
+        """76. 문자의 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고(원본 수정 안내), 그대로 진행하면 입금자명 기준으로 반영."""
+        from apps.rent_dist._rent3_core import Pay, Contract
+        c = self.client
+        url = "/api/rent3_lessor/payments/sms-paste"
+        cts = [x for x in Contract.all() if x.branch == "main" and x.status == "ACTIVE"]
+        a = next(x for x in cts if x.room_no == "201")
+        b = next(x for x in cts if x.room_no != "201" and x.tenant_name != a.tenant_name)
+        monthly = a.monthly_rent + a.maintenance_fee + a.compute_vat()
+        n0 = len(Pay.all())
+        # 1) 호실은 a, 입금자명은 b → 이름 불일치 경고(저장 안 됨), 입금자명 기준이면 b의 호실
+        t1 = f"[신한] 11/13 {a.room_no}호 {b.tenant_name} {monthly:,}원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t1}).json()
+        self.assertTrue(r["needs_confirm"])
+
+        self.assertTrue(any(i["field"] == "name" for i in r["issues"]))
+        self.assertEqual((r["by_name"]["room_no"], r["by_name"]["tenant_name"]), (b.room_no, b.tenant_name))
+        self.assertEqual(len(Pay.all()), n0)
+        r2 = c.post(url, json={"branch": "main", "sms_text": t1, "force": True}).json()
+        self.assertEqual(r2["payment"]["room_no"], b.room_no)                                  # 입금자명 기준
+        self.assertTrue(r2["forced_by_name"])
+        # 2) 금액만 다름 → 금액 경고, 이름 기준(=같은 호실)으로 반영
+        t2 = f"[신한] 11/14 {a.room_no}호 {a.tenant_name} 123,457원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t2}).json()
+        self.assertEqual([i["field"] for i in r["issues"]], ["amount"])
+        self.assertEqual(c.post(url, json={"branch": "main", "sms_text": t2, "force": True}).json()["payment"]["room_no"], a.room_no)
+        # 3) 호실·이름 모두 맞고 금액이 월 청구액이면 경고 없이 바로 수납
+        t3 = f"[신한] 11/15 {a.room_no}호 {a.tenant_name} {monthly:,}원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t3}).json()
+        self.assertTrue(r.get("success") and not r.get("needs_confirm"))
+        # 4) 입금자명으로 계약을 못 찾으면 진행할 수 없고 오류로 원본 수정 안내
+        r = c.post(url, json={"branch": "main", "sms_text": f"[신한] 11/16 {a.room_no}호 없는사람 {monthly:,}원 입금", "force": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("원본", r.json().get("hint", ""))
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("smsWarn", "needs_confirm", "원본 문자 고치기", "그대로 진행", "force: !!force"):
+            self.assertIn(needle, lapp, needle)
+        for p in [x for x in Pay.all() if x.raw_sms.startswith("[신한] 11/1")][:]:
+            p.delete(action="t")
 
 
 if __name__ == "__main__":

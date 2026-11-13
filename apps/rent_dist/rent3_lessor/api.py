@@ -82,6 +82,7 @@ class SmsPasteReq(BaseModel):
     branch: str = "main"
     sms_text: str
     up_to_ym: Optional[str] = None
+    force: bool = False   # 장부와 어긋난 문자를 확인한 뒤 '입금자명 기준'으로 그대로 반영
 
 
 class OutlayCreateReq(BaseModel):
@@ -1005,8 +1006,9 @@ def paste_sms_payment(req: SmsPasteReq):
         sms_text=req.sms_text,
         up_to_ym=req.up_to_ym,
         app_source=APP_SRC,
+        force=req.force,
     )
-    return {"success": True, **res}
+    return {**res, "success": not res.get("needs_confirm")}
 
 
 @router.post("/outlays")

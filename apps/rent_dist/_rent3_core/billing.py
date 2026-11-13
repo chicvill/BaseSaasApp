@@ -66,14 +66,16 @@ class SmsDepositParser:
         else:
             # 이름 바로 뒤 3자리 호수(예: '홍길동201'). 금액(440,000원)의 앞자리나 '입금 440,000' 같은 말을 호실로 읽지 않는다
             for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", s):
-                if m_room2.group(1) not in {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}:
+                if not m_room2.group(1).endswith(("은행", "뱅크", "금고")) and m_room2.group(1) not in {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}:
                     room_no = m_room2.group(2)
                     break
 
         # 4) 입금자 성명 추출 (은행/입금/승인/잔액 키워드 제외 한글 2~4자)
         ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}
         kor_tokens = re.findall(r"[가-힣]{2,4}", before_balance)
-        payer_name = next((tok for tok in kor_tokens if tok not in ignore_words), "입금자")
+        # '신한은행'·'카카오뱅크'·'새마을금고' 같은 금융기관 이름은 입금자가 아니다
+        is_bank = lambda tok: tok in ignore_words or tok.endswith(("은행", "뱅크", "금고", "체국", "협중앙")) or tok in {"수협", "신협", "케이뱅크", "저축은행"}
+        payer_name = next((tok for tok in kor_tokens if not is_bank(tok)), "입금자")
 
         return {
             "room_no": room_no,
@@ -223,6 +225,58 @@ class FifoPaymentEngine:
             "message": banner_msg,
         }
 
+    @staticmethod
+    def _expected_amounts(contract: Any, up_to_ym: Optional[str]) -> Dict[str, Any]:
+        """이 계약에서 '맞는 입금액'으로 볼 금액들: 월 청구액(월세+관리비+부가세)의 1~12배, 밀린 달을 앞에서부터 채운 누계, 전체 미납액."""
+        monthly = (contract.monthly_rent or 0) + (contract.maintenance_fee or 0) + (contract.compute_vat() or 0)
+        led = contract.ledger(up_to_ym=up_to_ym or current_ym())
+        ok = set()
+        if monthly > 0:
+            ok.update(monthly * k for k in range(1, 13))
+        acc = 0
+        for r in led["months"]:
+            if r["unpaid"] > 0:
+                acc += r["unpaid"]
+                ok.add(acc)
+        if led["total_unpaid"] > 0:
+            ok.add(led["total_unpaid"])
+        return {"ok": ok, "monthly": monthly, "total_unpaid": led["total_unpaid"]}
+
+    @classmethod
+    def check_sms(cls, b_id: str, parsed: Dict[str, Any], up_to_ym: Optional[str] = None) -> Dict[str, Any]:
+        """문자에서 읽은 호실·입금자명·금액을 장부와 맞춰 본다. 어긋난 곳은 issues, 입금자명 기준으로 반영할 때의 대상 계약은 by_name."""
+        room_no, name, amount = parsed["room_no"], parsed["payer_name"], parsed["amount"]
+        name_known = name != "입금자"
+        by_name_all = [c for c in Contract.all() if c.branch == b_id and c.status == "ACTIVE" and name_known and (c.tenant_name or "").strip() == name]
+        by_name = None
+        if by_name_all:
+            by_name = next((c for c in by_name_all if c.room_no == room_no), None) or (by_name_all[0] if len(by_name_all) == 1 else None)
+        issues: List[Dict[str, str]] = []
+        ct = None
+        if room_no:
+            room = Room.first(branch=b_id, room_no=room_no)
+            if not room:
+                issues.append({"field": "room", "msg": f"'{room_no}호'는 이 건물에 없는 호실입니다."})
+            else:
+                ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+                ct = ct or Contract.first(id_room=room.id, status="ACTIVE")
+                if not ct:
+                    issues.append({"field": "room", "msg": f"{room_no}호는 현재 계약이 없는 공실입니다."})
+        else:
+            ct = by_name
+            if not ct:
+                issues.append({"field": "room", "msg": "문자에서 호실을 찾지 못했고, 입금자명으로도 계약을 찾지 못했습니다."})
+        if ct:
+            if not name_known:
+                issues.append({"field": "name", "msg": f"입금자명을 읽지 못했습니다. ({ct.room_no}호 임차인은 '{ct.tenant_name}')"})
+            elif (ct.tenant_name or "").strip() != name:
+                issues.append({"field": "name", "msg": f"입금자명 '{name}'이(가) {ct.room_no}호 임차인 '{ct.tenant_name}'과 다릅니다."})
+            exp = cls._expected_amounts(ct, up_to_ym)
+            if amount not in exp["ok"]:
+                extra = f"월 청구액 {exp['monthly']:,}원" + (f", 밀린 금액 {exp['total_unpaid']:,}원" if exp["total_unpaid"] else "")
+                issues.append({"field": "amount", "msg": f"입금액 {amount:,}원이 청구액과 맞지 않습니다. ({extra})"})
+        return {"issues": issues, "by_name": by_name, "room_contract": ct}
+
     @classmethod
     def parse_and_collect_sms(
         cls,
@@ -230,19 +284,37 @@ class FifoPaymentEngine:
         sms_text: str,
         up_to_ym: Optional[str] = None,
         app_source: str = "rent3_lessor",
+        force: bool = False,
     ) -> Dict[str, Any]:
+        """문자를 읽어 수납한다. 호실·입금자명·금액 중 장부와 어긋난 것이 있으면 저장하지 않고 확인을 요청하고(needs_confirm),
+        force=True로 다시 요청하면 '입금자명 기준'(그 이름의 활성 계약 호실)으로 반영한다."""
         parsed = SmsDepositParser.parse(sms_text)
-        room_no = parsed["room_no"]
         b_id = normalize_branch_id(branch)
-        if not room_no:
-            # 입금자명으로 활성 계약 호실 역추적
-            matched_ct = Contract.first(branch=b_id, tenant_name=parsed["payer_name"], status="ACTIVE")
-            if not matched_ct:
+        chk = cls.check_sms(b_id, parsed, up_to_ym)
+        issues, by_name = chk["issues"], chk["by_name"]
+        if issues:
+            if not by_name:
+                if not parsed["room_no"]:
+                    raise DomainError(
+                        f"문자에서 호실 번호를 찾을 수 없으며 '{parsed['payer_name']}' 명의의 활성 계약도 없습니다.",
+                        hint="호실 번호를 직접 선택하거나 문자에 '201호'를 포함해 주세요.",
+                    )
                 raise DomainError(
-                    f"문자에서 호실 번호를 찾을 수 없으며 '{parsed['payer_name']}' 명의의 활성 계약도 없습니다.",
-                    hint="호실 번호를 직접 선택하거나 문자에 '201호'를 포함해 주세요.",
+                    " ".join(i["msg"] for i in issues) + f" '{parsed['payer_name']}' 명의의 활성 계약도 찾지 못했습니다.",
+                    hint="문자의 호실·입금자명·금액을 확인해 원본을 고친 뒤 다시 붙여넣어 주세요.",
                 )
-            room_no = matched_ct.room_no
+            if not force:
+                return {
+                    "needs_confirm": True,
+                    "level": "warning",
+                    "message": "문자 내용이 장부와 다릅니다. 원본 문자를 확인해 주세요.",
+                    "issues": issues,
+                    "parsed": parsed,
+                    "by_name": {"room_no": by_name.room_no, "tenant_name": by_name.tenant_name},
+                }
+            room_no = by_name.room_no
+        else:
+            room_no = parsed["room_no"] or (chk["room_contract"].room_no if chk["room_contract"] else "")
         result = cls.collect(
             branch=b_id,
             room_no=room_no,
@@ -255,6 +327,9 @@ class FifoPaymentEngine:
             app_source=app_source,
         )
         result["parsed"] = parsed
+        if issues:
+            result["forced_by_name"] = True
+            result["issues"] = issues
         return result
 
 

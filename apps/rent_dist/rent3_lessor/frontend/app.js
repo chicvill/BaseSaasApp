@@ -967,6 +967,7 @@
         <label class="r3-lbl" for="bankSms" style="margin:0 0 6px;font-weight:800;">🏦 은행 입금 문자 붙여넣기 <span class="bass-muted" style="font-weight:500;">— 호실·입금자 이름으로 호실을 자동으로 찾습니다</span></label>
         <textarea id="bankSms" class="bass-input" rows="2" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
+        <div id="smsWarn"></div>
       </div>
       ${pendHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -985,22 +986,47 @@
     };
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
     // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 메시지를 보낸다
+    // 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고 → '원본 고치기' 또는 '입금자명 기준으로 그대로 반영'
+    const smsWarn = document.getElementById("smsWarn");
+    async function runSms(force) {
+      const t = document.getElementById("bankSms").value.trim();
+      if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
+      smsWarn.innerHTML = "";
+      const res = await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t, force: !!force } });
+      if (res.needs_confirm) {
+        const p = res.parsed || {}, bn = res.by_name || {};
+        smsWarn.innerHTML = `
+          <div role="alert" style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--warn);background:rgba(234,179,8,.14);font-size:14px;line-height:1.55;">
+            <div style="font-weight:800;margin-bottom:4px;">⚠️ 문자 내용이 장부와 다릅니다</div>
+            ${res.issues.map((i) => `<div>· ${Bass.escapeHtml(i.msg)}</div>`).join("")}
+            <div class="bass-muted" style="font-size:13px;margin:6px 0;">읽은 값: ${p.room_no ? Bass.escapeHtml(p.room_no) + "호 " : "호실 없음 "}${Bass.escapeHtml(p.payer_name || "")} ${fmtWon(p.amount || 0)}<br>원본 문자의 호실·입금자명·금액을 확인해 고친 뒤 다시 처리하세요. 그대로 진행하면 <strong>입금자명 기준</strong>으로 ${Bass.escapeHtml(bn.room_no || "")}호 ${Bass.escapeHtml(bn.tenant_name || "")}님 계약에 반영합니다.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="smsFix" class="bass-btn" type="button" style="flex:1;min-width:120px;min-height:46px;">✏️ 원본 문자 고치기</button>
+              <button id="smsForce" class="bass-btn bass-btn--primary" type="button" style="flex:1;min-width:160px;min-height:46px;">그대로 진행 (${Bass.escapeHtml(bn.room_no || "")}호 ${Bass.escapeHtml(bn.tenant_name || "")})</button>
+            </div>
+          </div>`;
+        Bass.updateAppAlert("warning", res.message);
+        document.getElementById("smsFix").addEventListener("click", () => { smsWarn.innerHTML = ""; const ta = document.getElementById("bankSms"); ta.focus(); });
+        document.getElementById("smsForce").addEventListener("click", function () { Bass.withLock(this, () => runSms(true)); });
+        return;
+      }
+      await doneSms(res);
+    }
     document.getElementById("bankSmsGo").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const t = document.getElementById("bankSms").value.trim();
-        if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
-        const res = await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t } });
-        Bass.updateAppAlert(res.level || "success", res.message);
-        const pay = res.payment || {};
-        const rn = pay.room_no || selRoomNo;
-        receiptMsg[rn] = receiptText(pay, (res.ledger && res.ledger.total_unpaid) || 0);
-        payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})` };
-        selRoomNo = rn;
-        await refresh();
-        const pi = document.getElementById("roomPick");
-        if (pi) pi.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+      Bass.withLock(this, () => runSms(false));
     });
+    async function doneSms(res) {
+      Bass.updateAppAlert(res.level || "success", res.message);
+      const pay = res.payment || {};
+      const rn = pay.room_no || selRoomNo;
+      receiptMsg[rn] = receiptText(pay, (res.ledger && res.ledger.total_unpaid) || 0);
+      const note = res.forced_by_name ? " — 입금자명 기준으로 반영" : "";
+      payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})${note}` };
+      selRoomNo = rn;
+      await refresh();
+      const pi = document.getElementById("roomPick");
+      if (pi) pi.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
     renderRoomPanel();
   }
 
