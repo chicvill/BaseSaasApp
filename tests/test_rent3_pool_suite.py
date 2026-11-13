@@ -4667,6 +4667,92 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for p in [x for x in Pay.all() if x.raw_sms.startswith("[신한] 11/1")][:]:
             p.delete(action="t")
 
+    def test_77_lessor_pin_backend_foundation(self):
+        """77. 임대인 간편 비밀번호 1단계(백엔드): 스위치(RENT3_LESSOR_PIN) 꺼짐=사용 불가, 켜면 PIN·기기 2대 상한·1시간 토큰,
+        PIN 토큰은 허용 목록(조회·메시지·시설 처리)만 — 수납·세무·내보내기는 읽기도 403, 해시는 응답에 안 실림, 기기 해제·스위치 끔은 즉시 무효."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        PL = "/api/rent3/pool"
+        chic = self._login("chic")
+        lsr = Lessor.first(branch="main")
+        self.assertIsNotNone(lsr)
+        lid = lsr.id
+        try:
+            # 스위치 꺼짐: 설정·바로가기 모두 사용 불가
+            st = c.get(f"{PL}/shortcut/status", headers=chic).json()
+            self.assertFalse(st["applicable"])
+            self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 400)
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                st = c.get(f"{PL}/shortcut/status", headers=chic).json()
+                self.assertEqual((st["kind"], st["applicable"], st["max_devices"]), ("lessor", True, 2))
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "1111"}).status_code, 400)
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d1 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "폰"}).json()
+                d2 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "태블릿"}).json()
+                qk = d1["qk"]
+                self.assertTrue(d1["start_url"].startswith("/rent3_lessor/?qk="))
+                self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "셋째"}).status_code, 400)   # 2대 상한
+                lsr = Lessor.get(lid)
+                self.assertTrue(lsr.pin_hash and "2846" not in lsr.pin_hash)
+                self.assertNotIn(qk, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())
+                body = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).text
+                self.assertNotIn(lsr.pin_hash, body)
+                self.assertNotIn("quick_devices", body)
+                # 공개 정보: 이름은 가리고 건물·호실은 숨긴다. 매니페스트는 임대인 앱 범위
+                idn = c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()
+                self.assertEqual((idn["kind"], idn["building_name"], idn["room_no"]), ("lessor", "", ""))
+                m = c.get(f"{PL}/shortcut/manifest.json?qk={qk}", headers=NA).json()
+                self.assertEqual((m["scope"], m["start_url"]), ("/rent3_lessor/", d1["start_url"]))
+                # PIN 로그인: 틀리면 남은 횟수, 맞으면 임대인 PIN 토큰(1시간, m=pin)
+                bad = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": qk, "pin": "9999"})
+                self.assertEqual(bad.status_code, 401)
+                self.assertIn("남은 시도 4회", bad.json()["message"])
+                ok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": qk, "pin": "2846"}).json()
+                self.assertEqual((ok["role"], ok["via_pin"]), ("lessor", True))
+                claims = verify_token(ok["token"])
+                self.assertEqual((claims["r"], claims["m"]), ("lessor", "pin"))
+                self.assertLessEqual(claims["exp"] - __import__("time").time(), 3600)
+                pin = {"Authorization": f"Bearer {ok['token']}"}
+                # 허용 목록: 조회·메시지·시설 처리만
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin).status_code, 200)
+                self.assertEqual(c.get("/api/rent3_lessor/status?branch=main", headers=pin).status_code, 200)
+                self.assertEqual(c.get(f"{PL}/shortcut/status", headers=pin).json()["via_pin"], True)
+                for path in ("/tickets/x/assign", "/tickets/x/complete", "/chats"):
+                    self.assertNotIn(c.post(f"/api/rent3_lessor{path}", headers=pin, json={"branch": "main"}).status_code, (401, 403), path)
+                # 허용 밖: 읽기도 막힌다(입주자 명단 CSV·세무·계약서 사진), 쓰기(수납·수정·설정)도 막힌다
+                for method, path in (("get", "/ledger/export-csv?branch=main&year=2026"), ("get", "/tax/summary?branch=main"),
+                                     ("get", "/tax/export-csv?branch=main"), ("get", "/contracts/x/photo?branch=main"),
+                                     ("post", "/payments/collect"), ("post", "/payments/sms-paste"), ("post", "/payments/delete"),
+                                     ("post", "/contracts/edit"), ("post", "/building/edit"), ("post", "/billing-notices/send"),
+                                     ("post", "/tenant-invite"), ("post", "/tenant-shortcuts/revoke-all")):
+                    r = getattr(c, method)(f"/api/rent3_lessor{path}", headers=pin, **({"json": {"branch": "main"}} if method == "post" else {}))
+                    self.assertEqual(r.status_code, 403, (path, r.status_code))
+                # PIN 토큰으로는 PIN·기기 설정을 바꿀 수 없다
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=pin, json={"pin": "7391"}).status_code, 403)
+                # 5회 실패 잠금 → 일반 로그인이 푼다
+                for _ in range(5):
+                    c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "9999"})
+                self.assertTrue(c.get(f"{PL}/shortcut/status", headers=chic).json()["devices"][1]["locked"])
+                self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 401)
+                self._login("chic")
+                self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 200)
+                # 기기 해제 → 이미 받은 PIN 토큰도 즉시 401
+                dev_id = d1["device"]["id"]
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev_id}/revoke", headers=chic).status_code, 200)
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin).status_code, 401)
+                # 스위치를 끄면 남은 기기의 토큰도 바로 무효
+                ok2 = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).json()
+                pin2 = {"Authorization": f"Bearer {ok2['token']}"}
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin2).status_code, 200)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin2).status_code, 401)
+            self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 401)
+        finally:
+            l = Lessor.get(lid)
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

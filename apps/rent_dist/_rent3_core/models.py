@@ -163,7 +163,18 @@ class Lessor(PoolObj):
     applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
     franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
     consents: Dict[str, Any] = Field(default_factory=dict)       # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
+    pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py, RENT3_LESSOR_PIN 켠 뒤에만 사용)
+    quick_devices: List[Dict[str, Any]] = Field(default_factory=list)  # 바로가기 기기 목록(키는 해시만 저장)
     password: str = "1212"
+
+    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices")
+
+    def safe_dump(self) -> Dict[str, Any]:
+        """화면·API 로 내려보낼 때 쓰는 model_dump — 간편 비밀번호 해시와 바로가기 키 해시는 뺀다."""
+        d = self.model_dump()
+        for k in self.SECRET_FIELDS:
+            d.pop(k, None)
+        return d
 
     def summary(self) -> str:
         return f"임대인 {self.name} ({self.branch}, 상태={self.status})"

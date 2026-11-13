@@ -14,17 +14,47 @@ import secrets
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from .models import Tenant
+import os
+
+from .models import Lessor, Tenant
 from .pool import now_iso
 
 PIN_LEN = 4
 MAX_FAILS = 5
-MAX_DEVICES = 5
+MAX_DEVICES = 5            # 임차인
+LESSOR_MAX_DEVICES = 2     # 임대인(본인 폰 + 태블릿 정도)
+
+
+def lessor_pin_enabled() -> bool:
+    """임대인 간편 비밀번호 사용 스위치(RENT3_LESSOR_PIN=1). 임차인 실사용 검증이 끝나기 전에는 꺼 둔다."""
+    return os.getenv("RENT3_LESSOR_PIN", "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def kind_of(a: Any) -> str:
+    return "lessor" if isinstance(a, Lessor) else "tenant"
+
+
+def max_devices(a: Any) -> int:
+    return LESSOR_MAX_DEVICES if kind_of(a) == "lessor" else MAX_DEVICES
 
 
 def eligible(t: Any) -> bool:
-    """입주 중인 임차인인가(퇴실하면 거짓)."""
-    return bool(t is not None and getattr(t, "status", "") == "ACTIVE" and getattr(t, "room_no", ""))
+    """바로가기를 쓸 수 있는 계정인가. 임차인: 입주 중(퇴실하면 거짓). 임대인: 스위치가 켜져 있고 가맹 승인(ACTIVE) 상태."""
+    if t is None:
+        return False
+    if kind_of(t) == "lessor":
+        return lessor_pin_enabled() and getattr(t, "status", "") == "ACTIVE"
+    return bool(getattr(t, "status", "") == "ACTIVE" and getattr(t, "room_no", ""))
+
+
+def load_account(c: Dict[str, Any]) -> Any:
+    """토큰 클레임(u, r)으로 임차인·임대인 계정을 찾는다."""
+    u, r = str(c.get("u", "")), c.get("r")
+    if r == "tenant" and u.startswith("tenant:"):
+        return Tenant.get(u.removeprefix("tenant:"))
+    if r == "lessor" and u.startswith("lessor:"):
+        return Lessor.get(u.removeprefix("lessor:"))
+    return None
 
 
 def _kh(qk: str) -> str:
@@ -101,7 +131,7 @@ def find_by_qk(qk: str) -> Optional[Tuple[Any, Dict[str, Any]]]:
     if not qk or len(str(qk)) < 16:
         return None
     h = _kh(qk)
-    for t in Tenant.all():
+    for t in list(Tenant.all()) + list(Lessor.all()):
         for d in devices_of(t):
             if d.get("kh") == h:
                 return t, d
@@ -133,7 +163,7 @@ def record_success(t: Any, device_id: str) -> None:
 
 
 def revoke_all(t: Any) -> int:
-    """분실·도난 대응: 이 임차인의 간편 비밀번호와 바로가기 기기를 모두 없앤다. 이미 받은 PIN 토큰도 바로 무효가 된다. 해제한 기기 수를 돌려준다."""
+    """분실·도난 대응: 이 계정의 간편 비밀번호와 바로가기 기기를 모두 없앤다. 이미 받은 PIN 토큰도 바로 무효가 된다. 해제한 기기 수를 돌려준다."""
     n = len(devices_of(t))
     t.pin_hash, t.quick_devices = "", []
     t.save(action="quick_revoked_all", app_source="rent3_portal")

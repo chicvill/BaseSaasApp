@@ -181,7 +181,7 @@ def register_lessor_and_building(req: LessorRegisterReq):
     return {
         "success": True,
         "message": f"임대인 '{lessor.name}' 및 건물 '{bldg.building_name}'이 공동 JSON Data Pool(users.json, buildings.json)에 등재되었습니다.",
-        "lessor": lessor.model_dump(),
+        "lessor": lessor.safe_dump(),
         "building": bldg.model_dump(),
     }
 
@@ -190,7 +190,7 @@ def register_lessor_and_building(req: LessorRegisterReq):
 def approve_lessor(lessor_id: str):
     lessor = Lessor.require(lessor_id)
     lessor.approve(app_source=APP_SRC)
-    return {"success": True, "message": f"임대인 '{lessor.name}' 가맹 승인이 완료되었습니다.", "lessor": lessor.model_dump()}
+    return {"success": True, "message": f"임대인 '{lessor.name}' 가맹 승인이 완료되었습니다.", "lessor": lessor.safe_dump()}
 
 
 @router.post("/lessors/{lessor_id}/decision", dependencies=ADMIN_ONLY)
@@ -210,7 +210,7 @@ def decide_lessor(lessor_id: str, req: DecisionReq):
                 raise DomainError("서류 미비 상태로 승인하려면 사유를 입력해 주세요.")
     lessor.decide(req.decision, req.note, app_source=APP_SRC)
     label = Lessor.STATUS_LABELS.get(lessor.status, lessor.status)
-    return {"success": True, "message": f"임대인 '{lessor.name}' → {label}", "lessor": lessor.model_dump()}
+    return {"success": True, "message": f"임대인 '{lessor.name}' → {label}", "lessor": lessor.safe_dump()}
 
 
 @router.post("/lessors/{lessor_id}/registry-verify")
@@ -255,7 +255,7 @@ def set_room_limit(lessor_id: str, req: RoomLimitReq):
     lessor = Lessor.require(lessor_id)
     lessor.room_limit = req.room_limit
     lessor.save(action="lessor_room_limit_changed", app_source=APP_SRC)
-    return {"success": True, "message": f"호실 한도를 {req.room_limit}실로 바꿨습니다.", "lessor": lessor.model_dump()}
+    return {"success": True, "message": f"호실 한도를 {req.room_limit}실로 바꿨습니다.", "lessor": lessor.safe_dump()}
 
 
 @router.post("/accounts/reset-password", dependencies=ADMIN_ONLY)
@@ -344,7 +344,7 @@ def set_ai_limit(lessor_id: str, req: AiLimitReq):
     lessor = Lessor.require(lessor_id)
     lessor.ai_monthly_limit = req.ai_monthly_limit
     lessor.save(action="lessor_ai_limit_changed", app_source=APP_SRC)
-    return {"success": True, "message": f"월 AI 읽기 한도를 {req.ai_monthly_limit}회로 바꿨습니다.", "lessor": lessor.model_dump()}
+    return {"success": True, "message": f"월 AI 읽기 한도를 {req.ai_monthly_limit}회로 바꿨습니다.", "lessor": lessor.safe_dump()}
 
 
 @router.post("/lessors/{lessor_id}/settle-fee", dependencies=ADMIN_ONLY)
@@ -354,7 +354,7 @@ def settle_lessor_fee(lessor_id: str):
     return {
         "success": True,
         "message": f"임대인 '{lessor.name}' 월 SaaS 이용료({lessor.app_fee:,}원) 완납 정산이 users.json에 반영되었습니다.",
-        "lessor": lessor.model_dump(),
+        "lessor": lessor.safe_dump(),
     }
 
 

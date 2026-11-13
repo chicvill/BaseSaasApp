@@ -39,11 +39,15 @@ def issue_claims_token(username: str, role: str, branch: Optional[str], ttl: int
     return f"{payload}.{sig}"
 
 
-def lessor_token(lessor: Any) -> str:
-    return issue_claims_token(f"lessor:{lessor.id}", "lessor", lessor.branch)
+PIN_TOKEN_SECONDS = 3 * 3600          # 임차인
+LESSOR_PIN_TOKEN_SECONDS = 3600       # 임대인(업무 앱이라 더 짧게)
 
 
-PIN_TOKEN_SECONDS = 3 * 3600
+def lessor_token(lessor: Any, via_pin: bool = False, device_id: str = "") -> str:
+    """via_pin=True: 간편 비밀번호로 들어온 임대인 토큰(m="pin", 1시간) — 허용 목록 밖의 요청은 읽기도 막힌다(pin_guard)."""
+    if not via_pin:
+        return issue_claims_token(f"lessor:{lessor.id}", "lessor", lessor.branch)
+    return issue_claims_token(f"lessor:{lessor.id}", "lessor", lessor.branch, ttl=LESSOR_PIN_TOKEN_SECONDS, extra={"m": "pin", "d": device_id})
 
 
 def tenant_token(tenant: Any, via_pin: bool = False, device_id: str = "") -> str:
@@ -166,21 +170,36 @@ PIN_WRITE_ALLOW = (
     re.compile(r"/support/messages/?$"),
     re.compile(r"/auth/logout/?$"),
 )
+# 임대인(PIN)은 조회도 민감 정보(입주자 명단·세무·계약서 사진)가 많아 읽기·쓰기 모두 허용 목록에 있는 것만 연다.
+LESSOR_PIN_READ_ALLOW = (
+    re.compile(r"/rent3_lessor/(status|dashboard)/?$"),
+    re.compile(r"/rent3_lessor/messages/rooms(/[^/]+)?/?$"),
+    re.compile(r"/rent3/pool/shortcut/status/?$"),
+)
+LESSOR_PIN_WRITE_ALLOW = (
+    re.compile(r"/rent3_lessor/(chats|tickets/[^/]+/(assign|complete))/?$"),
+    re.compile(r"/auth/logout/?$"),
+)
 PIN_BLOCK_MESSAGE = "이 작업은 간편 비밀번호로 들어온 상태에서는 할 수 없습니다. 아이디·비밀번호로 다시 로그인해 주세요."
 
 
 def pin_guard(request: Request, c: Dict[str, Any]) -> None:
     if c.get("m") != "pin":
         return
-    # 기기를 해제했거나(분실 폰 포함) PIN 을 전체 해제했거나, 퇴실했으면 이미 받은 PIN 토큰도 바로 무효
-    from .models import Tenant
-    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
-    live = t is not None and t.status == "ACTIVE" and t.room_no and any(d.get("id") == c.get("d") and not d.get("locked") for d in (t.quick_devices or []))
+    # 기기를 해제했거나(분실 폰 포함) PIN 을 전체 해제했거나, 퇴실(임대인은 정지·스위치 끔)했으면 이미 받은 PIN 토큰도 바로 무효
+    from . import quicklogin as ql
+    t = ql.load_account(c)
+    live = t is not None and ql.eligible(t) and any(d.get("id") == c.get("d") and not d.get("locked") for d in (t.quick_devices or []))
     if not live:
         raise Unauthorized("바로가기가 해제되었거나 사용할 수 없습니다.", hint="아이디·비밀번호로 다시 로그인해 주세요.")
+    path = request.url.path
+    if ql.kind_of(t) == "lessor":
+        allow = LESSOR_PIN_READ_ALLOW if request.method in ("GET", "HEAD", "OPTIONS") else LESSOR_PIN_WRITE_ALLOW
+        if request.method == "OPTIONS" or any(rx.search(path) for rx in allow):
+            return
+        raise Forbidden(PIN_BLOCK_MESSAGE, hint="수납·계약·세무·설정·내보내기는 아이디·비밀번호로 로그인해야 합니다.")
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    path = request.url.path
     if any(rx.search(path) for rx in PIN_WRITE_ALLOW):
         return
     raise Forbidden(PIN_BLOCK_MESSAGE, hint="계약 동의·서명, 퇴실 정산 동의, 계좌·동의 설정 변경은 아이디·비밀번호로 로그인해야 합니다.")

@@ -385,7 +385,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         "branch": b_id,
         "branches": [{"branch": b.branch, "building_name": b.building_name} for b in buildings],
         "building": bldg.model_dump() if bldg else None,
-        "lessor": lessor.model_dump() if lessor else None,
+        "lessor": lessor.safe_dump() if lessor else None,
         "target_ym": target_ym,
         "monthly_target": monthly_target,
         "monthly_collected": monthly_collected,
