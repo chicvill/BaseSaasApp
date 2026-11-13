@@ -4393,7 +4393,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn("세무 허브 (종소세", lapp)
         self.assertIn("flex:1 1 180px;min-width:180px", lapp)
         shell = rd("shared_ui", "r3_shell.js")
-        self.assertIn("min-height:44px;display:flex;align-items:center", shell)
+        self.assertIn("display:block;min-height:44px;padding:10px 0", shell)
         small = re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
         for parts in (("shared_ui", "r3_shell.js"), ("shared_ui", "r3_modal.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"),
                       ("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")):
@@ -4482,6 +4482,78 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn('strip.style.display = "block"', app)
         self.assertIn("/rent3/?home=1", rd("shared_ui", "r3_shell.js"))
         self.assertIn("/rent3/?home=1", rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html"))
+
+    def test_73_ledger_csv_export_import(self):
+        """73. 납부현황 엑셀(CSV): 내려받기 → 그대로 올리면 변화 없음, 빠진 달은 '새로 기록', 값이 다르면 '다름'(기본 유지·선택 시 교체), 중복 없음, 반영 전 자동 백업, 남의 건물 불가."""
+        import tempfile
+        from unittest import mock
+        from datetime import date as _d
+        from apps.rent_dist._rent3_core import Pay, ledger_csv as lc
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        r = c.get("/api/rent3_lessor/ledger/export-csv?branch=main&year=2026", headers=chic)
+        self.assertEqual(r.status_code, 200)
+        text = r.content.decode("utf-8")
+        self.assertTrue(text.startswith("\ufeff"))
+        self.assertIn("호실,성명,선/후,1월", text)
+        post = lambda path, **kw: c.post(f"/api/rent3_lessor/ledger/import/{path}", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text, **kw})
+        base = post("preview").json()
+        self.assertEqual((base["counts"]["new"], base["counts"]["diff"]), (0, 0))             # 내려받은 그대로 올리면 바뀔 것이 없다
+        self.assertGreaterEqual(base["counts"]["same"], 1)
+        # 읽기 규칙: 점이 빠진 칸은 월·일로 풀어 읽고 표시, 이상한 칸은 날짜가 아님
+        self.assertEqual(lc._cell_date("1025", "2026-10"), (_d(2026, 10, 25), True))
+        self.assertEqual(lc._cell_date("115", "2026-01"), (_d(2026, 1, 15), True))
+        self.assertEqual(lc._cell_date("2. 3", "2026-02"), (_d(2026, 2, 3), False))
+        self.assertEqual(lc._cell_date("전출6/4", "2026-06")[0], None)
+        self.assertEqual(lc._cell_date("1. 5", "2026-12"), (_d(2027, 1, 5), False))           # 12월 칸에 적힌 1월 날짜
+        # 빠진 달: 한 건 지우고 같은 파일을 올리면 '새로 기록' 1건 → 반영하면 복구, 다시 올려도 중복 없음
+        victim = next(p for p in Pay.all() if p.branch == "main" and p.room_no == "201" and p.billing_month == "2026-08" and p.payment_kind == "MONTHLY_RENT")
+        total, when = victim.total_amount, victim.paid_date
+        victim.delete(action="t")
+        pv = post("preview").json()
+        self.assertEqual(pv["counts"]["new"], 1)
+        item = next(i for i in pv["items"] if i["status"] == "new")
+        self.assertEqual((item["room_no"], item["ym"], item["amount"], item["date"]), ("201", "2026-08", total, when))
+        bdir = tempfile.mkdtemp(prefix="rent3_bk_csv_")
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir}):
+            ap = post("apply")
+            self.assertEqual(ap.status_code, 200, ap.text)
+            self.assertEqual(ap.json()["added"], 1)
+            self.assertTrue(ap.json()["backup"])                                              # 반영 전 자동 백업
+            self.assertTrue(any(n.endswith(".tar.gz") for n in os.listdir(bdir)))
+            self.assertEqual(post("apply").json()["added"], 0)                                # 같은 파일을 또 올려도 중복 없음
+        back = [p for p in Pay.all() if p.branch == "main" and p.room_no == "201" and p.billing_month == "2026-08"]
+        self.assertEqual((len(back), back[0].total_amount, back[0].paid_date), (1, total, when))
+        # 값이 다른 칸: 기본은 '다름'으로 알리기만, 체크하면 파일 값으로 교체
+        self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=sunho, json={"branch": "main", "year": 2026, "csv_text": text}).status_code, 403)   # 남의 건물
+        self.assertEqual(c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json={"branch": "main", "year": 2026, "csv_text": "아무 표\n1,2,3"}).status_code, 400)
+        # 다름: 8월 칸 날짜를 파일에서 바꿔 올린다
+        import csv as _csv, io as _io
+        rows = list(_csv.reader(_io.StringIO(text.lstrip("\ufeff"))))
+        hi = next(k for k, r_ in enumerate(rows) if "1월" in r_)
+        col8 = rows[hi].index("8월")
+        for r_ in rows:
+            if r_ and r_[0] == "201":
+                r_[col8] = "8. 29"
+        buf = _io.StringIO()
+        _csv.writer(buf, lineterminator="\r\n").writerows(rows)
+        text2 = buf.getvalue()
+        pd = c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2}).json()
+        self.assertEqual(pd["counts"]["diff"], 1)
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir}):
+            keep = c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2}).json()
+            self.assertEqual((keep["added"], keep["replaced"]), (0, 0))
+            self.assertEqual(next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08").paid_date, when)       # 기본: 건드리지 않는다
+            rep = c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2, "replace_diffs": True}).json()
+            self.assertEqual(rep["replaced"], 1)
+        self.assertEqual(next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08").paid_date, "2026-08-29")
+        fixed = next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08")
+        fixed.paid_date = when
+        fixed.save(action="t")
+        # 화면
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnLedgerCsv", "showLedgerCsvModal", "/ledger/import/preview", "/ledger/import/apply", "확인했습니다 — 반영하기", "euc-kr"):
+            self.assertIn(needle, lapp, needle)
 
 
 if __name__ == "__main__":

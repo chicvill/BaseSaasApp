@@ -37,7 +37,7 @@
 
   // ☰ 메뉴: 첫 화면(수납 현황) 외의 모든 기능은 여기서 들어간다. 항목을 빼면 기능에 닿을 수 없으니 test_52 가 목록을 점검한다.
   const LESSOR_MENU = [
-    { items: [{ label: "💰 수납 현황", tab: "ledger" }] },
+    { items: [{ label: "💰 수납 현황", tab: "ledger" }, { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" }] },
     { title: "계약 · 매물", items: [
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
@@ -810,6 +810,76 @@
       R3Shell.openSupportSettings();
     });
   }
+  const btnLedgerCsv = document.getElementById("btnLedgerCsv");
+  if (btnLedgerCsv) {
+    btnLedgerCsv.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      showLedgerCsvModal();
+    });
+  }
+
+  // 📥 납부현황 엑셀(CSV): 내려받기(백업·엑셀 편집) / 올리기(미리보기 → 확인 → 반영). 반영 전에 서버가 자동 백업한다.
+  function showLedgerCsvModal() {
+    const yr = Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    const body = openModal("📥 납부현황 엑셀(CSV)", `
+      <div class="bass-muted" style="font-size:13px;line-height:1.6;margin-bottom:8px;">호실×월 납부일·금액 표를 엑셀로 받거나, 엑셀 장부를 올려 한꺼번에 기록합니다. 파일에는 <strong>입주자 이름</strong>이 들어 있으니 안전하게 보관하세요.</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+        <select id="lcYear" class="bass-select" style="width:110px;min-height:44px;">${[yr + 1, yr, yr - 1, yr - 2].map((y) => `<option value="${y}" ${y === yr ? "selected" : ""}>${y}년</option>`).join("")}</select>
+        <button id="lcDown" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">⬇️ 내려받기</button>
+      </div>
+      <div class="r3-lbl">엑셀(CSV) 올리기</div>
+      <input id="lcFile" type="file" accept=".csv,text/csv" class="bass-input" style="min-height:44px;">
+      <div id="lcOut" style="margin-top:10px;"></div>`);
+    const $ = (id) => body.querySelector("#" + id);
+    let csvText = "";
+    $("lcDown").addEventListener("click", () => downloadWithAuth(`/ledger/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${$("lcYear").value}`, `납부현황_${currentBranch}_${$("lcYear").value}.csv`));
+    const statusKo = { new: "새로 기록", same: "이미 같음", diff: "다름", skip: "건너뜀" };
+    const statusColor = { new: "var(--ok)", same: "var(--muted)", diff: "var(--warn)", skip: "var(--err)" };
+    async function readText(file) {
+      const buf = await file.arrayBuffer();
+      let t = new TextDecoder("utf-8").decode(buf);
+      if (t.includes("\uFFFD")) { try { t = new TextDecoder("euc-kr").decode(buf); } catch (_) { /* 그대로 */ } }
+      return t;
+    }
+    async function preview() {
+      const year = Number($("lcYear").value);
+      const d = await Bass.api(APP_ID, "/ledger/import/preview", { method: "POST", body: { branch: currentBranch, year, csv_text: csvText } });
+      const c = d.counts;
+      const attention = d.items.filter((i) => i.status === "diff" || i.status === "skip" || i.notes.length);
+      const rows = attention.map((i) => `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13.5px;"><strong>${Bass.escapeHtml(i.room_no)}호 ${Number(i.ym.slice(5))}월</strong> ${Bass.escapeHtml(i.date.slice(5).replace("-", "."))} ${fmtWon(i.amount)} <span style="color:${statusColor[i.status]};font-weight:700;">${statusKo[i.status]}</span>${i.reason ? ` · ${Bass.escapeHtml(i.reason)}` : ""}${i.existing ? `<br><span class="bass-muted">지금 앱: ${Bass.escapeHtml(i.existing.date.slice(5).replace("-", "."))} ${fmtWon(i.existing.amount)}</span>` : ""}${i.notes.map((n) => `<br><span class="bass-muted">· ${Bass.escapeHtml(n)}</span>`).join("")}</div>`).join("");
+      const unread = d.issues.map((i) => `<div style="padding:5px 0;font-size:13px;color:var(--muted);">· ${Bass.escapeHtml(i.msg)}</div>`).join("");
+      $("lcOut").innerHTML = `
+        <div class="bass-card" style="padding:10px 12px;">
+          <div style="font-weight:800;font-size:15px;margin-bottom:6px;">미리보기 — ${year}년 ${d.rows}호실</div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:14px;"><span style="color:var(--ok);font-weight:800;">새로 기록 ${c.new}건</span><span>이미 같음 ${c.same}건</span><span style="color:var(--warn);font-weight:800;">다름 ${c.diff}건</span><span style="color:var(--err);">건너뜀 ${c.skip}건</span><span>읽지 못한 칸 ${d.issues.length}곳</span></div>
+        </div>
+        ${rows || unread ? `<details style="margin-top:8px;" ${attention.length + d.issues.length <= 12 ? "open" : ""}><summary style="cursor:pointer;min-height:40px;font-weight:700;">확인이 필요한 칸 ${attention.length + d.issues.length}건 보기</summary><div style="max-height:34vh;overflow-y:auto;">${rows}${unread}</div></details>` : ""}
+        ${c.diff ? `<label style="margin-top:8px;"><input id="lcReplace" type="checkbox"> '다름' ${c.diff}건은 <strong>파일 내용으로 바꾸기</strong> (끄면 지금 앱의 값을 그대로 둡니다)</label>` : ""}
+        <div style="margin-top:10px;"><button id="lcApply" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;width:100%;" ${c.new + c.diff === 0 ? "disabled" : ""}>✅ 확인했습니다 — 반영하기</button>
+        <div class="bass-muted" style="font-size:12.5px;margin-top:6px;">반영하기 전에 전체 자료를 자동으로 백업합니다. 같은 파일을 다시 올려도 중복되지 않습니다.</div></div>`;
+      const ap = $("lcApply");
+      if (ap) ap.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const rep = $("lcReplace") ? $("lcReplace").checked : false;
+          const r = await Bass.api(APP_ID, "/ledger/import/apply", { method: "POST", body: { branch: currentBranch, year, csv_text: csvText, replace_diffs: rep } });
+          Bass.updateAppAlert("success", r.message);
+          await refresh();
+          closeModal();
+        });
+      });
+    }
+    $("lcFile").addEventListener("change", async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      if (f.size > 1000000) { Bass.updateAppAlert("warning", "파일이 너무 큽니다(1MB 이하)."); return; }
+      csvText = await readText(f);
+      $("lcOut").innerHTML = '<div class="bass-muted">읽는 중...</div>';
+      try { await preview(); } catch (err) { $("lcOut").innerHTML = ""; Bass.showError(err); }
+    });
+    $("lcYear").addEventListener("change", () => { if (csvText) preview().catch(Bass.showError); });
+  }
+
   const btnEditBuilding = document.getElementById("btnEditBuilding");
   if (btnEditBuilding) {
     btnEditBuilding.addEventListener("click", () => {

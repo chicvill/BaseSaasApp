@@ -737,6 +737,47 @@ def edit_building(req: BuildingEditReq):
     return {"success": True, "message": f"건물 정보를 저장했습니다 ({b.building_name}).", "building": b.model_dump()}
 
 
+# ── 납부현황 엑셀(CSV) 내려받기 · 올리기 (미리보기 → 확인 → 반영) ──
+class LedgerCsvReq(BaseModel):
+    branch: str = "main"
+    year: int = 0
+    csv_text: str
+    replace_diffs: bool = False
+
+
+@router.get("/ledger/export-csv")
+def export_ledger_csv(branch: str = "main", year: Optional[int] = None):
+    """호실×월 납부 현황을 엑셀로 열리는 CSV 로 내려받는다(백업·엑셀 편집용). 입주자 이름이 들어 있다."""
+    from apps.rent_dist._rent3_core import ledger_csv
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    yr = year or date.today().year
+    return Response(content=ledger_csv.export_csv(b_id, yr).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=ledger_{b_id}_{yr}.csv; filename*=UTF-8''" + __import__("urllib.parse").parse.quote(f"납부현황_{b_id}_{yr}.csv")})
+
+
+@router.post("/ledger/import/preview")
+def preview_ledger_csv(req: LedgerCsvReq):
+    """올린 CSV 를 읽어 '이렇게 기록하겠습니다'를 보여 준다(저장하지 않음)."""
+    from apps.rent_dist._rent3_core import ledger_csv
+    ensure_pool_seeded()
+    try:
+        return ledger_csv.plan(req.branch, req.year or date.today().year, req.csv_text)
+    except ValueError as e:
+        raise DomainError(str(e))
+
+
+@router.post("/ledger/import/apply")
+def apply_ledger_csv(req: LedgerCsvReq):
+    """미리보기에서 확인한 내용을 반영한다. 반영 전에 풀 전체를 자동 백업한다. 같은 파일을 다시 올려도 중복되지 않는다."""
+    from apps.rent_dist._rent3_core import ledger_csv
+    ensure_pool_seeded()
+    try:
+        return ledger_csv.apply(req.branch, req.year or date.today().year, req.csv_text, req.replace_diffs)
+    except ValueError as e:
+        raise DomainError(str(e))
+
+
 class TransferConfirmReq(BaseModel):
     branch: str = "main"
     amount: Optional[int] = None          # 실제 입금액이 다르면 고쳐서 수납
