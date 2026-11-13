@@ -963,12 +963,12 @@
         ${lateRows.length ? `<div style="font-weight:800;font-size:14px;margin:${pend.length ? "8px" : "0"} 0 6px;">⚠️ 미납 호실 ${lateRows.length}곳</div><div style="max-height:34vh;overflow-y:auto;">${lateRows.map((x) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(x.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;"><span>${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.contract.tenant_name || "")}</span><span style="color:var(--err);font-weight:800;white-space:nowrap;">${unpaidCount(x)}개월 · ${fmtWon((x.ledger && x.ledger.total_unpaid) || 0)}</span></button>`).join("")}</div>` : ""}
       </div>` : "";
     elTabContent.innerHTML = `
-      ${todoHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <label class="r3-lbl" for="roomPick" style="margin:0;white-space:nowrap;">호실 선택</label>
         <select id="roomPick" class="bass-select" style="flex:1;min-width:0;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
       </div>
       <div id="roomPanel"></div>
+      <div style="margin-top:12px;">${todoHtml}</div>
     `;
     document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => {
