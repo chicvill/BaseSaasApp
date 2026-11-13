@@ -49,6 +49,7 @@
       { label: "🔧 A/S 접수", tab: "ops" },
       { label: "⚖️ 만기 통보", tab: "expiry" },
       { label: "🔔 일괄 납입 통보", tab: "notice" },
+      { label: "📨 기존 임차인 앱 연결 안내 문자", id: "btnConnectMsg" },
     ] },
     { title: "건물", items: [
       { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
@@ -90,6 +91,7 @@
     root.querySelectorAll("[data-act]").forEach((b) => { b.style.display = "none"; });
     root.querySelectorAll(".pr[data-pay] input").forEach((el) => off(el, "수정은 아이디·비밀번호 로그인에서만 됩니다"));
     root.querySelectorAll(".pr-del").forEach((el) => { el.style.display = "none"; });
+    root.querySelectorAll(".cn-ok, .cn-no, .cn-code").forEach((el) => off(el, "연결 승인은 아이디·비밀번호 로그인에서만 됩니다"));
     if (!pin.pay_ok) root.querySelectorAll("#pmDirect, #pmAmt, #bankSmsGo, #bankSms, .nt-ok, .nt-no").forEach((el) => off(el, "수납은 '수납 허용'을 켠 기기에서만 됩니다"));
   }
   function applyPinBar() {
@@ -871,6 +873,27 @@
   const btnFullLogin = document.getElementById("btnFullLogin");
   if (btnFullLogin) btnFullLogin.addEventListener("click", fullLogin);
 
+  // 📨 기존 임차인 전체에게 보낼 공통 안내 문자: 링크 하나로 각자 내 페이지에 연결(문자 인증 또는 임대인 승인)
+  const btnConnectMsg = document.getElementById("btnConnectMsg");
+  if (btnConnectMsg) {
+    btnConnectMsg.addEventListener("click", () => {
+      closeDrawer();
+      const b = dash.building || {}, l = dash.lessor || {};
+      const link = `${window.location.origin}/rent3/?home=1&find=1`;
+      const msg = `[${b.building_name || "건물"} 안내] 안녕하세요, 임대인 ${l.name || ""}입니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있도록 입주자 앱을 열었습니다. 아래 링크에서 '내 페이지 찾기'로 본인 확인을 하고 비밀번호를 정해 이용해 주세요. 문자 인증이 안 되면 '임대인 확인으로 연결 요청'을 눌러 주세요.\n👉 ${link}`;
+      const people = (dash.rooms || []).filter((x) => x.is_occupied && x.contract).map((x) => `${x.room_no}호 ${x.contract.tenant_name || ""} ${x.contract.tenant_phone || (x.tenant && x.tenant.phone) || ""}`.trim());
+      const body = openModal("📨 기존 임차인 앱 연결 안내 문자", `
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">모든 입주 임차인에게 <strong>같은 문자</strong>를 보내면 됩니다. 각자 자기 계정으로만 들어가므로 다른 호실은 볼 수 없습니다. 가입을 마친 호실은 이 링크로 덮어쓸 수 없습니다.</div>
+        <textarea id="cmMsg" class="bass-input r3-msg" rows="7" readonly>${Bass.escapeHtml(msg)}</textarea>
+        <button id="cmCopy" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 문구 복사</button>
+        <div class="r3-lbl" style="margin-top:12px;">입주 임차인 연락처 (${people.length}명)</div>
+        <textarea id="cmPhones" class="bass-input r3-msg" rows="6" readonly>${Bass.escapeHtml(people.join("\n"))}</textarea>
+        <button id="cmCopyPhones" class="bass-btn" type="button" style="margin-top:6px;min-height:44px;">📋 연락처 복사</button>`);
+      body.querySelector("#cmCopy").addEventListener("click", () => copyText(msg));
+      body.querySelector("#cmCopyPhones").addEventListener("click", () => copyText(people.join("\n")));
+    });
+  }
+
   const btnLedgerCsv = document.getElementById("btnLedgerCsv");
   if (btnLedgerCsv) {
     btnLedgerCsv.addEventListener("click", () => {
@@ -1018,6 +1041,17 @@
     // 지금 챙길 일: 임차인이 이체했다고 알린 건(바로 보임), 미납 호실(접어 두었다가 눌러 펼친다, 많이 밀린 순)
     const lateRows = rooms.filter((x) => x.is_occupied && x.contract && unpaidCount(x) > 0)
       .sort((a, b) => ((b.ledger && b.ledger.total_unpaid) || 0) - ((a.ledger && a.ledger.total_unpaid) || 0));
+    const conn = dash.connect_requests || [];
+    const connHtml = conn.length ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
+        <div style="font-weight:800;font-size:14px;margin-bottom:4px;">🔗 내 페이지 연결 요청 ${conn.length}건</div>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.5;margin-bottom:8px;">임차인의 <strong>장부 휴대폰으로 전화</strong>해, 임차인 화면에 보이는 <strong>4자리 확인번호</strong>를 들은 뒤 입력하세요. 임차인이 요청한 적이 없다고 하면 거절하세요.</div>
+        ${conn.map((n) => `<div data-conn="${Bass.escapeHtml(n.id)}" style="padding:8px 0;border-top:1px solid var(--border);">
+          <div style="font-size:14px;margin-bottom:6px;"><strong>${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)}</strong> · <a href="tel:${Bass.escapeHtml(n.tenant_phone)}">📞 ${Bass.escapeHtml(n.tenant_phone)}</a></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;"><input class="bass-input cn-code" inputmode="numeric" maxlength="4" placeholder="확인번호 4자리" aria-label="확인번호" style="width:140px;min-height:44px;">
+          <button class="bass-btn bass-btn--sm bass-btn--primary cn-ok" type="button" style="min-height:44px;">✅ 승인</button>
+          <button class="bass-btn bass-btn--sm cn-no" type="button" style="min-height:44px;">거절</button></div></div>`).join("")}
+      </div>` : "";
     const pend = dash.transfer_notices || [];
     const pendHtml = pend.length ? `
       <div class="bass-card r3-zone r3-zone--notice" style="padding:10px 12px;margin-bottom:12px;">
@@ -1036,6 +1070,7 @@
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>
+      ${connHtml}
       ${pendHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <label class="r3-lbl" for="roomPick" style="margin:0;white-space:nowrap;">호실 선택</label>
@@ -1052,6 +1087,23 @@
       document.getElementById("roomPick").scrollIntoView({ behavior: "smooth", block: "start" });
     };
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
+    elTabContent.querySelectorAll("[data-conn]").forEach((card) => {
+      const id = card.dataset.conn;
+      card.querySelector(".cn-ok").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/connect-requests/${encodeURIComponent(id)}/approve`, { method: "POST", body: { branch: currentBranch, code: card.querySelector(".cn-code").value.trim() } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+        });
+      });
+      card.querySelector(".cn-no").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/connect-requests/${encodeURIComponent(id)}/reject`, { method: "POST", body: { branch: currentBranch } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+        });
+      });
+    });
     // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 메시지를 보낸다
     // 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고 → '원본 고치기' 또는 '입금자명 기준으로 그대로 반영'
     const smsWarn = document.getElementById("smsWarn");

@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_admin, is_local_request, lessor_scope
-from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat
+from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat, connect
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core.ops import TransferNotice
 from fastapi.responses import FileResponse, Response
@@ -395,6 +395,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         "rooms": room_cards,
         "transfer_notices": [n.model_dump() for n in sorted(TransferNotice.find(branch=b_id), key=lambda x: x.created_at) if n.status == "PENDING"],
         "pin": _pin_info(request),
+        "connect_requests": connect.pending_for_branch(b_id),
         "expiry_notice_rooms": expiry_notice_rooms,
         "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],
         "payments": [p.model_dump() for p in payments[:30]],
@@ -840,6 +841,26 @@ def confirm_transfer_notice(notice_id: str, req: TransferConfirmReq, request: Re
     n.status, n.handled_at, n.handled_by = "CONFIRMED", now_iso(), str((claims_from(request) or {}).get("u") or "lessor")
     n.save(action="transfer_notice_confirmed", app_source=APP_SRC)
     return {"success": True, **res}
+
+
+class ConnectApproveReq(BaseModel):
+    branch: str = "main"
+    code: str = ""
+
+
+@router.post("/connect-requests/{req_id}/approve")
+def approve_connect_request(req_id: str, req: ConnectApproveReq, request: Request):
+    """기존 임차인의 '내 페이지 연결 요청' 승인. 임차인(장부의 휴대폰)에게 전화해 화면에 보이는 4자리 확인번호를 듣고 입력해야 한다."""
+    ensure_pool_seeded()
+    r = connect.approve(req_id, req.branch, req.code, str((claims_from(request) or {}).get("u") or "lessor"))
+    return {"success": True, "message": f"{r.room_no}호 {r.tenant_name}님의 연결을 승인했습니다. 임차인 화면에서 비밀번호를 정하게 됩니다."}
+
+
+@router.post("/connect-requests/{req_id}/reject")
+def reject_connect_request(req_id: str, req: ConnectApproveReq, request: Request):
+    ensure_pool_seeded()
+    r = connect.reject(req_id, req.branch, str((claims_from(request) or {}).get("u") or "lessor"))
+    return {"success": True, "message": f"{r.room_no}호 {r.tenant_name}님의 연결 요청을 거절했습니다."}
 
 
 @router.post("/transfer-notices/{notice_id}/reject")

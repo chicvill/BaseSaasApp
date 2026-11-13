@@ -4916,6 +4916,74 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("/pool/auth/login", app[i:i + 1600])                    # 재설정 직후 새 비밀번호로 곧바로 로그인
         self.assertIn("resolveConsent", app[i:i + 1600])                      # 동의 화면이 필요하면 그대로 거친다
 
+    def test_81_existing_tenant_connect_request_with_lessor_approval(self):
+        """81. 기존 임차인 '내 페이지 연결'(문자 인증 없이): 4가지(건물·호실·성명·휴대폰) 대조 → 확인번호 → 임대인이 통화로 확인번호 입력해 승인
+        → 요청한 브라우저에만 1회용 입주 안내 링크 → 비밀번호·PIN 설정. 남의 건물 임대인·틀린 번호·이미 가입한 호실·남의 secret 은 거부."""
+        from apps.rent_dist._rent3_core import Tenant, Building, connect as cn
+        from apps.rent_dist._rent3_core.ops import ConnectRequest
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic, sunho = self._login("chic"), self._login("sunho")
+        t = next(x for x in Tenant.all() if x.branch == "main" and x.status == "ACTIVE" and x.room_no and not cn.activated(x))
+        old = (t.phone, t.password, t.pin_hash, list(t.quick_devices), dict(t.consents), t.invite_hash, t.invite_expires)
+        t.phone = "010-7777-1234"
+        t.save(action="t")
+        bname = Building.get(t.id_building).building_name if t.id_building else "시크빌"
+        body = {"building_name": bname, "room_no": f"{t.room_no}호", "name": t.name, "phone": "01077771234"}
+        try:
+            # 틀린 정보는 어느 항목이 틀렸는지 알려 주지 않는다
+            bad = c.post(f"{PL}/connect/request", headers=NA, json={**body, "phone": "01099990000"})
+            self.assertEqual(bad.status_code, 400)
+            self.assertNotIn("휴대폰", bad.json()["message"])
+            ok = c.post(f"{PL}/connect/request", headers=NA, json=body)
+            self.assertEqual(ok.status_code, 200, ok.text)
+            rid, secret, code = ok.json()["request_id"], ok.json()["secret"], ok.json()["code"]
+            self.assertTrue(code.isdigit() and len(code) == 4)
+            self.assertNotIn(secret, open(os.path.join(self.temp_pool, "ops.json"), encoding="utf-8").read())   # 비밀값 원문은 저장하지 않는다
+            # 승인 전: 대기 중, 남의 secret 은 거부, 임대인 첫 화면에 요청이 보인다(장부의 휴대폰 포함)
+            st = lambda sec=secret: c.post(f"{PL}/connect/status", headers=NA, json={"request_id": rid, "secret": sec})
+            self.assertEqual(st().json()["status"], "PENDING")
+            self.assertEqual(st("x" * 32).status_code, 400)
+            lst = c.get(f"{LS}/dashboard?branch=main", headers=chic).json()["connect_requests"]
+            self.assertEqual([(x["room_no"], x["tenant_phone"]) for x in lst if x["id"] == rid], [(t.room_no, "010-7777-1234")])
+            # 남의 건물 임대인은 승인할 수 없다 · 틀린 확인번호는 남은 횟수 안내, 5번이면 폐기
+            self.assertEqual(c.post(f"{LS}/connect-requests/{rid}/approve", headers=sunho, json={"branch": "main", "code": code}).status_code, 403)
+            wrong = "0000" if code != "0000" else "1111"
+            w = c.post(f"{LS}/connect-requests/{rid}/approve", headers=chic, json={"branch": "main", "code": wrong})
+            self.assertEqual(w.status_code, 400)
+            self.assertIn("남은 시도 4회", w.json()["message"])
+            self.assertEqual(st().json()["status"], "PENDING")                                                    # 틀려도 승인되지 않는다
+            ap = c.post(f"{LS}/connect-requests/{rid}/approve", headers=chic, json={"branch": "main", "code": code})
+            self.assertEqual(ap.status_code, 200, ap.text)
+            # 승인 뒤: 요청한 쪽만 링크를 받고, 링크는 한 번만 나온다
+            got = st().json()
+            self.assertEqual(got["status"], "APPROVED")
+            url = got["invite_url"]
+            self.assertTrue(url.startswith("/rent3_tenant/?invite="))
+            self.assertNotIn("invite_url", st().json())
+            tok = url.split("invite=")[1]
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={tok}", headers=NA).status_code, 200)
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": tok, "password": "Conn#Pass99", "pin": "2846", "agree_privacy": True})
+            self.assertEqual(acc.status_code, 200, acc.text)
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 200)
+            # 가입이 끝난 호실은 연결 요청으로 덮어쓸 수 없다
+            again = c.post(f"{PL}/connect/request", headers=NA, json=body)
+            self.assertEqual(again.status_code, 400)
+            self.assertIn("이미 가입", again.json()["message"])
+            # 확인번호 5번 오류 → 요청 폐기 (다른 호실 요청으로 확인)
+        finally:
+            for r_ in ConnectRequest.all():
+                r_.delete(action="t")
+            t = Tenant.get(t.id)
+            t.phone, t.password, t.pin_hash, t.quick_devices, t.consents, t.invite_hash, t.invite_expires = old
+            t.save(action="t")
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg"):
+            self.assertIn(needle, lapp, needle)
+        for needle in ("/pool/connect/request", "/pool/connect/status", "rent3_connect_req", "find=1"):
+            self.assertIn(needle, pj, needle)
+
 
 if __name__ == "__main__":
     unittest.main()

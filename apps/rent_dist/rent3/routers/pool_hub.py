@@ -15,7 +15,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk
+from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -713,6 +713,51 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
                  "branch": t.branch, "room_no": t.room_no, "tenant_id": t.id, "login_auth_verified": True, "redirect_url": url},
         "message": f"{t.name}님, 가입을 마쳤습니다.", **extra,
     }
+
+
+# ── 기존 임차인 '내 페이지 연결' (문자 인증 없이: 4가지 대조 → 임대인이 통화로 확인번호 확인 → 승인) ──
+class ConnectReq(BaseModel):
+    building_name: str
+    room_no: str
+    name: str
+    phone: str
+
+
+class ConnectStatusReq(BaseModel):
+    request_id: str
+    secret: str
+
+
+@router.post("/connect/request")
+def connect_request(req: ConnectReq, request: Request) -> Dict[str, Any]:
+    """기존 임차인이 건물·호실·성명·휴대폰을 입력해 연결을 요청한다. 맞으면 4자리 확인번호를 보여 주고(임대인에게 전화로 불러 준다),
+    임대인이 승인하면 비밀번호를 정하는 입주 안내 화면으로 이어진다. 이미 가입한 호실은 덮어쓸 수 없다."""
+    ensure_pool_seeded()
+    keys = [f"ip:{_client_ip(request)}", f"u:room{cn._room(req.room_no)}"]
+    ratelimit.check("connect", keys)
+    t = cn.find_tenant(req.building_name, req.room_no, req.name, req.phone)
+    if t is None:
+        ratelimit.fail("connect", keys)
+        raise DomainError("입력한 정보가 입주자 정보와 일치하지 않습니다.", hint="건물명·호실·성함·휴대폰 번호를 다시 확인해 주세요. 계속 안 되면 임대인에게 문의하세요.")
+    if cn.activated(t):
+        raise DomainError("이미 가입이 끝난 호실입니다.", hint="로그인하거나, 비밀번호를 잊었다면 '비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기'(문자 인증)를 이용해 주세요.")
+    ratelimit.fail("connect", keys)   # 성공한 요청도 횟수로 센다(같은 주소에서 요청을 반복해 임대인을 괴롭히지 못하게)
+    r, secret, code = cn.create(t)
+    return {"success": True, "request_id": r.id, "secret": secret, "code": code, "room_no": t.room_no,
+            "message": "연결을 요청했습니다. 임대인에게 전화해 아래 4자리 확인번호를 불러 주세요.",
+            "hint": "임대인이 번호를 확인해 승인하면 이 화면에서 비밀번호를 정할 수 있습니다."}
+
+
+@router.post("/connect/status")
+def connect_status(req: ConnectStatusReq, request: Request) -> Dict[str, Any]:
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("connectstatus", keys)
+    try:
+        out = cn.check_status(req.request_id, req.secret)
+    except DomainError:
+        ratelimit.fail("connectstatus", keys)
+        raise
+    return {"success": True, **out}
 
 
 class PinLoginReq(BaseModel):

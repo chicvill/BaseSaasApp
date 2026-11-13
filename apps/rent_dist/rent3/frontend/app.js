@@ -132,6 +132,7 @@
     $("formAccountLogin").style.display = tabName === "login" ? "block" : "none";
     $("formRegister").style.display = tabName === "register" ? "block" : "none";
     const fr = $("formReset"); if (fr) fr.style.display = "none";
+    const fcn = $("formConnect"); if (fcn) fcn.style.display = "none";
     const alertBox = $("authModalAlert");
     if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
 
@@ -471,6 +472,53 @@
         switchAuthTab("login");
       });
     });
+  }
+
+  // ── 기존 임차인 '내 페이지 연결 요청'(문자 인증 없이, 임대인이 통화로 확인번호를 확인해 승인) ──
+  const CC_KEY = "rent3_connect_req";
+  function bindConnect() {
+    const form = $("formConnect");
+    if (!form) return;
+    let timer = null;
+    const load = () => { try { return JSON.parse(window.localStorage.getItem(CC_KEY) || "null"); } catch (_) { return null; } };
+    const store = (v) => { try { if (v) window.localStorage.setItem(CC_KEY, JSON.stringify(v)); else window.localStorage.removeItem(CC_KEY); } catch (_) { /* 저장이 막혀도 이 화면에서는 계속 진행 */ } };
+    async function poll() {
+      const cur = load();
+      if (!cur) return;
+      try {
+        const r = await Bass.api(APP_ID, "/pool/connect/status", { method: "POST", body: { request_id: cur.id, secret: cur.secret } });
+        if (r.invite_url) { clearInterval(timer); store(null); window.location.href = r.invite_url; return; }
+        $("ccStatus").textContent = r.message || "";
+        if (r.status !== "PENDING" && r.status !== "APPROVED") { clearInterval(timer); store(null); setTimeout(render, 2500); }
+      } catch (_) { clearInterval(timer); store(null); render(); }
+    }
+    function render() {
+      const cur = load();
+      $("ccInput").style.display = cur ? "none" : "block";
+      $("ccWait").style.display = cur ? "block" : "none";
+      clearInterval(timer);
+      if (cur) { $("ccCode").textContent = cur.code; $("ccRoom2").textContent = `${cur.room_no}호`; $("ccStatus").textContent = "임대인의 확인을 기다리고 있습니다…"; poll(); timer = setInterval(poll, 4000); }
+    }
+    function show() {
+      $("formAccountLogin").style.display = "none"; $("formRegister").style.display = "none"; $("formReset").style.display = "none";
+      form.style.display = "block";
+      render();
+    }
+    const lc = $("lnkConnect");
+    if (lc) lc.addEventListener("click", (e) => { e.preventDefault(); show(); });
+    $("lnkConnectBack").addEventListener("click", (e) => { e.preventDefault(); clearInterval(timer); switchAuthTab("login"); });
+    $("lnkCcCancel").addEventListener("click", (e) => { e.preventDefault(); store(null); render(); });
+    $("btnCcRequest").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/pool/connect/request", { method: "POST", body: {
+          building_name: $("ccBuilding").value.trim(), room_no: $("ccRoom").value.trim(), name: $("ccName").value.trim(), phone: $("ccPhone").value.trim() } });
+        store({ id: r.request_id, secret: r.secret, code: r.code, room_no: r.room_no });
+        Bass.updateAppAlert("success", r.message, r.hint || "");
+        render();
+      });
+    });
+    window.__rent3ConnectShow = () => { openAuthModal({ tab: "login" }); show(); };
+    window.__rent3ConnectPending = () => Boolean(load());
   }
 
   async function loadPortalData() {
@@ -824,8 +872,16 @@
 
   renderSessionUI();
   bindPasswordReset();
+  bindConnect();
   loadPortalData()
     .then(() => {
+      // 공통 안내 링크(/rent3/?home=1&find=1): 내 페이지 찾기(문자 인증)를 바로 연다. 연결 요청 중인 브라우저면 대기 화면으로.
+      if (urlParams.get("find") === "1") {
+        if (window.__rent3ConnectPending && window.__rent3ConnectPending()) { window.__rent3ConnectShow(); return; }
+        openAuthModal({ tab: "login" });
+        const lf = $("lnkForgot");
+        if (lf) lf.click();
+      }
       if (urlParams.get("login") === "1") {
         openAuthModal({ tab: "login" });
         if (urlParams.get("expired") === "1") {

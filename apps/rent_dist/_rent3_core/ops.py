@@ -956,6 +956,29 @@ class RentBillingNotice(PoolObj):
         return resolved_cnt
 
 
+class ConnectRequest(PoolObj):
+    """기존 임차인의 '내 페이지 연결 요청'. 건물·호실·성명·휴대폰 4가지가 장부와 같으면 접수하고, 임대인이 임차인과 직접 통화해 확인한 뒤 승인해야 입주 안내 링크(비밀번호·PIN 설정)가 나온다.
+    요청한 쪽 브라우저만 아는 비밀값(secret)과 화면에 보인 4자리 확인번호(code)는 해시로만 보관한다."""
+    collection: ClassVar[str] = "ops"
+    label: ClassVar[str] = "내 페이지 연결 요청"
+
+    id: str = Field(default_factory=lambda: f"cnr_{uuid4().hex[:8]}")
+    branch: str = "main"
+    room_no: str = ""
+    tenant_id: str = ""
+    tenant_name: str = ""
+    secret_hash: str = ""
+    code_hash: str = ""
+    code_fails: int = 0
+    status: str = "PENDING"                  # PENDING | APPROVED | DELIVERED | REJECTED | EXPIRED
+    expires_at: str = ""
+    approved_at: str = ""
+    handled_by: str = ""
+
+    def summary(self) -> str:
+        return f"연결 요청 {self.room_no}호 {self.tenant_name} ({self.status})"
+
+
 class TransferNotice(PoolObj):
     """임차인의 '이체했어요' 알림. 돈이 들어온 것을 임대인이 확인(수납)하기 전에는 장부(Pay)에 아무것도 쓰지 않는다."""
     collection: ClassVar[str] = "ops"
