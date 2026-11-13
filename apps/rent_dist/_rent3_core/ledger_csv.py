@@ -173,9 +173,10 @@ def plan(branch: str, year: int, text: str) -> Dict[str, Any]:
             item.update(status="skip", reason="입주 계약이 없는 호실")
         elif c["date"] > today:
             item.update(status="skip", reason="오늘 이후 날짜")
-        elif c["ym"] < ct.move_in_date[:7]:
-            item.update(status="skip", reason="입주 전 달")
         else:
+            item["former"] = c["ym"] < ct.move_in_date[:7]      # 지금 입주자가 들어오기 전 달 = 이전 입주자 시기의 납부
+            if item["former"]:
+                item["notes"].append("이전 입주자 시기의 납부 — 세무 자료용으로 이전 입주자 기록으로 보관(지금 입주자의 미납·납부 내역에는 나타나지 않음)")
             if ct.tenant_name and c["name"] and ct.tenant_name != c["name"]:
                 item["notes"].append(f"파일의 이름({c['name']})이 앱의 입주자({ct.tenant_name})와 다름")
             due = ct.monthly_rent + ct.maintenance_fee
@@ -194,6 +195,7 @@ def plan(branch: str, year: int, text: str) -> Dict[str, Any]:
                 item["status"] = "same" if same else "diff"
         items.append(item)
     counts = {k: sum(1 for i in items if i["status"] == k) for k in ("new", "same", "diff", "skip")}
+    counts["former"] = sum(1 for i in items if i["status"] == "new" and i.get("former"))
     return {"success": True, "year": year, "rows": parsed["rows"], "items": items, "issues": parsed["issues"], "counts": counts,
             "notes_count": sum(1 for i in items if i["notes"])}
 
@@ -215,9 +217,14 @@ def apply(branch: str, year: int, text: str, replace_diffs: bool = False) -> Dic
         room = Room.first(branch=b, room_no=i["room_no"])
         ct = Contract.get(room.active_contract_id)
         rent, fee = _split(ct, i["amount"])
+        if i.get("former"):
+            rent, fee = i["amount"], 0           # 이전 입주자의 월세·관리비 비율은 알 수 없어 합계만 월세 칸에 둔다
         if i["status"] == "new":
-            Pay(branch=b, id_building=bldg.id if bldg else "", id_room=room.id, room_no=room.room_no, id_contract=ct.id, id_tenant=ct.id_tenant,
-                payer_name=ct.tenant_name, billing_month=i["ym"], paid_date=i["date"], rent_amount=rent, maintenance_amount=fee,
+            # 이전 입주자 시기: 사람·계약 객체를 새로 만들지 않고 호실·청구월 기준으로만 보관한다('former:' 표시 → 세무 집계에는 들어가고 지금 입주자 화면에는 안 나온다)
+            former = bool(i.get("former"))
+            Pay(branch=b, id_building=bldg.id if bldg else "", id_room=room.id, room_no=room.room_no,
+                id_contract=(f"former:{b}:{room.room_no}" if former else ct.id), id_tenant=("" if former else ct.id_tenant),
+                payer_name=("이전 입주자" if former else ct.tenant_name), billing_month=i["ym"], paid_date=i["date"], rent_amount=rent, maintenance_amount=fee,
                 total_amount=i["amount"], payment_kind="MONTHLY_RENT", method="TRANSFER", cash_receipt_no="엑셀 올리기",
                 idempotency_key=f"csv:{b}:{i['room_no']}:{i['ym']}:{i['date']}:{i['amount']}", raw_sms="납부현황 엑셀(CSV) 올리기").save(action="payment_imported_csv", app_source=SRC)
             added += 1

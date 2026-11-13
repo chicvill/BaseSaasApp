@@ -852,7 +852,7 @@
       $("lcOut").innerHTML = `
         <div class="bass-card" style="padding:10px 12px;">
           <div style="font-weight:800;font-size:15px;margin-bottom:6px;">미리보기 — ${year}년 ${d.rows}호실</div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:14px;"><span style="color:var(--ok);font-weight:800;">새로 기록 ${c.new}건</span><span>이미 같음 ${c.same}건</span><span style="color:var(--warn);font-weight:800;">다름 ${c.diff}건</span><span style="color:var(--err);">건너뜀 ${c.skip}건</span><span>읽지 못한 칸 ${d.issues.length}곳</span></div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:14px;"><span style="color:var(--ok);font-weight:800;">새로 기록 ${c.new}건</span><span>이미 같음 ${c.same}건</span><span style="color:var(--warn);font-weight:800;">다름 ${c.diff}건</span><span style="color:var(--err);">건너뜀 ${c.skip}건</span>${c.former ? `<span>이전 입주자 시기 ${c.former}건 포함</span>` : ""}<span>읽지 못한 칸 ${d.issues.length}곳</span></div>
         </div>
         ${rows || unread ? `<details style="margin-top:8px;" ${attention.length + d.issues.length <= 12 ? "open" : ""}><summary style="cursor:pointer;min-height:40px;font-weight:700;">확인이 필요한 칸 ${attention.length + d.issues.length}건 보기</summary><div style="max-height:34vh;overflow-y:auto;">${rows}${unread}</div></details>` : ""}
         ${c.diff ? `<label style="margin-top:8px;"><input id="lcReplace" type="checkbox"> '다름' ${c.diff}건은 <strong>파일 내용으로 바꾸기</strong> (끄면 지금 앱의 값을 그대로 둡니다)</label>` : ""}

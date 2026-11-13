@@ -4555,6 +4555,50 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("btnLedgerCsv", "showLedgerCsvModal", "/ledger/import/preview", "/ledger/import/apply", "확인했습니다 — 반영하기", "euc-kr"):
             self.assertIn(needle, lapp, needle)
 
+    def test_74_ledger_csv_former_tenant_payments_kept_for_tax(self):
+        """74. 이전 입주자 시기(지금 입주자 입주 전 달)의 납부도 버리지 않고 'former:' 기록으로 보관한다 — 사람·계약 객체를 새로 만들지 않고, 세무 집계에는 들어가며 지금 입주자의 납부·미납에는 나타나지 않는다."""
+        import csv as _csv, io as _io, tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Contract, Pay, Tenant, ledger_csv as lc
+        c = self.client
+        chic = self._login("chic")
+        ct = next(x for x in Contract.all() if x.branch == "main" and x.room_no == "201" and x.status == "ACTIVE")
+        old_move = ct.move_in_date
+        ct.move_in_date = "2026-06-01"                                  # 201호 지금 입주자는 6월부터
+        ct.save(action="t")
+        tenants_before = len(Tenant.all())
+        before_unpaid = c.get("/api/rent3_tenant/myhome/tenant_201", headers=chic).status_code
+        text = lc.export_csv("main", 2026)
+        rows = list(_csv.reader(_io.StringIO(text.lstrip("﻿"))))
+        hi = next(k for k, r in enumerate(rows) if "1월" in r)
+        col3 = rows[hi].index("3월")
+        for r in rows:
+            if r and r[0] == "201":
+                r[col3], r[col3 + 1] = "3. 5", "550,000"
+        buf = _io.StringIO()
+        _csv.writer(buf, lineterminator="\r\n").writerows(rows)
+        text2 = buf.getvalue()
+        body = {"branch": "main", "year": 2026, "csv_text": text2}
+        pv = c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json=body).json()
+        it = next(i for i in pv["items"] if i["room_no"] == "201" and i["ym"] == "2026-03")
+        self.assertEqual((it["status"], it["former"]), ("new", True))
+        self.assertGreaterEqual(pv["counts"]["former"], 1)
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_f_")}):
+            self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json=body).json()["added"], 1)
+            self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json=body).json()["added"], 0)      # 중복 없음
+        p = next(x for x in Pay.all() if x.room_no == "201" and x.billing_month == "2026-03")
+        self.assertEqual((p.id_contract, p.id_tenant, p.payer_name, p.total_amount, p.paid_date), ("former:main:201", "", "이전 입주자", 550000, "2026-03-05"))
+        self.assertEqual(len(Tenant.all()), tenants_before)                                                                   # 임시 임차인 객체를 만들지 않는다
+        self.assertNotIn(p.id, [x["id"] for x in c.get("/api/rent3_tenant/myhome/tenant_201").json()["payments"]])           # 지금 입주자 화면에는 안 나온다
+        self.assertEqual(Contract.get(ct.id).due_for_month("2026-03")["due"], 0)                                               # 지금 계약의 청구·미납에는 영향 없다(입주 전 달)
+        from apps.rent_dist._rent3_core import TaxAndCertificateService as T
+        rep = T.export_annual_tax_csv(branch="main", year=2026)
+        self.assertIn("201", rep)                                                                                              # 세무 집계는 호실·청구월 기준이라 그대로 읽는다
+        p.delete(action="t")
+        ct = Contract.get(ct.id)
+        ct.move_in_date = old_move
+        ct.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

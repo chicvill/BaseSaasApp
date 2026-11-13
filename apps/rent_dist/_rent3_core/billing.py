@@ -937,7 +937,8 @@ class TaxAndCertificateService:
         # (room_no, billing_month) 그룹핑
         grouped_pays: Dict[tuple[str, str], List[Pay]] = {}
         for p in period_pays:
-            ct = ct_by_id.get(p.id_contract) or active_ct_by_room.get(p.room_no)
+            former = (p.id_contract or "").startswith("former:")      # 앞 입주자 시기 납부: 현재 입주자의 사업자 정보를 붙이지 않는다
+            ct = ct_by_id.get(p.id_contract) or (None if former else active_ct_by_room.get(p.room_no))
             tn = tenants_by_id.get(p.id_tenant) or (tenants_by_id.get(ct.id_tenant) if ct else None)
             is_taxable = (
                 bool(ct and (ct.tax_invoice_requested or ct.tenant_business_number or ct.vat_target))
@@ -968,7 +969,7 @@ class TaxAndCertificateService:
             rm = room_by_no.get(r_no)
             ct = (
                 (ct_by_id.get(ym_pays[0].id_contract) if ym_pays else None)
-                or active_ct_by_room.get(r_no)
+                or (None if (ym_pays and (ym_pays[0].id_contract or "").startswith("former:")) else active_ct_by_room.get(r_no))
             )
             tn = (
                 (tenants_by_id.get(ym_pays[0].id_tenant) if ym_pays else None)
