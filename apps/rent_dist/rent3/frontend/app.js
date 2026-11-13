@@ -435,8 +435,14 @@
     $("lnkBackLogin").addEventListener("click", (e) => { e.preventDefault(); switchAuthTab("login"); });
     const body = () => ({
       identifier: $("rsIdent").value.trim(), name: $("rsName").value.trim(),
-      phone: $("rsPhone").value.trim(), birth: $("rsBirth").value.trim(),
+      phone: $("rsPhone").value.trim(), birth: $("rsBirth").value.trim(), proof: ($("rsProof") ? $("rsProof").value.trim() : ""),
     });
+    // 메인 화면의 '비밀번호를 잊으셨나요? 내 페이지 찾기' 링크: 로그인 창을 열고 곧바로 재설정 화면을 보인다
+    document.querySelectorAll(".js-forgot").forEach((a) => a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openAuthModal({ tab: "login" });
+      link.click();
+    }));
     $("btnRsStart").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const r = await Bass.api(APP_ID, "/pool/auth/password-reset/start", { method: "POST", body: body() });
@@ -445,12 +451,23 @@
     });
     $("btnRsConfirm").addEventListener("click", function () {
       Bass.withLock(this, async () => {
+        const newPw = $("rsNew").value;
         const r = await Bass.api(APP_ID, "/pool/auth/password-reset/confirm", {
-          method: "POST", body: { ...body(), code: $("rsCode").value.trim(), new_password: $("rsNew").value } });
+          method: "POST", body: { ...body(), code: $("rsCode").value.trim(), new_password: newPw } });
         Bass.updateAppAlert("success", r.message);
-        $("rsNew").value = ""; $("rsCode").value = "";
-        $("loginIdentifier").value = $("rsIdent").value.trim();
+        const ident = $("rsIdent").value.trim();
+        $("rsNew").value = ""; $("rsCode").value = ""; if ($("rsProof")) $("rsProof").value = "";
+        $("loginIdentifier").value = ident;
         $("loginPassword").value = "";
+        // 본인 확인을 방금 마쳤으므로 새 비밀번호로 곧바로 내 페이지에 들어간다(실패하면 로그인 화면으로)
+        try {
+          const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "" } });
+          const done = await resolveConsent(res);
+          saveSession(done.user, done.token);
+          closeAuthModal();
+          window.location.href = done.redirect_url;
+          return;
+        } catch (_) { /* 자동 입장이 안 되면 아래처럼 로그인 화면에서 직접 들어간다 */ }
         switchAuthTab("login");
       });
     });

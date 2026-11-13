@@ -176,7 +176,8 @@
             <h3>세입자 마이홈 & 공실탐색</h3>
             <p>입주 세입자는 내 호실 납부원장·납입일 D-3 알림·도어락·17% 세액공제 증명서로, 예비임차인은 공실 탐색으로 이동합니다.</p>
           </div>
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="tenant">임차인으로 로그인 →</button>
+          <div><button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="tenant">임차인으로 로그인 →</button>
+          <a href="#" class="js-forgot" style="display:inline-block;padding:12px 4px;font-size:13.5px;font-weight:700;">🔑 비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기</a></div>
         </article>
 
         <article class="or-role-card">
@@ -185,7 +186,8 @@
             <h3>지점 자산 · FIFO 수납 콘솔</h3>
             <p>보유 건물 지점(시크빌·선호·신비 등)으로 자동 연결되어 은행문자 수납, D-3/D+1 납입통보, 중개계약서 등록, 종소세를 관리합니다.</p>
           </div>
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="lessor">임대인으로 로그인 →</button>
+          <div><button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="lessor">임대인으로 로그인 →</button>
+          <a href="#" class="js-forgot" style="display:inline-block;padding:12px 4px;font-size:13.5px;font-weight:700;">🔑 비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기</a></div>
         </article>
 
         <article class="or-role-card">
@@ -263,6 +265,7 @@
             <li><strong>출입·주차·A/S·만기회신 통합</strong>: 도어락 비밀번호, 차량 등록, 사진 수리요청, 만기 6~2개월 전출/연장 회신을 지원합니다.</li>
           </ul>
           <button type="button" class="or-btn or-btn--blue js-role-login" data-role-preset="tenant">🔑 세입자 마이홈 로그인 →</button>
+          <a href="#" class="js-forgot" style="display:inline-block;padding:12px 4px;font-size:13.5px;">🔑 비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기</a>
         </article>
 
         <article id="forLandlordsSection" class="or-pillar">
@@ -277,6 +280,7 @@
           </ul>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="or-btn or-btn--green js-role-login" data-role-preset="lessor">🏢 임대인 콘솔 로그인 →</button>
+            <a href="#" class="js-forgot" style="display:inline-block;padding:12px 4px;font-size:13.5px;">🔑 비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기</a>
             <button type="button" id="btnPillarBroker" class="or-btn or-btn--outline">📸 중개 계약서 사진 등록 →</button>
           </div>
         </article>
@@ -345,12 +349,13 @@
       <!-- 비밀번호 재설정 (본인인증 기반) -->
       <form id="formReset" style="display:none;">
         <div style="font-size:12px; background:#fffbeb; color:#92400e; border:1px solid #fde68a; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🔑 가입 때 <strong>휴대폰 본인인증을 마친 계정</strong>은 실명·생년월일·휴대폰 인증으로 직접 재설정할 수 있습니다. 인증 이력이 없으면 본사에 문의해 임시 비밀번호를 받으세요.
+          🔑 <strong>비밀번호를 잊으셨나요?</strong> 장부에 등록된 <strong>실명·휴대폰</strong>으로 문자 인증번호를 받아 새 비밀번호를 정하면 내 페이지로 들어갈 수 있습니다. 가입 때 본인인증을 마친 계정은 생년월일도 입력합니다. 임대인은 사업자등록번호 또는 계좌번호 끝 4자리도 확인합니다. 등록된 휴대폰이 바뀌었다면 본사에 문의해 임시 비밀번호를 받으세요.
         </div>
         <div class="or-field"><label for="rsIdent">아이디 또는 가입한 휴대폰 번호</label><input id="rsIdent" class="or-input" autocomplete="username"></div>
         <div class="or-field"><label for="rsName">실명</label><input id="rsName" class="or-input"></div>
         <div class="or-field"><label for="rsPhone">휴대폰 번호</label><input id="rsPhone" class="or-input" placeholder="010-0000-0000"></div>
-        <div class="or-field"><label for="rsBirth">생년월일 (6자리 또는 8자리)</label><input id="rsBirth" class="or-input" placeholder="650312"></div>
+        <div class="or-field"><label for="rsBirth">생년월일 (6자리 또는 8자리) <span style="font-weight:400;color:var(--or-muted);">— 가입 때 본인인증을 한 경우만</span></label><input id="rsBirth" class="or-input" placeholder="650312" inputmode="numeric"></div>
+        <div class="or-field"><label for="rsProof">임대인만: 사업자등록번호 또는 계좌번호 끝 4자리 이상</label><input id="rsProof" class="or-input" placeholder="예: 1234" inputmode="numeric" autocomplete="off"></div>
         <div class="or-field" style="display:flex;gap:6px;align-items:center;">
           <button type="button" id="btnRsStart" class="or-btn or-btn--outline or-btn--sm">인증번호 받기</button>
           <input id="rsCode" class="or-input" placeholder="인증번호" style="flex:1;min-width:0;">

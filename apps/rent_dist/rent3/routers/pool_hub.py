@@ -1016,9 +1016,10 @@ class PasswordResetReq(BaseModel):
     identifier: str
     name: str
     phone: str
-    birth: str
+    birth: str = ""
     code: str = ""
     new_password: str = ""
+    proof: str = ""      # 임대인(본인인증 이력이 없는 기존 계정): 사업자등록번호 또는 계좌번호 끝 4자리 이상
 
 
 def _find_account(identifier: str):
@@ -1034,12 +1035,35 @@ def _find_account(identifier: str):
     return None
 
 
+def _recovery_ok(acct: Any, req: PasswordResetReq) -> bool:
+    """본인인증 이력이 없는 기존(이관) 계정의 '내 페이지 찾기': 장부에 적힌 실명·휴대폰과 같아야 하고(문자 인증번호는 그 번호로만 간다),
+    입주 중인 임차인 / 승인된 임대인만 된다. 임대인은 사업자등록번호 또는 계좌번호 끝자리까지 맞아야 한다(임대인 계정은 노출되는 정보가 훨씬 크다)."""
+    if len(_digits(acct.phone)) < 10 or _digits(acct.phone) != _digits(req.phone):
+        return False
+    if fr._norm_name(acct.name) != fr._norm_name(req.name):
+        return False
+    if isinstance(acct, Lessor):
+        if acct.status != "ACTIVE":
+            return False
+        proof = _digits(req.proof)
+        known = [d for d in (_digits(acct.business_number), _digits(acct.account_number)) if len(d) >= 4]
+        return len(proof) >= 4 and any(d.endswith(proof) for d in known)
+    return ql.eligible(acct)
+
+
+def _birth6(req: PasswordResetReq) -> str:
+    return fr.normalize_birth(req.birth) if (req.birth or "").strip() else "000000"
+
+
 def _reset_target(req: PasswordResetReq):
-    """본인인증을 마친 계정이고 입력한 실명·생년월일·휴대폰이 그 인증과 같을 때만 대상. 아니면 None (존재 여부를 알리지 않는다)."""
+    """본인인증 이력이 있는 계정은 입력한 실명·생년월일·휴대폰이 그 인증과 같을 때만 대상(예전과 같음).
+    이력이 없는 기존 계정은 _recovery_ok 규칙(장부의 실명·휴대폰 + 임대인은 추가 확인)으로만 대상. 아니면 None (존재 여부를 알리지 않는다)."""
     acct = _find_account(req.identifier)
-    idn = (acct.identity if acct else None) or {}
-    if not (acct and idn.get("verified")):
+    if acct is None:
         return None
+    idn = acct.identity or {}
+    if not idn.get("verified"):
+        return acct if _recovery_ok(acct, req) else None
     try:
         birth6 = fr.normalize_birth(req.birth)
     except DomainError:
@@ -1052,15 +1076,24 @@ def _reset_target(req: PasswordResetReq):
     return acct if same else None
 
 
+def _reset_keys(req: PasswordResetReq, request: Request) -> List[str]:
+    """시도 제한 키: 아이디별, 접속 주소별, 그리고 휴대폰 번호별(아이디를 바꿔 가며 같은 번호로 문자를 계속 보내게 하는 것을 막는다)."""
+    keys = [f"u:{req.identifier.strip().lower()}", f"ip:{_client_ip(request)}"]
+    ph = _digits(req.phone)
+    if ph:
+        keys.append(f"u:ph{ph}")
+    return keys
+
+
 @router.post("/auth/password-reset/start")
 def password_reset_start(req: PasswordResetReq, request: Request) -> Dict[str, Any]:
     """비밀번호 재설정 1단계: 본인인증 번호 발송. 계정이 있든 없든 같은 응답을 준다."""
     ensure_pool_seeded()
-    keys = [f"u:{req.identifier.strip().lower()}", f"ip:{_client_ip(request)}"]
+    keys = _reset_keys(req, request)
     ratelimit.check("reset", keys)
     ratelimit.fail("reset", keys)  # 인증번호 요청도 횟수로 센다
     if _reset_target(req) is not None:
-        fr.provider(_is_loopback(request)).start(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth))
+        fr.provider(_is_loopback(request)).start(req.name.strip(), req.phone.strip(), _birth6(req))
     return {"success": True, "message": "입력한 정보가 가입 때 본인인증한 정보와 같으면 인증번호를 보냅니다.",
             "hint": "시연용 인증번호는 000000 입니다." if fr.fake_allowed(_is_loopback(request)) else ""}
 
@@ -1069,7 +1102,7 @@ def password_reset_start(req: PasswordResetReq, request: Request) -> Dict[str, A
 def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str, Any]:
     """비밀번호 재설정 2단계: 인증번호 확인 후 새 비밀번호 저장 (해시). 로그인은 새 비밀번호로 다시 해야 한다."""
     ensure_pool_seeded()
-    keys = [f"u:{req.identifier.strip().lower()}", f"ip:{_client_ip(request)}"]
+    keys = _reset_keys(req, request)
     ratelimit.check("reset", keys)
     acct = _reset_target(req)
     try:
@@ -1077,12 +1110,14 @@ def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str,
             raise DomainError("입력한 정보가 본인인증한 정보와 다릅니다.",
                               hint="본인인증을 마친 계정만 직접 재설정할 수 있습니다. 그렇지 않으면 본사에 문의해 주세요.")
         pwd.validate_new_password(req.new_password)
-        fr.provider(_is_loopback(request)).confirm(req.name.strip(), req.phone.strip(), fr.normalize_birth(req.birth), req.code)
+        fr.provider(_is_loopback(request)).confirm(req.name.strip(), req.phone.strip(), _birth6(req), req.code)
     except DomainError:
         ratelimit.fail("reset", keys)
         raise
+    by_record = not (acct.identity or {}).get("verified")
     acct.password = pwd.hash_password(req.new_password.strip())
-    acct.save("password_reset_by_identity", app_source="rent3_portal")
+    acct.save("password_reset_by_recovery" if by_record else "password_reset_by_identity", app_source="rent3_portal")
+    ql.revoke_all(acct)   # 비밀번호를 새로 정하면 이전에 등록한 바로가기·간편 비밀번호는 모두 해제(분실 폰 대비) — 새 비밀번호로 로그인해 다시 만든다
     ratelimit.clear("reset", keys[:1])
     ratelimit.clear("login", [f"u:{req.identifier.strip().lower()}"])
     return {"success": True, "message": "비밀번호를 바꿨습니다. 새 비밀번호로 로그인해 주세요."}

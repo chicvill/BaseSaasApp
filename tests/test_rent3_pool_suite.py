@@ -4830,6 +4830,92 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("VIA_PIN", "pinLimit", "applyPinBar", "btnShortcut", "btnFullLogin", "pinOnly", "PIN_TABS"):
             self.assertIn(needle, lapp, needle)
 
+    def test_79_forgot_password_find_my_page_for_migrated_accounts(self):
+        """79. 비밀번호를 잊은 기존(이관) 임차인·임대인의 '내 페이지 찾기': 본인인증 이력이 없어도 장부의 실명·휴대폰 + 문자 인증으로 새 비밀번호를 정한다.
+        임대인은 사업자번호·계좌번호 끝자리까지, 퇴실·정지·번호 불일치는 거부, 바뀐 뒤 이전 바로가기는 해제, 번호별 시도 제한, 메인 화면 링크."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Tenant, passwords as pwd, quicklogin as ql, ratelimit
+        c, NA = self.client, self.NOAUTH
+        R = "/api/rent3/pool/auth/password-reset"
+        login = lambda ident, pw: c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": ident, "password": pw})
+        t = Tenant.first(room_no="202", branch="main")
+        lsr = Lessor.first(branch="main")
+        old_t = (t.name, t.phone, t.status, t.room_no, dict(t.identity), t.password, t.pin_hash, list(t.quick_devices))
+        old_l = (lsr.name, lsr.phone, lsr.status, dict(lsr.identity), lsr.password, lsr.business_number, lsr.account_number)
+        try:
+            ratelimit.reset_all()
+            with mock.patch.dict(os.environ, {"RENT3_FAKE_IDENTITY": "1"}):
+                # ── 임차인 ──
+                t.phone, t.identity, t.password, t.status, t.room_no = "010-5555-0202", {}, pwd.hash_password("Old#Pass99"), "ACTIVE", "202"
+                t.save(action="t")
+                ql.set_pin(t, "2846")
+                ql.new_device(Tenant.get(t.id), "폰")
+                base = {"identifier": t.id, "name": t.name, "phone": "01055550202", "new_password": "New#Pass99", "code": "000000"}
+                for bad in ({"name": "다른사람"}, {"phone": "01099990000"}, {"code": "111111"}, {"new_password": "1212"}):
+                    self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**base, **bad}).status_code, 400, bad)
+                self.assertEqual(login(t.id, "Old#Pass99").status_code, 200)                 # 거부된 시도는 아무것도 바꾸지 않았다
+                ratelimit.reset_all()
+                self.assertEqual(c.post(f"{R}/start", headers=NA, json=base).status_code, 200)
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json=base).status_code, 200)
+                self.assertEqual(login(t.id, "Old#Pass99").status_code, 401)
+                self.assertEqual(login(t.id, "New#Pass99").status_code, 200)
+                after = Tenant.get(t.id)
+                self.assertEqual((after.pin_hash, after.quick_devices), ("", []))             # 이전 바로가기·간편 비밀번호는 해제
+                # 퇴실한 임차인은 거부
+                ratelimit.reset_all()
+                after.status = "MOVED_OUT"
+                after.save(action="t")
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**base, "new_password": "Third#Pass9"}).status_code, 400)
+                # 번호별 시도 제한: 아이디를 바꿔 가며 같은 번호로 인증번호를 계속 요청해도 막힌다
+                ratelimit.reset_all()
+                codes = [c.post(f"{R}/start", headers=NA, json={**base, "identifier": f"nobody{i}"}).status_code for i in range(8)]
+                self.assertIn(429, codes)
+                # ── 임대인: 사업자번호·계좌번호 끝자리 필수 ──
+                ratelimit.reset_all()
+                lsr.phone, lsr.identity, lsr.status = "010-6666-0001", {}, "ACTIVE"
+                lsr.password, lsr.business_number, lsr.account_number = pwd.hash_password("Old#Pass99"), "123-45-67890", "110-123-456789"
+                lsr.save(action="t")
+                lb = {"identifier": lsr.username or lsr.id, "name": lsr.name, "phone": "01066660001", "new_password": "New#Pass99", "code": "000000"}
+                for proof in ("", "12", "0000", "9999"):
+                    self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": proof}).status_code, 400, proof)
+                self.assertEqual(login(lb["identifier"], "Old#Pass99").status_code, 200)
+                ratelimit.reset_all()
+                self.assertEqual(c.post(f"{R}/start", headers=NA, json={**lb, "proof": "7890"}).status_code, 200)
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": "7890"}).status_code, 200)
+                self.assertEqual(login(lb["identifier"], "New#Pass99").status_code, 200)
+                # 정지된 임대인은 거부
+                ratelimit.reset_all()
+                l2 = Lessor.get(lsr.id)
+                l2.status = "SUSPENDED"
+                l2.save(action="t")
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": "6789", "new_password": "Third#Pass9"}).status_code, 400)
+        finally:
+            ratelimit.reset_all()
+            t = Tenant.get(t.id)
+            (t.name, t.phone, t.status, t.room_no, t.identity, t.password, t.pin_hash, t.quick_devices) = old_t
+            t.save(action="t")
+            lsr = Lessor.get(lsr.id)
+            (lsr.name, lsr.phone, lsr.status, lsr.identity, lsr.password, lsr.business_number, lsr.account_number) = old_l
+            lsr.save(action="t")
+        html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "index.html"), encoding="utf-8").read()
+        js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertEqual(html.count("js-forgot"), 4)                                          # 임차인·임대인 로그인 카드 2 + 소개 구역 2
+        for needle in ("rsProof", "내 페이지 찾기"):
+            self.assertIn(needle, html, needle)
+        for needle in (".js-forgot", "proof:"):
+            self.assertIn(needle, js, needle)
+
+    def test_80_portal_forgot_links_and_auto_enter(self):
+        """80. 메인 홈: 임차인·임대인 로그인 옆과 소개 구역에 '비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기' 링크, 재설정 직후 새 비밀번호로 자동 입장."""
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
+        html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        self.assertGreaterEqual(html.count("js-forgot"), 4)                  # 역할 카드 2 + 소개 구역 2
+        self.assertIn("본인 확인으로 내 페이지 찾기", html)
+        i = app.index('"/pool/auth/password-reset/confirm"')
+        self.assertIn("/pool/auth/login", app[i:i + 1600])                    # 재설정 직후 새 비밀번호로 곧바로 로그인
+        self.assertIn("resolveConsent", app[i:i + 1600])                      # 동의 화면이 필요하면 그대로 거친다
+
 
 if __name__ == "__main__":
     unittest.main()
