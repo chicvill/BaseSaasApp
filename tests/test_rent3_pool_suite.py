@@ -4473,6 +4473,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             html = open(os.path.join(ROOT, "apps", "rent_dist", app, "frontend", "index.html"), encoding="utf-8").read()
             self.assertIn("/shared/ui/rent3_mobile.css", html, app)
 
+    def test_72_portal_auto_enter_when_logged_in(self):
+        """72. 이미 로그인한 임대인·임차인·관리인은 포털 첫 화면 대신 내 업무 화면으로 바로 들어간다(만료 토큰·?login=1·?logout=1·?home=1 은 제외). 전환 안내는 없고 ☰ 포털 홈은 ?home=1."""
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        app = rd("apps", "rent_dist", "rent3", "frontend", "app.js")
+        for needle in ("autoEnter", 'urlParams.get("home") === "1"', "window.location.replace(u.redirect_url)", 'strip.style.display = "none"', "p.exp * 1000"):
+            self.assertIn(needle, app, needle)
+        self.assertNotIn('strip.style.display = "block"', app)
+        self.assertIn("/rent3/?home=1", rd("shared_ui", "r3_shell.js"))
+        self.assertIn("/rent3/?home=1", rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html"))
+
 
 if __name__ == "__main__":
     unittest.main()

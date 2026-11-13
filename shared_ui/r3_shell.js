@@ -56,7 +56,7 @@
       g.items.forEach(function (it) { html += itemHtml(it); });
     });
     // 서랍 맨 아래: 어느 앱에서나 포털 홈으로 가거나 로그아웃할 수 있게 한다(공유 휴대폰에서 꼭 필요)
-    html += '<div class="r3-drawer__group">계정</div><a href="/rent3/">🌐 포털 홈</a><a href="/rent3/?logout=1">🚪 로그아웃</a>';
+    html += '<div class="r3-drawer__group">계정</div><a href="/rent3/?home=1">🌐 포털 홈</a><a href="/rent3/?logout=1">🚪 로그아웃</a>';
     drawer.insertAdjacentHTML("beforeend", html);
   }
 

@@ -99,7 +99,7 @@
       $("navUserBadge").textContent = `${roleIcon(user.role)} ${user.name} · 본인인증됨`;
       $("navGoWorkspace").href = user.redirect_url;
 
-      strip.style.display = "block";
+      strip.style.display = "none";    // '다른 계정으로 전환' 안내는 두지 않는다 — 로그아웃 후 다른 아이디로 로그인
       $("activeSessionText").innerHTML =
         `🛡️ <strong>${esc(user.name)}</strong>님(<code>${esc(user.role_label || user.role)}</code> · 본인인증 완료)으로 로그인되어 있습니다. 역할 전용 워크스페이스 또는 공동계약 호출 화면으로 바로 이동할 수 있습니다.`;
       $("stripGoBtn").href = user.redirect_url;
@@ -790,6 +790,20 @@
     window.history.replaceState({}, "", window.location.pathname);
     Bass.updateAppAlert("success", "로그아웃되어 OpenRent 직거래 포털 홈으로 이동했습니다.");
   }
+
+  // 이미 로그인되어 있으면 포털 첫 화면 대신 내 업무 화면(임대인=내 건물, 임차인=내 집, 관리인=관리인 앱)으로 바로 들어간다.
+  // 다른 건물·계정으로 가려면 로그아웃 후 그 아이디로 다시 로그인한다. 포털 홈을 일부러 보려면 ?home=1.
+  (function autoEnter() {
+    const u = getSession();
+    const tok = Bass.token();
+    if (!u || !u.redirect_url || !tok || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1") return;
+    if (!["lessor", "tenant", "admin", "superadmin"].includes(u.role)) return;
+    try {
+      const p = JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
+      if (!(p.exp * 1000 > Date.now() + 30000)) return;       // 만료된 로그인은 들어가지 않고 포털에서 다시 로그인
+    } catch (_) { return; }
+    window.location.replace(u.redirect_url);
+  })();
 
   renderSessionUI();
   bindPasswordReset();
