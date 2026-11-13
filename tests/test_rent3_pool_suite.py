@@ -4984,6 +4984,61 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("/pool/connect/request", "/pool/connect/status", "rent3_connect_req", "find=1"):
             self.assertIn(needle, pj, needle)
 
+    def test_82_admin_test_tenant_registration(self):
+        """82. 관리인 앱 '시험 임차인 등록': 점검은 아무것도 안 바꾸고, 등록은 백업 후 0원 계약(미납 0, 비공개)을 만들며, 재실행은 그대로·다른 임차인이 있는 호실은 멈춤·호실 한도 초과는 확인 후에만·임대인은 403."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, Lessor
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        url = "/api/rent3_admin/accounts/test-tenant"
+        body = {"branch": "main", "room_no": "799", "name": "시험김", "phone": "010-1234-0799"}
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            self.assertIn(c.post(url, headers=chic, json=body).status_code, (401, 403))                 # 임대인은 못 한다
+            n_rooms = len(Room.find(branch="main"))
+            dry = c.post(url, headers=admin, json=body).json()
+            self.assertEqual(dry["status"], "DRY")
+            self.assertEqual(len(Room.find(branch="main")), n_rooms)                                    # 점검은 바꾸지 않는다
+            # 한도 초과: 확인(한도 올리기) 없이는 멈춘다
+            lsr.room_limit = n_rooms
+            lsr.save(action="t")
+            blocked = c.post(url, headers=admin, json={**body, "apply": True}).json()
+            self.assertEqual((blocked["status"], blocked.get("need_raise_limit")), ("BLOCKED", True))
+            self.assertEqual(len(Room.find(branch="main")), n_rooms)
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_tt_")}):
+                done = c.post(url, headers=admin, json={**body, "apply": True, "raise_limit": True}).json()
+                self.assertEqual(done["status"], "DONE", done)
+                self.assertTrue(done["backup"].endswith(".tar.gz"))                                     # 등록 전 자동 백업
+                self.assertEqual(done["unpaid"], 0)
+                r = Room.first(branch="main", room_no="799")
+                self.assertFalse(r.is_published)                                                        # 공개 매물에 안 나온다
+                self.assertEqual((r.deposit, r.monthly_rent, r.maintenance_fee), (0, 0, 0))
+                self.assertEqual(Lessor.get(lsr.id).room_limit, n_rooms + 1)
+                again = c.post(url, headers=admin, json={**body, "apply": True}).json()
+                self.assertEqual(again["status"], "EXISTS")                                             # 재실행은 그대로
+                self.assertEqual(len(Room.find(branch="main")), n_rooms + 1)
+                other = c.post(url, headers=admin, json={**body, "phone": "010-9999-0000", "apply": True}).json()
+                self.assertEqual(other["status"], "BLOCKED")                                            # 다른 임차인이 있는 호실은 건드리지 않는다
+            # 만든 임차인이 연결 요청 흐름에 그대로 들어간다
+            q = c.post("/api/rent3/pool/connect/request", headers=self.NOAUTH, json={"building_name": "시크빌", "room_no": "799", "name": "시험김", "phone": "01012340799"})
+            self.assertEqual(q.status_code, 200, q.text)
+        finally:
+            from apps.rent_dist._rent3_core.ops import ConnectRequest
+            for x in ConnectRequest.all():
+                x.delete(action="t")
+            for cls, oid in ((Contract, "ct_main_799"), (Tenant, "tenant_main_799"), (Room, "room_main_799")):
+                o = cls.get(oid)
+                if o:
+                    o.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnTtCheck", "btnTtApply", "/accounts/test-tenant", "시험 임차인 등록"):
+            self.assertIn(needle, adm, needle)
+
 
 if __name__ == "__main__":
     unittest.main()

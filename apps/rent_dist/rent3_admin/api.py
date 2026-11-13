@@ -311,6 +311,24 @@ def revoke_shortcuts(req: InviteIssueReq):
     return {"success": True, "message": f"{t.name}님의 바로가기 {n}대와 간편 비밀번호를 해제했습니다."}
 
 
+class TestTenantReq(BaseModel):
+    branch: str = "main"
+    room_no: str = "701"
+    name: str = "민흥식"
+    phone: str = "010-3269-3343"
+    apply: bool = False
+    raise_limit: bool = False
+
+
+@router.post("/accounts/test-tenant", dependencies=ADMIN_ONLY)
+def test_tenant(req: TestTenantReq):
+    """시험·실사용 확인용 임차인 호실 등록(기본 시크빌 701호 민흥식, 0원 계약). apply=False 는 점검만, True 는 등록(등록 전 자동 백업, 중복 없음)."""
+    from apps.rent_dist._rent3_core import testtenant as tt
+    ensure_pool_seeded()
+    out = tt.register(req.branch.strip() or "main", req.room_no, req.name, req.phone, apply=req.apply, raise_limit=req.raise_limit)
+    return {"success": out["status"] != "BLOCKED", "level": "warning" if out["status"] == "BLOCKED" else "success", **out}
+
+
 @router.get("/backups", dependencies=ADMIN_ONLY)
 def list_backups():
     from apps.rent_dist._rent3_core import backup as bk

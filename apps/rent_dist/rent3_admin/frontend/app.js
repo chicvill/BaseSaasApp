@@ -432,7 +432,35 @@
           <button id="btnOpsTemp" class="bass-btn" type="button" style="min-height:44px;">임시 비밀번호 발급</button>
           <button id="btnOpsRevoke" class="bass-btn" type="button" style="min-height:44px;">📵 분실 폰 바로가기 전체 해제</button></div>
         <div id="opsResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
+      </div>
+      <div class="bass-card" style="margin-top:14px;">
+        <h3>🧪 시험 임차인 등록</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">실사용 확인용으로 호실 하나와 <strong>0원 계약</strong> 임차인을 등록합니다(공개 매물에는 나오지 않음). 먼저 <strong>점검</strong>으로 확인한 뒤 <strong>등록</strong>하세요 — 등록 전에 풀 전체를 자동 백업하고, 같은 호실·임차인이 있으면 아무것도 만들지 않습니다.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <input id="ttBranch" class="bass-input" value="main" placeholder="지점 코드 (예: main)" aria-label="지점 코드" style="min-height:44px;">
+          <input id="ttRoom" class="bass-input" value="701" placeholder="호실" aria-label="호실" inputmode="numeric" style="min-height:44px;">
+          <input id="ttName" class="bass-input" value="민흥식" placeholder="성함" aria-label="성함" style="min-height:44px;">
+          <input id="ttPhone" class="bass-input" value="010-3269-3343" placeholder="휴대폰" aria-label="휴대폰" inputmode="tel" style="min-height:44px;">
+        </div>
+        <label style="display:block;min-height:44px;padding:10px 0;font-size:13.5px;"><input id="ttRaise" type="checkbox"> 호실 한도가 모자라면 한 칸 올리기</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="btnTtCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
+          <button id="btnTtApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 등록</button></div>
+        <div id="ttResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
       </div>`;
+    const ttRun = (apply) => async function () {
+      Bass.withLock(this, async () => {
+        const body = { branch: document.getElementById("ttBranch").value.trim(), room_no: document.getElementById("ttRoom").value.trim(),
+          name: document.getElementById("ttName").value.trim(), phone: document.getElementById("ttPhone").value.trim(), apply, raise_limit: document.getElementById("ttRaise").checked };
+        if (apply && !window.confirm(`${body.room_no}호 ${body.name}님(0원 계약)을 등록합니다. 등록 전에 자동 백업합니다. 계속할까요?`)) return;
+        const r = await Bass.api(APP_ID, "/accounts/test-tenant", { method: "POST", body });
+        const color = r.status === "BLOCKED" ? "var(--warn)" : "var(--ok)";
+        document.getElementById("ttResult").innerHTML = `<span style="color:${color};font-weight:800;">${{ DRY: "점검 결과", EXISTS: "이미 있음", BLOCKED: "멈춤", DONE: "등록 완료" }[r.status] || ""}</span><br>${Bass.escapeHtml(r.head || "")}<br>${Bass.escapeHtml(r.message)}${r.status === "DONE" ? "<br><strong>서버는 등록한 풀을 바로 사용합니다.</strong> 이제 포털 '연결 요청'에서 이 정보로 접수할 수 있습니다." : ""}`;
+        if (r.status === "DONE") Bass.updateAppAlert("success", r.message);
+      });
+    };
+    document.getElementById("btnTtCheck").addEventListener("click", ttRun(false));
+    document.getElementById("btnTtApply").addEventListener("click", ttRun(true));
     document.getElementById("btnBkRun").addEventListener("click", function () {
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
