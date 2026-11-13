@@ -23,7 +23,7 @@ try {
   await A.eval(`(() => { const s = document.getElementById("roomPick"); s.value = ${JSON.stringify(room)}; s.dispatchEvent(new Event("change", { bubbles: true })); return 1; })()`);
   await sleep(600);
   await snap(A, "1_호실카드", `${room}호 선택`);
-  for (const [act, name] of [["pay", "2_수납내역"], ["contract", "3_계약내용"], ["expiry", "4_만기통보"], ["moveout", "5_전출"]]) {
+  for (const [act, name] of [["contract", "3_계약내용"], ["expiry", "4_만기통보"], ["moveout", "5_전출"]]) {
     await click(`[data-act="${act}"]`); await sleep(900);
     await snap(A, name, act);
     await A.eval(`document.querySelector(".r3-modal__x") && document.querySelector(".r3-modal__x").click()`); await sleep(300);

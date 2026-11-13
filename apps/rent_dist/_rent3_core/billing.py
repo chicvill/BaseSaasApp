@@ -64,12 +64,14 @@ class SmsDepositParser:
         if m_room:
             room_no = m_room.group(1)
         else:
-            m_room2 = re.search(r"(?:[가-힣]{2,4})\s*([1-9]\d{2})(?:\D|$)", s)
-            if m_room2:
-                room_no = m_room2.group(1)
+            # 이름 바로 뒤 3자리 호수(예: '홍길동201'). 금액(440,000원)의 앞자리나 '입금 440,000' 같은 말을 호실로 읽지 않는다
+            for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", s):
+                if m_room2.group(1) not in {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}:
+                    room_no = m_room2.group(2)
+                    break
 
         # 4) 입금자 성명 추출 (은행/입금/승인/잔액 키워드 제외 한글 2~4자)
-        ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업"}
+        ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}
         kor_tokens = re.findall(r"[가-힣]{2,4}", before_balance)
         payer_name = next((tok for tok in kor_tokens if tok not in ignore_words), "입금자")
 

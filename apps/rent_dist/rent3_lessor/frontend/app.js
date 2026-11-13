@@ -252,7 +252,7 @@
     .rc-title span { font-size: 15px; margin-left: 4px; }
     .rc-unpaid { font-weight: 800; font-size: 14px; color: var(--ok); }
     .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
-    .rc-btns { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+    .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
     .rc-info { font-size: 13px; line-height: 1.7; }
@@ -267,6 +267,7 @@
     document.head.appendChild(st);
   })();
   let selRoomNo = params.get("room") || "";   // 관리인 원격 지원 카드가 호실을 지정해서 들어온다
+  let payFlash = null;     // 방금 문자로 수납한 결과 안내({no, text}) — 그 호실의 수납 화면 맨 위에 한 번 보인다
   const receiptMsg = {};   // 호실 → 임차인에게 보낼 문자 초안(수납 직후 영수 문구)
 
   const roomOf = (no) => (dash.rooms || []).find((x) => x.room_no === no);
@@ -341,8 +342,8 @@
     }).catch(Bass.showError);
   }
 
-  // ① 수납내역: 알림문자 붙여넣기 · 직접수납 · 월별 납부 내역(날짜·금액 고치기)
-  function showPayModal(no) {
+  // ① 수납내역(호실 카드 아래에 항상 펼쳐 둔다): 직접 수납(현금 등) · 월별 납부 내역(날짜·금액 고치기) · 수납확인 메시지
+  function renderPayInline(no) {
     const r = roomOf(no);
     if (!r || !r.ledger) return;
     const lg = r.ledger;
@@ -379,30 +380,34 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;"><input type="number" class="bass-input nt-amt" value="${n.amount}" style="width:120px;" aria-label="실제 입금액">
         <button class="bass-btn bass-btn--sm bass-btn--primary nt-ok" type="button" style="min-height:44px;">✅ 입금 확인·수납</button>
         <button class="bass-btn bass-btn--sm nt-no" type="button" style="min-height:44px;">반려</button></div></div>`).join("");
-    const body = openModal(`💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역`, `
+    const host = document.getElementById("payInline");
+    if (!host) return;
+    const flashHtml = payFlash && payFlash.no === no ? `<div style="padding:10px 12px;margin-bottom:10px;border-radius:12px;background:rgba(34,197,94,.16);border:1px solid var(--ok);font-size:14px;line-height:1.5;">✅ ${Bass.escapeHtml(payFlash.text)}<br><span class="bass-muted" style="font-size:13px;">아래 월별 내역을 확인하고, 맨 아래 <strong>수납확인 메시지</strong>를 임차인에게 보내세요.</span></div>` : "";
+    host.innerHTML = `
+      <div style="font-weight:800;font-size:16px;margin-bottom:8px;">💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역</div>
+      ${flashHtml}
       ${noticeHtml}
-      <label class="r3-lbl">입금 알림문자 붙여넣기</label>
-      <textarea id="pmSms" class="bass-input" rows="2" placeholder="[은행] 10/28 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} ${(defAmt).toLocaleString("ko-KR")}원 입금"></textarea>
+      <label class="r3-lbl">직접 수납 (현금 등 은행 문자가 없는 경우)</label>
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px;">
-        <button id="pmParse" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="flex:1 1 100%;">⚡ 문자 읽고 수납</button>
         <input id="pmAmt" class="bass-input" type="number" style="width:112px;" value="${defAmt}" aria-label="직접 수납액">
-        <button id="pmDirect" class="bass-btn bass-btn--sm" type="button">💰 직접수납</button>
+        <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
       </div>
       <div class="r3-lbl">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span></div>
       <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>
       <label class="r3-lbl" style="margin-top:12px;">임차인에게 보낼 메시지</label>
       ${msgOf("pmMsg", draft)}
-      <button id="pmCopy" class="bass-btn bass-btn--sm" type="button" style="margin-top:6px;">📋 복사 → 임차인 문자창</button>`);
+      <button id="pmCopy" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 수납확인 메시지 복사 → 임차인 문자창</button>`;
+    const body = host;
 
     const after = async (res) => {
       Bass.updateAppAlert(res.level || "success", res.message);
       const pay = res.payment || {};
       const rn = pay.room_no || no;
       receiptMsg[rn] = receiptText(pay, (res.ledger && res.ledger.total_unpaid) || 0);
+      payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})` };
       selRoomNo = rn;
       await refresh();
-      showPayModal(rn);
     };
     body.querySelectorAll("[data-notice]").forEach((card) => {
       const id = card.dataset.notice;
@@ -419,16 +424,7 @@
           const res = await Bass.api(APP_ID, `/transfer-notices/${encodeURIComponent(id)}/reject`, { method: "POST", body: { branch: currentBranch, reason: why } });
           Bass.updateAppAlert("success", res.message);
           await refresh();
-          showPayModal(no);
         });
-      });
-    });
-    $m("pmParse").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        let t = $m("pmSms").value.trim();
-        if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
-        if (!/\d{3,4}\s*호/.test(t)) t += ` ${no}호`;
-        await after(await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t } }));
       });
     });
     $m("pmDirect").addEventListener("click", function () {
@@ -452,7 +448,6 @@
             Bass.updateAppAlert("success", res.message);
             delete receiptMsg[no];
             await refresh();
-            showPayModal(no);
           });
         });
       }
@@ -470,7 +465,6 @@
           Bass.updateAppAlert("success", res.message);
           delete receiptMsg[no];
           await refresh();
-          showPayModal(no);
         }).catch(() => {});
       }));
     });
@@ -926,7 +920,6 @@
     const bs = r.billing_schedule;
     box.innerHTML = `<div class="room-card" style="${need ? "border-color:var(--warn);" : ""}">
       <div class="rc-btns">
-        <button class="bass-btn bass-btn--sm" data-act="pay" type="button">수납내역</button>
         <button class="bass-btn bass-btn--sm" data-act="contract" type="button">계약내용</button>
         <button class="bass-btn bass-btn--sm ${need ? "rc-warn" : ""}" data-act="expiry" type="button">만기통보</button>
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
@@ -937,9 +930,11 @@
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
-      </div></div>`;
-    const acts = { pay: showPayModal, contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts };
+      </div></div>
+      <div id="payInline" class="room-card" style="margin-top:10px;"></div>`;
+    const acts = { contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
+    renderPayInline(r.room_no);      // 호실을 고르면 그 호실의 수납 내용이 바로 펼쳐진 채로 열린다
   }
 
   function renderLedgerTab() {
@@ -953,30 +948,59 @@
       const who = x.is_occupied && x.contract ? ` ${x.contract.tenant_name || ""}` : " 공실";
       return `<option value="${Bass.escapeHtml(x.room_no)}" ${x.room_no === selRoomNo ? "selected" : ""}>${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}${n > 0 ? ` · 미납 ${n}` : ""}</option>`;
     };
-    // 지금 챙길 일: 임차인이 이체했다고 알린 건, 미납 호실(많이 밀린 순). 누르면 그 호실의 수납내역이 바로 열린다.
+    // 지금 챙길 일: 임차인이 이체했다고 알린 건(바로 보임), 미납 호실(접어 두었다가 눌러 펼친다, 많이 밀린 순)
     const lateRows = rooms.filter((x) => x.is_occupied && x.contract && unpaidCount(x) > 0)
       .sort((a, b) => ((b.ledger && b.ledger.total_unpaid) || 0) - ((a.ledger && a.ledger.total_unpaid) || 0));
     const pend = dash.transfer_notices || [];
-    const todoHtml = (pend.length || lateRows.length) ? `
-      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;">
-        ${pend.length ? `<div style="font-weight:800;font-size:14px;margin-bottom:6px;">📨 이체 확인 요청 ${pend.length}건</div>${pend.map((n) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(n.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;border-color:var(--warn);">${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} · ${fmtWon(n.amount)} 이체했다고 알림 → 확인하기</button>`).join("")}` : ""}
-        ${lateRows.length ? `<div style="font-weight:800;font-size:14px;margin:${pend.length ? "8px" : "0"} 0 6px;">⚠️ 미납 호실 ${lateRows.length}곳</div><div style="max-height:34vh;overflow-y:auto;">${lateRows.map((x) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(x.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;"><span>${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.contract.tenant_name || "")}</span><span style="color:var(--err);font-weight:800;white-space:nowrap;">${unpaidCount(x)}개월 · ${fmtWon((x.ledger && x.ledger.total_unpaid) || 0)}</span></button>`).join("")}</div>` : ""}
+    const pendHtml = pend.length ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
+        <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📨 이체 확인 요청 ${pend.length}건</div>
+        ${pend.map((n) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(n.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;border-color:var(--warn);">${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} · ${fmtWon(n.amount)} 이체했다고 알림 → 확인하기</button>`).join("")}
       </div>` : "";
+    const lateHtml = lateRows.length ? `
+      <details id="lateBox" class="bass-card" style="padding:0;margin-top:12px;">
+        <summary style="cursor:pointer;min-height:52px;padding:14px 14px;font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px;">⚠️ 미납 호실 ${lateRows.length}곳 <span class="bass-muted" style="font-weight:500;">눌러서 펼치기</span></summary>
+        <div style="padding:0 10px 10px;max-height:44vh;overflow-y:auto;">${lateRows.map((x) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(x.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;"><span>${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.contract.tenant_name || "")}</span><span style="color:var(--err);font-weight:800;white-space:nowrap;">${unpaidCount(x)}개월 · ${fmtWon((x.ledger && x.ledger.total_unpaid) || 0)}</span></button>`).join("")}</div>
+      </details>` : "";
     elTabContent.innerHTML = `
+      <div class="bass-card" style="padding:12px;margin-bottom:12px;">
+        <label class="r3-lbl" for="bankSms" style="margin:0 0 6px;font-weight:800;">🏦 은행 입금 문자 붙여넣기 <span class="bass-muted" style="font-weight:500;">— 호실·입금자 이름으로 호실을 자동으로 찾습니다</span></label>
+        <textarea id="bankSms" class="bass-input" rows="2" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
+        <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
+      </div>
+      ${pendHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <label class="r3-lbl" for="roomPick" style="margin:0;white-space:nowrap;">호실 선택</label>
         <select id="roomPick" class="bass-select" style="flex:1;min-width:0;font-size:18px;font-weight:700;min-height:48px;">${rooms.map(opt).join("")}</select>
       </div>
       <div id="roomPanel"></div>
-      <div style="margin-top:12px;">${todoHtml}</div>
+      ${lateHtml}
     `;
-    document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; renderRoomPanel(); });
-    elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => {
-      selRoomNo = b.dataset.room;
-      document.getElementById("roomPick").value = selRoomNo;
+    document.getElementById("roomPick").addEventListener("change", (e) => { selRoomNo = e.target.value; payFlash = null; renderRoomPanel(); });
+    const goRoom = (no) => {
+      selRoomNo = no;
+      document.getElementById("roomPick").value = no;
       renderRoomPanel();
-      showPayModal(selRoomNo);
-    }));
+      document.getElementById("roomPick").scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
+    // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 메시지를 보낸다
+    document.getElementById("bankSmsGo").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const t = document.getElementById("bankSms").value.trim();
+        if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
+        const res = await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t } });
+        Bass.updateAppAlert(res.level || "success", res.message);
+        const pay = res.payment || {};
+        const rn = pay.room_no || selRoomNo;
+        receiptMsg[rn] = receiptText(pay, (res.ledger && res.ledger.total_unpaid) || 0);
+        payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})` };
+        selRoomNo = rn;
+        await refresh();
+        const pi = document.getElementById("roomPick");
+        if (pi) pi.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
     renderRoomPanel();
   }
 

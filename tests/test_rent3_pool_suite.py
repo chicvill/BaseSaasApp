@@ -4599,6 +4599,29 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         ct.move_in_date = old_move
         ct.save(action="t")
 
+    def test_75_lessor_first_screen_bank_sms_flow(self):
+        """75. 임대인 첫 화면: 은행 문자 입력창이 호실 선택 밖에 있고(호실·이름으로 자동 매칭), 선택한 호실의 수납 내용이 펼쳐진 채로 열리며, 미납 호실은 접혀 있다가 눌러서 펼친다."""
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        i_sms, i_pick = app.index('id="bankSms"'), app.index('id="roomPick"')
+        self.assertLess(i_sms, i_pick)                                          # 문자 입력이 호실 선택보다 위
+        self.assertLess(app.index('<div id="roomPanel">'), app.index('${lateHtml}'))              # 미납 목록은 맨 아래
+        for needle in ("bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금 등", "수납확인 메시지 복사"):
+            self.assertIn(needle, app, needle)
+        for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
+            self.assertNotIn(gone, app, gone)
+        # 서버는 호실 번호가 없는 문자도 입금자 이름으로 호실을 찾는다
+        from apps.rent_dist._rent3_core.billing import SmsDepositParser as P
+        for text, room, name in (("[신한] 11/13 440,000원 입금 안동기", "", "안동기"),                      # 금액 앞자리(440)를 호실로 읽지 않는다
+                                 ("[Web발신] 신한 11/13 13:20 입금 440,000원 안동기 202호", "202", "안동기"),
+                                 ("안동기202 440,000원", "202", "안동기"),
+                                 ("[KB] 11/13 홍길동 301 입금 290,000원 잔액 1,200,000원", "301", "홍길동")):
+            got = P.parse(text)
+            self.assertEqual((got["room_no"], got["payer_name"]), (room, name), text)
+        c = self.client
+        r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
+        self.assertIn(r.status_code, (400, 404))
+        self.assertIn("호실", r.json()["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

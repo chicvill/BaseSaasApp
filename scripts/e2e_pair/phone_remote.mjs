@@ -38,7 +38,7 @@ try {
   check(await A.eval(`!document.getElementById("btnSupportChat")`), "관리인 화면에는 '관리인에게 문의' 메뉴 없음");
   await snap(A, "3_대리접속_임대인앱", "임대인 앱에 관리인이 들어온 모습(위 띠)");
   // 보기 전용: 수납 입력은 서버가 막는다
-  await A.eval(`document.querySelector('[data-act="pay"]').click()`); await sleep(1000);
+  await sleep(1000);   // 수납 내용은 호실 카드 아래에 이미 펼쳐져 있다
   await A.eval(`document.getElementById("pmDirect").click()`); await sleep(1500);
   const msg = await A.eval(`(document.querySelector(".bass-alert__msg") || {}).innerText || ""`);
   check(/보기 전용/.test(msg), `수납 입력 시도는 막힘: ${msg}`);
