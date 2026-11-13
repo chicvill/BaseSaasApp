@@ -4753,6 +4753,83 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             l.pin_hash, l.quick_devices = "", []
             l.save(action="t")
 
+    def test_78_lessor_pin_pay_toggle_cap_and_screens(self):
+        """78. 임대인 PIN 2~3단계: 기기별 '수납 허용'(비밀번호 재확인), 허용 기기만 수납(추가만·수정/삭제 불가), 하루 25건·1,000만 원 한도,
+        대시보드 pin 정보, 바로가기 PIN 우선(임대인 페이지는 비밀번호 로그인이 남아 있어도 PIN 먼저), 화면 제한 코드."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Pay, Contract, quicklogin as ql
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic = self._login("chic")
+        lid = Lessor.first(branch="main").id
+        ct = next(x for x in Contract.all() if x.branch == "main" and x.status == "ACTIVE" and x.room_no == "201")
+        monthly = ct.monthly_rent + ct.maintenance_fee + ct.compute_vat()
+        try:
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d1 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "폰"}).json()
+                dev = d1["device"]["id"]
+                ok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d1["qk"], "pin": "2846"}).json()
+                pin = {"Authorization": f"Bearer {ok['token']}"}
+                dash = c.get(f"{LS}/dashboard?branch=main", headers=pin).json()
+                self.assertEqual((dash["pin"]["via_pin"], dash["pin"]["pay_ok"]), (True, False))
+                self.assertFalse(c.get(f"{LS}/dashboard?branch=main", headers=chic).json()["pin"]["via_pin"])
+                n0 = len(Pay.all())
+                # 수납 허용 전: 문자·직접·이체 확인 모두 403
+                sms = f"[신한] 11/13 201호 {ct.tenant_name} {monthly:,}원 입금"
+                for path, body in (("/payments/sms-paste", {"branch": "main", "sms_text": sms}),
+                                   ("/payments/collect", {"branch": "main", "room_no": "201", "amount": monthly}),
+                                   ("/transfer-notices/x/confirm", {"branch": "main"})):
+                    self.assertEqual(c.post(f"{LS}{path}", headers=pin, json=body).status_code, 403, path)
+                self.assertEqual(len(Pay.all()), n0)
+                # 켜기: PIN 토큰으로는 못 바꾼다 · 비밀번호가 틀리면 거부 · 맞으면 켜진다
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=pin, json={"allow": True, "password": "1212"}).status_code, 403)
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": True, "password": "틀린비번99"}).status_code, 401)
+                r = c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": True, "password": "1212"})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertTrue(r.json()["devices"][0]["pay_ok"])
+                self.assertTrue(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["pay_ok"])
+                # 허용 기기: 문자 수납 가능 + 한도 기록, 수정·삭제는 여전히 403
+                r = c.post(f"{LS}/payments/sms-paste", headers=pin, json={"branch": "main", "sms_text": sms})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertEqual(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["left_n"], 24)
+                paid = Pay.get(r.json()["payment"]["id"])
+                self.assertEqual(paid.total_amount, monthly)
+                for path in ("/payments/delete", "/payments/edit", "/contracts/edit"):
+                    self.assertEqual(c.post(f"{LS}{path}", headers=pin, json={"branch": "main", "pay_id": paid.id}).status_code, 403, path)
+                # 한도: 금액(1,000만 원 초과)·건수(25건) 초과는 403, 한도 안내 문구
+                big = c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 10_000_001})
+                self.assertEqual(big.status_code, 403)
+                self.assertIn("한도", big.json()["message"])
+                l = Lessor.get(lid)
+                for d in l.quick_devices:
+                    d["pay_n"] = ql.PIN_PAY_MAX_COUNT
+                l.save(action="t")
+                full = c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 1000})
+                self.assertEqual(full.status_code, 403)
+                self.assertIn("한도", full.json()["message"])
+                # 비밀번호 로그인(일반 토큰)은 한도와 무관
+                self.assertEqual(c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 200)
+                # 끄면 즉시 다시 403
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": False}).status_code, 200)
+                self.assertEqual(c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 403)
+        finally:
+            for x in Pay.all():
+                if x.branch == "main" and x.room_no == "201" and (x.raw_sms or "").startswith("[신한] 11/13 201호"):
+                    x.delete(action="t")
+            for x in [x for x in Pay.all() if x.branch == "main" and x.room_no == "201" and x.total_amount == 1000 and x.paid_date >= "2026-11-01"]:
+                x.delete(action="t")
+            l = Lessor.get(lid)
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
+        # 화면: PIN 우선 정책·임대인 설정·수납 허용·제한 코드
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        for needle in ("LESSOR_PAGE", "skipPinOnce", "r3_pin_skip", "pay-allow", "수납 허용 켜기", "집주인 바로가기"):
+            self.assertIn(needle, shell, needle)
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("VIA_PIN", "pinLimit", "applyPinBar", "btnShortcut", "btnFullLogin", "pinOnly", "PIN_TABS"):
+            self.assertIn(needle, lapp, needle)
+
 
 if __name__ == "__main__":
     unittest.main()

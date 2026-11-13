@@ -174,7 +174,10 @@ PIN_WRITE_ALLOW = (
 LESSOR_PIN_READ_ALLOW = (
     re.compile(r"/rent3_lessor/(status|dashboard)/?$"),
     re.compile(r"/rent3_lessor/messages/rooms(/[^/]+)?/?$"),
-    re.compile(r"/rent3/pool/shortcut/status/?$"),
+    re.compile(r"/rent3/pool/(shortcut/status|support/summary)/?$"),   # support/summary: 관리인이 내 화면을 보는 중인지 알리는 띠(안전 표시)
+)
+LESSOR_PIN_PAY_ALLOW = (       # 기기별 '수납 허용'을 켠 경우에만(추가만 가능, 수정·삭제 제외). 한도는 각 API 가 확인한다.
+    re.compile(r"/rent3_lessor/(payments/(collect|sms-paste)|transfer-notices/[^/]+/(confirm|reject))/?$"),
 )
 LESSOR_PIN_WRITE_ALLOW = (
     re.compile(r"/rent3_lessor/(chats|tickets/[^/]+/(assign|complete))/?$"),
@@ -189,13 +192,16 @@ def pin_guard(request: Request, c: Dict[str, Any]) -> None:
     # 기기를 해제했거나(분실 폰 포함) PIN 을 전체 해제했거나, 퇴실(임대인은 정지·스위치 끔)했으면 이미 받은 PIN 토큰도 바로 무효
     from . import quicklogin as ql
     t = ql.load_account(c)
-    live = t is not None and ql.eligible(t) and any(d.get("id") == c.get("d") and not d.get("locked") for d in (t.quick_devices or []))
+    dev = next((d for d in ((t.quick_devices or []) if t is not None else []) if d.get("id") == c.get("d") and not d.get("locked")), None)
+    live = t is not None and ql.eligible(t) and dev is not None
     if not live:
         raise Unauthorized("바로가기가 해제되었거나 사용할 수 없습니다.", hint="아이디·비밀번호로 다시 로그인해 주세요.")
     path = request.url.path
     if ql.kind_of(t) == "lessor":
         allow = LESSOR_PIN_READ_ALLOW if request.method in ("GET", "HEAD", "OPTIONS") else LESSOR_PIN_WRITE_ALLOW
         if request.method == "OPTIONS" or any(rx.search(path) for rx in allow):
+            return
+        if request.method not in ("GET", "HEAD") and dev.get("pay_ok") and any(rx.search(path) for rx in LESSOR_PIN_PAY_ALLOW):
             return
         raise Forbidden(PIN_BLOCK_MESSAGE, hint="수납·계약·세무·설정·내보내기는 아이디·비밀번호로 로그인해야 합니다.")
     if request.method in ("GET", "HEAD", "OPTIONS"):

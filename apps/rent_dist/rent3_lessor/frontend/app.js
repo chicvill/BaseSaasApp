@@ -58,6 +58,8 @@
       { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
+      { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
+      { label: "🔓 아이디·비밀번호로 로그인", id: "btnFullLogin", pinOnly: true },
       { label: "🔑 임차인 앱", href: "/rent3_tenant/", adminOnly: true },
       { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
       { label: "🌐 Data Pool 관제", href: "/rent3/pool.html", adminOnly: true },
@@ -67,13 +69,46 @@
   const ME_ADMIN = R3Shell.isAdminSession();
   // 관리인: 다른 앱으로 건너가는 링크(임대인·임차인 앱)는 입장 없이는 막히므로 숨기고, 원격 지원 입장 중일 때만 돌아갈 곳(관리인 앱·Data Pool)을 보인다
   const adminLinkOk = (i) => R3Shell.isAdminProxy() && /^\/(rent3_admin\/|rent3\/pool)/.test(i.href || "");
-  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
+  // 간편 비밀번호(PIN)로 들어온 화면: 서버가 허용한 일(현황 조회·메시지·시설 처리·수납[허용 기기])만 메뉴에 둔다
+  const VIA_PIN = R3Shell.isViaPin();
+  const PIN_TABS = ["ledger", "messages", "ops"];
+  const pinOk = (i) => i.pinOnly || i.id === "btnShortcut" || i.href === "manual.html" || PIN_TABS.includes(i.tab);
+  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly) && (VIA_PIN ? pinOk(i) : !i.pinOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
   R3Shell.watchSupport();
   const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
+  }
+
+  // 🔐 간편 비밀번호로 들어온 화면: 서버가 어차피 막지만, 눌러서 거절당하지 않도록 미리 감추거나 끄고 안내 띠를 보인다
+  function pinLimit(root) {
+    if (!VIA_PIN || !root) return;
+    const pin = (dash && dash.pin) || {};
+    const off = (el, why) => { el.disabled = true; el.title = why; el.style.opacity = ".45"; };
+    root.querySelectorAll("[data-act]").forEach((b) => { b.style.display = "none"; });
+    root.querySelectorAll(".pr[data-pay] input").forEach((el) => off(el, "수정은 아이디·비밀번호 로그인에서만 됩니다"));
+    root.querySelectorAll(".pr-del").forEach((el) => { el.style.display = "none"; });
+    if (!pin.pay_ok) root.querySelectorAll("#pmDirect, #pmAmt, #bankSmsGo, #bankSms, .nt-ok, .nt-no").forEach((el) => off(el, "수납은 '수납 허용'을 켠 기기에서만 됩니다"));
+  }
+  function applyPinBar() {
+    if (!VIA_PIN) return;
+    let bar = document.getElementById("pinBar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "pinBar";
+      bar.style.cssText = "margin:8px 0;padding:10px 12px;border-radius:12px;border:1px solid var(--warn);background:rgba(234,179,8,.14);font-size:13.5px;line-height:1.55;";
+      elTabContent.parentNode.insertBefore(bar, elTabContent);
+    }
+    const pin = (dash && dash.pin) || {};
+    const pay = pin.pay_ok ? `수납 허용 기기 — 오늘 남은 한도 <strong>${pin.left_n}건 · ${fmtWon(pin.left_amount)}</strong>` : "이 기기는 <strong>수납 불가</strong>(바로가기 설정에서 '수납 허용'을 켤 수 있습니다)";
+    bar.innerHTML = `🔐 간편 비밀번호로 접속 중 · 조회·메시지·A/S 처리만 가능 · ${pay}<br><span class="bass-muted">계약·세무·내보내기·설정은 </span><a href="#" id="pinBarLogin" style="font-weight:700;">아이디·비밀번호로 로그인</a>`;
+    document.getElementById("pinBarLogin").addEventListener("click", (e) => { e.preventDefault(); fullLogin(); });
+  }
+  function fullLogin() {
+    try { window.localStorage.removeItem("bass_token"); window.localStorage.removeItem("rent3_session"); } catch (_) { /* 저장소를 못 지워도 포털에서 다시 로그인한다 */ }
+    window.location.href = "/rent3/?login=1";
   }
 
   // ── 가맹 신청 패널: 본인인증 → 건물 정보 → 등기부 대조 → 제출 ──
@@ -183,6 +218,7 @@
     dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
     document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
     renderFranchiseBanner();
+    applyPinBar();
 
     const b = dash.building || {};
     const l = dash.lessor || {};
@@ -227,6 +263,7 @@
   function renderTab() {
     if (!dash) return;
     if (currentTab !== "ledger" && !TAB_TITLES[currentTab]) currentTab = "ledger";
+    if (VIA_PIN && !PIN_TABS.includes(currentTab)) currentTab = "ledger";   // 간편 비밀번호로는 허용된 화면만
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === currentTab));
     document.getElementById("backBar").hidden = currentTab === "ledger";
     document.getElementById("backTitle").textContent = TAB_TITLES[currentTab] || "";
@@ -239,6 +276,7 @@
     else if (currentTab === "messages") renderMessagesTab();
     else if (currentTab === "bldgtax") renderBldgTaxTab();
     else if (currentTab === "rooms") renderRoomsTab();
+    pinLimit(elTabContent);
   }
   document.getElementById("btnBackLedger").addEventListener("click", () => switchTab("ledger"));
 
@@ -405,6 +443,7 @@
       ${msgOf("pmMsg", draft)}
       <button id="pmCopy" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 수납확인 메시지 복사 → 임차인 문자창</button>`;
     const body = host;
+    pinLimit(host);
 
     const after = async (res) => {
       Bass.updateAppAlert(res.level || "success", res.message);
@@ -810,6 +849,12 @@
       R3Shell.openSupportSettings();
     });
   }
+  const closeDrawer = () => { const dr = document.querySelector("[data-r3-drawer]"); if (dr) dr.classList.remove("is-open"); };
+  const btnShortcut = document.getElementById("btnShortcut");
+  if (btnShortcut) btnShortcut.addEventListener("click", () => { closeDrawer(); R3Shell.openShortcutSettings(); });
+  const btnFullLogin = document.getElementById("btnFullLogin");
+  if (btnFullLogin) btnFullLogin.addEventListener("click", fullLogin);
+
   const btnLedgerCsv = document.getElementById("btnLedgerCsv");
   if (btnLedgerCsv) {
     btnLedgerCsv.addEventListener("click", () => {

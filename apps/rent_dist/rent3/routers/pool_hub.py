@@ -532,6 +532,39 @@ def _me_tenant(request: Request) -> Any:
     return t
 
 
+class PayAllowReq(BaseModel):
+    allow: bool
+    password: str = ""
+
+
+def _lessor_pw_ok(lsr: Any, pw: str, demo: bool) -> bool:
+    """임대인 비밀번호 재확인(로그인과 같은 규칙). 수납 허용을 켤 때만 쓴다."""
+    core_u = CoreUser.by_username(lsr.username) if lsr.username else None
+    custom = lsr.password
+    stored_ok = bool(custom) and custom != "1212" and (demo or pw.lower() not in pwd.WEAK) and pwd.verify(custom, pw)
+    return bool((core_u.check_password(pw) if core_u else False) or stored_ok or (demo and (pw == "1212" or (bool(custom) and not pwd.is_hashed(custom) and pw == custom))))
+
+
+@router.post("/shortcut/devices/{device_id}/pay-allow")
+def shortcut_pay_allow(device_id: str, req: PayAllowReq, request: Request) -> Dict[str, Any]:
+    """임대인: 이 기기에서 간편 비밀번호로도 수납(문자·직접·이체 확인)할 수 있게 켜고 끈다. 켤 때는 비밀번호를 다시 확인한다.
+    수정·삭제는 어떤 경우에도 비밀번호 로그인에서만 된다. 하루 한도(25건·1,000만 원)가 적용된다."""
+    t = _me_tenant(request)
+    if ql.kind_of(t) != "lessor":
+        raise DomainError("임대인 전용 설정입니다.")
+    if req.allow:
+        keys = [f"u:{t.id}", f"ip:{_client_ip(request)}"]
+        ratelimit.check("payallow", keys)
+        if not _lessor_pw_ok(t, str(req.password or ""), demo_login_allowed(request)):
+            ratelimit.fail("payallow", keys)
+            raise Unauthorized("비밀번호가 맞지 않습니다.", hint="수납 허용은 아이디·비밀번호를 다시 확인한 뒤 켤 수 있습니다.")
+        ratelimit.clear("payallow", keys)
+    if not ql.set_pay_ok(t, device_id, req.allow):
+        raise NotFound("등록된 기기를 찾을 수 없습니다.")
+    return {"success": True, "devices": ql.public_devices(t),
+            "message": "이 기기에서 간편 비밀번호로 수납할 수 있게 했습니다(하루 25건·1,000만 원까지)." if req.allow else "이 기기의 간편 비밀번호 수납을 껐습니다."}
+
+
 def _start_url(t: Any, qk: str, extra: str = "") -> str:
     return f"/rent3_lessor/?qk={qk}{extra}" if ql.kind_of(t) == "lessor" else f"/rent3_tenant/?tenant={t.id}&qk={qk}{extra}"
 

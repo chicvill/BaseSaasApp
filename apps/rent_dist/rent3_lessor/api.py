@@ -303,7 +303,7 @@ def get_status(branch: str = "main"):
 
 
 @router.get("/dashboard")
-def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
+def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
     ensure_pool_seeded()
     b_id = normalize_branch_id(branch)
     ref_dt = RentBillingNotice._parse_ref_date(as_of_date)
@@ -394,6 +394,7 @@ def get_dashboard(branch: str = "main", up_to_ym: Optional[str] = None, as_of_da
         "total_unpaid_branch": total_unpaid_branch,
         "rooms": room_cards,
         "transfer_notices": [n.model_dump() for n in sorted(TransferNotice.find(branch=b_id), key=lambda x: x.created_at) if n.status == "PENDING"],
+        "pin": _pin_info(request),
         "expiry_notice_rooms": expiry_notice_rooms,
         "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],
         "payments": [p.model_dump() for p in payments[:30]],
@@ -526,9 +527,36 @@ def change_doorlock(room_id: str, req: DoorlockReq):
     }
 
 
+def _pin_info(request: Request) -> Dict[str, Any]:
+    """간편 비밀번호로 들어온 화면이면 수납 허용 여부와 오늘 남은 한도를 알려 준다(화면이 막힌 버튼을 미리 꺼 두는 용도)."""
+    from apps.rent_dist._rent3_core import quicklogin as ql
+    c = claims_from(request) or {}
+    if c.get("m") != "pin":
+        return {"via_pin": False}
+    t = ql.load_account(c)
+    return {"via_pin": True, **(ql.pin_pay_state(t, str(c.get("d", ""))) if t is not None else {"pay_ok": False})}
+
+
+def _pin_pay_gate(request: Request, amount: int) -> Optional[Dict[str, Any]]:
+    """PIN 토큰이면 수납 허용 기기·하루 한도를 확인하고 그 토큰 정보를 돌려준다(일반 로그인이면 None)."""
+    from apps.rent_dist._rent3_core import quicklogin as ql
+    c = claims_from(request) or {}
+    if c.get("m") != "pin":
+        return None
+    ql.pin_pay_gate(c, int(amount))
+    return c
+
+
+def _pin_pay_record(c: Optional[Dict[str, Any]], res: Dict[str, Any]) -> None:
+    if c and not res.get("needs_confirm"):
+        from apps.rent_dist._rent3_core import quicklogin as ql
+        ql.pin_pay_record(c, int((res.get("payment") or {}).get("total_amount") or 0))
+
+
 @router.post("/payments/collect")
-def collect_payment(req: CollectPaymentReq):
+def collect_payment(req: CollectPaymentReq, request: Request):
     ensure_pool_seeded()
+    pc = _pin_pay_gate(request, req.amount)
     res = FifoPaymentEngine.collect(
         branch=req.branch,
         room_no=req.room_no,
@@ -537,8 +565,9 @@ def collect_payment(req: CollectPaymentReq):
         paid_date=req.paid_date,
         method=req.method,
         up_to_ym=req.up_to_ym,
-        app_source=APP_SRC,
+        app_source="rent3_lessor_pin" if pc else APP_SRC,
     )
+    _pin_pay_record(pc, res)
     return {"success": True, **res}
 
 
@@ -804,8 +833,10 @@ def confirm_transfer_notice(notice_id: str, req: TransferConfirmReq, request: Re
     """임대인이 통장에서 입금을 확인한 뒤 수납으로 반영한다(선입선출 수납)."""
     ensure_pool_seeded()
     n = _notice_of(notice_id, req.branch)
+    pc = _pin_pay_gate(request, int(req.amount or n.amount))
     res = FifoPaymentEngine.collect(branch=n.branch, room_no=n.room_no, amount=int(req.amount or n.amount), payer_name=n.tenant_name,
-                                    paid_date=req.paid_date, method="TRANSFER", app_source=APP_SRC)
+                                    paid_date=req.paid_date, method="TRANSFER", app_source="rent3_lessor_pin" if pc else APP_SRC)
+    _pin_pay_record(pc, res)
     n.status, n.handled_at, n.handled_by = "CONFIRMED", now_iso(), str((claims_from(request) or {}).get("u") or "lessor")
     n.save(action="transfer_notice_confirmed", app_source=APP_SRC)
     return {"success": True, **res}
@@ -999,15 +1030,18 @@ def upsert_tenant_tax_biz(req: TenantTaxBizReq):
 
 
 @router.post("/payments/sms-paste")
-def paste_sms_payment(req: SmsPasteReq):
+def paste_sms_payment(req: SmsPasteReq, request: Request):
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core.billing import SmsDepositParser
+    pc = _pin_pay_gate(request, SmsDepositParser.parse(req.sms_text)["amount"]) if (claims_from(request) or {}).get("m") == "pin" else None
     res = FifoPaymentEngine.parse_and_collect_sms(
         branch=req.branch,
         sms_text=req.sms_text,
         up_to_ym=req.up_to_ym,
-        app_source=APP_SRC,
+        app_source="rent3_lessor_pin" if pc else APP_SRC,
         force=req.force,
     )
+    _pin_pay_record(pc, res)
     return {**res, "success": not res.get("needs_confirm")}
 
 

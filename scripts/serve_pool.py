@@ -22,6 +22,7 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=9080)
     ap.add_argument("--tokens-out", default="")
     ap.add_argument("--tenants", default="")
+    ap.add_argument("--lessor-out", default="", help="화면 확인용 임대인(지점 첫 임대인) 로그인 정보(JSON)를 적는다")
     ap.add_argument("--admin-out", default="", help="화면 확인용 관리인 로그인 정보(JSON)를 적는다")
     a = ap.parse_args()
     for k in ("RENT3_DEMO_LOGIN", "RENT3_FAKE_IDENTITY", "RENT3_TODAY", "RENT2_TODAY", "RENT3_POOL_DIR"):
@@ -41,6 +42,13 @@ def main() -> None:
                 out[tid] = {"token": tenant_token(t), "user": {"id": t.id, "tenant_id": t.id, "name": t.name, "phone": t.phone,
                                                                "role": "tenant", "branch": t.branch}}
         json.dump(out, open(a.tokens_out, "w", encoding="utf-8"), ensure_ascii=False)
+    if a.lessor_out:
+        from apps.rent_dist._rent3_core import Lessor
+        from apps.rent_dist._rent3_core.authz import lessor_token
+        l = Lessor.first(branch="main")
+        json.dump({"id": l.id, "token": lessor_token(l), "user": {"id": l.id, "username": l.username or l.id, "name": l.name, "phone": l.phone,
+                                                               "role": "lessor", "branch": l.branch}},
+                  open(a.lessor_out, "w", encoding="utf-8"), ensure_ascii=False)
     if a.admin_out:
         from core.auth import User as CoreUser, ensure_default_admins, issue_token
         ensure_default_admins()

@@ -23,6 +23,8 @@ PIN_LEN = 4
 MAX_FAILS = 5
 MAX_DEVICES = 5            # 임차인
 LESSOR_MAX_DEVICES = 2     # 임대인(본인 폰 + 태블릿 정도)
+PIN_PAY_MAX_COUNT = 25     # 임대인 PIN 수납: 기기당 하루 건수 상한
+PIN_PAY_MAX_AMOUNT = 10_000_000   # 임대인 PIN 수납: 기기당 하루 금액 상한(원)
 
 
 def lessor_pin_enabled() -> bool:
@@ -96,7 +98,67 @@ def devices_of(t: Any) -> List[Dict[str, Any]]:
 
 def public_devices(t: Any) -> List[Dict[str, Any]]:
     return [{"id": d["id"], "label": d.get("label", ""), "created_at": d.get("created_at", ""), "last_used_at": d.get("last_used_at", ""),
-             "locked": bool(d.get("locked")), "failed": int(d.get("failed", 0))} for d in devices_of(t)]
+             "locked": bool(d.get("locked")), "failed": int(d.get("failed", 0)), "pay_ok": bool(d.get("pay_ok"))} for d in devices_of(t)]
+
+
+def _today() -> str:
+    from datetime import date
+    return date.today().isoformat()
+
+
+def _device(t: Any, device_id: str) -> Optional[Dict[str, Any]]:
+    return next((d for d in devices_of(t) if d.get("id") == device_id), None)
+
+
+def set_pay_ok(t: Any, device_id: str, allow: bool) -> bool:
+    """임대인 기기별 '간편 비밀번호로 수납 허용' 켜고 끄기(끌 때는 오늘 쓴 한도도 그대로 둔다)."""
+    devs = devices_of(t)
+    hit = False
+    for d in devs:
+        if d["id"] == device_id:
+            d["pay_ok"], hit = bool(allow), True
+    if hit:
+        t.quick_devices = devs
+        t.save(action="quick_pay_allow_on" if allow else "quick_pay_allow_off", app_source="rent3_portal")
+    return hit
+
+
+def pin_pay_state(t: Any, device_id: str) -> Dict[str, Any]:
+    """이 기기의 수납 허용 여부와 오늘 남은 한도."""
+    d = _device(t, device_id) or {}
+    used_n, used_sum = (int(d.get("pay_n", 0)), int(d.get("pay_sum", 0))) if d.get("pay_day") == _today() else (0, 0)
+    return {"pay_ok": bool(d.get("pay_ok")), "used_n": used_n, "used_sum": used_sum,
+            "left_n": max(0, PIN_PAY_MAX_COUNT - used_n), "left_amount": max(0, PIN_PAY_MAX_AMOUNT - used_sum),
+            "max_n": PIN_PAY_MAX_COUNT, "max_amount": PIN_PAY_MAX_AMOUNT}
+
+
+def pin_pay_gate(c: Dict[str, Any], amount: int) -> None:
+    """PIN 로 들어온 임대인이 수납하기 전에: 수납 허용 기기인지, 오늘 한도가 남았는지 확인한다(아니면 거부)."""
+    from core.errors import Forbidden
+    t = load_account(c)
+    if t is None:
+        raise Forbidden("계정을 확인할 수 없습니다.")
+    st = pin_pay_state(t, str(c.get("d", "")))
+    if not st["pay_ok"]:
+        raise Forbidden("이 기기는 간편 비밀번호로 수납할 수 없습니다.", hint="바로가기 설정에서 '수납 허용'을 켜거나, 아이디·비밀번호로 로그인해 주세요.")
+    if st["left_n"] < 1 or int(amount) > st["left_amount"]:
+        raise Forbidden(f"오늘 간편 비밀번호 수납 한도({PIN_PAY_MAX_COUNT}건·{PIN_PAY_MAX_AMOUNT // 10000:,}만 원)를 넘었습니다.",
+                        hint=f"남은 한도 {st['left_n']}건·{st['left_amount']:,}원. 아이디·비밀번호로 로그인하면 한도 없이 처리할 수 있습니다.")
+
+
+def pin_pay_record(c: Dict[str, Any], amount: int) -> None:
+    t = load_account(c)
+    if t is None:
+        return
+    devs = devices_of(t)
+    for d in devs:
+        if d["id"] == c.get("d"):
+            if d.get("pay_day") != _today():
+                d["pay_day"], d["pay_n"], d["pay_sum"] = _today(), 0, 0
+            d["pay_n"] = int(d.get("pay_n", 0)) + 1
+            d["pay_sum"] = int(d.get("pay_sum", 0)) + int(amount)
+    t.quick_devices = devs
+    t.save(action="quick_pin_payment", app_source="rent3_portal")
 
 
 def set_pin(t: Any, pin: str) -> None:

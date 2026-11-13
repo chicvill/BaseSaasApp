@@ -17,6 +17,7 @@
     if (!user || !user.name) return;
     if (window.location.pathname.startsWith("/rent3_contract")) return;
     const isLessor = user.role === "lessor" || user.role === "admin";
+    if (isLessor && window.R3Shell && window.R3Shell.isViaPin && window.R3Shell.isViaPin()) return;   // 간편 비밀번호 접속은 계약 호출 조회가 막혀 있다
     const params = new URLSearchParams();
     params.set("role", isLessor ? "lessor" : "tenant");
     if (isLessor && user.branch && user.branch !== "all") params.set("branch", user.branch);

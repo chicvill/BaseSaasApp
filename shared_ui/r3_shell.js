@@ -143,9 +143,16 @@
       return p.exp * 1000 > Date.now() + 30000;
     } catch (e) { return false; }
   }
+  var LESSOR_PAGE = global.location.pathname.indexOf("/rent3_lessor/") === 0;
+  function skipPinOnce() { try { return global.sessionStorage.getItem("r3_pin_skip") === "1"; } catch (e) { return false; } }
   function needsPin() {
     if (!QK) return false;
     var tok = global.localStorage.getItem("bass_token") || "";
+    if (LESSOR_PAGE) {
+      // 임대인: 바로가기(홈 화면 아이콘)로 열면 비밀번호 로그인이 남아 있어도 항상 간편 비밀번호부터 묻는다(PIN 우선).
+      // 이 탭에서 방금 바로가기를 만든 경우(skipPinOnce)와 이미 PIN 으로 들어온 유효한 토큰일 때만 건너뛴다.
+      return !(skipPinOnce() || (tok && tokenAlive(tok) && isViaPin()));
+    }
     var sess = readJson("rent3_session");
     var tid = urlParams.get("tenant") || "";
     var same = sess && sess.role === "tenant" && (!tid || sess.tenant_id === tid || sess.id === tid);
@@ -235,8 +242,9 @@
         if (!res.ok) { who.textContent = "바로가기를 쓸 수 없습니다"; lock(res.d.message || res.d.detail || "등록되지 않았거나 해제된 바로가기입니다."); return; }
         var d = res.d;
         who.textContent = ((d.building_name ? d.building_name + " " : "") + (d.room_no ? d.room_no + "호 · " : "") + d.masked_name + "님").trim();
-        applyShortcutHead(QK, ((d.building_name || "내 집") + " " + d.room_no + "호").trim());
-        if (!d.eligible) lock("현재 입주 중인 계정이 아니어서 바로가기를 쓸 수 없습니다.");
+        applyShortcutHead(QK, d.kind === "lessor" ? "집주인 바로가기" : ((d.building_name || "내 집") + " " + d.room_no + "호").trim());
+        if (d.kind === "lessor") ov.firstChild.textContent = "🏢";
+        if (!d.eligible) lock(d.kind === "lessor" ? "지금은 임대인 바로가기를 쓸 수 없습니다. 아이디·비밀번호로 로그인해 주세요." : "현재 입주 중인 계정이 아니어서 바로가기를 쓸 수 없습니다.");
         else if (d.locked) lock("간편 비밀번호를 5번 틀려 잠겼습니다. 아이디·비밀번호로 한 번 로그인하면 다시 쓸 수 있습니다.");
         else if (!d.has_pin) lock("간편 비밀번호가 설정되어 있지 않습니다. 아이디·비밀번호로 로그인해 주세요.");
       })
@@ -326,12 +334,20 @@
     call("/status").then(function (res) {
       if (!res.ok) { notify("error", res.d.message || res.d.detail || "상태를 불러오지 못했습니다."); return; }
       var st = res.d;
-      if (!st.applicable) { notify("warning", "입주한 임차인만 쓸 수 있습니다."); return; }
+      var LESSOR = st.kind === "lessor";
+      if (!st.applicable) { notify("warning", LESSOR ? "임대인 바로가기는 아직 열리지 않았습니다." : "입주한 임차인만 쓸 수 있습니다."); return; }
       var fresh = null;   // 방금 만든 기기의 안내
+      var payAsk = "";    // 임대인: 수납 허용을 켜려고 비밀번호를 묻는 중인 기기 id
       function render() {
         var ua = global.navigator.userAgent || "";
         var ios = /iPhone|iPad|iPod/.test(ua);
-        var html =
+        var html = LESSOR ?
+          '<p style="font-size:13.5px;line-height:1.7;margin:0 0 8px;">홈 화면 아이콘을 누르면 <strong>4자리 숫자</strong>만으로 임대인 화면이 열립니다. 기기는 <strong>' + st.max_devices + '대까지</strong>, 접속은 1시간 동안 유지됩니다.</p>' +
+          '<ul style="font-size:12.5px;line-height:1.6;margin:0 0 10px;padding-left:18px;">' +
+          "<li>간편 비밀번호로는 <strong>현황 조회·메시지·시설(A/S) 처리</strong>만 됩니다.</li>" +
+          "<li>수납은 기기별 <strong>'수납 허용'</strong>을 켠 기기에서만, 하루 25건·1,000만 원까지 됩니다. (수정·삭제는 불가)</li>" +
+          "<li>계약·세무·내보내기·건물 설정은 아이디·비밀번호로 로그인해야 합니다.</li>" +
+          "<li>5번 틀리면 그 기기는 잠기고, 아이디·비밀번호로 로그인하면 풀립니다. 폰 잠금(생체·패턴)도 꼭 켜 두세요.</li></ul>" :
           '<p style="font-size:13.5px;line-height:1.7;margin:0 0 8px;">홈 화면 아이콘을 누르면 <strong>4자리 숫자</strong>만으로 내 집 화면이 열립니다. 이 기기에서만 쓰이고, 언제든 해제할 수 있습니다.</p>' +
           '<ul style="font-size:12.5px;line-height:1.6;margin:0 0 10px;padding-left:18px;">' +
           "<li>열람·납부·메시지·A/S 요청 같은 일상 업무만 됩니다.</li>" +
@@ -357,7 +373,9 @@
         }
         html += st.devices.length ? st.devices.map(function (d) {
           return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(148,163,184,.35);font-size:13px;">' +
-            "<span>📱 " + esc(d.label) + (d.locked ? ' <b style="color:#dc2626;">잠김</b>' : "") + '<br><span style="opacity:.7;font-size:12.5px;">' + esc((d.created_at || "").slice(0, 10)) + " 등록" + (d.last_used_at ? " · 최근 " + esc(d.last_used_at.slice(0, 16).replace("T", " ")) : "") + "</span></span>" +
+            "<span>📱 " + esc(d.label) + (d.locked ? ' <b style="color:#dc2626;">잠김</b>' : "") + (LESSOR && d.pay_ok ? ' <b style="color:#16a34a;">수납 허용</b>' : "") + '<br><span style="opacity:.7;font-size:12.5px;">' + esc((d.created_at || "").slice(0, 10)) + " 등록" + (d.last_used_at ? " · 최근 " + esc(d.last_used_at.slice(0, 16).replace("T", " ")) : "") + "</span>" +
+              (LESSOR && !st.via_pin ? '<br><button type="button" class="bass-btn bass-btn--sm" style="margin-top:4px;min-height:40px;" data-pay="' + esc(d.id) + '" data-on="' + (d.pay_ok ? "0" : "1") + '">' + (d.pay_ok ? "💰 수납 허용 끄기" : "💰 수납 허용 켜기") + "</button>" : "") +
+              (LESSOR && payAsk === d.id ? '<span style="display:flex;gap:6px;margin-top:6px;"><input type="password" data-paypw autocomplete="current-password" placeholder="로그인 비밀번호 확인" style="flex:1;min-width:0;height:44px;box-sizing:border-box;font-size:16px;padding:8px;border:1px solid #d1d5db;border-radius:6px;color:#111;background:#fff;"><button type="button" class="bass-btn bass-btn--sm bass-btn--primary" style="min-height:44px;" data-payok="' + esc(d.id) + '">확인</button></span>' : "") + "</span>" +
             (st.via_pin ? "" : '<button type="button" class="bass-btn bass-btn--sm" data-rev="' + esc(d.id) + '">해제</button>') + "</div>";
         }).join("") : '<div style="font-size:12.5px;opacity:.7;">등록된 기기가 없습니다.</div>';
         var body = global.R3.openModal("📲 바로가기 · 간편 비밀번호", html);
@@ -376,11 +394,31 @@
             if (!r.ok) { notify("error", r.d.message || r.d.detail || "만들지 못했습니다."); return; }
             applyShortcutHead(r.d.qk, "");
             try { global.history.replaceState(null, "", r.d.start_url); } catch (e) { /* 주소 바꾸기가 막혀도 안드로이드 설치는 매니페스트를 쓴다 */ }
+            if (LESSOR) { try { global.sessionStorage.setItem("r3_pin_skip", "1"); } catch (e) { /* 이 탭에서 새로고침해도 PIN 을 다시 묻지 않게(홈 화면 아이콘으로 열 때는 항상 묻는다) */ } }
             fresh = r.d; call("/status").then(function (r2) { if (r2.ok) st = r2.d; render(); });
           });
         });
         var inst = body.querySelector("#r3DevInstall");
         if (inst) inst.addEventListener("click", function () { if (installPrompt) { installPrompt.prompt(); installPrompt = null; } });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-pay]"), function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-pay");
+            if (b.getAttribute("data-on") === "1") { payAsk = id; render(); return; }   // 켜기: 비밀번호를 한 번 더 묻는다
+            call("/devices/" + encodeURIComponent(id) + "/pay-allow", { method: "POST", body: JSON.stringify({ allow: false }) }).then(function (r) {
+              if (!r.ok) { notify("error", r.d.message || r.d.detail || "바꾸지 못했습니다."); return; }
+              notify("success", r.d.message); st.devices = r.d.devices; payAsk = ""; render();
+            });
+          });
+        });
+        Array.prototype.forEach.call(body.querySelectorAll("[data-payok]"), function (b) {
+          b.addEventListener("click", function () {
+            var id = b.getAttribute("data-payok"), pw = body.querySelector("[data-paypw]").value;
+            call("/devices/" + encodeURIComponent(id) + "/pay-allow", { method: "POST", body: JSON.stringify({ allow: true, password: pw }) }).then(function (r) {
+              if (!r.ok) { notify("error", r.d.message || r.d.detail || "바꾸지 못했습니다."); return; }
+              notify("success", r.d.message); st.devices = r.d.devices; payAsk = ""; render();
+            });
+          });
+        });
         Array.prototype.forEach.call(body.querySelectorAll("[data-rev]"), function (b) {
           b.addEventListener("click", function () {
             call("/devices/" + encodeURIComponent(b.getAttribute("data-rev")) + "/revoke", { method: "POST", body: "{}" }).then(function (r) {
