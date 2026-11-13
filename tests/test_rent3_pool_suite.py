@@ -4935,7 +4935,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             bad = c.post(f"{PL}/connect/request", headers=NA, json={**body, "phone": "01099990000"})
             self.assertEqual(bad.status_code, 400)
             self.assertNotIn("휴대폰", bad.json()["message"])
-            ok = c.post(f"{PL}/connect/request", headers=NA, json=body)
+            info = c.get(f"{PL}/connect/info?branch=main", headers=NA).json()                           # 링크의 지점 코드 → 건물명·임대인 전화번호
+            self.assertTrue(info["building_name"] and info["lessor_phone"])
+            self.assertEqual(c.get(f"{PL}/connect/info?branch=nope", headers=NA).status_code, 404)
+            by_branch = {"branch": "main", "room_no": t.room_no, "name": t.name, "phone": "01077771234"}   # 건물명 없이 지점 코드로
+            self.assertEqual(c.post(f"{PL}/connect/request", headers=NA, json={**by_branch, "branch": "sunho"}).status_code, 400)   # 다른 지점 코드는 일치하지 않는다
+            ok = c.post(f"{PL}/connect/request", headers=NA, json=by_branch)
             self.assertEqual(ok.status_code, 200, ok.text)
             rid, secret, code = ok.json()["request_id"], ok.json()["secret"], ok.json()["code"]
             self.assertTrue(code.isdigit() and len(code) == 4)
@@ -4956,6 +4961,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             ap = c.post(f"{LS}/connect-requests/{rid}/approve", headers=chic, json={"branch": "main", "code": code})
             self.assertEqual(ap.status_code, 200, ap.text)
             # 승인 뒤: 요청한 쪽만 링크를 받고, 링크는 한 번만 나온다
+            polled = c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()               # 승인 후: 대기에서 빠지고 진행 상태 띠에 오른다
+            self.assertEqual([x["id"] for x in polled["pending"] if x["id"] == rid], [])
+            self.assertEqual([x["state"] for x in polled["recent"] if x["id"] == rid], ["APPROVED"])
             got = st().json()
             self.assertEqual(got["status"], "APPROVED")
             url = got["invite_url"]
@@ -4963,9 +4971,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertNotIn("invite_url", st().json())
             tok = url.split("invite=")[1]
             self.assertEqual(c.get(f"{PL}/invite/identify?token={tok}", headers=NA).status_code, 200)
+            self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["SETTING"])   # 비밀번호 설정 중
             acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": tok, "password": "Conn#Pass99", "pin": "2846", "agree_privacy": True})
             self.assertEqual(acc.status_code, 200, acc.text)
             self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 200)
+            self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["DONE"])         # 연결 완료
             # 가입이 끝난 호실은 연결 요청으로 덮어쓸 수 없다
             again = c.post(f"{PL}/connect/request", headers=NA, json=body)
             self.assertEqual(again.status_code, 400)
@@ -4979,9 +4989,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t.save(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
         pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg"):
+        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect="):
             self.assertIn(needle, lapp, needle)
-        for needle in ("/pool/connect/request", "/pool/connect/status", "rent3_connect_req", "find=1"):
+        for needle in ("/pool/connect/request", "/pool/connect/status", "/pool/connect/info", "rent3_connect_req", "find=1", "r3Connect", "__rent3ConnectOpen"):
             self.assertIn(needle, pj, needle)
 
     def test_82_admin_test_tenant_registration(self):

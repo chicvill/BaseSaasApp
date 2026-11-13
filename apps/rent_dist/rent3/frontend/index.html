@@ -369,27 +369,6 @@
         </div>
       </form>
 
-      <!-- 기존 임차인 내 페이지 연결 요청 (임대인이 통화로 확인번호를 확인해 승인) -->
-      <form id="formConnect" style="display:none;" onsubmit="return false;">
-        <div style="font-size:12px; background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🔗 <strong>기존 입주자 연결</strong> — 아래 4가지가 임대인 장부와 같으면 <strong>4자리 확인번호</strong>가 나옵니다. 그 번호를 임대인에게 전화로 불러 주면, 임대인이 확인·승인한 뒤 비밀번호를 정할 수 있습니다.
-        </div>
-        <div id="ccInput">
-          <div class="or-field"><label for="ccBuilding">건물명</label><input id="ccBuilding" class="or-input" placeholder="예: 시크빌"></div>
-          <div class="or-field"><label for="ccRoom">호실</label><input id="ccRoom" class="or-input" placeholder="예: 701" inputmode="numeric"></div>
-          <div class="or-field"><label for="ccName">성함</label><input id="ccName" class="or-input" autocomplete="name"></div>
-          <div class="or-field"><label for="ccPhone">휴대폰 번호 (임대인에게 알려 준 번호)</label><input id="ccPhone" class="or-input" placeholder="010-0000-0000" inputmode="tel" autocomplete="tel"></div>
-          <button type="button" id="btnCcRequest" class="or-btn or-btn--blue" style="width:100%; padding:12px;">연결 요청하기</button>
-        </div>
-        <div id="ccWait" style="display:none;text-align:center;">
-          <div style="font-size:13.5px;margin-bottom:6px;"><strong id="ccRoom2"></strong> 연결 요청 중입니다. 임대인에게 전화해 아래 번호를 불러 주세요.</div>
-          <div id="ccCode" style="font-size:44px;font-weight:800;letter-spacing:10px;margin:8px 0;color:#1d4ed8;"></div>
-          <div id="ccStatus" style="font-size:13px;color:#555;min-height:20px;">임대인의 확인을 기다리고 있습니다…</div>
-          <div style="font-size:12px;color:#777;margin-top:6px;">이 화면(브라우저)을 닫지 마세요. 승인되면 자동으로 비밀번호 설정 화면으로 이동합니다.</div>
-          <a href="#" id="lnkCcCancel" style="display:inline-block;padding:12px;font-size:13px;">요청 취소</a>
-        </div>
-        <div style="text-align:center;margin-top:8px;"><a href="#" id="lnkConnectBack" style="font-size:12.5px;">← 로그인으로 돌아가기</a></div>
-      </form>
 
       <!-- TAB 2: 간편 본인인증 회원가입 -->
       <form id="formRegister" style="display:none;">

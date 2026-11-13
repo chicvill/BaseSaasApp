@@ -717,7 +717,8 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
 
 # ── 기존 임차인 '내 페이지 연결' (문자 인증 없이: 4가지 대조 → 임대인이 통화로 확인번호 확인 → 승인) ──
 class ConnectReq(BaseModel):
-    building_name: str
+    building_name: str = ""
+    branch: str = ""          # 임대인이 보낸 링크의 지점 코드(있으면 건물명 대신 이것으로 건물을 정한다)
     room_no: str
     name: str
     phone: str
@@ -735,7 +736,7 @@ def connect_request(req: ConnectReq, request: Request) -> Dict[str, Any]:
     ensure_pool_seeded()
     keys = [f"ip:{_client_ip(request)}", f"u:room{cn._room(req.room_no)}"]
     ratelimit.check("connect", keys)
-    t = cn.find_tenant(req.building_name, req.room_no, req.name, req.phone)
+    t = cn.find_tenant(req.building_name, req.room_no, req.name, req.phone, branch=req.branch)
     if t is None:
         ratelimit.fail("connect", keys)
         raise DomainError("입력한 정보가 입주자 정보와 일치하지 않습니다.", hint="건물명·호실·성함·휴대폰 번호를 다시 확인해 주세요. 계속 안 되면 임대인에게 문의하세요.")
@@ -746,6 +747,18 @@ def connect_request(req: ConnectReq, request: Request) -> Dict[str, Any]:
     return {"success": True, "request_id": r.id, "secret": secret, "code": code, "room_no": t.room_no,
             "message": "연결을 요청했습니다. 임대인에게 전화해 아래 4자리 확인번호를 불러 주세요.",
             "hint": "임대인이 번호를 확인해 승인하면 이 화면에서 비밀번호를 정할 수 있습니다."}
+
+
+@router.get("/connect/info")
+def connect_info(branch: str, request: Request) -> Dict[str, Any]:
+    """연결 화면 머리(건물명·임대인 전화번호). 임대인이 보낸 링크의 지점 코드로 조회한다."""
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("connectinfo", keys)
+    info = cn.public_info(branch)
+    if info is None:
+        ratelimit.fail("connectinfo", keys)
+        raise NotFound("건물을 찾을 수 없습니다.", hint="임대인이 보낸 링크를 다시 확인해 주세요.")
+    return {"success": True, **info}
 
 
 @router.post("/connect/status")

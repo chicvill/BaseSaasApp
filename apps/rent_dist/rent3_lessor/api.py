@@ -843,6 +843,13 @@ def confirm_transfer_notice(notice_id: str, req: TransferConfirmReq, request: Re
     return {"success": True, **res}
 
 
+@router.get("/connect-requests")
+def list_connect_requests(branch: str = "main"):
+    """승인 대기 요청과 최근 승인한 요청의 진행 상태(임대인 앱이 가볍게 주기적으로 조회해 새 요청이 오면 창을 띄운다)."""
+    ensure_pool_seeded()
+    return {"success": True, "pending": connect.pending_for_branch(branch), "recent": connect.recent_for_branch(branch)}
+
+
 class ConnectApproveReq(BaseModel):
     branch: str = "main"
     code: str = ""

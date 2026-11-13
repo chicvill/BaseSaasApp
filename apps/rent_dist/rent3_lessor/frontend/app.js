@@ -879,11 +879,11 @@
     btnConnectMsg.addEventListener("click", () => {
       closeDrawer();
       const b = dash.building || {}, l = dash.lessor || {};
-      const link = `${window.location.origin}/rent3/?home=1&find=1`;
-      const msg = `[${b.building_name || "건물"} 안내] 안녕하세요, 임대인 ${l.name || ""}입니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있도록 입주자 앱을 열었습니다. 아래 링크에서 '내 페이지 찾기'로 본인 확인을 하고 비밀번호를 정해 이용해 주세요. 문자 인증이 안 되면 '임대인 확인으로 연결 요청'을 눌러 주세요.\n👉 ${link}`;
+      const link = `${window.location.origin}/rent3/?connect=${encodeURIComponent(currentBranch)}`;
+      const msg = `[${b.building_name || "건물"} 안내] 안녕하세요, 임대인 ${l.name || ""}입니다. 입주자 앱을 열었습니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있어요.\n\n1) 아래 링크를 누르고 호실·성함·휴대폰 번호를 입력해 주세요.\n2) 화면에 4자리 확인번호가 나오면 저(${l.phone || "임대인 번호"})에게 전화해서 그 번호를 불러 주세요.\n3) 제가 확인하면 바로 비밀번호를 정하실 수 있습니다.\n\n👉 ${link}`;
       const people = (dash.rooms || []).filter((x) => x.is_occupied && x.contract).map((x) => `${x.room_no}호 ${x.contract.tenant_name || ""} ${x.contract.tenant_phone || (x.tenant && x.tenant.phone) || ""}`.trim());
       const body = openModal("📨 기존 임차인 앱 연결 안내 문자", `
-        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">모든 입주 임차인에게 <strong>같은 문자</strong>를 보내면 됩니다. 각자 자기 계정으로만 들어가므로 다른 호실은 볼 수 없습니다. 가입을 마친 호실은 이 링크로 덮어쓸 수 없습니다.</div>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">모든 입주 임차인에게 <strong>같은 문자</strong>를 보내면 됩니다. 각자 자기 계정으로만 들어가므로 다른 호실은 볼 수 없습니다. 가입을 마친 호실은 이 링크로 덮어쓸 수 없습니다. 임차인이 링크를 열면 입력 창만 뜨고, 임차인이 전화를 걸면 이 화면에 <strong>승인 창이 자동으로</strong> 뜹니다.</div>
         <textarea id="cmMsg" class="bass-input r3-msg" rows="7" readonly>${Bass.escapeHtml(msg)}</textarea>
         <button id="cmCopy" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 문구 복사</button>
         <div class="r3-lbl" style="margin-top:12px;">입주 임차인 연락처 (${people.length}명)</div>
@@ -2514,5 +2514,63 @@
   }
 
   refresh().catch(Bass.showError);
-})();
 
+  // 🔗 기존 임차인 연결 요청: 임차인이 링크에서 요청하고 전화를 걸어 오면, 로그인해 있는 이 화면에 승인 창이 자동으로 뜬다.
+  //    임차인이 전화로 불러 주는 4자리 확인번호를 입력해 승인하면 창이 닫힌다. 승인한 뒤 임차인의 진행 상태는 화면 위 띠로 계속 보인다.
+  (function watchConnect() {
+    if (VIA_PIN || ME_ADMIN) return;
+    const shown = new Set();
+    const telOf = (p) => "tel:" + String(p || "").replace(/[^0-9+]/g, "");
+    function renderBar(recent) {
+      let bar = document.getElementById("connBar");
+      if (!recent.length) { if (bar) bar.remove(); return; }
+      if (!bar) {
+        bar = document.createElement("div");
+        bar.id = "connBar";
+        bar.style.cssText = "margin:8px 0;padding:10px 12px;border-radius:12px;border:1px solid var(--ok);background:rgba(34,197,94,.12);font-size:13.5px;line-height:1.6;";
+        elTabContent.parentNode.insertBefore(bar, elTabContent);
+      }
+      const icon = { DONE: "✅", SETTING: "⏳", APPROVED: "📲" };
+      bar.innerHTML = "<strong>🔗 임차인 연결 진행</strong><br>" + recent.map((n) => `${icon[n.state] || ""} ${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} — ${Bass.escapeHtml(n.label)}`).join("<br>");
+    }
+    function showModal(n) {
+      shown.add(n.id);
+      const body = openModal(`🔗 ${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)}님 연결 요청`, `
+        <div style="font-size:14.5px;line-height:1.7;margin-bottom:4px;">임차인이 전화를 걸어 <strong>4자리 확인번호</strong>를 불러 줍니다. 그 번호를 아래에 입력하세요.</div>
+        <a href="${Bass.escapeHtml(telOf(n.tenant_phone))}" style="display:block;font-size:18px;font-weight:800;margin:6px 0 10px;">📞 임차인 ${Bass.escapeHtml(n.tenant_phone || "")} (눌러서 전화)</a>
+        <input id="cmCode" class="bass-input" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="확인번호" aria-label="확인번호" style="font-size:30px;letter-spacing:12px;text-align:center;min-height:60px;">
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button id="cmOk" class="bass-btn bass-btn--primary" type="button" style="flex:1;min-height:54px;font-size:17px;">✅ 승인</button>
+          <button id="cmNo" class="bass-btn" type="button" style="min-height:54px;">거절</button></div>`);
+      const code = body.querySelector("#cmCode");
+      setTimeout(() => code.focus(), 50);
+      body.querySelector("#cmOk").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/connect-requests/${encodeURIComponent(n.id)}/approve`, { method: "POST", body: { branch: currentBranch, code: code.value.trim() } });
+          closeModal();
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+          poll();
+        });
+      });
+      body.querySelector("#cmNo").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/connect-requests/${encodeURIComponent(n.id)}/reject`, { method: "POST", body: { branch: currentBranch } });
+          closeModal();
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+        });
+      });
+    }
+    async function poll() {
+      if (document.visibilityState === "hidden") return;
+      let d;
+      try { d = await Bass.api(APP_ID, `/connect-requests?branch=${encodeURIComponent(currentBranch)}`); } catch (_) { return; }
+      renderBar(d.recent || []);
+      const next = (d.pending || []).find((n) => !shown.has(n.id));
+      if (next && !document.getElementById("r3Modal")) showModal(next);   // 다른 창을 보고 있으면 닫힐 때까지 기다린다
+    }
+    setTimeout(poll, 1500);
+    setInterval(poll, 6000);
+  })();
+})();

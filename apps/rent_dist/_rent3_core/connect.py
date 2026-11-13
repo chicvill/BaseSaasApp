@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from core.errors import DomainError
 
 from . import franchise as fr, invite as inv, passwords as pwd, quicklogin as ql
-from .models import Building, Tenant, normalize_branch_id
+from .models import Building, Lessor, Tenant, normalize_branch_id
 from .ops import ConnectRequest
 
 WAIT_HOURS = 24          # 임대인이 승인할 때까지 기다리는 시간
@@ -53,13 +53,27 @@ def activated(t: Any) -> bool:
     return bool(t.pin_hash or t.quick_devices or pwd.is_hashed(t.password or ""))
 
 
-def find_tenant(building_name: str, room_no: str, name: str, phone: str) -> Optional[Any]:
-    """건물명·호실·성명·휴대폰이 모두 장부와 같은 입주 임차인(아니면 None)."""
+def public_info(branch: str) -> Optional[Dict[str, Any]]:
+    """연결 화면 머리에 보일 건물명·임대인 연락처(임대인이 보낸 링크의 지점 코드로 찾는다). 없는 지점이면 None."""
+    b = Building.first(branch=normalize_branch_id(branch))
+    if b is None:
+        return None
+    lsr = Lessor.get(b.id_lessor) if b.id_lessor else Lessor.first(branch=b.branch)
+    return {"branch": b.branch, "building_name": b.building_name, "lessor_name": (lsr.name if lsr else ""), "lessor_phone": (lsr.phone if lsr else "")}
+
+
+def find_tenant(building_name: str, room_no: str, name: str, phone: str, branch: str = "") -> Optional[Any]:
+    """호실·성명·휴대폰이 장부와 같고, 지점 코드(링크에 들어 있음) 또는 건물명이 같은 입주 임차인(아니면 None)."""
     room, ph, nm, bn = _room(room_no), _digits(phone), fr._norm_name(name), _bname(building_name)
-    if not room or len(ph) < 10 or not nm or len(bn) < 2:
+    br = normalize_branch_id(branch) if branch else ""
+    if not room or len(ph) < 10 or not nm or (not br and len(bn) < 2):
         return None
     for t in Tenant.all():
         if not ql.eligible(t) or _room(t.room_no) != room or _digits(t.phone) != ph or fr._norm_name(t.name) != nm:
+            continue
+        if br:
+            if normalize_branch_id(t.branch) == br:
+                return t
             continue
         b = Building.get(t.id_building) if t.id_building else Building.first(branch=t.branch)
         bname = _bname(b.building_name) if b else ""
@@ -96,6 +110,24 @@ def pending_for_branch(branch: str) -> List[Dict[str, Any]]:
         t = Tenant.get(r.tenant_id)
         out.append({"id": r.id, "room_no": r.room_no, "tenant_name": r.tenant_name, "tenant_phone": (t.phone if t else ""), "created_at": r.created_at})
     return out
+
+
+def recent_for_branch(branch: str, minutes: int = 90) -> List[Dict[str, Any]]:
+    """최근 승인한 요청의 진행 상태 — 통화를 끊지 않은 채 임차인이 어디까지 왔는지 임대인이 본다."""
+    cutoff = (datetime.now() - timedelta(minutes=minutes)).isoformat(timespec="seconds")
+    out = []
+    for r in ConnectRequest.find(branch=normalize_branch_id(branch)):
+        if r.status not in ("APPROVED", "DELIVERED") or (r.approved_at or "") < cutoff:
+            continue
+        t = Tenant.get(r.tenant_id)
+        if r.status == "DELIVERED" and t is not None and activated(t):
+            state, label = "DONE", "연결 완료 (비밀번호 설정을 마쳤습니다)"
+        elif r.status == "DELIVERED":
+            state, label = "SETTING", "임차인이 비밀번호를 정하는 중"
+        else:
+            state, label = "APPROVED", "승인함 — 임차인 화면이 넘어가는 중"
+        out.append({"id": r.id, "room_no": r.room_no, "tenant_name": r.tenant_name, "state": state, "label": label, "approved_at": r.approved_at})
+    return sorted(out, key=lambda x: x["approved_at"], reverse=True)
 
 
 def _of(req_id: str, branch: str) -> ConnectRequest:
