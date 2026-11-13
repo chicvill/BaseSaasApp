@@ -382,7 +382,13 @@
         <button class="bass-btn bass-btn--sm nt-no" type="button" style="min-height:44px;">반려</button></div></div>`).join("");
     const host = document.getElementById("payInline");
     if (!host) return;
-    const flashHtml = payFlash && payFlash.no === no ? `<div style="padding:10px 12px;margin-bottom:10px;border-radius:12px;background:rgba(34,197,94,.16);border:1px solid var(--ok);font-size:14px;line-height:1.5;">✅ ${Bass.escapeHtml(payFlash.text)}<br><span class="bass-muted" style="font-size:13px;">아래 월별 내역을 확인하고, 맨 아래 <strong>수납확인 메시지</strong>를 임차인에게 보내세요.</span></div>` : "";
+    const flashHtml = payFlash && payFlash.no === no ? `<div id="payFlashBox" role="status" style="padding:10px 12px;margin-bottom:10px;border-radius:12px;background:rgba(34,197,94,.16);border:1px solid var(--ok);font-size:14px;line-height:1.5;cursor:pointer;">✅ ${Bass.escapeHtml(payFlash.text)}<br><span class="bass-muted" style="font-size:13px;">아래 월별 내역을 확인하고, 맨 아래 <strong>수납확인 메시지</strong>를 임차인에게 보내세요.</span></div>` : "";
+    if (flashHtml) {      // 수납 완료 안내: 화면을 터치하면 바로, 아니면 2초 뒤에 닫힌다
+      const flashRef = payFlash;
+      const dismiss = () => { if (payFlash !== flashRef) return; payFlash = null; const el = document.getElementById("payFlashBox"); if (el) el.remove(); };
+      setTimeout(() => document.addEventListener("pointerdown", dismiss, { once: true }), 0);   // 화면 어디를 눌러도 닫힌다(누른 버튼은 그대로 동작)
+      setTimeout(dismiss, 2000);
+    }
     host.innerHTML = `
       <div style="font-weight:800;font-size:16px;margin-bottom:8px;">💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역</div>
       ${flashHtml}
