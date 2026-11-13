@@ -293,12 +293,24 @@
     .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
-    .rc-info { font-size: 13px; line-height: 1.7; }
+    .rc-info { font-size: 13px; line-height: 1.75; padding: 10px 12px; border-radius: 10px; background: hsla(224, 34%, 12%, .42); border: 1px solid hsla(224, 35%, 62%, .18); margin-top: 8px; }
+    .rc-subbtns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+    .r3-zone { transition: border-color .15s ease; }
+    .r3-zone--sms { background: linear-gradient(155deg, hsla(206, 86%, 52%, .13), hsla(222, 68%, 40%, .07)) !important; border-color: hsla(206, 86%, 60%, .38) !important; border-left: 4px solid hsl(199, 92%, 56%) !important; }
+    .r3-zone--notice { background: hsla(38, 92%, 50%, .10) !important; border-color: hsla(38, 92%, 56%, .45) !important; border-left: 4px solid var(--warn) !important; }
+    .r3-zone--room { background: linear-gradient(155deg, hsla(232, 56%, 58%, .11), hsla(240, 44%, 44%, .06)) !important; border-color: hsla(232, 56%, 64%, .35) !important; border-left: 4px solid hsl(235, 80%, 70%) !important; }
+    .r3-zone--pay { background: linear-gradient(155deg, hsla(156, 68%, 42%, .12), hsla(172, 60%, 34%, .06)) !important; border-color: hsla(156, 68%, 52%, .36) !important; border-left: 4px solid var(--ok) !important; }
+    .r3-zone--late { background: hsla(356, 82%, 56%, .09) !important; border-color: hsla(356, 82%, 60%, .40) !important; border-left: 4px solid var(--err) !important; }
+    .r3-subbox { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); }
+    .r3-subbox--direct { background: hsla(156, 54%, 46%, .09); border-color: hsla(156, 54%, 56%, .26); margin: 8px 0 12px; }
+    .r3-subbox--msg { background: hsla(262, 64%, 58%, .10); border-color: hsla(262, 64%, 66%, .28); margin-top: 12px; }
     .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr .pr-del { padding: 4px; min-height: 40px; font-size: 12.5px; color: var(--err); width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
-    .pr--un, .pr--ok { grid-template-columns: 44px 1fr; }
+    .pr--un, .pr--ok { grid-template-columns: 44px 1fr; padding-left: 6px; padding-right: 6px; border-radius: 6px; }
+    .pr--un { background: hsla(356, 82%, 56%, .10); }
+    .pr--ok { background: hsla(152, 65%, 45%, .06); }
     .pr--un .pr__un { color: var(--err); font-weight: 800; }
     .pr-list { max-height: 205px; overflow-y: auto; border-bottom: 1px solid var(--border); }
     `;
@@ -431,17 +443,21 @@
       <div style="font-weight:800;font-size:16px;margin-bottom:8px;">💰 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 수납내역</div>
       ${flashHtml}
       ${noticeHtml}
-      <label class="r3-lbl">직접 수납 (현금 등 은행 문자가 없는 경우)</label>
-      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin:6px 0 10px;">
-        <input id="pmAmt" class="bass-input" type="number" style="width:112px;" value="${defAmt}" aria-label="직접 수납액">
-        <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
+      <div class="r3-subbox r3-subbox--direct">
+        <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금 등 은행 문자가 없는 경우)</label>
+        <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+          <input id="pmAmt" class="bass-input" type="number" style="width:124px;" value="${defAmt}" aria-label="직접 수납액">
+          <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
+        </div>
       </div>
       <div class="r3-lbl">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span></div>
       <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>
-      <label class="r3-lbl" style="margin-top:12px;">임차인에게 보낼 메시지</label>
-      ${msgOf("pmMsg", draft)}
-      <button id="pmCopy" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 수납확인 메시지 복사 → 임차인 문자창</button>`;
+      <div class="r3-subbox r3-subbox--msg">
+        <label class="r3-lbl" style="margin:0 0 6px;">✉️ 임차인에게 보낼 수납확인 메시지</label>
+        ${msgOf("pmMsg", draft)}
+        <button id="pmCopy" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin-top:8px;min-height:44px;">📋 수납확인 메시지 복사 → 임차인 문자창</button>
+      </div>`;
     const body = host;
     pinLimit(host);
 
@@ -969,20 +985,20 @@
     const need = inWindow && !ec;     // 통지 구간인데 통보 실적이 없으면 노란색
     const n = unpaidCount(r);
     const bs = r.billing_schedule;
-    box.innerHTML = `<div class="room-card" style="${need ? "border-color:var(--warn);" : ""}">
+    box.innerHTML = `<div class="room-card r3-zone r3-zone--room" style="${need ? "border-color:var(--warn);" : ""}">
       <div class="rc-btns">
         <button class="bass-btn bass-btn--sm" data-act="contract" type="button">계약내용</button>
         <button class="bass-btn bass-btn--sm ${need ? "rc-warn" : ""}" data-act="expiry" type="button">만기통보</button>
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
       </div>
-      <div style="margin-bottom:8px;"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;">📲 입주 안내 카드 (QR)</button>
-        <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;">📵 분실 폰 해제</button></div>
+      <div class="rc-subbtns"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;border-color:hsla(199,80%,60%,.4);">📲 입주 안내 카드 (QR)</button>
+        <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;border-color:hsla(356,75%,62%,.4);">📵 분실 폰 해제</button></div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>
-      <div id="payInline" class="room-card" style="margin-top:10px;"></div>`;
+      <div id="payInline" class="room-card r3-zone r3-zone--pay" style="margin-top:10px;"></div>`;
     const acts = { contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
     renderPayInline(r.room_no);      // 호실을 고르면 그 호실의 수납 내용이 바로 펼쳐진 채로 열린다
@@ -1004,17 +1020,17 @@
       .sort((a, b) => ((b.ledger && b.ledger.total_unpaid) || 0) - ((a.ledger && a.ledger.total_unpaid) || 0));
     const pend = dash.transfer_notices || [];
     const pendHtml = pend.length ? `
-      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
+      <div class="bass-card r3-zone r3-zone--notice" style="padding:10px 12px;margin-bottom:12px;">
         <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📨 이체 확인 요청 ${pend.length}건</div>
         ${pend.map((n) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(n.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;border-color:var(--warn);">${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} · ${fmtWon(n.amount)} 이체했다고 알림 → 확인하기</button>`).join("")}
       </div>` : "";
     const lateHtml = lateRows.length ? `
-      <details id="lateBox" class="bass-card" style="padding:0;margin-top:12px;">
+      <details id="lateBox" class="bass-card r3-zone r3-zone--late" style="padding:0;margin-top:12px;">
         <summary style="cursor:pointer;min-height:52px;padding:14px 14px;font-weight:800;font-size:15px;display:flex;align-items:center;gap:8px;">⚠️ 미납 호실 ${lateRows.length}곳 <span class="bass-muted" style="font-weight:500;">눌러서 펼치기</span></summary>
         <div style="padding:0 10px 10px;max-height:44vh;overflow-y:auto;">${lateRows.map((x) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(x.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;display:flex;justify-content:space-between;gap:8px;"><span>${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.contract.tenant_name || "")}</span><span style="color:var(--err);font-weight:800;white-space:nowrap;">${unpaidCount(x)}개월 · ${fmtWon((x.ledger && x.ledger.total_unpaid) || 0)}</span></button>`).join("")}</div>
       </details>` : "";
     elTabContent.innerHTML = `
-      <div class="bass-card" style="padding:12px;margin-bottom:12px;">
+      <div class="bass-card r3-zone r3-zone--sms" style="padding:12px;margin-bottom:12px;">
         <label class="r3-lbl" for="bankSms" style="margin:0 0 6px;font-weight:800;">🏦 은행 입금 문자 붙여넣기 <span class="bass-muted" style="font-weight:500;">— 호실·입금자 이름으로 호실을 자동으로 찾습니다</span></label>
         <textarea id="bankSms" class="bass-input" rows="2" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
