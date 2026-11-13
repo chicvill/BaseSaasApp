@@ -17,9 +17,14 @@
     ".r3-burger:hover{filter:brightness(1.08)}",
     ".r3-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:9998;display:none}",
     ".r3-overlay.is-open{display:block}",
-    ".r3-drawer{position:fixed;top:0;right:0;bottom:0;width:min(320px,86vw);z-index:9999;overflow-y:auto;",
-    "background:var(--surface,#fff);color:var(--text,#0f172a);border-left:1px solid var(--border,#e2e8f0);",
-    "box-shadow:-8px 0 24px rgba(0,0,0,.25);padding:16px 14px 28px;transform:translateX(105%);",
+    /* 제목 앞에 놓는 아이콘형 메뉴 단추: 글자 없이 ☰ 만, 눈에 띄는 색, 누르기 쉬운 크기 */
+    ".r3-burger--icon{flex:none;justify-content:center;width:48px;height:48px;min-height:48px;padding:0;border:0;border-radius:14px;",
+    "color:#fff;background:linear-gradient(135deg,var(--primary,#2563eb),var(--primary-2,#0ea5e9));box-shadow:0 6px 16px -6px rgba(37,99,235,.7)}",
+    ".r3-burger--icon svg{width:26px;height:26px;display:block}",
+    ".r3-burger--icon:active{transform:scale(.95)}",
+    ".r3-drawer{position:fixed;top:0;left:0;bottom:0;width:min(320px,86vw);z-index:9999;overflow-y:auto;",
+    "background:var(--surface,#fff);color:var(--text,#0f172a);border-right:1px solid var(--border,#e2e8f0);",
+    "box-shadow:8px 0 24px rgba(0,0,0,.25);padding:16px 14px 28px;transform:translateX(-105%);",
     "transition:transform .2s ease;display:flex;flex-direction:column;gap:6px}",
     ".r3-drawer.is-open{transform:none}",
     ".r3-drawer__head{display:flex;justify-content:space-between;align-items:center;font-weight:800;",
@@ -44,7 +49,7 @@
 
     var head = document.createElement("div");
     head.className = "r3-drawer__head";
-    head.innerHTML = "<span>☰ 더보기</span>";
+    head.innerHTML = "<span>메뉴</span>";
     var closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "r3-drawer__close";
@@ -66,8 +71,19 @@
       });
     }
 
+    var ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M4 6.5h16M4 12h16M4 17.5h16"/></svg>';
     document.querySelectorAll("[data-r3-burger]").forEach(function (b) {
       b.classList.add("r3-burger");
+      var hdr = b.closest("header.bass-card");
+      var row = hdr && hdr.querySelector(":scope > .bass-row");
+      if (row) {                       // 앱 머리줄: ☰ 를 제목 앞으로 옮기고 '더보기' 글자는 없앤다
+        row.insertBefore(b, row.firstChild);
+        row.style.cssText += ";justify-content:flex-start;flex-wrap:nowrap;align-items:center;gap:10px";
+        Array.prototype.forEach.call(row.children, function (c) { if (c !== b && c.tagName === "DIV") { c.style.flex = "1 1 auto"; c.style.minWidth = "0"; } });
+        b.classList.add("r3-burger--icon");
+        b.innerHTML = ICON;
+        b.setAttribute("aria-label", "메뉴 열기");
+      }
       b.setAttribute("aria-haspopup", "true");
       b.addEventListener("click", function () { setOpen(!drawer.classList.contains("is-open")); });
     });

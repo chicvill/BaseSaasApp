@@ -72,7 +72,9 @@
       var p = function (v) { return String(v).padStart(2, "0"); };
       var t = n.getFullYear() + "." + p(n.getMonth() + 1) + "." + p(n.getDate()) + " " + p(n.getHours()) + ":" + p(n.getMinutes());
       var name = nameFn();
-      if (el && name) el.textContent = "🏢 " + name + " " + t;
+      // 건물 이름은 한 줄(크게), 날짜·시각은 그 아래 작게 — 좁은 화면에서 제목이 두 줄로 갈라지지 않게
+      if (el && name) el.innerHTML = '<span style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🏢 ' + esc(name) + '</span>' +
+        '<small style="display:block;font-size:14px;font-weight:500;opacity:.7;letter-spacing:0;">' + t + "</small>";
     }
     setInterval(tick, 30000);
     return tick;
