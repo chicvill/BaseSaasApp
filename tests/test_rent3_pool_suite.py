@@ -4241,6 +4241,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(acc(password="Invite2026x", pin="1234", agree_privacy=True).status_code, 400)       # 약한 PIN
         with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
             self.assertEqual(acc(password="Invite2026x", agree_privacy=False).status_code, 400)             # 동의 필수(운영 모드)
+        t201 = Tenant.get("tenant_201"); keep_idn = t201.identity; t201.identity = {}; t201.save(action="t")     # 가입 전엔 본인 확인 기록이 없다
         ok = acc(password="Invite2026x", pin="2846", agree_privacy=True)
         self.assertEqual(ok.status_code, 200, ok.text)
         d = ok.json()
@@ -4248,6 +4249,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         from core.auth import verify_token
         self.assertNotIn("m", verify_token(d["token"]))                                                     # 비밀번호를 정한 정식 로그인
         self.assertEqual(acc(password="Another2026x").status_code, 404)                                    # 1회용
+        # 1단계: 링크+4칸으로 가입하면 본인 확인 기록이 생기되 '실명 확인'이 아닌 invite_link 수준으로 구분된다
+        idn_rec = Tenant.get("tenant_201").identity
+        self.assertEqual((idn_rec["verified"], idn_rec["assurance"], idn_rec["provider"], idn_rec["birth6"]), (True, "invite_link", "invite", ""))
+        hd = {"Authorization": f"Bearer {d['token']}"}
+        call = lambda: c.post("/api/rent3_contract/sessions/call", headers=hd, json={"caller_role": "tenant", "branch": "main", "room_no": "201"})
+        self.assertNotIn("휴대폰 본인인증이 필요합니다", call().text)                                                       # 기본: 계약 화면의 인증 막힘이 없다
+        with mock.patch.dict(os.environ, {"RENT3_INVITE_IDENTITY_OK": "0"}):
+            blocked = call()
+            self.assertEqual(blocked.status_code, 403)                                                 # 스위치를 끄면 실명 인증이 필요
+            self.assertIn("실명 본인인증", blocked.text)
         login = c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x"})
         self.assertEqual(login.status_code, 200, login.text)                                                 # 새 비밀번호로 정상 로그인
         pl = c.post("/api/rent3/pool/auth/pin-login", headers=NA, json={"qk": d["start_url"].split("qk=")[1].split("&")[0], "pin": "2846"})

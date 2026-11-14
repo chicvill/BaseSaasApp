@@ -224,6 +224,8 @@ def reset_activation(t: Any) -> Dict[str, Any]:
     t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
     t.consents = {}
     t.activated_at = ""
+    if (t.identity or {}).get("provider") == "invite":    # 링크로 얻은 확인만 지운다(문자·네이버 인증은 유지)
+        t.identity = {}
     t.save(action="activation_reset", app_source="rent3_admin")
     return {"requests_closed": n_req}
 

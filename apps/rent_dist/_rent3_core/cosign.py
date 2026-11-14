@@ -615,7 +615,7 @@ class CoSignSession(PoolObj):
             ph = re.sub(r"\D", "", str((self.terms or {}).get("tenant_phone") or ""))
             t = next((x for x in Tenant.all() if ph and re.sub(r"\D", "", x.phone) == ph), None)
         idn = (t.identity if t else {}) or {}
-        return {"verified": bool(idn.get("verified")), "provider": idn.get("provider", ""),
+        return {"verified": bool(idn.get("verified")), "provider": idn.get("provider", ""), "assurance": idn.get("assurance", ""),
                 "fake": bool(idn.get("fake")), "verified_at": idn.get("verified_at", "")}
 
     def is_tenant_party(self, id_tenant: str = "", phone: str = "") -> bool:

@@ -11,9 +11,10 @@ status: DRY(점검만) | EXISTS(이미 있음) | BLOCKED(멈춤) | DONE(등록�
 from __future__ import annotations
 
 from datetime import date, timedelta
+from types import SimpleNamespace
 from typing import Any, Dict
 
-from . import backup
+from . import backup, franchise
 from .models import Building, Contract, Lessor, Room, Tenant
 
 
@@ -58,7 +59,8 @@ def register(branch: str = "main", room_no: str = "701", name: str = "민흥식"
          deposit=0, monthly_rent=0, maintenance_fee=0, is_published=False, id_tenant=tid, active_contract_id=cid,
          move_in_date=today.isoformat()).save(action="test_room_added", app_source="add_test_tenant")
     Tenant(id=tid, name=name, phone=phone, branch=branch, id_building=bldg.id, current_room_id=rid, room_no=room_no, checked_in=True,
-           checked_in_at=today.isoformat() + "T12:00:00", status="ACTIVE").save(action="test_tenant_added", app_source="add_test_tenant")
+           checked_in_at=today.isoformat() + "T12:00:00", status="ACTIVE",
+           identity=franchise.invite_identity_record(SimpleNamespace(name=name, phone=phone), "test")).save(action="test_tenant_added", app_source="add_test_tenant")
     Contract(id=cid, branch=branch, id_building=bldg.id, id_room=rid, room_no=room_no, id_lessor=(lessor.id if lessor else ""),
              lessor_name=(lessor.name if lessor else ""), id_tenant=tid, tenant_name=name, tenant_phone=phone, contract_date=today.isoformat(),
              move_in_date=today.isoformat(), expiry_date=(today + timedelta(days=365)).isoformat(), lease_term_months=12, lease_type="월세",

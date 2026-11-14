@@ -727,6 +727,8 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
             raise DomainError(why, hint="다른 4자리 숫자를 입력해 주세요(간편 비밀번호는 비워 두고 나중에 정해도 됩니다).")
     t.password = pwd.hash_password(req.password.strip())
     t.activated_at = now_iso()
+    if not (t.identity or {}).get("verified"):      # 문자·네이버 등 더 강한 인증이 이미 있으면 덮어쓰지 않는다
+        t.identity = fr.invite_identity_record(t)
     t.save(action="password_set_by_invite", app_source="rent3_invite")
     if req.agree_privacy:
         cs.record_consent(t, True, bool((t.consents or {}).get("support_access")))

@@ -187,6 +187,20 @@ def verify_identity_record(res: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def invite_identity_record(t: Any, assurance: str = "invite_link") -> Dict[str, Any]:
+    """입주 안내 링크(+호실·이름·전화·임대인 이름 4칸 확인)로 가입한 임차인의 본인 확인 기록.
+    '링크를 받은 이 호실 사람'이라는 보증이며 실명·생년월일 확인(통신사·네이버)은 아니므로 assurance 로 구분한다(invite_link / test)."""
+    return {
+        "verified": True, "name": t.name, "phone": t.phone, "birth6": "", "provider": "invite", "fake": False,
+        "assurance": assurance, "verified_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def invite_identity_allowed() -> bool:
+    """계약 시작·응답·서명에 invite_link 수준 본인 확인을 인정할지(환경변수 RENT3_INVITE_IDENTITY_OK, 기본 인정). 0 이면 문자·네이버 등 실명 확인이 필요하다."""
+    return os.getenv("RENT3_INVITE_IDENTITY_OK", "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 def mask_identity(idn: Dict[str, Any]) -> Dict[str, Any]:
     """임대인 화면에 돌려줄 값. 생년월일은 가린다."""
     if not idn or not idn.get("verified"):

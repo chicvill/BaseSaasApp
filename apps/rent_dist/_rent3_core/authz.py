@@ -444,6 +444,9 @@ async def contract_scope(request: Request) -> Optional[Dict[str, Any]]:
         if not (t and (t.identity or {}).get("verified")):
             raise Forbidden("휴대폰 본인인증이 필요합니다.",
                             hint="계약 화면 첫 페이지에서 본인인증을 마친 뒤 다시 시도해 주세요.")
+        from . import franchise as _fr
+        if (t.identity or {}).get("assurance") == "invite_link" and not _fr.invite_identity_allowed():
+            raise Forbidden("실명 본인인증이 필요합니다.", hint="입주 안내 링크 확인만으로는 계약할 수 없도록 설정되어 있습니다. 계약 화면에서 본인인증을 마쳐 주세요.")
 
     sid = request.path_params.get("session_id") or request.path_params.get("token")
     if sid:
