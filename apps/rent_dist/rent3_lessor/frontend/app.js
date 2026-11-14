@@ -877,7 +877,14 @@
   //    링크를 문자로 받은 사람만 가입할 수 있으므로 임대인 승인·전화 확인이 필요 없다. 만든 링크는 이 기기에만 보관(7일)해 창을 닫았다 열어도 이어서 보낸다.
   const btnConnectMsg = document.getElementById("btnConnectMsg");
   if (btnConnectMsg) {
-    btnConnectMsg.addEventListener("click", () => { closeDrawer(); showInviteSender().catch(Bass.showError); });
+    btnConnectMsg.addEventListener("click", () => {
+      closeDrawer();
+      showInviteSender().catch((err) => {
+        const body = openModal("📨 기존 임차인 앱 연결 안내", `<div style="font-size:14.5px;line-height:1.7;">창을 여는 중 문제가 생겼습니다.<br><strong>${Bass.escapeHtml((err && err.message) || String(err))}</strong><br><span class="bass-muted">${Bass.escapeHtml((err && err.hint) || "화면을 새로고침(PC: Ctrl+Shift+R)한 뒤 다시 눌러 주세요.")}</span></div>
+          <button id="ivRetry" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;margin-top:10px;">다시 시도</button>`);
+        body.querySelector("#ivRetry").addEventListener("click", () => btnConnectMsg.click());
+      });
+    });
   }
   async function showInviteSender() {
     const E = Bass.escapeHtml;
