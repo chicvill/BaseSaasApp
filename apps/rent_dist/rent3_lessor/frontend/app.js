@@ -914,7 +914,7 @@
         return `<div class="iv-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
           <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room_no)}호 ${E(p.tenant_name)}</strong> ${chip}<br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
           ${p.activated ? `<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">↩ 가입 취소</button>`
-            : `${!p.phone || !link(p) ? "" : `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>`}<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">${(p.invite_pending || sent(p)) ? "✖ 링크 취소" : "↩ 등록 취소"}</button>`}</div>`;
+            : `${!p.phone ? "" : (link(p) ? `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>` : `<button type="button" class="bass-btn bass-btn--sm iv-make1" style="min-height:44px;">🔗 링크 만들기</button>`)}<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">${(p.invite_pending || sent(p)) ? "✖ 링크 취소" : "↩ 등록 취소"}</button>`}</div>`;
       }).join("");
       body.innerHTML = `
         <div style="font-size:13px;line-height:1.65;margin-bottom:8px;">입주자마다 <strong>본인 전용 링크</strong>(7일·1회)를 앱이 만들어 줍니다. <strong>링크를 문자로 받은 사람만</strong> 가입할 수 있어서 임대인 승인이나 전화 확인이 필요 없어요. 아래 큰 단추를 누르면 <strong>다음 사람의 문자 창</strong>이 받는 사람·문구가 입력된 채 열리니 <strong>보내기</strong>만 누르고 돌아오세요. <span class="bass-muted">(문구가 비어 있으면 자동 복사된 문구를 붙여넣으세요. PC에서는 복사만 됩니다.)</span><br><span class="bass-muted">사람마다 링크가 달라서 단체문자·그룹채팅에는 넣을 수 없습니다(다른 사람 링크가 보입니다).</span></div>
@@ -935,6 +935,19 @@
         } else { Bass.updateAppAlert("success", "문구를 복사했습니다 — 문자 창에 붙여넣어 보내세요."); }
       };
       const send = (p) => { smsTo(p.phone, msgFor(p)); batch.sent = batch.sent || {}; batch.sent[p.room_no] = true; saveB(batch); setTimeout(draw, 400); };
+      // 한 호실만 새 링크를 만든다(다른 사람에게 이미 보낸 링크는 그대로)
+      const issueOne = async (p) => {
+        const r = await Bass.api(APP_ID, "/tenant-invites/bulk", { method: "POST", body: { branch: currentBranch, room_no: p.room_no } });
+        batch = batch || { at: Date.now(), links: {}, sent: {} };
+        batch.links = batch.links || {};
+        r.links.forEach((x) => { batch.links[x.room_no] = x.path; if (batch.sent) delete batch.sent[x.room_no]; });
+        saveB(batch);
+        return r;
+      };
+      body.querySelectorAll(".iv-row .iv-make1").forEach((btn) => btn.addEventListener("click", function () {
+        const p = rows[Number(this.closest(".iv-row").dataset.i)];
+        Bass.withLock(this, async () => { await issueOne(p); Bass.updateAppAlert("success", `${p.room_no}호 ${p.tenant_name}님의 새 링크를 만들었습니다. 📩 문자를 눌러 보내세요.`); await draw(); });
+      }));
       body.querySelector("#ivMake").addEventListener("click", function () {
         if (batch && !window.confirm("링크를 다시 만들면 이미 보낸 링크는 쓸 수 없게 됩니다. 계속할까요?")) return;
         Bass.withLock(this, async () => {
@@ -961,6 +974,7 @@
           Bass.withLock(this, async () => {
             const r = await Bass.api(APP_ID, "/tenant-invites/cancel", { method: "POST", body: { branch: currentBranch, room_no: p.room_no } });
             if (batch && batch.links) { delete batch.links[p.room_no]; if (batch.sent) delete batch.sent[p.room_no]; saveB(batch); }
+            if (r.kind === "reset") await issueOne(p);     // 등록을 초기화했으면 바로 이 호실의 새 링크를 만들어 📩 문자 단추가 나오게 한다
             Bass.updateAppAlert("success", r.message);
             await draw();
           });

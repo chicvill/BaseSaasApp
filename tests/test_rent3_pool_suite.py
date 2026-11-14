@@ -5122,6 +5122,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=sunho, json={"branch": "main", "room_no": first["room_no"]}).status_code, 403)
             cn2 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
             self.assertEqual(cn2["kind"], "reset")
+            # 한 호실만 새 링크: 그 호실 것만 만들어지고 다른 사람이 받은 링크는 그대로 쓸 수 있다
+            third = [x for x in again["links"] if x["room_no"] not in (other["room_no"], first["room_no"])][0]
+            one = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
+            self.assertEqual([x["room_no"] for x in one["links"]], [first["room_no"]])
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={third['path'].split('invite=')[1]}", headers=NA).status_code, 200)
+            # 링크 취소 응답이 없던 호실도 초기화 가능(찌꺼기 정리)
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()["kind"], "link")
             self.assertFalse({x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}[first["room_no"]]["activated"])
             self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": first["room_no"] and Tenant.first(room_no=first["room_no"], branch="main").id, "password": "Bulk#Pass99"}).status_code, 401)
             # 간편 비밀번호 접속으로는 못 한다(허용 목록 밖)

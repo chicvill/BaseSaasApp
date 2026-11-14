@@ -916,6 +916,7 @@ def tenant_invites_status(branch: str = "main"):
 
 class BulkInviteReq(BaseModel):
     branch: str = "main"
+    room_no: str = ""      # 비우면 가입 전 전원, 값이 있으면 그 호실 한 곳만(다른 사람이 받은 링크는 그대로 둔다)
 
 
 class InviteCancelReq(BaseModel):
@@ -950,6 +951,8 @@ def tenant_invites_bulk(req: BulkInviteReq, request: Request):
     who = str((claims_from(request) or {}).get("u") or "lessor")
     links, skipped = [], 0
     for t in _branch_tenants(req.branch):
+        if req.room_no and t.room_no != req.room_no:
+            continue
         if cn.activated(t):
             skipped += 1
             continue
