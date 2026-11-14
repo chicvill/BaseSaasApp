@@ -20,6 +20,7 @@ from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_c
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
 from core.errors import Conflict, DomainError, NotFound
+from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core import (
     POOL_COLLECTIONS,
     Admin,
@@ -693,6 +694,7 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
         if why:
             raise DomainError(why, hint="다른 4자리 숫자를 입력해 주세요(간편 비밀번호는 비워 두고 나중에 정해도 됩니다).")
     t.password = pwd.hash_password(req.password.strip())
+    t.activated_at = now_iso()
     t.save(action="password_set_by_invite", app_source="rent3_invite")
     if req.agree_privacy:
         cs.record_consent(t, True, bool((t.consents or {}).get("support_access")))
@@ -1174,6 +1176,8 @@ def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str,
         raise
     by_record = not (acct.identity or {}).get("verified")
     acct.password = pwd.hash_password(req.new_password.strip())
+    if isinstance(acct, Tenant):
+        acct.activated_at = now_iso()
     acct.save("password_reset_by_recovery" if by_record else "password_reset_by_identity", app_source="rent3_portal")
     ql.revoke_all(acct)   # 비밀번호를 새로 정하면 이전에 등록한 바로가기·간편 비밀번호는 모두 해제(분실 폰 대비) — 새 비밀번호로 로그인해 다시 만든다
     ratelimit.clear("reset", keys[:1])

@@ -251,6 +251,7 @@ class Tenant(PoolObj):
     invite_hash: str = ""                    # 입주 안내 카드(1회용 링크) 토큰의 해시(invite.py)
     invite_expires: str = ""
     invite_issued_by: str = ""
+    activated_at: str = ""                   # 입주자 본인이 비밀번호를 직접 정한 시각(입주 안내 링크·비밀번호 찾기). 비어 있으면 아직 가입 전
     password: str = "1212"
 
     SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash")

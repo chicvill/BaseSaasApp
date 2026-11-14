@@ -5067,7 +5067,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         before = {t.id: (t.password, t.pin_hash, list(t.quick_devices), dict(t.consents), t.invite_hash, t.invite_expires, t.invite_issued_by) for t in Tenant.all()}
         try:
             st = c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]
-            self.assertTrue(st and all(set(x) == {"room_no", "tenant_name", "phone", "activated", "invite_pending"} for x in st))   # 링크 원문 없음
+            self.assertTrue(st and all(set(x) == {"room_no", "tenant_name", "phone", "activated", "invite_pending"} for x in st))
+            act0 = sum(1 for x in st if x["activated"])   # 링크 원문 없음
             self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=sunho).status_code, 403)                          # 남의 건물
             r = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"})
             self.assertEqual(r.status_code, 200, r.text)
@@ -5089,6 +5090,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             again = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"}).json()
             self.assertNotIn(first["room_no"], [x["room_no"] for x in again["links"]])
             self.assertGreaterEqual(again["skipped_activated"], 1)
+            # 가져온 임차인(무작위 해시 비밀번호)은 가입한 것으로 보지 않는다: 위에서 가입한 한 호실만 가입 완료
+            self.assertEqual(sum(1 for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"] if x["activated"]), act0 + 1)   # 해시 비밀번호만으로는 가입으로 보지 않는다(방금 가입한 한 호실만 늘었다)
+            # 취소: 링크 취소(가입 전) · 가입 취소(가입 후) · 남의 건물 불가
+            other = again["links"][0]
+            cn1 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": other["room_no"]}).json()
+            self.assertEqual(cn1["kind"], "link")
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={other['path'].split('invite=')[1]}", headers=NA).status_code, 404)   # 취소한 링크는 못 쓴다
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=sunho, json={"branch": "main", "room_no": first["room_no"]}).status_code, 403)
+            cn2 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
+            self.assertEqual(cn2["kind"], "reset")
+            self.assertFalse({x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}[first["room_no"]]["activated"])
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": first["room_no"] and Tenant.first(room_no=first["room_no"], branch="main").id, "password": "Bulk#Pass99"}).status_code, 401)
             # 간편 비밀번호 접속으로는 못 한다(허용 목록 밖)
             from unittest import mock
             from apps.rent_dist._rent3_core import Lessor
@@ -5100,7 +5113,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=ph).status_code, 403)
                 self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=ph, json={"branch": "main"}).status_code, 403)
             lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-            for needle in ("showInviteSender", "/tenant-invites/bulk", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
+            for needle in ("showInviteSender", "/tenant-invites/bulk", "/tenant-invites/cancel", "iv-cancel", "↩ 가입 취소", "✖ 링크 취소", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
                 self.assertIn(needle, lapp, needle)
         finally:
             for tid, (pw, pin, dev, cons, ih, ie, ib) in before.items():

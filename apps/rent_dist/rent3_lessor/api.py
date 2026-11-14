@@ -918,6 +918,27 @@ class BulkInviteReq(BaseModel):
     branch: str = "main"
 
 
+class InviteCancelReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+
+
+@router.post("/tenant-invites/cancel")
+def tenant_invite_cancel(req: InviteCancelReq):
+    """한 호실의 연결을 취소한다. 가입을 마친 호실은 '가입 상태 초기화'(비밀번호·간편 비밀번호·바로가기·동의 기록을 지워 가입 전으로), 아직 가입 전이면 보낸 링크를 못 쓰게 한다. 호실·계약·납부 내역은 그대로."""
+    from apps.rent_dist._rent3_core import connect as cn
+    ensure_pool_seeded()
+    t = next((x for x in _branch_tenants(req.branch) if x.room_no == req.room_no), None)
+    if t is None:
+        raise DomainError(f"{req.room_no}호에 입주한 임차인이 없습니다.")
+    if cn.activated(t):
+        cn.reset_activation(t)
+        return {"success": True, "kind": "reset", "message": f"{t.room_no}호 {t.name}님의 가입을 취소했습니다(비밀번호·간편 비밀번호·바로가기 삭제). 다시 안내 링크를 보내야 합니다."}
+    if cn.cancel_invite(t):
+        return {"success": True, "kind": "link", "message": f"{t.room_no}호 {t.name}님께 보낸 안내 링크를 취소했습니다."}
+    return {"success": True, "kind": "none", "message": f"{t.room_no}호는 취소할 가입이나 링크가 없습니다."}
+
+
 @router.post("/tenant-invites/bulk")
 def tenant_invites_bulk(req: BulkInviteReq, request: Request):
     """아직 가입하지 않은 모든 입주 임차인에게 줄 **본인 전용 입주 안내 링크**(7일·1회)를 한꺼번에 만든다. 링크는 이 응답에서만 보인다(서버에는 해시만 남는다).

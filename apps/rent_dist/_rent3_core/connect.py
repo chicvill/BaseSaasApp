@@ -49,8 +49,9 @@ def _now() -> str:
 
 
 def activated(t: Any) -> bool:
-    """이미 자기 비밀번호나 간편 비밀번호가 있는 계정인가(그러면 연결 요청으로 덮어쓰지 못한다)."""
-    return bool(t.pin_hash or t.quick_devices or pwd.is_hashed(t.password or ""))
+    """입주자 본인이 이미 가입(비밀번호를 직접 정함)한 계정인가(그러면 연결 요청으로 덮어쓰지 못한다).
+    가져온(이관) 임차인에게는 아무도 모르는 무작위 비밀번호가 해시로 들어 있으므로 '해시 여부'로 판단하지 않는다 — 가입 시각(activated_at)이나 간편 비밀번호가 있어야 한다."""
+    return bool(getattr(t, "activated_at", "") or t.pin_hash or t.quick_devices)
 
 
 def public_info(branch: str) -> Optional[Dict[str, Any]]:
@@ -205,5 +206,15 @@ def reset_activation(t: Any) -> Dict[str, Any]:
     t.pin_hash, t.quick_devices = "", []
     t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
     t.consents = {}
-    t.save(action="activation_reset_by_admin", app_source="rent3_admin")
+    t.activated_at = ""
+    t.save(action="activation_reset", app_source="rent3_admin")
     return {"requests_closed": n_req}
+
+
+def cancel_invite(t: Any) -> bool:
+    """아직 쓰지 않은 개별 안내 링크를 취소한다(받은 링크는 바로 못 쓰게 된다). 취소할 링크가 없으면 False."""
+    if not (t.invite_hash and t.invite_expires >= _now()):
+        return False
+    t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
+    t.save(action="invite_cancelled", app_source="rent3_invite")
+    return True

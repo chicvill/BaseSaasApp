@@ -900,7 +900,8 @@
         const chip = p.activated ? '<span style="color:var(--ok);font-weight:700;">✅ 가입 완료</span>' : (sent(p) ? '<span style="color:var(--warn);font-weight:700;">📩 보냄</span>' : '<span class="bass-muted">미발송</span>');
         return `<div class="iv-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
           <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room_no)}호 ${E(p.tenant_name)}</strong> ${chip}<br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
-          ${p.activated || !p.phone || !link(p) ? "" : `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>`}</div>`;
+          ${p.activated ? `<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">↩ 가입 취소</button>`
+            : `${!p.phone || !link(p) ? "" : `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>`}${(p.invite_pending || sent(p)) ? `<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">✖ 링크 취소</button>` : ""}`}</div>`;
       }).join("");
       body.innerHTML = `
         <div style="font-size:13px;line-height:1.65;margin-bottom:8px;">입주자마다 <strong>본인 전용 링크</strong>(7일·1회)를 앱이 만들어 줍니다. <strong>링크를 문자로 받은 사람만</strong> 가입할 수 있어서 임대인 승인이나 전화 확인이 필요 없어요. 아래 큰 단추를 누르면 <strong>다음 사람의 문자 창</strong>이 받는 사람·문구가 입력된 채 열리니 <strong>보내기</strong>만 누르고 돌아오세요. <span class="bass-muted">(문구가 비어 있으면 자동 복사된 문구를 붙여넣으세요. PC에서는 복사만 됩니다.)</span><br><span class="bass-muted">사람마다 링크가 달라서 단체문자·그룹채팅에는 넣을 수 없습니다(다른 사람 링크가 보입니다).</span></div>
@@ -933,8 +934,22 @@
       });
       body.querySelector("#ivNext").addEventListener("click", () => { if (sendable.length) send(sendable[0]); });
       body.querySelectorAll(".iv-row").forEach((row) => {
+        const p = rows[Number(row.dataset.i)];
         const one = row.querySelector(".iv-one");
-        if (one) one.addEventListener("click", () => send(rows[Number(row.dataset.i)]));
+        if (one) one.addEventListener("click", () => send(p));
+        const cancel = row.querySelector(".iv-cancel");
+        if (cancel) cancel.addEventListener("click", function () {
+          const msg = p.activated
+            ? `${p.room_no}호 ${p.tenant_name}님의 가입을 취소할까요?\n비밀번호·간편 비밀번호·바로가기가 지워져 가입 전 상태로 돌아갑니다. (호실·계약·납부는 그대로)\n다시 쓰려면 안내 링크를 새로 보내야 합니다.`
+            : `${p.room_no}호 ${p.tenant_name}님께 보낸 안내 링크를 취소할까요?\n받은 링크는 더 이상 쓸 수 없습니다.`;
+          if (!window.confirm(msg)) return;
+          Bass.withLock(this, async () => {
+            const r = await Bass.api(APP_ID, "/tenant-invites/cancel", { method: "POST", body: { branch: currentBranch, room_no: p.room_no } });
+            if (batch && batch.links) { delete batch.links[p.room_no]; if (batch.sent) delete batch.sent[p.room_no]; saveB(batch); }
+            Bass.updateAppAlert("success", r.message);
+            await draw();
+          });
+        });
       });
     }
     await draw();
