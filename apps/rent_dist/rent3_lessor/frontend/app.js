@@ -873,38 +873,71 @@
   const btnFullLogin = document.getElementById("btnFullLogin");
   if (btnFullLogin) btnFullLogin.addEventListener("click", fullLogin);
 
-  // 📨 기존 임차인 전체에게 보낼 공통 안내 문자: 링크 하나로 각자 내 페이지에 연결(문자 인증 또는 임대인 승인)
+  // 📨 기존 임차인 안내: 입주자마다 '본인 전용 링크'(7일·1회)를 앱이 만들어 주고, 큰 단추로 다음 사람에게 문자 창을 연다(문구는 자동 복사).
+  //    링크를 문자로 받은 사람만 가입할 수 있으므로 임대인 승인·전화 확인이 필요 없다. 만든 링크는 이 기기에만 보관(7일)해 창을 닫았다 열어도 이어서 보낸다.
   const btnConnectMsg = document.getElementById("btnConnectMsg");
   if (btnConnectMsg) {
-    btnConnectMsg.addEventListener("click", () => {
-      closeDrawer();
-      const b = dash.building || {}, l = dash.lessor || {};
-      const link = `${window.location.origin}/rent3/?connect=${encodeURIComponent(currentBranch)}`;
-      const msg = `[${b.building_name || "건물"} 안내] 안녕하세요, 임대인 ${l.name || ""}입니다. 입주자 앱을 열었습니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있어요.\n\n1) 아래 링크를 누르고 호실·성함·휴대폰 번호를 입력해 주세요.\n2) 화면에 4자리 확인번호가 나오면 저(${l.phone || "임대인 번호"})에게 전화해서 그 번호를 불러 주세요.\n3) 제가 확인하면 바로 비밀번호를 정하실 수 있습니다.\n\n👉 ${link}`;
-      const people = (dash.rooms || []).filter((x) => x.is_occupied && x.contract).map((x) => ({ room: x.room_no, name: x.contract.tenant_name || "", phone: x.contract.tenant_phone || (x.tenant && x.tenant.phone) || "" }));
-      const E = Bass.escapeHtml;
-      const rows = people.map((p, i) => `<div class="cm-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
-          <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room)}호 ${E(p.name)}</strong><br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
-          <button type="button" class="bass-btn bass-btn--sm cm-copy" style="min-height:44px;" ${p.phone ? "" : "disabled"}>📋 번호</button>
-          <button type="button" class="bass-btn bass-btn--sm bass-btn--primary cm-sms" style="min-height:44px;" ${p.phone ? "" : "disabled"}>📩 문자</button></div>`).join("");
-      const body = openModal("📨 기존 임차인 앱 연결 안내 문자", `
-        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">모든 입주 임차인에게 <strong>같은 문자</strong>를 보내면 됩니다. 각자 자기 계정으로만 들어가므로 다른 호실은 볼 수 없습니다. 가입을 마친 호실은 이 링크로 덮어쓸 수 없습니다. 임차인이 링크를 열면 입력 창만 뜨고, 임차인이 전화를 걸면 이 화면에 <strong>승인 창이 자동으로</strong> 뜹니다.</div>
-        <div style="font-size:13px;line-height:1.6;padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(99,102,241,.16);">💡 <strong>여러 명에게 한꺼번에</strong> 보내려면 휴대폰 문자 앱의 <strong>단체문자(그룹 메시지)</strong>나 카카오톡 <strong>그룹채팅</strong>에 아래 문구를 붙여넣어 보내면 편합니다. 아래 <strong>[전체 번호 복사]</strong>로 받는 사람 칸에 한 번에 붙여넣을 수 있어요.<br><span class="bass-muted">단, 그룹채팅·그룹 문자는 받는 사람끼리 서로의 이름·번호가 보이고 답장이 섞일 수 있습니다. 각자에게 따로 보내는 <strong>개별 발송</strong>이 부담스럽다면 수신자가 서로 보이지 않는 단체 발송 기능을 쓰세요.</span></div>
-        <textarea id="cmMsg" class="bass-input r3-msg" rows="7" readonly>${E(msg)}</textarea>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
-          <button id="cmCopy" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">📋 문구 복사</button>
-          <button id="cmCopyAll" class="bass-btn" type="button" style="min-height:44px;">📋 전체 번호 복사 (${people.filter((p) => p.phone).length}명)</button></div>
-        <div class="r3-lbl" style="margin-top:12px;">한 명씩 보내려면 골라서 누르세요 <span class="bass-muted">(📩 문자 = 문구를 복사하고 그 사람에게 문자 창을 엽니다)</span></div>
-        <div id="cmList" style="max-height:36vh;overflow-y:auto;">${rows || '<div class="bass-muted" style="padding:10px;">입주 임차인이 없습니다.</div>'}</div>`);
-      body.querySelector("#cmCopy").addEventListener("click", () => copyText(msg));
-      body.querySelector("#cmCopyAll").addEventListener("click", () => copyText(people.filter((p) => p.phone).map((p) => p.phone).join(", ")));
-      const pick = (row) => { body.querySelectorAll(".cm-row").forEach((r) => { r.style.background = r === row ? "rgba(99,102,241,.22)" : ""; }); };
-      body.querySelectorAll(".cm-row").forEach((row) => {
-        const p = people[Number(row.dataset.i)];
-        row.querySelector(".cm-copy").addEventListener("click", () => { pick(row); copyText(p.phone); Bass.updateAppAlert("success", `${p.room}호 ${p.name} 번호를 복사했습니다.`); });
-        row.querySelector(".cm-sms").addEventListener("click", () => { pick(row); copyAndSms(msg, p.phone); });
+    btnConnectMsg.addEventListener("click", () => { closeDrawer(); showInviteSender().catch(Bass.showError); });
+  }
+  async function showInviteSender() {
+    const E = Bass.escapeHtml;
+    const key = `rent3_inv_${currentBranch}`;
+    const loadB = () => { try { const v = JSON.parse(window.localStorage.getItem(key) || "null"); return v && (Date.now() - v.at) < 6 * 86400000 ? v : null; } catch (_) { return null; } };
+    const saveB = (v) => { try { window.localStorage.setItem(key, JSON.stringify(v)); } catch (_) { /* 저장이 막혀도 이 창에서는 계속 쓸 수 있다 */ } };
+    const b = dash.building || {}, l = dash.lessor || {};
+    let batch = loadB();
+    const body = openModal("📨 기존 임차인 앱 연결 안내", '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>');
+    async function draw() {
+      const st = await Bass.api(APP_ID, `/tenant-invites?branch=${encodeURIComponent(currentBranch)}`);
+      const rows = st.tenants;
+      const todo = rows.filter((p) => !p.activated);
+      const link = (p) => (batch && batch.links[p.room_no]) ? window.location.origin + batch.links[p.room_no] : "";
+      const sent = (p) => batch && batch.sent && batch.sent[p.room_no];
+      const msgFor = (p) => `[${b.building_name || "건물"} 안내] ${p.tenant_name}님, 안녕하세요. 임대인 ${l.name || ""}입니다. 입주자 앱을 열었습니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있어요.\n아래 본인 전용 링크를 누르고 비밀번호만 정하시면 바로 시작됩니다(7일 안에 한 번만 사용, 다른 분께 전달하지 마세요).\n👉 ${link(p)}\n문의: ${l.phone || ""}`;
+      const sendable = todo.filter((p) => p.phone && link(p) && !sent(p));
+      const done = rows.length - todo.length;
+      const list = rows.map((p, i) => {
+        const chip = p.activated ? '<span style="color:var(--ok);font-weight:700;">✅ 가입 완료</span>' : (sent(p) ? '<span style="color:var(--warn);font-weight:700;">📩 보냄</span>' : '<span class="bass-muted">미발송</span>');
+        return `<div class="iv-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
+          <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room_no)}호 ${E(p.tenant_name)}</strong> ${chip}<br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
+          ${p.activated || !p.phone || !link(p) ? "" : `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>`}</div>`;
+      }).join("");
+      body.innerHTML = `
+        <div style="font-size:13px;line-height:1.65;margin-bottom:8px;">입주자마다 <strong>본인 전용 링크</strong>(7일·1회)를 앱이 만들어 줍니다. <strong>링크를 문자로 받은 사람만</strong> 가입할 수 있어서 임대인 승인이나 전화 확인이 필요 없어요. 아래 큰 단추를 누르면 <strong>다음 사람의 문자 창</strong>이 받는 사람·문구가 입력된 채 열리니 <strong>보내기</strong>만 누르고 돌아오세요. <span class="bass-muted">(문구가 비어 있으면 자동 복사된 문구를 붙여넣으세요. PC에서는 복사만 됩니다.)</span><br><span class="bass-muted">사람마다 링크가 달라서 단체문자·그룹채팅에는 넣을 수 없습니다(다른 사람 링크가 보입니다).</span></div>
+        <div style="font-weight:800;margin:6px 0;">가입 ${done}/${rows.length}명 · 미발송 ${sendable.length}명</div>
+        ${batch ? "" : '<div class="bass-muted" style="margin-bottom:6px;">아직 링크를 만들지 않았습니다.</div>'}
+        <button id="ivMake" class="bass-btn ${batch ? "" : "bass-btn--primary"}" type="button" style="width:100%;min-height:48px;margin-bottom:8px;">${batch ? "🔁 링크 다시 만들기 (이전 링크는 못 씀)" : "🔗 입주자별 링크 만들기"}</button>
+        <button id="ivNext" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:56px;font-size:17px;margin-bottom:10px;" ${sendable.length ? "" : "disabled"}>📩 다음 사람에게 문자 보내기 (${sendable.length}명 남음)</button>
+        <div id="ivList" style="max-height:34vh;overflow-y:auto;">${list || '<div class="bass-muted" style="padding:10px;">입주 임차인이 없습니다.</div>'}</div>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-top:8px;">📞 문자를 못 받았다는 분은 공통 주소 <code>${E(window.location.origin)}/rent3/?connect=${E(currentBranch)}</code> 로 연결을 요청하게 하세요(이때는 임대인 승인 창이 뜹니다).</div>`;
+      // 휴대폰이면 받는 사람 번호와 문구가 입력된 문자 창을 바로 연다(보내기만 누르면 됨). 클립보드에도 복사해 두고, PC 에서는 복사만 한다.
+      const smsTo = (phone, text) => {
+        copyText(text);
+        const d = String(phone || "").replace(/\D/g, "");
+        if (d && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+          const a = document.createElement("a");
+          a.href = `sms:${d}${/iPhone|iPad/i.test(navigator.userAgent) ? "&" : "?"}body=${encodeURIComponent(text)}`;
+          a.click();
+        } else { Bass.updateAppAlert("success", "문구를 복사했습니다 — 문자 창에 붙여넣어 보내세요."); }
+      };
+      const send = (p) => { smsTo(p.phone, msgFor(p)); batch.sent = batch.sent || {}; batch.sent[p.room_no] = true; saveB(batch); setTimeout(draw, 400); };
+      body.querySelector("#ivMake").addEventListener("click", function () {
+        if (batch && !window.confirm("링크를 다시 만들면 이미 보낸 링크는 쓸 수 없게 됩니다. 계속할까요?")) return;
+        Bass.withLock(this, async () => {
+          const r = await Bass.api(APP_ID, "/tenant-invites/bulk", { method: "POST", body: { branch: currentBranch } });
+          batch = { at: Date.now(), links: Object.fromEntries(r.links.map((x) => [x.room_no, x.path])), sent: {} };
+          saveB(batch);
+          Bass.updateAppAlert("success", r.message);
+          await draw();
+        });
       });
-    });
+      body.querySelector("#ivNext").addEventListener("click", () => { if (sendable.length) send(sendable[0]); });
+      body.querySelectorAll(".iv-row").forEach((row) => {
+        const one = row.querySelector(".iv-one");
+        if (one) one.addEventListener("click", () => send(rows[Number(row.dataset.i)]));
+      });
+    }
+    await draw();
   }
 
   const btnLedgerCsv = document.getElementById("btnLedgerCsv");

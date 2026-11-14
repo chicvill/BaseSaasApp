@@ -898,6 +898,44 @@ def revoke_tenant_shortcuts(req: TenantInviteReq):
     return {"success": True, "message": f"{t.name}님의 바로가기 {n}대와 간편 비밀번호를 해제했습니다. 새 폰에서는 비밀번호로 로그인해 다시 설정하게 하세요."}
 
 
+def _branch_tenants(branch: str):
+    from apps.rent_dist._rent3_core import quicklogin as ql
+    b_id = normalize_branch_id(branch)
+    ts = [t for t in Tenant.all() if normalize_branch_id(t.branch) == b_id and ql.eligible(t)]
+    return sorted(ts, key=lambda t: (t.room_no or ""))
+
+
+@router.get("/tenant-invites")
+def tenant_invites_status(branch: str = "main"):
+    """입주 임차인별 가입 현황(링크 원문은 없다): 가입 완료 여부, 유효한 안내 링크가 있는지."""
+    from apps.rent_dist._rent3_core import connect as cn, invite as inv
+    ensure_pool_seeded()
+    return {"success": True, "tenants": [{"room_no": t.room_no, "tenant_name": t.name, "phone": t.phone, "activated": cn.activated(t),
+                                          "invite_pending": inv.status(t)["pending"]} for t in _branch_tenants(branch)]}
+
+
+class BulkInviteReq(BaseModel):
+    branch: str = "main"
+
+
+@router.post("/tenant-invites/bulk")
+def tenant_invites_bulk(req: BulkInviteReq, request: Request):
+    """아직 가입하지 않은 모든 입주 임차인에게 줄 **본인 전용 입주 안내 링크**(7일·1회)를 한꺼번에 만든다. 링크는 이 응답에서만 보인다(서버에는 해시만 남는다).
+    가입을 마친 호실은 건너뛴다. 이전에 만든 링크는 새 링크로 바뀌어 쓸 수 없게 된다."""
+    from apps.rent_dist._rent3_core import connect as cn, invite as inv
+    ensure_pool_seeded()
+    who = str((claims_from(request) or {}).get("u") or "lessor")
+    links, skipped = [], 0
+    for t in _branch_tenants(req.branch):
+        if cn.activated(t):
+            skipped += 1
+            continue
+        tok = inv.issue(t, who)
+        links.append({"room_no": t.room_no, "tenant_name": t.name, "phone": t.phone, "path": f"/rent3_tenant/?invite={tok}", "expires": t.invite_expires})
+    return {"success": True, "links": links, "skipped_activated": skipped,
+            "message": f"{len(links)}명의 개별 안내 링크를 만들었습니다(가입 완료 {skipped}명은 건너뜀). 7일 안에 한 번씩 쓸 수 있습니다."}
+
+
 @router.post("/tenant-invite")
 def issue_tenant_invite(req: TenantInviteReq, request: Request):
     """입주 임차인에게 줄 1회용 입주 안내 카드(링크·QR)를 발급한다. 이전 링크는 무효가 된다. 링크 원문은 이 응답에서만 보인다."""

@@ -4997,7 +4997,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t.save(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
         pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect=", "cmCopyAll", "cm-sms", "단체문자(그룹 메시지)"):
+        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect=", "showInviteSender"):
             self.assertIn(needle, lapp, needle)
         for needle in ("/pool/connect/request", "/pool/connect/status", "/pool/connect/info", "rent3_connect_req", "find=1", "r3Connect", "__rent3ConnectOpen"):
             self.assertIn(needle, pj, needle)
@@ -5056,6 +5056,61 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("btnTtCheck", "btnTtApply", "/accounts/test-tenant", "시험 임차인 등록"):
             self.assertIn(needle, adm, needle)
+
+    def test_83_per_tenant_invite_links_bulk(self):
+        """83. 입주자별 개별 안내 링크 일괄 발급: 가입 전 입주자마다 본인 전용 링크(해시만 저장·7일·1회), 가입 완료 호실은 건너뜀, 현황 조회엔 링크 원문 없음,
+        링크로 가입하면 현황이 '가입 완료'로 바뀜, 남의 건물 임대인·PIN 접속은 불가."""
+        from apps.rent_dist._rent3_core import Tenant, connect as cn
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic, sunho = self._login("chic"), self._login("sunho")
+        before = {t.id: (t.password, t.pin_hash, list(t.quick_devices), dict(t.consents), t.invite_hash, t.invite_expires, t.invite_issued_by) for t in Tenant.all()}
+        try:
+            st = c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]
+            self.assertTrue(st and all(set(x) == {"room_no", "tenant_name", "phone", "activated", "invite_pending"} for x in st))   # 링크 원문 없음
+            self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=sunho).status_code, 403)                          # 남의 건물
+            r = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"})
+            self.assertEqual(r.status_code, 200, r.text)
+            links = r.json()["links"]
+            self.assertEqual(len(links) + r.json()["skipped_activated"], len(st))
+            self.assertEqual(len({x["path"] for x in links}), len(links))                                                       # 사람마다 다른 링크
+            for x in links[:3]:
+                tok = x["path"].split("invite=")[1]
+                idn = c.get(f"{PL}/invite/identify?token={tok}", headers=NA).json()
+                self.assertEqual(idn["room_no"], x["room_no"])
+            self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=sunho, json={"branch": "main"}).status_code, 403)
+            self.assertNotIn(links[0]["path"].split("invite=")[1], open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 원문은 저장하지 않는다
+            # 한 사람이 링크로 가입 → 현황이 가입 완료, 다시 발급하면 그 호실은 건너뜀
+            first = links[0]
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": first["path"].split("invite=")[1], "password": "Bulk#Pass99", "agree_privacy": True})
+            self.assertEqual(acc.status_code, 200, acc.text)
+            st2 = {x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}
+            self.assertTrue(st2[first["room_no"]]["activated"])
+            again = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"}).json()
+            self.assertNotIn(first["room_no"], [x["room_no"] for x in again["links"]])
+            self.assertGreaterEqual(again["skipped_activated"], 1)
+            # 간편 비밀번호 접속으로는 못 한다(허용 목록 밖)
+            from unittest import mock
+            from apps.rent_dist._rent3_core import Lessor
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "t"}).json()
+                tok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d["qk"], "pin": "2846"}).json()["token"]
+                ph = {"Authorization": f"Bearer {tok}"}
+                self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=ph).status_code, 403)
+                self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=ph, json={"branch": "main"}).status_code, 403)
+            lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("showInviteSender", "/tenant-invites/bulk", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
+                self.assertIn(needle, lapp, needle)
+        finally:
+            for tid, (pw, pin, dev, cons, ih, ie, ib) in before.items():
+                t = Tenant.get(tid)
+                if t:
+                    t.password, t.pin_hash, t.quick_devices, t.consents, t.invite_hash, t.invite_expires, t.invite_issued_by = pw, pin, dev, cons, ih, ie, ib
+                    t.save(action="t")
+            l = Lessor.first(branch="main")
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
 
 
 if __name__ == "__main__":

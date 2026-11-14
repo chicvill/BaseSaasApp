@@ -49,13 +49,17 @@ try {
   await sleep(7000);
   await snap(B, "5_임대인_진행띠", "임대인 화면의 임차인 연결 진행 상태");
   check(await B.eval(`document.getElementById("connBar") && /비밀번호/.test(document.getElementById("connBar").textContent)`), "진행 띠에 '비밀번호 설정' 상태가 보임");
-  // 임대인 메뉴: 안내 문자 예시
+  // 임대인 메뉴: 입주자별 개별 링크(승인 없이 문자로 받은 사람만 가입) — 만들기 → 다음 사람에게 보내기
   await B.eval(`document.querySelector("[data-r3-burger]").click()`); await sleep(500);
-  await B.eval(`document.getElementById("btnConnectMsg").click()`); await sleep(1200);
-  const msg = await B.eval(`document.getElementById("cmMsg").value`);
-  check(/\?connect=main/.test(msg) && /전화/.test(msg), "안내 문자: 링크(?connect=지점코드) + 전화 안내 포함");
-  console.log("----- 안내 문자 예시 -----\n" + msg + "\n--------------------------");
-  await snap(B, "6_안내문자", "기존 임차인 앱 연결 안내 문자");
+  await B.eval(`document.getElementById("btnConnectMsg").click()`); await sleep(2000);
+  check(await B.eval(`!!document.getElementById("ivMake") && /본인 전용 링크/.test(document.getElementById("r3Modal").innerText)`), "안내 창: 입주자별 본인 전용 링크 안내");
+  await snap(B, "6_개별링크_만들기전", "개별 링크 안내 창(만들기 전)");
+  await B.eval(`document.getElementById("ivMake").click()`); await sleep(3000);
+  check(await B.eval(`!document.getElementById("ivNext").disabled && /다음 사람에게 문자 보내기/.test(document.getElementById("ivNext").textContent)`), "링크 생성 후: '다음 사람에게 문자 보내기' 큰 단추 활성");
+  check(await B.eval(`document.querySelectorAll(".iv-row").length >= 1`), "입주자 목록과 상태(미발송/보냄/가입 완료)");
+  await B.eval(`window.open = () => null; document.getElementById("ivNext").click()`); await sleep(1200);
+  check(await B.eval(`/📩 보냄/.test(document.getElementById("ivList").innerText)`), "보낸 사람은 '📩 보냄' 표시, 다음 사람으로 넘어감");
+  await snap(B, "7_개별링크_보낸뒤", "한 명 보낸 뒤 목록");
   console.log(bad ? `\n❌ 실패 ${bad}건` : "\n✅ 모두 통과");
 } finally { await A.close(); await B.close(); }
 process.exit(bad ? 1 : 0);
