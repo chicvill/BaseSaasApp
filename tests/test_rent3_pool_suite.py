@@ -4219,7 +4219,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         idn = c.get(f"/api/rent3/pool/invite/identify?token={tok}", headers=NA).json()
         self.assertEqual((idn["room_no"], idn["masked_name"]), ("201", ql.mask_name(t.name)))
         self.assertEqual(c.get("/api/rent3/pool/invite/identify?token=wrong-token-0000000000", headers=NA).status_code, 404)
-        acc = lambda **kw: c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, **kw})
+        from apps.rent_dist._rent3_core import connect as cn_id
+        who = {"room_no": t.room_no, "name": t.name, "phone": t.phone, "lessor_name": cn_id.public_info(t.branch)["lessor_name"]}
+        acc = lambda **kw: c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, **who, **kw})
+        # 본인 확인: 호실·이름·전화번호·임대인 이름이 모두 맞아야 한다(틀리면 비밀번호도 못 정한다)
+        vf = lambda **kw: c.post("/api/rent3/pool/invite/verify", headers=NA, json={"token": tok, **who, **kw})
+        self.assertEqual(vf().status_code, 200)
+        from apps.rent_dist._rent3_core import ratelimit as rl_id
+        for bad in ({"room_no": "999"}, {"name": "엉뚱한이"}, {"phone": "010-0000-0000"}, {"lessor_name": "남의임대인"}, {"lessor_name": ""}):
+            rl_id.reset_all()
+            self.assertEqual(vf(**bad).status_code, 400, bad)
+            self.assertEqual(acc(password="Invite2026x", agree_privacy=True, **bad).status_code, 400, bad)      # 확인 단계를 건너뛰고 바로 가입해도 막힌다
+        self.assertEqual(c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, "password": "Invite2026x", "agree_privacy": True}).status_code, 400)   # 4칸 없이는 불가
+        rl_id.reset_all()
+        self.assertEqual(vf().status_code, 200)
+        for _ in range(5):
+            vf(name="엉뚱한이")
+        self.assertEqual(vf().status_code, 429)       # 5번 틀리면 맞는 입력도 잠시 거절
+        rl_id.reset_all()
         self.assertEqual(acc(password="short", agree_privacy=True).status_code, 400)                          # 비밀번호 규칙
         self.assertEqual(acc(password="Invite2026x", pin="1234", agree_privacy=True).status_code, 400)       # 약한 PIN
         with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
@@ -4252,7 +4269,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # ── 화면: 서랍 하단 포털 홈·로그아웃, 가입 화면, 관리인 운영 탭, PIN 차단 안내 ──
         rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
         shell = rd("shared_ui", "r3_shell.js")
-        for needle in ("🌐 포털 홈", "🚪 로그아웃", "/rent3/?logout=1", "showInviteSetup", "/auth/invite-accept", "installHelp"):
+        for needle in ("🌐 포털 홈", "🚪 로그아웃", "/rent3/?logout=1", "showInviteSetup", "/auth/invite-accept", "/invite/verify", "r3IdLessor", "본인 확인", "installHelp"):
             self.assertIn(needle, shell, needle)
         admin_idx = rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html")
         self.assertIn("/rent3/?logout=1", admin_idx)
@@ -4972,7 +4989,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             tok = url.split("invite=")[1]
             self.assertEqual(c.get(f"{PL}/invite/identify?token={tok}", headers=NA).status_code, 200)
             self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["SETTING"])   # 비밀번호 설정 중
-            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": tok, "password": "Conn#Pass99", "pin": "2846", "agree_privacy": True})
+            from apps.rent_dist._rent3_core import connect as cn_id
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": tok, "password": "Conn#Pass99", "pin": "2846", "agree_privacy": True,
+                                                                       "room_no": t.room_no, "name": t.name, "phone": t.phone, "lessor_name": cn_id.public_info(t.branch)["lessor_name"]})
             self.assertEqual(acc.status_code, 200, acc.text)
             self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 200)
             self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["DONE"])         # 연결 완료
@@ -5083,7 +5102,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertNotIn(links[0]["path"].split("invite=")[1], open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 원문은 저장하지 않는다
             # 한 사람이 링크로 가입 → 현황이 가입 완료, 다시 발급하면 그 호실은 건너뜀
             first = links[0]
-            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": first["path"].split("invite=")[1], "password": "Bulk#Pass99", "agree_privacy": True})
+            from apps.rent_dist._rent3_core import connect as cn_id
+            t1 = Tenant.first(room_no=first["room_no"], branch="main")
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": first["path"].split("invite=")[1], "password": "Bulk#Pass99", "agree_privacy": True,
+                                                                       "room_no": t1.room_no, "name": t1.name, "phone": t1.phone, "lessor_name": cn_id.public_info("main")["lessor_name"]})
             self.assertEqual(acc.status_code, 200, acc.text)
             st2 = {x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}
             self.assertTrue(st2[first["room_no"]]["activated"])

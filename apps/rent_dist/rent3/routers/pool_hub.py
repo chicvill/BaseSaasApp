@@ -3,6 +3,7 @@ apps/rent3/routers/pool_hub.py — 통합관리용 공동 JSON Data Pool 관제 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -659,6 +660,10 @@ class InviteAcceptReq(BaseModel):
     password: str
     pin: str = ""
     agree_privacy: bool = False
+    room_no: str = ""
+    name: str = ""
+    phone: str = ""
+    lessor_name: str = ""
 
 
 @router.get("/invite/identify")
@@ -667,6 +672,32 @@ def invite_identify(token: str, request: Request) -> Dict[str, Any]:
     b = Building.get(t.id_building) if t.id_building else None
     return {"success": True, "masked_name": ql.mask_name(t.name), "room_no": t.room_no, "building_name": (b.building_name if b else ""),
             "expires": t.invite_expires, "consent_required": cs.consent_required()}
+
+
+class InviteVerifyReq(BaseModel):
+    token: str
+    room_no: str = ""
+    name: str = ""
+    phone: str = ""
+    lessor_name: str = ""
+
+
+def _invite_verify(t: Tenant, req: Any) -> None:
+    """호실·이름·전화번호·임대인 이름 대조. 한 링크에서 5번 틀리면 15분 잠긴다(잠긴 동안은 맞아도 거절)."""
+    keys = [f"tok:{hashlib.sha256(str(req.token).encode()).hexdigest()[:16]}"]
+    ratelimit.check("invite", keys)
+    if not cn.verify_identity(t, req.room_no, req.name, req.phone, req.lessor_name):
+        ratelimit.fail("invite", keys)
+        raise DomainError("입력한 정보가 장부와 맞지 않습니다.", hint="호실·본인 이름·본인 전화번호·임대인 이름을 다시 확인해 주세요. 계속 안 되면 임대인에게 문의해 주세요(5번 틀리면 15분 동안 잠깁니다).")
+    ratelimit.clear("invite", keys)
+
+
+@router.post("/invite/verify")
+def invite_verify(req: InviteVerifyReq, request: Request) -> Dict[str, Any]:
+    """비밀번호를 정하기 전 단계: 본인 확인만 한다(저장·로그인 없음)."""
+    t = _invite_lookup(req.token, request)
+    _invite_verify(t, req)
+    return {"success": True, "verified": True, "message": "본인 확인이 되었습니다."}
 
 
 def _invite_lookup(token: str, request: Request) -> Tenant:
@@ -685,6 +716,7 @@ def _invite_lookup(token: str, request: Request) -> Tenant:
 def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
     """입주 안내 링크로 비밀번호(필수)·PIN(선택)을 정하고 로그인한다. 링크는 한 번만 쓸 수 있다."""
     t = _invite_lookup(req.token, request)
+    _invite_verify(t, req)       # 서버에서도 다시 대조한다(앞 단계를 건너뛰고 바로 호출해도 통과 못 함)
     pwd.validate_new_password(req.password)
     if cs.consent_required() and not req.agree_privacy:
         raise DomainError("개인정보 수집·이용에 동의해야 이용할 수 있습니다.", hint="동의는 필수입니다.")

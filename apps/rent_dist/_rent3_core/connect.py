@@ -83,6 +83,23 @@ def find_tenant(building_name: str, room_no: str, name: str, phone: str, branch:
     return None
 
 
+def verify_identity(t: Any, room_no: str, name: str, phone: str, lessor_name: str) -> bool:
+    """입주 안내 링크로 가입하기 전 본인 확인: 호실·본인 이름·본인 전화번호·임대인 이름이 장부와 모두 같아야 한다.
+    링크를 남에게 전달받았거나 주워도 이 4가지를 모르면 가입할 수 없다. 장부에 값이 없는 항목(전화번호 등)은 대조할 수 없으므로 건너뛴다."""
+    if not _room(room_no) or _room(room_no) != _room(t.room_no):
+        return False
+    if not fr._norm_name(name) or fr._norm_name(name) != fr._norm_name(t.name):
+        return False
+    if len(_digits(t.phone)) >= 10 and _digits(phone) != _digits(t.phone):
+        return False
+    b = Building.get(t.id_building) if t.id_building else Building.first(branch=t.branch)
+    lsr = (Lessor.get(b.id_lessor) if b and b.id_lessor else None) or Lessor.first(branch=t.branch)
+    if lsr is not None and fr._norm_name(lsr.name):
+        if fr._norm_name(lessor_name) != fr._norm_name(lsr.name):
+            return False
+    return True
+
+
 def create(t: Any) -> Tuple[ConnectRequest, str, str]:
     """요청 접수. 이 임차인의 이전 요청은 폐기하고, (요청, secret, 확인번호)를 돌려준다. secret·확인번호 원문은 이 응답에서만 볼 수 있다."""
     for old in ConnectRequest.find(tenant_id=t.id):

@@ -258,7 +258,15 @@
     ov.innerHTML = '<div style="max-width:380px;margin:0 auto;">' +
       '<div style="font-size:40px;line-height:1;text-align:center;">🏠</div>' +
       '<div id="r3InvWho" style="font-size:17px;font-weight:700;margin:10px 0 2px;text-align:center;">확인하는 중…</div>' +
-      '<div style="font-size:13px;color:#555;margin-bottom:14px;text-align:center;">비밀번호를 정하면 바로 시작합니다.</div>' +
+      '<div id="r3InvLead" style="font-size:13px;color:#555;margin-bottom:14px;text-align:center;">먼저 본인 확인을 하고, 비밀번호를 정하면 바로 시작합니다.</div>' +
+      '<div id="r3InvId" hidden>' +
+      '<label style="font-size:13px;font-weight:700;">호실 <span style="font-weight:400;color:#666;">(예: 701)</span></label><input id="r3IdRoom" type="text" inputmode="numeric" autocomplete="off" style="' + inp + '">' +
+      '<label style="font-size:13px;font-weight:700;">본인 이름</label><input id="r3IdName" type="text" autocomplete="off" style="' + inp + '">' +
+      '<label style="font-size:13px;font-weight:700;">본인 전화번호</label><input id="r3IdPhone" type="tel" inputmode="tel" autocomplete="off" placeholder="010-0000-0000" style="' + inp + '">' +
+      '<label style="font-size:13px;font-weight:700;">임대인 이름 <span style="font-weight:400;color:#666;">(계약서에 적힌 임대인)</span></label><input id="r3IdLessor" type="text" autocomplete="off" style="' + inp + '">' +
+      '<div id="r3IdMsg" style="min-height:20px;font-size:13px;color:#dc2626;margin-bottom:8px;"></div>' +
+      '<button id="r3IdGo" type="button" style="width:100%;height:50px;font-size:17px;font-weight:700;border:0;border-radius:10px;background:#2563eb;color:#fff;">본인 확인</button>' +
+      '</div>' +
       '<div id="r3InvForm" hidden>' +
       '<label style="font-size:13px;font-weight:700;">비밀번호 (8자 이상, 영문+숫자)</label><input id="r3InvPw" type="password" autocomplete="new-password" style="' + inp + '">' +
       '<label style="font-size:13px;font-weight:700;">비밀번호 다시 입력</label><input id="r3InvPw2" type="password" autocomplete="new-password" style="' + inp + '">' +
@@ -278,9 +286,29 @@
         if (!res.ok) { $("r3InvWho").textContent = "사용할 수 없는 안내 링크입니다"; msg.textContent = ""; var m = document.createElement("div"); m.style.cssText = "font-size:13px;color:#dc2626;text-align:center;"; m.textContent = (res.d.message || "") + " " + (res.d.hint || ""); $("r3InvWho").after(m); return; }
         var d = res.d;
         $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + d.room_no + "호 · " + d.masked_name + "님").trim();
-        $("r3InvForm").hidden = false;
+        $("r3InvId").hidden = false;     // 1단계: 본인 확인(호실은 일부러 채워 주지 않는다 — 아는 사람만 통과)
+        $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + "입주 안내").trim();
       })
       .catch(function () { $("r3InvWho").textContent = "서버에 연결하지 못했습니다"; });
+    var ident = null;
+    $("r3IdGo").addEventListener("click", function () {
+      var idMsg = $("r3IdMsg"), btn = this;
+      var v = { room_no: $("r3IdRoom").value.trim(), name: $("r3IdName").value.trim(), phone: $("r3IdPhone").value.trim(), lessor_name: $("r3IdLessor").value.trim() };
+      idMsg.textContent = "";
+      if (!v.room_no || !v.name || !v.phone || !v.lessor_name) { idMsg.textContent = "4칸을 모두 입력해 주세요."; return; }
+      btn.disabled = true;
+      fetch("/api/rent3/pool/invite/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ token: INVITE }, v)) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok || !res.d.verified) { idMsg.textContent = (res.d.message || res.d.detail || "본인 확인에 실패했습니다.") + (res.d.hint ? " " + res.d.hint : ""); return; }
+          ident = v;
+          $("r3InvId").hidden = true; $("r3InvForm").hidden = false;
+          $("r3InvWho").textContent = "✅ 본인 확인 완료";
+          $("r3InvLead").textContent = "비밀번호를 정하면 바로 시작합니다.";
+        })
+        .catch(function () { btn.disabled = false; idMsg.textContent = "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요."; });
+    });
     $("r3InvGo").addEventListener("click", function () {
       var pw = $("r3InvPw").value, pin = $("r3InvPin").value.trim();
       msg.textContent = "";
@@ -289,7 +317,7 @@
       if (!$("r3InvAgree").checked) { msg.textContent = "개인정보 수집·이용에 동의해 주세요."; return; }
       var btn = this; btn.disabled = true;
       fetch("/api/rent3/pool/auth/invite-accept", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: INVITE, password: pw, pin: pin, agree_privacy: true }) })
+        body: JSON.stringify(Object.assign({ token: INVITE, password: pw, pin: pin, agree_privacy: true }, ident || {})) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           btn.disabled = false;

@@ -44,23 +44,29 @@
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
     ] },
     { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }] },
-    { title: "운영", items: [
+    { title: "임차인 소통 · 시설", items: [
       { label: "💬 메시지", tab: "messages" },
       { label: "🔧 A/S 접수", tab: "ops" },
-      { label: "⚖️ 만기 통보", tab: "expiry" },
-      { label: "🔔 일괄 납입 통보", tab: "notice" },
-      { label: "📨 기존 임차인 앱 연결 안내 문자", id: "btnConnectMsg" },
     ] },
-    { title: "건물", items: [
+    { title: "통보 · 안내", items: [
+      { label: "🔔 일괄 납입 통보", tab: "notice" },
+      { label: "⚖️ 만기 통보", tab: "expiry" },
+      { label: "📨 임차인 앱 가입 안내 문자", id: "btnConnectMsg" },
+    ] },
+    { title: "건물 설정", items: [
       { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
-    { title: "도움말 · 이동", items: [
-      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
-      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
-      { label: "📘 이용 매뉴얼", href: "manual.html" },
+    { title: "내 설정", items: [
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
+      { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "🔓 아이디·비밀번호로 로그인", id: "btnFullLogin", pinOnly: true },
+    ] },
+    { title: "도움말 · 문의", items: [
+      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
+      { label: "📘 이용 매뉴얼", href: "manual.html" },
+    ] },
+    { title: "이동 (관리인)", items: [
       { label: "🔑 임차인 앱", href: "/rent3_tenant/", adminOnly: true },
       { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
       { label: "🌐 Data Pool 관제", href: "/rent3/pool.html", adminOnly: true },
@@ -900,7 +906,7 @@
       const todo = rows.filter((p) => !p.activated);
       const link = (p) => (batch && batch.links[p.room_no]) ? window.location.origin + batch.links[p.room_no] : "";
       const sent = (p) => batch && batch.sent && batch.sent[p.room_no];
-      const msgFor = (p) => `[${b.building_name || "건물"} 안내] ${p.tenant_name}님, 안녕하세요. 임대인 ${l.name || ""}입니다. 입주자 앱을 열었습니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있어요.\n아래 본인 전용 링크를 누르고 비밀번호만 정하시면 바로 시작됩니다(7일 안에 한 번만 사용, 다른 분께 전달하지 마세요).\n👉 ${link(p)}\n문의: ${l.phone || ""}`;
+      const msgFor = (p) => `[${b.building_name || "건물"} 안내] ${p.tenant_name}님, 안녕하세요. ${b.building_name || "건물"} 관리자입니다.\n월세 납부 내역 확인, 수리(A/S) 요청, 연말정산 납부확인서 발행, 임대인과의 채팅 등 생활 편이를 위해 임차관리 앱을 제공합니다.\n아래 본인 전용 링크를 누르고 본인 확인 및 비밀번호만 정하시면 바로 사용하실 수 있습니다. (7일 안에 한 번만 사용 가능, 다른 분께 전달하지 마세요).\n👉 ${link(p)}\n문의: ${l.phone || ""}`;
       const sendable = todo.filter((p) => p.phone && link(p) && !sent(p));
       const done = rows.length - todo.length;
       const list = rows.map((p, i) => {

@@ -26,24 +26,30 @@
   // ☰ 메뉴: 첫 화면은 '내 집(납부 확인)' 하나뿐이고, 나머지는 모두 여기서 들어간다(빠진 기능 0개 — test_56 이 점검).
   const TENANT_MENU = [
     { items: [{ label: "🏠 내 집 (납부 확인)", id: "btnSvcHome" }] },
-    { title: "계약 · 서류", items: [
+    { title: "계약 · 증빙 서류", items: [
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=tenant" },
-      { label: "🧾 연말정산 납부확인서", id: "btnSvcCert" },
       { label: "📸 중개 계약서 사본", id: "btnSvcPaper" },
+      { label: "🧾 연말정산 납부확인서", id: "btnSvcCert" },
+    ] },
+    { title: "계약 기간 · 퇴실", items: [
       { label: "📅 만기 · 연장 안내", id: "btnSvcExpiry" },
       { label: "🚪 퇴실 정산", id: "btnSvcCheckout" },
     ] },
-    { title: "요청", items: [
+    { title: "생활 · 요청", items: [
       { label: "✉️ 임대인과 메시지", id: "btnSvcMsg" },
       { label: "🔧 A/S 요청", id: "btnSvcAs" },
       { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
-      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
     ] },
-    { title: "찾기", items: [{ label: "🔍 빈 집 찾기", id: "btnMenuListings" }] },
-    { title: "도움말", items: [
+    { title: "내 설정", items: [
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
+    ] },
+    { title: "도움말 · 문의", items: [
+      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
+    ] },
+    { title: "다른 집 찾기", items: [{ label: "🔍 빈 집 찾기", id: "btnMenuListings" }] },
+    { title: "이동 (관리인)", items: [
       { label: "🏢 임대인 앱", href: "/rent3_lessor/", adminOnly: true },
       { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
       { label: "🌐 Data Pool 관제", href: "/rent3/pool.html", adminOnly: true },
