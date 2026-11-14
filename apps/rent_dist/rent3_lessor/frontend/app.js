@@ -881,16 +881,29 @@
       const b = dash.building || {}, l = dash.lessor || {};
       const link = `${window.location.origin}/rent3/?connect=${encodeURIComponent(currentBranch)}`;
       const msg = `[${b.building_name || "건물"} 안내] 안녕하세요, 임대인 ${l.name || ""}입니다. 입주자 앱을 열었습니다. 월세 납부 확인·수리(A/S) 요청·연말정산 납부확인서를 편하게 이용하실 수 있어요.\n\n1) 아래 링크를 누르고 호실·성함·휴대폰 번호를 입력해 주세요.\n2) 화면에 4자리 확인번호가 나오면 저(${l.phone || "임대인 번호"})에게 전화해서 그 번호를 불러 주세요.\n3) 제가 확인하면 바로 비밀번호를 정하실 수 있습니다.\n\n👉 ${link}`;
-      const people = (dash.rooms || []).filter((x) => x.is_occupied && x.contract).map((x) => `${x.room_no}호 ${x.contract.tenant_name || ""} ${x.contract.tenant_phone || (x.tenant && x.tenant.phone) || ""}`.trim());
+      const people = (dash.rooms || []).filter((x) => x.is_occupied && x.contract).map((x) => ({ room: x.room_no, name: x.contract.tenant_name || "", phone: x.contract.tenant_phone || (x.tenant && x.tenant.phone) || "" }));
+      const E = Bass.escapeHtml;
+      const rows = people.map((p, i) => `<div class="cm-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
+          <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room)}호 ${E(p.name)}</strong><br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
+          <button type="button" class="bass-btn bass-btn--sm cm-copy" style="min-height:44px;" ${p.phone ? "" : "disabled"}>📋 번호</button>
+          <button type="button" class="bass-btn bass-btn--sm bass-btn--primary cm-sms" style="min-height:44px;" ${p.phone ? "" : "disabled"}>📩 문자</button></div>`).join("");
       const body = openModal("📨 기존 임차인 앱 연결 안내 문자", `
         <div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">모든 입주 임차인에게 <strong>같은 문자</strong>를 보내면 됩니다. 각자 자기 계정으로만 들어가므로 다른 호실은 볼 수 없습니다. 가입을 마친 호실은 이 링크로 덮어쓸 수 없습니다. 임차인이 링크를 열면 입력 창만 뜨고, 임차인이 전화를 걸면 이 화면에 <strong>승인 창이 자동으로</strong> 뜹니다.</div>
-        <textarea id="cmMsg" class="bass-input r3-msg" rows="7" readonly>${Bass.escapeHtml(msg)}</textarea>
-        <button id="cmCopy" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;min-height:44px;">📋 문구 복사</button>
-        <div class="r3-lbl" style="margin-top:12px;">입주 임차인 연락처 (${people.length}명)</div>
-        <textarea id="cmPhones" class="bass-input r3-msg" rows="6" readonly>${Bass.escapeHtml(people.join("\n"))}</textarea>
-        <button id="cmCopyPhones" class="bass-btn" type="button" style="margin-top:6px;min-height:44px;">📋 연락처 복사</button>`);
+        <div style="font-size:13px;line-height:1.6;padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(99,102,241,.16);">💡 <strong>여러 명에게 한꺼번에</strong> 보내려면 휴대폰 문자 앱의 <strong>단체문자(그룹 메시지)</strong>나 카카오톡 <strong>그룹채팅</strong>에 아래 문구를 붙여넣어 보내면 편합니다. 아래 <strong>[전체 번호 복사]</strong>로 받는 사람 칸에 한 번에 붙여넣을 수 있어요.<br><span class="bass-muted">단, 그룹채팅·그룹 문자는 받는 사람끼리 서로의 이름·번호가 보이고 답장이 섞일 수 있습니다. 각자에게 따로 보내는 <strong>개별 발송</strong>이 부담스럽다면 수신자가 서로 보이지 않는 단체 발송 기능을 쓰세요.</span></div>
+        <textarea id="cmMsg" class="bass-input r3-msg" rows="7" readonly>${E(msg)}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+          <button id="cmCopy" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">📋 문구 복사</button>
+          <button id="cmCopyAll" class="bass-btn" type="button" style="min-height:44px;">📋 전체 번호 복사 (${people.filter((p) => p.phone).length}명)</button></div>
+        <div class="r3-lbl" style="margin-top:12px;">한 명씩 보내려면 골라서 누르세요 <span class="bass-muted">(📩 문자 = 문구를 복사하고 그 사람에게 문자 창을 엽니다)</span></div>
+        <div id="cmList" style="max-height:36vh;overflow-y:auto;">${rows || '<div class="bass-muted" style="padding:10px;">입주 임차인이 없습니다.</div>'}</div>`);
       body.querySelector("#cmCopy").addEventListener("click", () => copyText(msg));
-      body.querySelector("#cmCopyPhones").addEventListener("click", () => copyText(people.join("\n")));
+      body.querySelector("#cmCopyAll").addEventListener("click", () => copyText(people.filter((p) => p.phone).map((p) => p.phone).join(", ")));
+      const pick = (row) => { body.querySelectorAll(".cm-row").forEach((r) => { r.style.background = r === row ? "rgba(99,102,241,.22)" : ""; }); };
+      body.querySelectorAll(".cm-row").forEach((row) => {
+        const p = people[Number(row.dataset.i)];
+        row.querySelector(".cm-copy").addEventListener("click", () => { pick(row); copyText(p.phone); Bass.updateAppAlert("success", `${p.room}호 ${p.name} 번호를 복사했습니다.`); });
+        row.querySelector(".cm-sms").addEventListener("click", () => { pick(row); copyAndSms(msg, p.phone); });
+      });
     });
   }
 

@@ -189,3 +189,21 @@ def check_status(req_id: str, secret: str) -> Dict[str, Any]:
         r.save(action="connect_delivered", app_source="rent3_connect")
         return {"status": "APPROVED", "message": "임대인이 승인했습니다. 비밀번호를 정해 주세요.", "invite_url": f"/rent3_tenant/?invite={tok}"}
     return {"status": "EXPIRED", "message": "이미 처리된 요청입니다."}
+
+
+def reset_activation(t: Any) -> Dict[str, Any]:
+    """관리인이 한 임차인을 '아직 가입하지 않은 처음 상태'로 되돌린다(연결·가입 과정을 다시 시험하거나, 잘못 연결된 계정을 풀 때).
+    비밀번호(→ 쓸 수 없는 초기값), 간편 비밀번호·바로가기 기기, 입주 안내 링크, 개인정보 동의 기록, 진행 중인 연결 요청을 모두 지운다.
+    호실·계약·납부 내역은 건드리지 않는다. 이미 열려 있는 로그인 화면은 만료(최대 12시간)될 때까지 남을 수 있다."""
+    n_req = 0
+    for r in ConnectRequest.find(tenant_id=t.id):
+        if r.status in ("PENDING", "APPROVED", "DELIVERED"):
+            r.status = "EXPIRED"
+            r.save(action="connect_reset_by_admin", app_source="rent3_admin")
+            n_req += 1
+    t.password = "1212"
+    t.pin_hash, t.quick_devices = "", []
+    t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
+    t.consents = {}
+    t.save(action="activation_reset_by_admin", app_source="rent3_admin")
+    return {"requests_closed": n_req}

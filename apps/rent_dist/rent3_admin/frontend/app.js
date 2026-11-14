@@ -430,7 +430,8 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button id="btnOpsInvite" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">입주 안내 링크 만들기</button>
           <button id="btnOpsTemp" class="bass-btn" type="button" style="min-height:44px;">임시 비밀번호 발급</button>
-          <button id="btnOpsRevoke" class="bass-btn" type="button" style="min-height:44px;">📵 분실 폰 바로가기 전체 해제</button></div>
+          <button id="btnOpsRevoke" class="bass-btn" type="button" style="min-height:44px;">📵 분실 폰 바로가기 전체 해제</button>
+          <button id="btnOpsResetAct" class="bass-btn" type="button" style="min-height:44px;">↩ 가입 상태 초기화 (재시험)</button></div>
         <div id="opsResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
       </div>
       <div class="bass-card" style="margin-top:14px;">
@@ -478,6 +479,15 @@
       Bass.withLock(this, async () => {
         const r = await Bass.api(APP_ID, "/accounts/revoke-shortcuts", { method: "POST", body: { id: document.getElementById("opsTenant").value } });
         out.textContent = r.message;
+        await renderOpsTab();
+      });
+    });
+    document.getElementById("btnOpsResetAct").addEventListener("click", function () {
+      const label = document.getElementById("opsTenant").selectedOptions[0].textContent.trim();
+      if (!window.confirm(`[${label}]\n비밀번호·간편 비밀번호·바로가기·입주 안내 링크·동의 기록·연결 요청을 모두 지우고 '가입 전' 처음 상태로 되돌립니다. (호실·계약·납부 내역은 그대로)\n연결·가입 과정을 다시 시험할 때 쓰세요. 계속할까요?`)) return;
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/accounts/reset-activation", { method: "POST", body: { id: document.getElementById("opsTenant").value } });
+        out.innerHTML = `${Bass.escapeHtml(r.message)}<br><span class="bass-muted">${Bass.escapeHtml(r.hint || "")}</span>`;
         await renderOpsTab();
       });
     });

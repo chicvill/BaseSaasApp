@@ -4980,7 +4980,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             again = c.post(f"{PL}/connect/request", headers=NA, json=body)
             self.assertEqual(again.status_code, 400)
             self.assertIn("이미 가입", again.json()["message"])
-            # 확인번호 5번 오류 → 요청 폐기 (다른 호실 요청으로 확인)
+            # 관리인이 가입 상태를 초기화하면 처음 상태로 돌아가 다시 시험할 수 있다(호실·계약은 그대로)
+            admin = self._login("admin")
+            self.assertIn(c.post("/api/rent3_admin/accounts/reset-activation", headers=chic, json={"id": t.id}).status_code, (401, 403))
+            rs = c.post("/api/rent3_admin/accounts/reset-activation", headers=admin, json={"id": t.id})
+            self.assertEqual(rs.status_code, 200, rs.text)
+            self.assertFalse(cn.activated(Tenant.get(t.id)))
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 401)
+            self.assertEqual(Tenant.get(t.id).room_no, t.room_no)
+            self.assertEqual(c.post(f"{PL}/connect/request", headers=NA, json=body).status_code, 200)       # 다시 연결 요청 가능
         finally:
             for r_ in ConnectRequest.all():
                 r_.delete(action="t")
@@ -4989,7 +4997,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t.save(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
         pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect="):
+        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect=", "cmCopyAll", "cm-sms", "단체문자(그룹 메시지)"):
             self.assertIn(needle, lapp, needle)
         for needle in ("/pool/connect/request", "/pool/connect/status", "/pool/connect/info", "rent3_connect_req", "find=1", "r3Connect", "__rent3ConnectOpen"):
             self.assertIn(needle, pj, needle)

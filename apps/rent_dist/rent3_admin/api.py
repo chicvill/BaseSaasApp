@@ -320,6 +320,18 @@ class TestTenantReq(BaseModel):
     raise_limit: bool = False
 
 
+@router.post("/accounts/reset-activation", dependencies=ADMIN_ONLY)
+def reset_activation(req: InviteIssueReq):
+    """임차인 가입 상태 초기화(재시험·잘못 연결된 계정 풀기): 비밀번호·간편 비밀번호·바로가기·입주 안내 링크·동의 기록·연결 요청을 지운다. 호실·계약·납부는 그대로."""
+    from apps.rent_dist._rent3_core import connect as cn
+    t = Tenant.get(req.id)
+    if t is None:
+        raise DomainError("임차인을 찾을 수 없습니다.")
+    out = cn.reset_activation(t)
+    return {"success": True, "message": f"{t.room_no}호 {t.name}님의 가입 상태를 처음으로 되돌렸습니다(연결 요청 {out['requests_closed']}건 종료). 호실·계약·납부 내역은 그대로입니다.",
+            "hint": "이미 열려 있는 로그인 화면은 로그아웃해야 처음부터 시험할 수 있습니다."}
+
+
 @router.post("/accounts/test-tenant", dependencies=ADMIN_ONLY)
 def test_tenant(req: TestTenantReq):
     """시험·실사용 확인용 임차인 호실 등록(기본 시크빌 701호 민흥식, 0원 계약). apply=False 는 점검만, True 는 등록(등록 전 자동 백업, 중복 없음)."""
