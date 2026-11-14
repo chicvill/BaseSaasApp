@@ -936,7 +936,9 @@ def tenant_invite_cancel(req: InviteCancelReq):
         return {"success": True, "kind": "reset", "message": f"{t.room_no}호 {t.name}님의 가입을 취소했습니다(비밀번호·간편 비밀번호·바로가기 삭제). 다시 안내 링크를 보내야 합니다."}
     if cn.cancel_invite(t):
         return {"success": True, "kind": "link", "message": f"{t.room_no}호 {t.name}님께 보낸 안내 링크를 취소했습니다."}
-    return {"success": True, "kind": "none", "message": f"{t.room_no}호는 취소할 가입이나 링크가 없습니다."}
+    # 링크도 가입 기록도 없어 보여도, 이전 등록의 찌꺼기(비밀번호·동의 기록·연결 요청)가 남았을 수 있어 깨끗이 초기화한다
+    cn.reset_activation(t)
+    return {"success": True, "kind": "reset", "message": f"{t.room_no}호 {t.name}님의 등록 기록을 초기화했습니다(호실·계약·납부는 그대로). 다시 안내 링크를 보내야 합니다."}
 
 
 @router.post("/tenant-invites/bulk")
