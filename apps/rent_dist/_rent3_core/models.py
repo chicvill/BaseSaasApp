@@ -166,9 +166,15 @@ class Lessor(PoolObj):
     pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py, RENT3_LESSOR_PIN 켠 뒤에만 사용)
     quick_devices: List[Dict[str, Any]] = Field(default_factory=list)  # 바로가기 기기 목록(키는 해시만 저장)
     login_devices: List[str] = Field(default_factory=list)  # 비밀번호 로그인이 허용된 기기 해시(devicebind.py, RENT3_DEVICE_BIND 켠 뒤에만 적용)
+    invite_hash: str = ""                    # 관리인이 발급한 1회용 가입/암호설정 링크 토큰의 해시(invite.py)
+    invite_expires: str = ""
+    invite_issued_by: str = ""
+    activated_at: str = ""                   # 임대인 본인이 직접 비밀번호를 정한 시각
+    password_changed_at: str = ""            # 마지막으로 비밀번호를 설정·변경한 시각(6개월 권유 기준)
+    password_remind_sent_at: str = ""        # 관리인이 마지막으로 새 암호 설정 권유를 보낸 시각
     password: str = "1212"
 
-    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "login_devices")
+    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash", "login_devices")
 
     def safe_dump(self) -> Dict[str, Any]:
         """화면·API 로 내려보낼 때 쓰는 model_dump — 간편 비밀번호 해시와 바로가기 키 해시는 뺀다."""
@@ -254,6 +260,9 @@ class Tenant(PoolObj):
     invite_expires: str = ""
     invite_issued_by: str = ""
     activated_at: str = ""                   # 입주자 본인이 비밀번호를 직접 정한 시각(입주 안내 링크·비밀번호 찾기). 비어 있으면 아직 가입 전
+    readonly_until: str = ""                 # 퇴실 정산이 끝난 뒤 '조회 전용'으로 로그인할 수 있는 마지막 날(다음 해 2월 말). 지나면 로그인 불가
+    password_changed_at: str = ""            # 마지막으로 비밀번호를 설정·변경한 시각(재계약·1년 권유 기준)
+    password_remind_sent_at: str = ""        # 임대인이 마지막으로 새 암호 설정 권유를 보낸 시각
     password: str = "1212"
 
     SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash", "login_devices")

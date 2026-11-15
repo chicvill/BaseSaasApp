@@ -211,11 +211,22 @@ def pin_guard(request: Request, c: Dict[str, Any]) -> None:
     raise Forbidden(PIN_BLOCK_MESSAGE, hint="계약 동의·서명, 퇴실 정산 동의, 계좌·동의 설정 변경은 아이디·비밀번호로 로그인해야 합니다.")
 
 
+def moved_out_guard(request: Request, c: Dict[str, Any]) -> None:
+    """퇴실한 임차인(MOVED_OUT)은 로그인은 되지만(다음 해 2월 말까지, 연말정산 납부확인서·정산서 조회) 쓰기는 모두 막힌다."""
+    if c.get("r") != "tenant" or request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    from . import quicklogin as ql
+    t = ql.load_account(c)
+    if t is not None and getattr(t, "status", "") == "MOVED_OUT" and not re.search(r"/auth/logout/?$", request.url.path):
+        raise Forbidden("퇴실한 계정은 조회만 할 수 있습니다.", hint="연말정산 납부확인서·정산서는 다음 해 2월 말까지 조회·내려받기 할 수 있습니다.")
+
+
 def need_claims(request: Request) -> Dict[str, Any]:
     c = claims_from(request)
     if c is None:
         raise Unauthorized("로그인이 필요합니다.", hint="포털에서 로그인한 뒤 다시 시도해 주세요.")
     pin_guard(request, c)
+    moved_out_guard(request, c)
     return c
 
 

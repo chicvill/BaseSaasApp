@@ -136,7 +136,7 @@ def get_admin_overview():
             "portfolio_noi": portfolio_noi,
         },
         "lessors": [
-            {**{k: v for k, v in l.model_dump().items() if k not in ("identity", "franchise_docs", "password")},
+            {**{k: v for k, v in l.safe_dump().items() if k not in ("identity", "franchise_docs", "password")},
              "application": fr.application_summary(l, Building.first(branch=l.branch)),
              "room_count": Room.count(branch=l.branch),
              "published_count": len([r for r in Room.find(branch=l.branch) if r.is_published])}
@@ -284,6 +284,96 @@ def list_resident_tenants():
     items = [{"id": t.id, "name": t.name, "room_no": t.room_no, "branch": t.branch, "invite": inv.status(t)["pending"], "has_pin": bool(t.pin_hash),
               "devices": len(ql.devices_of(t))} for t in Tenant.all() if ql.eligible(t)]
     return {"success": True, "tenants": sorted(items, key=lambda x: (x["branch"], x["room_no"]))}
+
+
+@router.get("/accounts/lessors", dependencies=ADMIN_ONLY)
+def list_lessor_accounts():
+    """임대인 암호 설정 상태·6개월(180일) 변경 권유 대상 조회(해시·원문은 제외)."""
+    from apps.rent_dist._rent3_core import connect as cn, invite as inv
+    ensure_pool_seeded()
+    items = []
+    for lsr in sorted(Lessor.all(), key=lambda x: x.branch):
+        b = Building.first(branch=normalize_branch_id(lsr.branch))
+        age = inv.password_age_days(lsr)
+        items.append({
+            "id": lsr.id,
+            "name": lsr.name,
+            "username": lsr.username,
+            "phone": lsr.phone,
+            "branch": lsr.branch,
+            "building_name": b.building_name if b else "",
+            "status": lsr.status,
+            "activated": cn.activated(lsr),
+            "password_changed_at": lsr.password_changed_at or lsr.activated_at,
+            "days_since_change": age,
+            "due_6m": bool(lsr.status == "ACTIVE" and age is not None and age >= inv.LESSOR_REMIND_DAYS),
+            "invite_pending": inv.status(lsr)["pending"],
+            "password_remind_sent_at": lsr.password_remind_sent_at,
+        })
+    return {"success": True, "lessors": items}
+
+
+@router.post("/accounts/lessor-invite", dependencies=ADMIN_ONLY)
+def issue_lessor_invite(req: InviteIssueReq, request: Request):
+    """관리인이 전화로 본인 확인 후 임대인에게 1회용 비밀번호 설정 링크(7일 유효)를 발급한다. 새 비밀번호를 정하기 전까지 기존 비밀번호는 유지된다."""
+    from apps.rent_dist._rent3_core import invite as inv
+    lsr = Lessor.get(req.id)
+    if lsr is None:
+        raise DomainError("임대인을 찾을 수 없습니다.")
+    if lsr.status != "ACTIVE":
+        raise DomainError("가맹 승인된 임대인에게만 발급할 수 있습니다.")
+    tok = inv.issue(lsr, _admin_name(request))
+    b = Building.first(branch=normalize_branch_id(lsr.branch))
+    bname = b.building_name if b else lsr.branch
+    url = f"/rent3_lessor/?invite={tok}"
+    sms_text = (
+        f"[{bname}] {lsr.name} 임대인님, 관리인이 비밀번호 설정 링크를 보내 드립니다.\n"
+        f"아래 링크를 열어 본인 확인(건물명·이름·전화번호·사업자/계좌 끝 4자리) 후 새 비밀번호를 정해 주세요(7일 안에 1회 사용).\n"
+        f"{url}"
+    )
+    return {
+        "success": True,
+        "url": url,
+        "expires": lsr.invite_expires,
+        "lessor_name": lsr.name,
+        "building_name": bname,
+        "sms_text": sms_text,
+        "message": f"{lsr.name} 임대인용 비밀번호 설정 링크를 만들었습니다(7일 안에 1회 사용).",
+    }
+
+
+@router.post("/accounts/lessors/{lessor_id}/remind-password", dependencies=ADMIN_ONLY)
+def remind_lessor_password(lessor_id: str, request: Request):
+    """관리인 → 임대인 6개월(180일) 주기 새 비밀번호 설정 권유 메시지·링크 발송. 강제 만료·차단은 하지 않으며 기존 비밀번호와 등록 기기는 유지된다."""
+    from apps.rent_dist._rent3_core import invite as inv
+    lsr = Lessor.get(lessor_id)
+    if lsr is None:
+        raise DomainError("임대인을 찾을 수 없습니다.")
+    if lsr.status != "ACTIVE":
+        raise DomainError("가맹 승인된 임대인에게만 발송할 수 있습니다.")
+    tok = inv.issue(lsr, _admin_name(request))
+    lsr.password_remind_sent_at = now_iso()
+    lsr.save(action="lessor_password_remind_sent", app_source=APP_SRC)
+    b = Building.first(branch=normalize_branch_id(lsr.branch))
+    bname = b.building_name if b else lsr.branch
+    age = inv.password_age_days(lsr)
+    url = f"/rent3_lessor/?invite={tok}"
+    body = (
+        f"[🔒 6개월 정기 비밀번호 변경 권유] {bname} {lsr.name} 임대인님, 안전한 임대 장부 보호를 위해 "
+        f"6개월마다 새로운 비밀번호로 변경하시기를 권유드립니다. 아래 1회용 링크(7일 유효)에서 본인 확인 후 새 비밀번호를 설정해 주세요. "
+        f"(새 비밀번호를 설정하기 전까지는 기존 비밀번호를 그대로 쓰실 수 있습니다.)\n{url}"
+    )
+    sup.post_admin_message(lsr, _admin_name(request), body)
+    return {
+        "success": True,
+        "url": url,
+        "expires": lsr.invite_expires,
+        "lessor_name": lsr.name,
+        "building_name": bname,
+        "days_since_change": age,
+        "sms_text": body,
+        "message": f"{lsr.name} 임대인에게 6개월 새 비밀번호 설정 권유 메시지와 1회용 링크를 보냈습니다.",
+    }
 
 
 @router.post("/accounts/invite", dependencies=ADMIN_ONLY)

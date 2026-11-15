@@ -5,7 +5,7 @@ apps/_rent3_core/ops.py — 1:1 직통 인앱 메신저, A/S 하자보수 대장
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import uuid4
 
@@ -157,7 +157,18 @@ class CheckOutSettlement(PoolObj):
     id_contract: str = ""
     id_tenant: str = ""
     tenant_name: str = ""
-    status: str = "CALCULATED"               # CALCULATED -> AGREED -> COMPLETED
+    status: str = "CALCULATED"               # REQUESTED(임차인 신청) -> CALCULATED(임대인 정산서) -> AGREED(임차인 동의·계좌) -> PAID(임대인 송금 표시) -> COMPLETED(임차인 수취 확인 또는 7일 자동 확정) / DISPUTED(이의)
+    requested_at: str = ""
+    desired_date: str = ""                   # 임차인이 적은 퇴실 희망일
+    tenant_request_memo: str = ""
+    account_holder: str = ""                 # 반환 계좌 예금주(계약자와 같아야 한다)
+    paid_at: str = ""
+    paid_memo: str = ""
+    confirm_due: str = ""                    # 송금 표시 뒤 임차인이 확인하지 않으면 자동 확정하는 시각(7일)
+    received_at: str = ""
+    auto_confirmed: bool = False
+    dispute_note: str = ""
+    disputed_at: str = ""
     deposit_original: int = 0
     unpaid_rent_deduction: int = 0           # Contract.ledger() 실시간 미납액 자동 반영
     utility_settlement: int = 0              # 당일 계량기 공과금 실비
@@ -194,23 +205,23 @@ class CheckOutSettlement(PoolObj):
         total_deduct = unpaid + utility_settlement + cleaning_fee + damage_restoration_fee
         refund = max(0, ct.deposit - total_deduct)
 
-        settlement = cls(
-            branch=b_id,
-            id_building=room.id_building,
-            id_room=room.id,
-            room_no=room.room_no,
-            id_contract=ct.id,
-            id_tenant=ct.id_tenant,
-            tenant_name=ct.tenant_name,
-            status="CALCULATED",
-            deposit_original=ct.deposit,
-            unpaid_rent_deduction=unpaid,
-            utility_settlement=utility_settlement,
-            cleaning_fee=cleaning_fee,
-            damage_restoration_fee=damage_restoration_fee,
-            refund_amount=refund,
-            inspection_notes=inspection_notes,
-        ).save(action="checkout_calculated", app_source=app_source)
+        existing = next((x for x in cls.find(id_room=room.id) if x.status in ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")), None)
+        if existing is not None and existing.status == "PAID":
+            raise DomainError("이미 송금을 표시한 정산서입니다.", hint="임차인이 이의를 제기하면 수정해서 다시 보낼 수 있습니다.")
+        fields = dict(
+            branch=b_id, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id,
+            id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED", deposit_original=ct.deposit,
+            unpaid_rent_deduction=unpaid, utility_settlement=utility_settlement, cleaning_fee=cleaning_fee,
+            damage_restoration_fee=damage_restoration_fee, refund_amount=refund, inspection_notes=inspection_notes,
+        )
+        if existing is not None:        # 임차인 신청·이의 건을 이어서 쓴다(동의·계좌는 다시 받는다)
+            for k, v in fields.items():
+                setattr(existing, k, v)
+            existing.refund_bank_account, existing.tenant_signature, existing.account_holder = "", "", ""
+            existing.dispute_note, existing.disputed_at, existing.confirm_due = "", "", ""
+            settlement = existing.save(action="checkout_recalculated", app_source=app_source)
+        else:
+            settlement = cls(**fields).save(action="checkout_calculated", app_source=app_source)
 
         DirectChat(
             branch=b_id,
@@ -218,23 +229,124 @@ class CheckOutSettlement(PoolObj):
             room_no=room.room_no,
             sender_role="system",
             sender_name="퇴실정산 안내",
-            message=f"[보증금 정산 명세서 도착] 원보증금 {ct.deposit:,}원 중 공제 {total_deduct:,}원을 제외한 실반환 예정액은 {refund:,}원입니다. 임차인 앱에서 계좌 입력 및 동의 서명을 진행해 주세요.",
+            message=(f"[보증금 정산 명세서 도착] 원보증금 {ct.deposit:,}원 중 공제 {total_deduct:,}원을 제외한 실반환 예정액은 {refund:,}원입니다. "
+                     "임차인 앱에서 내용을 확인하고, 이의가 있으면 [이의 제기]로 채팅·통화 협의를 요청하세요. 이의가 없으면 반환받을 계좌(예금주는 계약자 본인)를 입력하고 동의 서명을 해 주세요.\n"
+                     "📄 퇴실하면 로그인 수단이 정리되니 연말정산 납부확인서를 미리 내려받아 두세요."),
+            quick_action_label="정산서 확인·연말정산 자료 받기",
+            quick_action_url=f"/rent3_tenant/?tenant={ct.id_tenant}&svc=checkout",
         ).save(action="chat_auto_sent", app_source=app_source)
         return settlement
 
-    def tenant_agree(self, bank_account: str, signature: str, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+    # ───────── 임차인이 먼저 신청 → 임대인 정산서 → 동의·계좌 → 송금 → 수취 확인 (채팅 카드로 안내)
+    OPEN_STATES: ClassVar[tuple] = ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")
+    AUTO_CONFIRM_DAYS: ClassVar[int] = 7
+
+    @staticmethod
+    def _mask_account(acct: str) -> str:
+        digits = "".join(ch for ch in str(acct or "") if ch.isdigit())
+        return f"끝 4자리 {digits[-4:]}" if len(digits) >= 4 else "입력됨"
+
+    @staticmethod
+    def _norm(name: str) -> str:
+        import re as _re
+        return _re.sub(r"\s+", "", _re.sub(r"\([^)]*\)", "", str(name or "")))
+
+    def _chat(self, sender_role: str, sender_name: str, message: str, label: str = "", url: str = "", app_source: str = "rent3_checkout") -> None:
+        DirectChat(branch=self.branch, id_room=self.id_room, room_no=self.room_no, sender_role=sender_role, sender_name=sender_name,
+                   message=message, quick_action_label=label, quick_action_url=url).save(action="chat_auto_sent", app_source=app_source)
+
+    @classmethod
+    def tenant_request(cls, tenant: "Tenant", desired_date: str = "", memo: str = "", app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+        room = Room.get(tenant.current_room_id) if tenant.current_room_id else Room.first(branch=tenant.branch, room_no=tenant.room_no)
+        if not room or not room.active_contract_id:
+            raise DomainError("퇴실을 신청할 수 있는 활성 계약이 없습니다.")
+        if any(x.status in cls.OPEN_STATES for x in cls.find(id_room=room.id)):
+            raise DomainError("이미 진행 중인 퇴실 정산이 있습니다.", hint="채팅에서 진행 상황을 확인해 주세요.")
+        ct = Contract.require(room.active_contract_id)
+        s = cls(branch=tenant.branch, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id, id_tenant=tenant.id,
+                tenant_name=ct.tenant_name, status="REQUESTED", deposit_original=ct.deposit, requested_at=now_iso(),
+                desired_date=(desired_date or "").strip(), tenant_request_memo=(memo or "").strip()).save(action="checkout_requested", app_source=app_source)
+        s._chat("tenant", ct.tenant_name, f"[🚪 퇴실 신청] {room.room_no}호 {ct.tenant_name} 세입자가 퇴실을 신청했습니다. 희망일 {s.desired_date or '미정'}."
+                + (f" 메모: {s.tenant_request_memo}" if s.tenant_request_memo else "") + " 점검 후 정산서를 보내 주세요.", app_source=app_source)
+        s._chat("system", "퇴실정산 안내", "퇴실하면 로그인 수단(바로가기·간편 비밀번호·등록 기기)이 정리됩니다. 📄 연말정산 납부확인서를 지금 미리 내려받아 두세요. "
+                "(퇴실 후에도 다음 해 2월 말까지는 로그인해서 조회·내려받기만 할 수 있습니다.)", "연말정산 납부확인서 내려받기",
+                f"/rent3_tenant/?tenant={tenant.id}&svc=cert", app_source=app_source)
+        return s
+
+    def tenant_agree(self, bank_account: str, signature: str, account_holder: str = "", app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+        if self.status != "CALCULATED":
+            raise DomainError("동의할 수 있는 정산서가 아닙니다.", hint="임대인이 정산서를 보낸 뒤에만, 한 번만 동의할 수 있습니다(동의 뒤 계좌 변경은 임대인에게 요청).")
         if not bank_account.strip() or not signature.strip():
             raise DomainError("반환받을 계좌번호와 동의 서명을 모두 입력해 주세요.")
+        if self._norm(account_holder) != self._norm(self.tenant_name) or not self._norm(account_holder):
+            raise DomainError("예금주가 계약자 본인과 같아야 합니다.", hint=f"계약자({self.tenant_name}) 본인 명의 계좌만 쓸 수 있습니다. 예금주를 정확히 입력해 주세요.")
         self.refund_bank_account = bank_account.strip()
+        self.account_holder = account_holder.strip()
         self.tenant_signature = signature.strip()
         self.status = "AGREED"
-        return self.save(action="checkout_agreed_by_tenant", app_source=app_source)
+        self.save(action="checkout_agreed_by_tenant", app_source=app_source)
+        self._chat("tenant", self.tenant_name, f"[✍️ 정산 동의·반환 계좌 접수] 반환액 {self.refund_amount:,}원 · 예금주 {self.account_holder} · 계좌 {self._mask_account(bank_account)}. "
+                   "계좌 전체는 정산서에서만 보입니다. 확인 후 송금해 주세요.", app_source=app_source)
+        return self
 
-    def complete_refund_and_vacate(self, app_source: str = "rent3_lessor") -> "CheckOutSettlement":
-        """보증금 송금 완료 승인 즉시: 계약 종료 + 임차인 퇴실 + 호실 공실 및 직거래 매물 자동 복귀!"""
+    def mark_paid(self, memo: str = "", app_source: str = "rent3_lessor") -> "CheckOutSettlement":
+        if self.status != "AGREED":
+            raise DomainError("임차인이 동의·계좌 입력을 마친 정산서만 송금 표시를 할 수 있습니다.")
+        if self._norm(self.account_holder) != self._norm(self.tenant_name):
+            raise DomainError("예금주가 계약자와 일치하지 않아 송금 표시를 할 수 없습니다.")
+        due = (datetime.now() + timedelta(days=self.AUTO_CONFIRM_DAYS)).isoformat(timespec="seconds")
+        self.status, self.paid_at, self.paid_memo, self.confirm_due = "PAID", now_iso(), (memo or "").strip(), due
+        self.save(action="checkout_marked_paid", app_source=app_source)
+        self._chat("lessor", "임대인", f"[💸 보증금 반환 송금 완료] {self.refund_amount:,}원을 {self.account_holder} 님 계좌({self._mask_account(self.refund_bank_account)})로 보냈습니다."
+                   + (f" 메모: {self.paid_memo}" if self.paid_memo else "") + f" 입금을 확인하고 [받았습니다]를 눌러 주세요. {self.AUTO_CONFIRM_DAYS}일 안에 이의가 없으면 자동 확정됩니다.",
+                   "받았습니다 / 못 받았습니다", f"/rent3_tenant/?tenant={self.id_tenant}&svc=checkout", app_source=app_source)
+        return self
+
+    def tenant_confirm_received(self, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+        if self.status != "PAID":
+            raise DomainError("송금이 표시된 정산서만 수취 확인을 할 수 있습니다.")
+        return self.complete_refund_and_vacate(app_source=app_source)
+
+    def tenant_dispute(self, note: str, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+        if self.status not in ("CALCULATED", "AGREED", "PAID"):
+            raise DomainError("이의를 제기할 수 있는 단계가 아닙니다.")
+        note = (note or "").strip()
+        if not note:
+            raise DomainError("이의 내용을 적어 주세요.", hint="어느 항목이 왜 다른지(또는 입금을 못 받았는지) 적어 주세요.")
+        was_paid = self.status == "PAID"
+        self.status, self.dispute_note, self.disputed_at, self.confirm_due = "DISPUTED", note, now_iso(), ""
+        self.save(action="checkout_disputed_by_tenant", app_source=app_source)
+        self._chat("tenant", self.tenant_name, ("[⚠️ 입금 확인 불가] " if was_paid else "[⚠️ 정산 이의 제기] ") + note
+                   + " — 채팅 또는 통화로 협의한 뒤 정산서를 수정해 다시 보내 주세요.", app_source=app_source)
+        return self
+
+    @classmethod
+    def auto_confirm_due(cls, branch: str = "", tenant_id: str = "") -> int:
+        """송금 표시 뒤 7일 동안 이의가 없으면 자동 확정(퇴실 처리). 조회 때 함께 실행한다. 처리한 건수를 돌려준다."""
+        now, n = now_iso(), 0
+        for s in cls.find(status="PAID"):
+            if (branch and s.branch != branch) or (tenant_id and s.id_tenant != tenant_id):
+                continue
+            if s.confirm_due and s.confirm_due <= now:
+                s.complete_refund_and_vacate(app_source="rent3_checkout", auto=True)
+                n += 1
+        return n
+
+    @staticmethod
+    def _readonly_until(today: Any) -> str:
+        """퇴실 후 조회 기간의 끝: 퇴실한 다음 해 2월 말."""
+        import calendar
+        y = today.year + 1
+        return f"{y}-02-{calendar.monthrange(y, 2)[1]:02d}"
+
+    def complete_refund_and_vacate(self, app_source: str = "rent3_lessor", auto: bool = False) -> "CheckOutSettlement":
+        """임차인 수취 확인(또는 7일 자동 확정) 시: 계약 종료 + 임차인 퇴실 + 호실 공실 및 직거래 매물 자동 복귀.
+        임차인은 로그인 수단(바로가기·기기·링크)만 정리되고, 다음 해 2월 말까지 조회 전용으로 로그인할 수 있다."""
         self.status = "COMPLETED"
         self.completed_at = now_iso()
-        self.save(action="checkout_completed", app_source=app_source)
+        self.received_at = self.completed_at
+        self.auto_confirmed = bool(auto)
+        self.save(action="checkout_completed_auto" if auto else "checkout_completed", app_source=app_source)
 
         ct = Contract.get(self.id_contract)
         if ct:
@@ -242,14 +354,20 @@ class CheckOutSettlement(PoolObj):
 
         tenant = Tenant.get(self.id_tenant)
         if tenant:
+            from . import connect as cn
+            cn.purge_login_methods(tenant)
             tenant.status = "MOVED_OUT"
             tenant.current_room_id = ""
+            tenant.readonly_until = self._readonly_until(date_today())
             tenant.save(action="tenant_moved_out", app_source=app_source)
 
         room = Room.get(self.id_room)
         if room:
             room.vacate(app_source=app_source)
 
+        self._chat("system", "퇴실정산 안내", "[✅ 정산 완료] 보증금 반환이 확정되어 퇴실 처리되었습니다. "
+                   + ("(7일 동안 이의가 없어 자동 확정) " if auto else "") + f"{tenant.readonly_until if tenant else ''}까지 로그인해서 연말정산 납부확인서·정산서를 조회할 수 있습니다.",
+                   app_source=app_source)
         return self
 
 

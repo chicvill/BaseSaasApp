@@ -655,39 +655,54 @@ def shortcut_manifest(qk: str, request: Request):
     return JSONResponse(body, media_type="application/manifest+json", headers={"Cache-Control": "no-store"})
 
 
-# ── 입주 안내 카드(1회용 링크): 임차인이 비밀번호·PIN 을 정하고 들어온다 ──
+# ── 입주 안내 카드 / 임대인 암호 설정 링크(1회용 링크): 비밀번호·PIN 을 정하고 들어온다 ──
 class InviteAcceptReq(BaseModel):
     token: str
     password: str
     pin: str = ""
     agree_privacy: bool = False
     room_no: str = ""
+    building_name: str = ""
     name: str = ""
     phone: str = ""
     lessor_name: str = ""
+    proof: str = ""
     device_id: str = ""
 
 
 @router.get("/invite/identify")
 def invite_identify(token: str, request: Request) -> Dict[str, Any]:
     t = _invite_lookup(token, request)
+    if isinstance(t, Lessor):
+        b = Building.first(branch=normalize_branch_id(t.branch))
+        return {"success": True, "kind": "lessor", "masked_name": ql.mask_name(t.name), "room_no": "", "building_name": (b.building_name if b else ""),
+                "expires": t.invite_expires, "consent_required": cs.consent_required()}
     b = Building.get(t.id_building) if t.id_building else None
-    return {"success": True, "masked_name": ql.mask_name(t.name), "room_no": t.room_no, "building_name": (b.building_name if b else ""),
+    return {"success": True, "kind": "tenant", "masked_name": ql.mask_name(t.name), "room_no": t.room_no, "building_name": (b.building_name if b else ""),
             "expires": t.invite_expires, "consent_required": cs.consent_required()}
 
 
 class InviteVerifyReq(BaseModel):
     token: str
     room_no: str = ""
+    building_name: str = ""
     name: str = ""
     phone: str = ""
     lessor_name: str = ""
+    proof: str = ""
 
 
-def _invite_verify(t: Tenant, req: Any) -> None:
-    """호실·이름·전화번호·임대인 이름 대조. 한 링크에서 5번 틀리면 15분 잠긴다(잠긴 동안은 맞아도 거절)."""
+def _invite_verify(t: Any, req: Any) -> None:
+    """임차인(호실·이름·전화번호·임대인 이름) 또는 임대인(건물명·이름·전화번호·사업자/계좌 끝 4자리) 대조. 한 링크에서 5번 틀리면 15분 잠긴다."""
     keys = [f"tok:{hashlib.sha256(str(req.token).encode()).hexdigest()[:16]}"]
     ratelimit.check("invite", keys)
+    if isinstance(t, Lessor):
+        ok = cn.verify_lessor_identity(t, req.building_name or req.room_no, req.name, req.phone, req.proof or req.lessor_name)
+        if not ok:
+            ratelimit.fail("invite", keys)
+            raise DomainError("입력한 정보가 장부와 맞지 않습니다.", hint="건물명·본인 이름·본인 전화번호·사업자번호(또는 계좌번호) 끝 4자리를 다시 확인해 주세요(5번 틀리면 15분 동안 잠깁니다).")
+        ratelimit.clear("invite", keys)
+        return
     if not cn.verify_identity(t, req.room_no, req.name, req.phone, req.lessor_name):
         ratelimit.fail("invite", keys)
         raise DomainError("입력한 정보가 장부와 맞지 않습니다.", hint="호실·본인 이름·본인 전화번호·임대인 이름을 다시 확인해 주세요. 계속 안 되면 임대인에게 문의해 주세요(5번 틀리면 15분 동안 잠깁니다).")
@@ -702,13 +717,17 @@ def invite_verify(req: InviteVerifyReq, request: Request) -> Dict[str, Any]:
     return {"success": True, "verified": True, "message": "본인 확인이 되었습니다."}
 
 
-def _invite_lookup(token: str, request: Request) -> Tenant:
+def _invite_lookup(token: str, request: Request) -> Any:
     keys = [f"ip:{_client_ip(request)}"]
     ratelimit.check("invite", keys)
-    t = inv.find(token)
+    t = inv.find_any(token)
     if t is None:
         ratelimit.fail("invite", keys)
-        raise NotFound("사용할 수 없는 입주 안내 링크입니다.", hint="이미 사용했거나 기간(7일)이 지났습니다. 임대인에게 새 안내 카드를 요청해 주세요.")
+        raise NotFound("사용할 수 없는 입주 안내 링크입니다.", hint="이미 사용했거나 기간(7일)이 지났습니다. 새 안내 링크를 요청해 주세요.")
+    if isinstance(t, Lessor):
+        if t.status != "ACTIVE":
+            raise DomainError("가맹 승인된 임대인 계정만 쓸 수 있는 링크입니다.")
+        return t
     if not ql.eligible(t):
         raise DomainError("입주 중인 호실이 있어야 쓸 수 있는 링크입니다.")
     return t
@@ -716,7 +735,7 @@ def _invite_lookup(token: str, request: Request) -> Tenant:
 
 @router.post("/auth/invite-accept")
 def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
-    """입주 안내 링크로 비밀번호(필수)·PIN(선택)을 정하고 로그인한다. 링크는 한 번만 쓸 수 있다."""
+    """안내 링크로 비밀번호(필수)·PIN(선택)을 정하고 로그인한다. 링크는 한 번만 쓸 수 있다(권유 링크로 변경 시 기존 등록 기기 유지)."""
     t = _invite_lookup(req.token, request)
     _invite_verify(t, req)       # 서버에서도 다시 대조한다(앞 단계를 건너뛰고 바로 호출해도 통과 못 함)
     pwd.validate_new_password(req.password)
@@ -727,22 +746,41 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
         why = ql.weak_pin_reason(pin, t)
         if why:
             raise DomainError(why, hint="다른 4자리 숫자를 입력해 주세요(간편 비밀번호는 비워 두고 나중에 정해도 됩니다).")
+    now = now_iso()
     t.password = pwd.hash_password(req.password.strip())
-    t.activated_at = now_iso()
+    if not t.activated_at:
+        t.activated_at = now
+    t.password_changed_at = now
     if not (t.identity or {}).get("verified"):      # 문자·네이버 등 더 강한 인증이 이미 있으면 덮어쓰지 않는다
         t.identity = fr.invite_identity_record(t)
     t.save(action="password_set_by_invite", app_source="rent3_invite")
-    dbind.register(t, req.device_id)      # 가입한 이 기기를 등록한다(재등록 때는 등록 취소로 기기 목록이 비어 있다)
+    dbind.register(t, req.device_id)      # 이 기기를 등록한다(권유 링크는 기존 등록 기기를 유지한 채 현재 기기를 추가)
     if req.agree_privacy:
         cs.record_consent(t, True, bool((t.consents or {}).get("support_access")))
     inv.consume(t)
     ql.unlock_all(t)
+    from apps.rent_dist._rent3_core.authz import unrevoke_token
+    if isinstance(t, Lessor):
+        extra_lsr: Dict[str, Any] = {}
+        if pin and ql.eligible(t):
+            ql.set_pin(t, pin)
+            dev, qk = ql.new_device(t, "내 휴대폰")
+            extra_lsr = {"qk": qk, "start_url": f"/rent3_lessor/?branch={t.branch}&qk={qk}&welcome=1", "device": {"id": dev["id"]}}
+        tok = lessor_token(t)
+        unrevoke_token(tok)
+        url = f"/rent3_lessor/?branch={t.branch}"
+        lbl = f"임대인 ({t.branch})"
+        return {
+            "success": True, "role": "lessor", "role_label": lbl, "redirect_url": url, "token": tok,
+            "user": {"id": t.id, "username": t.username or t.id, "name": t.name, "phone": t.phone, "role": "lessor", "role_label": lbl,
+                     "branch": t.branch, "login_auth_verified": True, "redirect_url": url},
+            "message": f"{t.name}님, 비밀번호 설정을 마쳤습니다.", **extra_lsr,
+        }
     extra: Dict[str, Any] = {}
     if pin:
         ql.set_pin(t, pin)
         dev, qk = ql.new_device(t, "내 휴대폰")
         extra = {"qk": qk, "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}&welcome=1", "device": {"id": dev["id"]}}
-    from apps.rent_dist._rent3_core.authz import unrevoke_token
     tok = tenant_token(t)
     unrevoke_token(tok)
     url = f"/rent3_tenant/?tenant={t.id}"
@@ -1058,7 +1096,13 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
                 "임차인 비밀번호가 올바르지 않습니다.",
                 hint="가입할 때 설정한 비밀번호를 확인해 주세요.",
             )
-        if not demo:
+        moved_out = matched_tenant.status == "MOVED_OUT"
+        if moved_out:
+            from datetime import date as _date
+            if not matched_tenant.readonly_until or _date.today().isoformat() > matched_tenant.readonly_until:
+                raise Unauthorized("퇴실 후 조회 기간이 끝나 더 이상 로그인할 수 없습니다.",
+                                   hint="연말정산 납부확인서는 퇴실한 다음 해 2월 말까지 조회할 수 있습니다. 다시 입주하시면 새 안내 링크로 등록해 주세요.")
+        elif not demo:
             dbind.enforce(matched_tenant, req.device_id, "임차인")
         is_active_resident = matched_tenant.status == "ACTIVE" and bool(matched_tenant.current_room_id or matched_tenant.room_no)
         if is_active_resident:
@@ -1069,6 +1113,9 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             role_key = "prospect"
             role_lbl = "예비임차인"
             default_url = "/rent3_tenant/?view=listings"
+            if moved_out:
+                role_lbl = f"퇴실 임차인 (조회 전용, {matched_tenant.readonly_until}까지)"
+                default_url = f"/rent3_tenant/?tenant={matched_tenant.id}&view=moved"
 
         if is_contract_hint:
             target_url = _build_contract_target_url("tenant", req.target_hint, tenant_id=matched_tenant.id)
@@ -1216,9 +1263,11 @@ def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str,
         ratelimit.fail("reset", keys)
         raise
     by_record = not (acct.identity or {}).get("verified")
+    now = now_iso()
     acct.password = pwd.hash_password(req.new_password.strip())
-    if isinstance(acct, Tenant):
-        acct.activated_at = now_iso()
+    if not getattr(acct, "activated_at", ""):
+        acct.activated_at = now
+    acct.password_changed_at = now
     acct.save("password_reset_by_recovery" if by_record else "password_reset_by_identity", app_source="rent3_portal")
     ql.revoke_all(acct)   # 비밀번호를 새로 정하면 이전에 등록한 바로가기·간편 비밀번호는 모두 해제(분실 폰 대비) — 새 비밀번호로 로그인해 다시 만든다
     ratelimit.clear("reset", keys[:1])

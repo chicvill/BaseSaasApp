@@ -286,8 +286,16 @@
         if (!res.ok) { $("r3InvWho").textContent = "사용할 수 없는 안내 링크입니다"; msg.textContent = ""; var m = document.createElement("div"); m.style.cssText = "font-size:13px;color:#dc2626;text-align:center;"; m.textContent = (res.d.message || "") + " " + (res.d.hint || ""); $("r3InvWho").after(m); return; }
         var d = res.d;
         $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + d.room_no + "호 · " + d.masked_name + "님").trim();
-        $("r3InvId").hidden = false;     // 1단계: 본인 확인(호실은 일부러 채워 주지 않는다 — 아는 사람만 통과)
-        $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + "입주 안내").trim();
+        $("r3InvId").hidden = false;     // 1단계: 본인 확인(호실·건물명은 일부러 채워 주지 않는다 — 아는 사람만 통과)
+        if (d.kind === "lessor") {
+          $("r3InvWho").textContent = "🏢 임대인 비밀번호 설정 안내";
+          var rLbl = $("r3IdRoom").previousElementSibling, lLbl = $("r3IdLessor").previousElementSibling;
+          if (rLbl) rLbl.innerHTML = '건물명 <span style="font-weight:400;color:#666;">(예: 시크빌)</span>';
+          $("r3IdRoom").setAttribute("inputmode", "text");
+          if (lLbl) lLbl.innerHTML = '사업자등록번호 또는 계좌번호 <span style="font-weight:400;color:#666;">(끝 4자리 이상)</span>';
+        } else {
+          $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + "입주 안내").trim();
+        }
       })
       .catch(function () { $("r3InvWho").textContent = "서버에 연결하지 못했습니다"; });
     var ident = null;

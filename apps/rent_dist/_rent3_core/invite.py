@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Optional
 
-from .models import Tenant
+from .models import Lessor, Tenant, date_today
 
 TTL_DAYS = 7
+LESSOR_REMIND_DAYS = 180
+TENANT_REMIND_DAYS = 365
 
 
 def _h(tok: str) -> str:
@@ -41,6 +43,21 @@ def find(tok: str) -> Optional[Any]:
     return None
 
 
+def find_lessor(tok: str) -> Optional[Lessor]:
+    if not tok or len(str(tok)) < 16:
+        return None
+    h = _h(tok)
+    now = datetime.now().isoformat(timespec="seconds")
+    for lsr in Lessor.all():
+        if lsr.invite_hash and lsr.invite_hash == h and lsr.invite_expires >= now:
+            return lsr
+    return None
+
+
+def find_any(tok: str) -> Optional[Any]:
+    return find(tok) or find_lessor(tok)
+
+
 def consume(t: Any) -> None:
     t.invite_hash, t.invite_expires = "", ""
     t.save(action="invite_used", app_source="rent3_invite")
@@ -50,3 +67,15 @@ def status(t: Any) -> Dict[str, Any]:
     now = datetime.now().isoformat(timespec="seconds")
     pending = bool(t.invite_hash and t.invite_expires >= now)
     return {"pending": pending, "expires": t.invite_expires if pending else ""}
+
+
+def password_age_days(acct: Any) -> Optional[int]:
+    """마지막 비밀번호 설정·변경일(없으면 가입 시각·가맹일)로부터 경과한 일수."""
+    ref = getattr(acct, "password_changed_at", "") or getattr(acct, "activated_at", "") or getattr(acct, "joined_at", "")
+    if not ref:
+        return None
+    try:
+        d = date.fromisoformat(str(ref)[:10])
+        return max(0, (date.today() - d).days)
+    except ValueError:
+        return None

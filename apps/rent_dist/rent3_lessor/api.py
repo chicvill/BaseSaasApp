@@ -367,6 +367,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
     payments = sorted(Pay.find(branch=b_id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
     outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
     tickets = sorted(MaintenanceTicket.find(branch=b_id), key=lambda t: t.updated_at, reverse=True)
+    CheckOutSettlement.auto_confirm_due(branch=b_id)      # 송금 표시 뒤 7일 동안 이의가 없으면 자동 확정
     checkouts = sorted(CheckOutSettlement.find(branch=b_id), key=lambda c: c.updated_at, reverse=True)
     chats = sorted((c for c in DirectChat.find(branch=b_id) if not c.session_id), key=lambda c: c.created_at, reverse=True)[:30]   # 계약방 대화는 계약 화면에서
     cosign_sessions = sorted(CoSignSession.find(branch=b_id), key=lambda s: s.updated_at, reverse=True)
@@ -1444,15 +1445,27 @@ def calculate_checkout(req: CheckoutCalcReq):
     }
 
 
-@router.post("/checkout/{settlement_id}/complete")
-def complete_checkout(settlement_id: str):
+class CheckoutPaidReq(BaseModel):
+    branch: str = "main"
+    memo: str = ""
+
+
+@router.post("/checkout/{settlement_id}/mark-paid")
+def mark_checkout_paid(settlement_id: str, req: Optional[CheckoutPaidReq] = None):
+    """임대인이 보증금을 송금한 뒤 표시한다(임차인이 받았다고 확인하거나 7일 안에 이의가 없으면 퇴실 확정). 예금주가 계약자와 같은 계좌로만 표시할 수 있다."""
     s = CheckOutSettlement.require(settlement_id)
-    s.complete_refund_and_vacate(app_source=APP_SRC)
+    s.mark_paid((req.memo if req else ""), app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"{s.room_no}호 보증금 반환 종결 — 호실이 즉시 '공실 매물 공개' 상태로 자동 복귀되었습니다!",
+        "message": f"{s.room_no}호 송금을 표시했습니다. 임차인이 받았다고 확인하면(또는 7일 안에 이의가 없으면) 퇴실이 확정되고 공실 매물로 복귀합니다.",
         "settlement": s.model_dump(),
     }
+
+
+@router.post("/checkout/{settlement_id}/complete")
+def complete_checkout(settlement_id: str, req: Optional[CheckoutPaidReq] = None):
+    """(예전 이름) 송금 완료 표시 — mark-paid 와 같다. 퇴실 확정은 임차인 수취 확인 뒤에 이루어진다."""
+    return mark_checkout_paid(settlement_id, req)
 
 
 @router.post("/chats")
@@ -1697,6 +1710,51 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
         ),
         "hint": code_hint,
         "check": chk.model_dump(),
+    }
+
+
+@router.post("/expiry/remind-password")
+def remind_tenant_renewal_password(req: TenantInviteReq, request: Request):
+    """만기·재계약(또는 1년 도래) 임차인에게 새 비밀번호 설정 권유 메시지·1회용 링크를 보낸다. 기존 비밀번호와 등록 기기는 유지된다."""
+    from apps.rent_dist._rent3_core import invite as inv
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    room = Room.first(branch=b_id, room_no=req.room_no)
+    t = Tenant.get(room.id_tenant) if (room and room.id_tenant) else None
+    if t is None or t.status != "ACTIVE":
+        raise DomainError(f"{req.room_no}호에 입주 중인 임차인이 없습니다.")
+    who = str((claims_from(request) or {}).get("u") or "lessor")
+    tok = inv.issue(t, who)
+    t.password_remind_sent_at = now_iso()
+    t.save(action="tenant_password_remind_sent", app_source=APP_SRC)
+    b = Building.first(branch=b_id)
+    bname = b.building_name if b else b_id
+    lsr = Lessor.first(branch=b_id)
+    url = f"/rent3_tenant/?invite={tok}"
+    sms_text = (
+        f"[{bname}] {t.room_no}호 {t.name}님, 재계약(만기 연장)을 맞아 안전한 계정 보호를 위해 새로운 비밀번호 설정을 안내드립니다.\n"
+        f"아래 전용 링크(7일 유효, 1회용)에서 본인 확인 후 새 비밀번호를 설정해 주세요(설정 전까지 기존 비밀번호는 그대로 유지됩니다).\n"
+        f"{url}"
+    )
+    DirectChat(
+        branch=b_id,
+        id_room=room.id,
+        room_no=room.room_no,
+        sender_role="lessor",
+        sender_name=lsr.name if lsr else "임대인",
+        message=f"[🔒 재계약 새 비밀번호 설정 안내] {sms_text}",
+        quick_action_label="새 비밀번호 설정",
+        quick_action_url=url,
+    ).save(action="chat_auto_sent", app_source=APP_SRC)
+    return {
+        "success": True,
+        "url": url,
+        "expires": t.invite_expires,
+        "tenant_name": t.name,
+        "room_no": t.room_no,
+        "building_name": bname,
+        "sms_text": sms_text,
+        "message": f"{t.room_no}호 {t.name}님께 재계약 새 비밀번호 설정 안내 메시지와 1회용 링크를 보냈습니다.",
     }
 
 

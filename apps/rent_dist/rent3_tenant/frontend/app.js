@@ -157,6 +157,18 @@
         : `<div class="bass-card">현재 활성 입주 세입자가 없습니다. '빈 집 찾기'에서 계약을 진행해 보세요.</div>`;
       return;
     }
+    if (params.get("view") === "moved") {       // 퇴실 후 조회 전용(다음 해 2월 말까지): 연말정산 납부확인서·퇴실 정산서만 본다
+      const ar = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/archive`);
+      const E = Bass.escapeHtml;
+      const cert = ar.certificate || {};
+      const rows = Object.entries(cert).filter(([, v]) => ["string", "number"].includes(typeof v)).map(([k, v]) => `<tr><th>${E(k)}</th><td>${E(String(v))}</td></tr>`).join("");
+      elMyhome.innerHTML = `<div class="bass-card"><h3>🧾 퇴실 후 조회 전용</h3>
+        <p class="bass-muted" style="font-size:13px;">${E(ar.name)}님은 퇴실 처리되었습니다. <strong>${E(ar.readonly_until)}</strong>까지 로그인해서 연말정산 납부확인서와 정산서를 조회·내려받을 수 있고, 그 밖의 기능은 쓸 수 없습니다.</p></div>
+        <div class="bass-card cert-paper"><h3>연말정산 납부확인서</h3>${rows ? `<table>${rows}</table>` : `<p class="bass-muted">표시할 납부확인서가 없습니다.</p>`}
+          <button class="bass-btn no-print" type="button" onclick="window.print()">🖨️ 인쇄 / PDF 저장</button></div>
+        <div class="bass-card"><h3>퇴실 정산서</h3>${(ar.settlements || []).map((x) => `<p style="font-size:13.5px;line-height:1.7;">${E(x.room_no)}호 · 보증금 ${fmtWon(x.deposit_original)} → 반환 ${fmtWon(x.refund_amount)} · 상태 ${E(x.status)} · 계좌 ${E(x.account_masked || "")} · 완료 ${E((x.completed_at || "").slice(0, 10))}</p>`).join("") || `<p class="bass-muted">정산서가 없습니다.</p>`}</div>`;
+      return;
+    }
     const data = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}`);
     document.getElementById("poolBadge").textContent = `JSON Pool v${data.pool_revision}`;
 
@@ -207,7 +219,7 @@
     // 할 일 배너: 미납 > 퇴실 정산 > 만기 확인 (해당할 때만, 최대 2줄)
     const todos = [];
     if (lg.total_unpaid > 0) todos.push({ icon: "🚨", text: `미납 ${fmtWon(lg.total_unpaid)}이 있습니다`, label: "납부하기", go: "pay", hot: true });
-    if (co && co.status === "CALCULATED") todos.push({ icon: "🚪", text: "퇴실 정산서가 도착했습니다", label: "확인·동의", go: "checkout", hot: true });
+    if (co && ["CALCULATED", "PAID"].includes(co.status)) todos.push({ icon: "🚪", text: co.status === "PAID" ? "보증금이 송금되었습니다 — 받으셨나요?" : "퇴실 정산서가 도착했습니다", label: co.status === "PAID" ? "수취 확인" : "확인·동의", go: "checkout", hot: true });
     if (ec && ec.status === "AWAITING_TENANT") todos.push({ icon: "📅", text: "만기 후 전출 계획을 알려 주세요", label: "답변하기", go: "expiry", hot: true });
     else if (ec && ec.status === "RENEWAL_PREVIEWED") todos.push({ icon: "📝", text: "연장 재계약 예고가 도착했습니다", label: "확인하기", go: "expiry", hot: true });
     else if (ew && ew.in_6_to_2_months_window && !ec) todos.push({ icon: "📅", text: "만기가 다가옵니다. 전출 계획을 알릴 수 있습니다", label: "열기", go: "expiry", hot: false });
@@ -349,17 +361,30 @@
       <section class="svc" data-svc="checkout">
       ${blk(`      ${co ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-color:var(--warn);">
-          <h3>🚪 퇴실 보증금 정산 명세서 도착 (실반환 예정액: ${fmtWon(co.refund_amount)})</h3>
-          <p class="bass-muted" style="font-size:13px;">원보증금 ${fmtWon(co.deposit_original)} − 미납월세 ${fmtWon(co.unpaid_rent_deduction)} − 공과금 ${fmtWon(co.utility_settlement)} − 청소비 ${fmtWon(co.cleaning_fee)}</p>
+          ${co.status === "REQUESTED" ? `<h3>🚪 퇴실 신청이 접수되었습니다</h3><p class="bass-muted" style="font-size:13px;">임대인이 점검 후 정산서를 보냅니다. 📄 <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>는 퇴실 전에 미리 내려받아 두세요.</p>` : `
+          <h3>🚪 퇴실 보증금 정산 명세서 (실반환 예정액: ${fmtWon(co.refund_amount)})</h3>
+          <p class="bass-muted" style="font-size:13px;">원보증금 ${fmtWon(co.deposit_original)} − 미납월세 ${fmtWon(co.unpaid_rent_deduction)} − 공과금 ${fmtWon(co.utility_settlement)} − 청소비 ${fmtWon(co.cleaning_fee)} − 파손 ${fmtWon(co.damage_restoration_fee)}</p>
+          <p style="font-size:13px;">📄 퇴실하면 로그인 수단이 정리됩니다. <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>를 미리 내려받아 두세요(퇴실 후에도 다음 해 2월 말까지 조회는 가능).</p>`}
           ${co.status === "CALCULATED" ? `
             <div class="field-grid" style="margin-top:8px;">
               <input id="coBank" class="bass-input" value="${Bass.escapeHtml(t.account_number || "")}" placeholder="반환받을 은행 계좌번호">
+              <input id="coHolder" class="bass-input" value="" placeholder="예금주 (계약자 본인 ${Bass.escapeHtml(t.name)})">
               <input id="coSig" class="bass-input" value="${Bass.escapeHtml(t.name)} (동의서명)" placeholder="동의 전자서명">
               <button id="btnAgreeCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button">✍️ 정산 내역 확인 및 동의 서명</button>
+              <button id="btnDisputeCo" data-id="${co.id}" class="bass-btn" type="button">⚠️ 이의 제기 (채팅·통화로 협의)</button>
             </div>
-          ` : `<span class="bass-badge bass-badge--ok">세입자 동의 완료 — 임대인 송금 대기 중</span>`}
+          ` : co.status === "AGREED" ? `<span class="bass-badge bass-badge--ok">동의 완료 — 임대인 송금 대기 중</span> <button id="btnDisputeCo" data-id="${co.id}" class="bass-btn bass-btn--sm" type="button">⚠️ 이의 제기</button>`
+          : co.status === "PAID" ? `<div style="font-size:14px;line-height:1.7;">💸 임대인이 ${fmtWon(co.refund_amount)}을 송금했다고 표시했습니다. 입금을 확인해 주세요. (표시 후 7일 안에 이의가 없으면 자동 확정)</div>
+            <div class="bass-row" style="gap:8px;margin-top:8px;"><button id="btnReceivedCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;">✅ 받았습니다</button><button id="btnDisputeCo" data-id="${co.id}" class="bass-btn" type="button" style="min-height:48px;">❌ 못 받았습니다</button></div>`
+          : co.status === "DISPUTED" ? `<span class="bass-badge bass-badge--warn">이의 접수 — 임대인과 채팅·통화로 협의 중</span><div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(co.dispute_note || "")}</div>` : ""}
         </div>
-      ` : ""}
+      ` : `
+        <div class="bass-card no-print" style="margin-bottom:14px;">
+          <h3>🚪 퇴실 신청</h3>
+          <p class="bass-muted" style="font-size:13px;">퇴실을 신청하면 임대인이 점검 후 정산서를 보냅니다. 퇴실하면 로그인 수단이 정리되니 <strong>연말정산 납부확인서를 먼저 내려받아 두세요.</strong></p>
+          <div class="field-grid"><input id="coWant" class="bass-input" type="date" aria-label="퇴실 희망일"><input id="coMemo" class="bass-input" placeholder="메모(선택)"><button id="btnRequestCo" class="bass-btn bass-btn--primary" type="button">🚪 퇴실 신청</button></div>
+        </div>
+      `}
 
 `, "받은 퇴실 정산 명세서가 없습니다.")}
       </section>
@@ -616,6 +641,7 @@
             method: "POST",
             body: {
               bank_account: document.getElementById("coBank").value,
+              account_holder: document.getElementById("coHolder").value,
               signature: document.getElementById("coSig").value,
             },
           });
@@ -624,6 +650,35 @@
         });
       });
     }
+
+    const btnRequestCo = document.getElementById("btnRequestCo");
+    if (btnRequestCo) btnRequestCo.addEventListener("click", function () {
+      if (!window.confirm("퇴실을 신청할까요?\n퇴실이 확정되면 바로가기·간편 비밀번호가 정리됩니다. 연말정산 납부확인서는 먼저 내려받아 두세요.")) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/checkout/request`, { method: "POST", body: { desired_date: document.getElementById("coWant").value, memo: document.getElementById("coMemo").value } });
+        Bass.updateAppAlert("success", res.message);
+        await loadMyhome();
+      });
+    });
+    const btnReceivedCo = document.getElementById("btnReceivedCo");
+    if (btnReceivedCo) btnReceivedCo.addEventListener("click", function () {
+      if (!window.confirm("보증금이 입금된 것을 확인하셨나요? 확인하면 퇴실이 확정됩니다.")) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/checkout/${btnReceivedCo.dataset.id}/confirm-received`, { method: "POST", body: {} });
+        Bass.updateAppAlert("success", res.message);
+        await loadMyhome();
+      });
+    });
+    const btnDisputeCo = document.getElementById("btnDisputeCo");
+    if (btnDisputeCo) btnDisputeCo.addEventListener("click", function () {
+      const note = window.prompt("이의 내용을 적어 주세요(예: 청소비가 과하다 / 입금을 받지 못했다).");
+      if (!note || !note.trim()) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/checkout/${btnDisputeCo.dataset.id}/dispute`, { method: "POST", body: { note: note.trim() } });
+        Bass.updateAppAlert("success", res.message);
+        await loadMyhome();
+      });
+    });
 
     const btnPlanStay = document.getElementById("btnPlanStay");
     if (btnPlanStay) {

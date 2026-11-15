@@ -68,6 +68,16 @@ class TicketSubmitReq(BaseModel):
 class CheckoutAgreeReq(BaseModel):
     bank_account: str
     signature: str
+    account_holder: str = ""        # 예금주 — 계약자 본인과 같아야 한다
+
+
+class CheckoutRequestReq(BaseModel):
+    desired_date: str = ""
+    memo: str = ""
+
+
+class CheckoutDisputeReq(BaseModel):
+    note: str
 
 
 @router.get("/status")
@@ -175,6 +185,7 @@ def get_myhome(tenant_id: str):
     bill_notices = [bn.model_dump() for bn in RentBillingNotice.for_contract(ct.id, limit=10)] if ct else []
 
     tickets = sorted(MaintenanceTicket.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
+    CheckOutSettlement.auto_confirm_due(tenant_id=t.id)      # 송금 표시 뒤 7일 동안 이의가 없으면 자동 확정
     checkouts = [c for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED"]
     chats = sorted(
         [c for c in DirectChat.find(branch=t.branch, room_no=t.room_no) if not c.session_id],   # 계약방 대화는 계약 화면에서만
@@ -379,15 +390,66 @@ def create_ticket(tenant_id: str, req: TicketSubmitReq):
     }
 
 
-@router.post("/checkout/{settlement_id}/agree", dependencies=[Depends(any_user)])
-def agree_checkout(settlement_id: str, req: CheckoutAgreeReq):
+def _own_settlement(settlement_id: str, request: Request) -> CheckOutSettlement:
+    """퇴실 정산서의 당사자 임차인 본인만(임대인·다른 임차인은 불가)."""
+    from core.errors import Forbidden
     s = CheckOutSettlement.require(settlement_id)
-    s.tenant_agree(req.bank_account, req.signature, app_source=APP_SRC)
+    c = claims_from(request) or {}
+    if c.get("r") != "tenant" or c.get("u") != f"tenant:{s.id_tenant}":
+        raise Forbidden("이 정산서의 임차인 본인만 처리할 수 있습니다.")
+    return s
+
+
+@router.post("/checkout/{settlement_id}/agree", dependencies=[Depends(any_user)])
+def agree_checkout(settlement_id: str, req: CheckoutAgreeReq, request: Request):
+    s = _own_settlement(settlement_id, request)
+    s.tenant_agree(req.bank_account, req.signature, req.account_holder, app_source=APP_SRC)
     return {
         "success": True,
         "message": "퇴실 정산 명세 동의 및 반환계좌 등록이 완료되었습니다 (임대인 앱 즉시 반영).",
         "settlement": s.model_dump(),
     }
+
+
+@router.post("/myhome/{tenant_id}/checkout/request", dependencies=[Depends(tenant_scope)])
+def request_checkout(tenant_id: str, req: CheckoutRequestReq):
+    """임차인이 퇴실을 먼저 신청한다(채팅 카드로 임대인에게 전달, 연말정산 자료 미리 받기 안내 포함)."""
+    ensure_pool_seeded()
+    t = Tenant.get(tenant_id)
+    if not t or t.status != "ACTIVE":
+        raise NotFound("입주 중인 임차인만 퇴실을 신청할 수 있습니다.")
+    s = CheckOutSettlement.tenant_request(t, req.desired_date, req.memo, app_source=APP_SRC)
+    return {"success": True, "message": "퇴실 신청이 임대인에게 전달되었습니다. 연말정산 납부확인서는 지금 미리 내려받아 두세요.", "settlement": s.model_dump()}
+
+
+@router.post("/checkout/{settlement_id}/confirm-received", dependencies=[Depends(any_user)])
+def confirm_checkout_received(settlement_id: str, request: Request):
+    s = _own_settlement(settlement_id, request)
+    s.tenant_confirm_received(app_source=APP_SRC)
+    return {"success": True, "message": "수취 확인이 완료되어 퇴실 정산이 끝났습니다. 다음 해 2월 말까지 로그인해서 납부확인서·정산서를 조회할 수 있습니다.", "settlement": s.model_dump()}
+
+
+@router.post("/checkout/{settlement_id}/dispute", dependencies=[Depends(any_user)])
+def dispute_checkout(settlement_id: str, req: CheckoutDisputeReq, request: Request):
+    s = _own_settlement(settlement_id, request)
+    s.tenant_dispute(req.note, app_source=APP_SRC)
+    return {"success": True, "message": "이의가 임대인에게 전달되었습니다. 채팅 또는 통화로 협의해 주세요.", "settlement": s.model_dump()}
+
+
+@router.get("/myhome/{tenant_id}/archive", dependencies=[Depends(tenant_scope)])
+def moved_out_archive(tenant_id: str):
+    """퇴실한 임차인의 조회 전용 자료(마지막 계약의 연말정산 납부확인서·퇴실 정산서). 퇴실 후 다음 해 2월 말까지 로그인해서 볼 수 있다."""
+    ensure_pool_seeded()
+    t = Tenant.get(tenant_id)
+    if not t:
+        raise NotFound("임차인 정보를 찾을 수 없습니다.")
+    cts = sorted(Contract.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
+    ct = cts[0] if cts else None
+    cert = TaxAndCertificateService.build_tenant_tax_certificate(ct.id) if ct else None
+    sets = sorted(CheckOutSettlement.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
+    mask = CheckOutSettlement._mask_account
+    return {"success": True, "name": t.name, "moved_out": t.status == "MOVED_OUT", "readonly_until": t.readonly_until, "certificate": cert,
+            "settlements": [{**{k: v for k, v in x.model_dump().items() if k not in ("refund_bank_account", "tenant_signature")}, "account_masked": mask(x.refund_bank_account)} for x in sets]}
 
 
 @router.get("/contracts/{contract_id}/photo", dependencies=[Depends(any_user)])

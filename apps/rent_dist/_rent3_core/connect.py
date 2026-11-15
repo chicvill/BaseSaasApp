@@ -100,6 +100,27 @@ def verify_identity(t: Any, room_no: str, name: str, phone: str, lessor_name: st
     return True
 
 
+def verify_lessor_identity(lsr: Any, building_name: str, name: str, phone: str, proof: str) -> bool:
+    """임대인 안내 링크로 비밀번호를 정하기 전 본인 확인 4칸: 건물명·본인 이름·본인 전화번호·사업자번호/계좌번호 끝 4자리 이상.
+    장부에 값이 없는 항목은 건너뛴다."""
+    if not fr._norm_name(name) or fr._norm_name(name) != fr._norm_name(lsr.name):
+        return False
+    if len(_digits(lsr.phone)) >= 10 and _digits(phone) != _digits(lsr.phone):
+        return False
+    b = Building.first(branch=normalize_branch_id(lsr.branch))
+    bname = _bname(b.building_name) if b else ""
+    if bname:
+        bn = _bname(building_name)
+        if not bn or not (bn in bname or bname in bn):
+            return False
+    known = [d for d in (_digits(lsr.business_number), _digits(lsr.account_number)) if len(d) >= 4]
+    if known:
+        pr = _digits(proof)
+        if len(pr) < 4 or not any(d.endswith(pr) for d in known):
+            return False
+    return True
+
+
 def create(t: Any) -> Tuple[ConnectRequest, str, str]:
     """요청 접수. 이 임차인의 이전 요청은 폐기하고, (요청, secret, 확인번호)를 돌려준다. secret·확인번호 원문은 이 응답에서만 볼 수 있다."""
     for old in ConnectRequest.find(tenant_id=t.id):
@@ -224,11 +245,25 @@ def reset_activation(t: Any) -> Dict[str, Any]:
     t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
     t.consents = {}
     t.activated_at = ""
+    t.password_changed_at = ""
+    t.password_remind_sent_at = ""
     t.login_devices = []                                  # 등록된 로그인 기기도 모두 끊는다(분실한 폰 포함)
     if (t.identity or {}).get("provider") == "invite":    # 링크로 얻은 확인만 지운다(문자·네이버 인증은 유지)
         t.identity = {}
     t.save(action="activation_reset", app_source="rent3_admin")
     return {"requests_closed": n_req}
+
+
+def purge_login_methods(t: Any) -> None:
+    """퇴실 정산이 끝났을 때: 바로가기·간편 비밀번호·등록 기기·미사용 안내 링크·진행 중 연결 요청만 정리한다.
+    비밀번호·개인정보 동의·본인 확인 기록은 그대로 둔다(퇴실 후 다음 해 2월 말까지 연말정산 납부확인서·정산서를 '조회'해야 하고, 동의는 분쟁 증빙이다)."""
+    for r in ConnectRequest.find(tenant_id=t.id):
+        if r.status in ("PENDING", "APPROVED", "DELIVERED"):
+            r.status = "EXPIRED"
+            r.save(action="connect_closed_on_moveout", app_source="rent3_checkout")
+    t.pin_hash, t.quick_devices, t.login_devices = "", [], []
+    t.invite_hash, t.invite_expires, t.invite_issued_by = "", "", ""
+    t.save(action="login_methods_purged_on_moveout", app_source="rent3_checkout")
 
 
 def cancel_invite(t: Any) -> bool:

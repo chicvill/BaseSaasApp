@@ -684,7 +684,9 @@
     const stay = Boolean(ec && (ec.tenant_plan === "STAY" || /RENEWAL/.test(ec.status || "")));
     const moveOut = Boolean(ec && ec.tenant_plan === "MOVE_OUT");
     const dep0 = (ec && ec.proposed_deposit) || r.deposit;
-    const rent0 = (ec && ec.proposed_monthly_rent) || r.monthly_rent;
+    // 재계약 기본안: 월세 5% 인상(천 원 단위 내림, 법정 한도 안). 예고 전에는 이 값이 채워지고 임대인이 고칠 수 있으며, 공동 재계약방에서 서로 조정한다.
+    const rent5 = Math.max(Number(r.monthly_rent || 0), Math.floor(Number(r.monthly_rent || 0) * 1.05 / 1000) * 1000);
+    const rent0 = (ec && ec.proposed_monthly_rent) || rent5;
     const fee0 = (ec && ec.proposed_maintenance_fee != null && ec.status !== "AWAITING_TENANT") ? ec.proposed_maintenance_fee : r.maintenance_fee;
     const maxDep = Math.round(Number(r.deposit || 0) * 1.05);
     const maxRent = Math.round(Number(r.monthly_rent || 0) * 1.05);
@@ -702,7 +704,7 @@
       </div>
       ${moveOut ? `<div class="bass-muted" style="font-size:12.5px;">📦 전출 예정(${Bass.escapeHtml(ec.planned_move_out_date || "")})으로 기록되어 있습니다. 전출 정산은 [전출] 버튼에서 하세요.</div>` : ""}
       ${stay ? `
-        <div class="r3-lbl" style="margin-top:12px;">③ 계약 갱신 안내 (법정 5% 이내)</div>
+        <div class="r3-lbl" style="margin-top:12px;">③ 재계약 안내 (기본 월세 5% 인상 · 고칠 수 있고, 재계약방에서 함께 조정)</div>
         <div class="r3-grid">
           <label class="r3-fld">보증금(원) <span class="bass-muted">최대 ${fmtWon(maxDep)}</span><input id="exDep" class="bass-input" type="number" value="${dep0}"></label>
           <label class="r3-fld">월세(원) <span class="bass-muted">최대 ${fmtWon(maxRent)}</span><input id="exRent" class="bass-input" type="number" value="${rent0}"></label>
@@ -713,6 +715,7 @@
         <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
           <button id="exCopy2" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
           <button id="exSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📝 갱신 예고 기록·앱 전달</button>
+          <button id="exPwRemind" class="bass-btn bass-btn--sm" type="button">🔒 재계약 새 암호 설정 안내·링크 복사</button>
         </div>` : ""}`);
     void body;
     $m("exCopy1").addEventListener("click", async () => {
@@ -746,11 +749,23 @@
     if (stay) {
       const compose = () => {
         const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
-        $m("exMsg2").value = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n(법정 증액 한도 5% 이내입니다.) 의견 있으시면 알려 주세요.`;
+        $m("exMsg2").value = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n월세는 기본 5% 인상안이며(법정 한도 5% 이내) 금액은 재계약 과정에서 함께 조정할 수 있습니다. 의견 있으시면 알려 주세요.`;
       };
       ["exDep", "exRent", "exFee", "exTerm"].forEach((id) => $m(id).addEventListener("input", compose));
       compose();
       $m("exCopy2").addEventListener("click", () => copyAndSms($m("exMsg2").value, phone));
+      $m("exPwRemind").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, "/expiry/remind-password", {
+            method: "POST",
+            body: { branch: currentBranch, room_no: no },
+          });
+          const fullText = (res.sms_text || "").replace(res.url, window.location.origin + res.url);
+          $m("exMsg2").value = fullText;
+          await copyAndSms(fullText, phone);
+          Bass.updateAppAlert("success", res.message);
+        });
+      });
       $m("exSend").addEventListener("click", function () {
         Bass.withLock(this, async () => {
           const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
@@ -795,9 +810,10 @@
       ${msgOf("moMsg", "")}
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
         <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
-        <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">✅ 정산 확정 · 임대 매물 등록</button>
+        <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📤 정산서 보내기</button>
       </div>
-      <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산 확정을 누르면 보증금 반환을 마친 것으로 보고 호실이 공실이 되어 홈페이지 임대 매물로 공개됩니다.</div>`);
+      <div id="moState" style="margin-top:10px;"></div>
+      <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산서를 보내면 임차인 앱·채팅에 도착합니다. 임차인이 확인·동의하고 <strong>본인 명의 계좌</strong>를 입력하면 여기서 <strong>송금 완료 표시</strong>를 합니다. 임차인이 받았다고 확인하거나(또는 7일 안에 이의가 없으면) 퇴실이 확정되어 공실 매물로 공개됩니다. 이의가 오면 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요.</div>`);
     void body;
     const refund = () => Math.max(0, dep - unpaid - num("moClean") - num("moUtil") - num("moDmg"));
     const compose = () => {
@@ -809,17 +825,34 @@
     ["moDate", "moClean", "moUtil", "moDmg"].forEach((id) => $m(id).addEventListener("input", compose));
     compose();
     $m("moCopy").addEventListener("click", () => copyAndSms($m("moMsg").value, phone));
+    const stateOf = () => ((dash && dash.checkouts) || []).find((x) => x.room_no === no && x.status !== "COMPLETED");
+    const drawState = () => {
+      const co = stateOf(), box = $m("moState");
+      if (!co) { box.innerHTML = ""; return; }
+      const label = { REQUESTED: "🚪 임차인이 퇴실을 신청했습니다(희망일 " + (co.desired_date || "미정") + "). 금액을 입력해 정산서를 보내세요.", CALCULATED: "📤 정산서를 보냈습니다 — 임차인 확인·동의 대기", AGREED: "✍️ 임차인이 동의하고 계좌를 입력했습니다 — 송금 후 아래 단추를 누르세요", PAID: "💸 송금 표시 완료 — 임차인 수취 확인 대기(7일 안에 이의 없으면 자동 확정)", DISPUTED: "⚠️ 임차인 이의: " + (co.dispute_note || "") + " — 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요" }[co.status] || co.status;
+      box.innerHTML = `<div class="bass-card" style="padding:10px;font-size:13px;line-height:1.7;"><strong>${Bass.escapeHtml(label)}</strong>
+        ${co.status === "AGREED" ? `<br>예금주 <strong>${Bass.escapeHtml(co.account_holder || "")}</strong> · 계좌 <strong>${Bass.escapeHtml(co.refund_bank_account || "")}</strong> · 반환액 <strong>${fmtWon(co.refund_amount)}</strong><br><button id="moPaid" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;margin-top:6px;">💸 송금 완료 표시</button>` : ""}</div>`;
+      const paid = $m("moPaid");
+      if (paid) paid.addEventListener("click", function () {
+        if (!window.confirm(`${co.account_holder || ""} 님 계좌로 ${fmtWon(co.refund_amount)}을 실제로 송금한 뒤 눌러 주세요. 표시하면 임차인에게 수취 확인 요청이 갑니다.`)) return;
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/checkout/${co.id}/mark-paid`, { method: "POST", body: { branch: currentBranch } });
+          Bass.updateAppAlert("success", res.message);
+          await refresh();
+          drawState();
+        });
+      });
+    };
+    drawState();
     $m("moDone").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        if (!window.confirm(`${no}호 정산을 확정할까요?\n환불 예정액 ${fmtWon(refund())}을 임차인에게 돌려준 뒤 눌러 주세요. 호실이 공실이 되고 임대 매물로 공개됩니다.`)) return;
-        const calc = await Bass.api(APP_ID, "/checkout/calculate", {
+        const res = await Bass.api(APP_ID, "/checkout/calculate", {
           method: "POST",
           body: { branch: currentBranch, room_no: no, utility_settlement: num("moUtil"), cleaning_fee: num("moClean"), damage_restoration_fee: num("moDmg") },
         });
-        const res = await Bass.api(APP_ID, `/checkout/${calc.settlement.id}/complete`, { method: "POST", body: { branch: currentBranch } });
         Bass.updateAppAlert("success", res.message);
-        closeModal();
         await refresh();
+        drawState();
       });
     });
   }

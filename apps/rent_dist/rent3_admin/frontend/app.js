@@ -409,7 +409,7 @@
 
   async function renderOpsTab() {
     elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
-    const [bk, tn] = await Promise.all([Bass.api(APP_ID, "/backups"), Bass.api(APP_ID, "/accounts/tenants")]);
+    const [bk, tn, ls] = await Promise.all([Bass.api(APP_ID, "/backups"), Bass.api(APP_ID, "/accounts/tenants"), Bass.api(APP_ID, "/accounts/lessors")]);
     const rows = bk.backups.map((b) => `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
       <span><code>${Bass.escapeHtml(b.name)}</code><br><span class="bass-muted" style="font-size:12px;">${Bass.escapeHtml(b.created_at.replace("T", " "))} · ${fmtKb(b.size)}</span></span>
       <button class="bass-btn bass-btn--sm btn-bk-dl" data-name="${Bass.escapeHtml(b.name)}" type="button" style="min-height:44px;">내려받기</button></div>`).join("") || '<div class="bass-muted" style="font-size:13px;">아직 백업이 없습니다.</div>';
@@ -420,6 +420,18 @@
           <strong>같은 디스크에만 두면 디스크 고장 때 함께 사라집니다 — 가끔 내려받아 다른 곳에 보관하세요.</strong> 백업에는 개인정보가 들어 있습니다.</div>
         <button id="btnBkRun" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">지금 백업 만들기</button>
         <div style="margin-top:8px;">${rows}</div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🏢 임대인 암호 설정 · 6개월 변경 권유</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">전화로 본인 확인을 마친 임대인에게 <strong>1회용 비밀번호 설정 링크</strong>(7일 유효, 4칸 대조 필수)를 보내거나, 6개월(180일)이 지난 임대인에게 <strong>새 암호 설정 권유 메시지·링크</strong>를 보냅니다(새 비밀번호를 정하기 전까지 기존 비밀번호와 등록 기기는 유지됩니다).</div>
+        <select id="opsLessor" class="bass-select" style="width:100%;min-height:44px;margin-bottom:8px;">
+          ${(ls.lessors || []).map((l) => `<option value="${Bass.escapeHtml(l.id)}">${Bass.escapeHtml(l.building_name || l.branch)} · ${Bass.escapeHtml(l.name)}${l.activated ? " (가입됨" + (l.days_since_change != null ? ` · ${l.days_since_change}일 경과` : "") + ")" : " (미설정)"}${l.due_6m ? " · ⚠️ 6개월 경과 권유 대상" : ""}${l.invite_pending ? " · 링크 대기" : ""}</option>`).join("")}
+        </select>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button id="btnLessorInvite" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔑 임대인 암호 설정 링크 발급</button>
+          <button id="btnLessorRemind" class="bass-btn" type="button" style="min-height:44px;">🔒 6개월 새 암호 설정 권유 발송</button>
+        </div>
+        <div id="opsLessorResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
       </div>
       <div class="bass-card">
         <h3>🔑 입주 임차인 계정</h3>
@@ -466,6 +478,23 @@
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    const lsrOut = document.getElementById("opsLessorResult");
+    document.getElementById("btnLessorInvite").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/accounts/lessor-invite", { method: "POST", body: { id: document.getElementById("opsLessor").value } });
+        const link = window.location.origin + r.url;
+        lsrOut.innerHTML = `<strong>${Bass.escapeHtml(r.lessor_name)}님 (${Bass.escapeHtml(r.building_name)})</strong> — 아래 링크를 전달해 주세요(7일·1회).<br><input class="bass-input" readonly value="${Bass.escapeHtml(link)}" style="width:100%;margin-top:6px;" onclick="this.select()">`;
+      });
+    });
+    document.getElementById("btnLessorRemind").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const lid = document.getElementById("opsLessor").value;
+        const r = await Bass.api(APP_ID, `/accounts/lessors/${encodeURIComponent(lid)}/remind-password`, { method: "POST", body: {} });
+        const link = window.location.origin + r.url;
+        lsrOut.innerHTML = `<strong>${Bass.escapeHtml(r.message)}</strong><br><input class="bass-input" readonly value="${Bass.escapeHtml(link)}" style="width:100%;margin-top:6px;" onclick="this.select()">`;
+        Bass.updateAppAlert("success", r.message);
+      });
+    });
     const out = document.getElementById("opsResult");
     document.getElementById("btnOpsInvite").addEventListener("click", function () {
       Bass.withLock(this, async () => {
