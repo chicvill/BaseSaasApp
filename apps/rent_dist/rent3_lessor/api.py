@@ -1723,6 +1723,9 @@ def remind_tenant_renewal_password(req: TenantInviteReq, request: Request):
     t = Tenant.get(room.id_tenant) if (room and room.id_tenant) else None
     if t is None or t.status != "ACTIVE":
         raise DomainError(f"{req.room_no}호에 입주 중인 임차인이 없습니다.")
+    from apps.rent_dist._rent3_core import connect as cn_chk
+    if not cn_chk.activated(t):
+        raise DomainError("아직 앱에 가입하지 않은 임차인입니다.", hint="입주 안내 링크를 먼저 보내 주세요(가입 안내 문자 창). 이미 보낸 가입 링크가 있으면 이 권유가 덮어써서 못 쓰게 됩니다.")
     who = str((claims_from(request) or {}).get("u") or "lessor")
     tok = inv.issue(t, who)
     t.password_remind_sent_at = now_iso()

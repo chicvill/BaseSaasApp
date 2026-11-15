@@ -1098,8 +1098,8 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             )
         moved_out = matched_tenant.status == "MOVED_OUT"
         if moved_out:
-            from datetime import date as _date
-            if not matched_tenant.readonly_until or _date.today().isoformat() > matched_tenant.readonly_until:
+            from apps.rent_dist._rent3_core.models import date_today as _today
+            if not matched_tenant.readonly_until or _today().isoformat() > matched_tenant.readonly_until:
                 raise Unauthorized("퇴실 후 조회 기간이 끝나 더 이상 로그인할 수 없습니다.",
                                    hint="연말정산 납부확인서는 퇴실한 다음 해 2월 말까지 조회할 수 있습니다. 다시 입주하시면 새 안내 링크로 등록해 주세요.")
         elif not demo:

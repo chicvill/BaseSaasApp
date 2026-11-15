@@ -286,6 +286,14 @@ def list_resident_tenants():
     return {"success": True, "tenants": sorted(items, key=lambda x: (x["branch"], x["room_no"]))}
 
 
+def _require_lessor_proof(lsr) -> None:
+    """임대인 링크의 본인 확인 4번째 칸(사업자번호·계좌번호 끝 4자리)에 쓸 증빙이 장부에 있어야 발급한다(없으면 건물명·이름·전화 3가지만으로 통과해 약하다)."""
+    import re as _re
+    if not any(len(_re.sub(r"\D", "", str(v or ""))) >= 4 for v in (lsr.business_number, lsr.account_number)):
+        raise DomainError(f"{lsr.name} 임대인의 장부에 사업자번호·계좌번호가 없어 본인 확인 증빙이 없습니다.",
+                          hint="가맹 신청 정보에서 사업자번호 또는 계좌번호를 먼저 등록한 뒤 링크를 발급해 주세요.")
+
+
 @router.get("/accounts/lessors", dependencies=ADMIN_ONLY)
 def list_lessor_accounts():
     """임대인 암호 설정 상태·6개월(180일) 변경 권유 대상 조회(해시·원문은 제외)."""
@@ -322,6 +330,7 @@ def issue_lessor_invite(req: InviteIssueReq, request: Request):
         raise DomainError("임대인을 찾을 수 없습니다.")
     if lsr.status != "ACTIVE":
         raise DomainError("가맹 승인된 임대인에게만 발급할 수 있습니다.")
+    _require_lessor_proof(lsr)
     tok = inv.issue(lsr, _admin_name(request))
     b = Building.first(branch=normalize_branch_id(lsr.branch))
     bname = b.building_name if b else lsr.branch
@@ -351,6 +360,7 @@ def remind_lessor_password(lessor_id: str, request: Request):
         raise DomainError("임대인을 찾을 수 없습니다.")
     if lsr.status != "ACTIVE":
         raise DomainError("가맹 승인된 임대인에게만 발송할 수 있습니다.")
+    _require_lessor_proof(lsr)
     tok = inv.issue(lsr, _admin_name(request))
     lsr.password_remind_sent_at = now_iso()
     lsr.save(action="lessor_password_remind_sent", app_source=APP_SRC)

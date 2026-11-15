@@ -292,6 +292,7 @@
           var rLbl = $("r3IdRoom").previousElementSibling, lLbl = $("r3IdLessor").previousElementSibling;
           if (rLbl) rLbl.innerHTML = '건물명 <span style="font-weight:400;color:#666;">(예: 시크빌)</span>';
           $("r3IdRoom").setAttribute("inputmode", "text");
+          var pinEl = $("r3InvPin"); if (pinEl) { pinEl.hidden = true; if (pinEl.previousElementSibling) pinEl.previousElementSibling.hidden = true; }   // 임대인 간편 비밀번호는 아직 쓰지 않는다(서버가 무시)
           if (lLbl) lLbl.innerHTML = '사업자등록번호 또는 계좌번호 <span style="font-weight:400;color:#666;">(끝 4자리 이상)</span>';
         } else {
           $("r3InvWho").textContent = ((d.building_name ? d.building_name + " " : "") + "입주 안내").trim();

@@ -5367,11 +5367,36 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         from apps.rent_dist._rent3_core.ops import CheckOutSettlement
         c = self.client
         chic = self._login("chic")
-        room = next(r for r in Room.find(branch="main") if r.active_contract_id and r.id_tenant and r.room_no not in ("201", "202")
+        from apps.rent_dist._rent3_core import Contract
+        room = next(r for r in Room.find(branch="main") if r.active_contract_id and r.id_tenant
                     and Tenant.get(r.id_tenant) and Tenant.get(r.id_tenant).status == "ACTIVE")
         t = Tenant.get(room.id_tenant)
+        snaps = [(o, o.model_dump()) for o in (room, Contract.get(room.active_contract_id), t)]    # 단독 실행해도 다른 시험에 영향이 없게 끝나면 되돌린다
+        try:
+            self._run_87(c, chic, room, t)
+        finally:
+            for o, d in snaps:
+                for k, v in d.items():
+                    setattr(o, k, v)
+                o.save(action="t")
+
+    def _run_87(self, c, chic, room, t):
+        from apps.rent_dist._rent3_core import DirectChat, Tenant
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
         tk = self._login(t.id)
         TN, LS = "/api/rent3_tenant", "/api/rent3_lessor"
+        ROOT_ = ROOT
+        # 보강: 가입 전 임차인에게 재계약 비밀번호 권유를 보내면 기존 가입 링크를 덮어쓰므로 거절
+        t.activated_at, t.pin_hash, t.quick_devices = "", "", []; t.save(action="t")
+        self.assertEqual(c.post(f"{LS}/expiry/remind-password", headers=chic, json={"branch": "main", "room_no": room.room_no}).status_code, 400)
+        # 임대인 링크: 장부에 사업자번호·계좌번호가 없으면 관리인도 발급 불가
+        from apps.rent_dist._rent3_core import Lessor
+        lsr = Lessor.first(branch="main"); keep = (lsr.business_number, lsr.account_number)
+        lsr.business_number, lsr.account_number = "", ""; lsr.save(action="t")
+        try:
+            self.assertEqual(c.post("/api/rent3_admin/accounts/lessor-invite", headers=self._login("admin"), json={"id": lsr.id}).status_code, 400)
+        finally:
+            lsr.business_number, lsr.account_number = keep; lsr.save(action="t")
         # 임차인 신청 + 연말정산 미리 받기 안내
         rq = c.post(f"{TN}/myhome/{t.id}/checkout/request", headers=tk, json={"desired_date": "2027-01-31", "memo": "이사"})
         self.assertEqual(rq.status_code, 200, rq.text)
@@ -5412,12 +5437,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual((done.status, done.auto_confirmed), ("COMPLETED", True))
         self.assertEqual(Tenant.get(t.id).status, "MOVED_OUT")
         # 화면: 신청·예금주·수취 확인·송금 표시, 재계약 기본 5% 인상
-        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        rd = lambda *parts: open(os.path.join(ROOT_, *parts), encoding="utf-8").read()
         tj = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
         for needle in ("btnRequestCo", "coHolder", "btnReceivedCo", "btnDisputeCo", "view\") === \"moved", "/archive"):
             self.assertIn(needle, tj, needle)
         lj = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
-        for needle in ("moPaid", "/mark-paid", "rent5", "기본 월세 5% 인상"):
+        for needle in ("moPaid", "/mark-paid", "rent5", "기본 월세 5% 인상", "co-open", "정산 이의/미수취 확인 필요"):
             self.assertIn(needle, lj, needle)
 
 

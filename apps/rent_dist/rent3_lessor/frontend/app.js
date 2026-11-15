@@ -1179,6 +1179,13 @@
     const lateRows = rooms.filter((x) => x.is_occupied && x.contract && unpaidCount(x) > 0)
       .sort((a, b) => ((b.ledger && b.ledger.total_unpaid) || 0) - ((a.ledger && a.ledger.total_unpaid) || 0));
     const conn = dash.connect_requests || [];
+    // 퇴실 정산 이의(DISPUTED)·임차인 신청(REQUESTED)·동의 완료(AGREED, 송금 차례) 건: 바로 보이게
+    const coAlerts = (dash.checkouts || []).filter((x) => ["DISPUTED", "REQUESTED", "AGREED"].includes(x.status));
+    const coHtml = coAlerts.length ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
+        <div style="font-weight:800;font-size:14px;margin-bottom:4px;">🚪 퇴실 정산 확인 필요 ${coAlerts.length}건</div>
+        ${coAlerts.map((x) => `<div style="font-size:13px;line-height:1.6;">${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.tenant_name || "")} — ${x.status === "DISPUTED" ? `<strong>⚠️ 정산 이의/미수취 확인 필요</strong>: ${Bass.escapeHtml(x.dispute_note || "")}` : x.status === "AGREED" ? "✍️ 동의 완료 — 송금 후 표시하세요" : "🚪 퇴실 신청 — 정산서를 보내세요"} <button type="button" class="bass-btn bass-btn--sm co-open" data-room="${Bass.escapeHtml(x.room_no)}" style="min-height:40px;">열기</button></div>`).join("")}
+      </div>` : "";
     const connHtml = conn.length ? `
       <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
         <div style="font-weight:800;font-size:14px;margin-bottom:4px;">🔗 내 페이지 연결 요청 ${conn.length}건</div>
@@ -1207,6 +1214,7 @@
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>
+      ${coHtml}
       ${connHtml}
       ${pendHtml}
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -1224,6 +1232,7 @@
       document.getElementById("roomPick").scrollIntoView({ behavior: "smooth", block: "start" });
     };
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
+    elTabContent.querySelectorAll(".co-open").forEach((b) => b.addEventListener("click", () => showMoveOutModal(b.dataset.room)));
     elTabContent.querySelectorAll("[data-conn]").forEach((card) => {
       const id = card.dataset.conn;
       card.querySelector(".cn-ok").addEventListener("click", function () {
