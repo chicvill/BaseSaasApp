@@ -317,7 +317,7 @@
       if (!$("r3InvAgree").checked) { msg.textContent = "개인정보 수집·이용에 동의해 주세요."; return; }
       var btn = this; btn.disabled = true;
       fetch("/api/rent3/pool/auth/invite-accept", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(Object.assign({ token: INVITE, password: pw, pin: pin, agree_privacy: true }, ident || {})) })
+        body: JSON.stringify(Object.assign({ token: INVITE, password: pw, pin: pin, agree_privacy: true, device_id: (global.Bass && global.Bass.deviceId) ? global.Bass.deviceId() : "" }, ident || {})) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           btn.disabled = false;

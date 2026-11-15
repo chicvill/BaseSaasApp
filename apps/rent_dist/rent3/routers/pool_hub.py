@@ -16,7 +16,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
-from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn
+from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -51,6 +51,7 @@ class PortalLoginReq(BaseModel):
     login_mode: str = "account"          # account | cosign
     identifier: str = ""                 # 아이디 / 휴대폰 / 이메일 / 성명
     password: str = ""
+    device_id: str = ""                  # 이 기기의 무작위 값(Bass.deviceId) — 등록된 기기 확인(devicebind.py)
     target_hint: str = ""                # "" | "pool" | "add_listing" | "broker" | "contract" | "contract:{branch}:{room_no}"
     session_code: str = ""
     cosign_role: str = "tenant"          # lessor | tenant
@@ -664,6 +665,7 @@ class InviteAcceptReq(BaseModel):
     name: str = ""
     phone: str = ""
     lessor_name: str = ""
+    device_id: str = ""
 
 
 @router.get("/invite/identify")
@@ -730,6 +732,7 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
     if not (t.identity or {}).get("verified"):      # 문자·네이버 등 더 강한 인증이 이미 있으면 덮어쓰지 않는다
         t.identity = fr.invite_identity_record(t)
     t.save(action="password_set_by_invite", app_source="rent3_invite")
+    dbind.register(t, req.device_id)      # 가입한 이 기기를 등록한다(재등록 때는 등록 취소로 기기 목록이 비어 있다)
     if req.agree_privacy:
         cs.record_consent(t, True, bool((t.consents or {}).get("support_access")))
     inv.consume(t)
@@ -992,6 +995,8 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             matched_lessor.save("password_hashed", app_source="rent3_portal")
         if not valid_pw:
             raise Unauthorized("임대인 비밀번호가 올바르지 않습니다.", hint="가입할 때 설정한 비밀번호를 확인해 주세요.")
+        if not demo:
+            dbind.enforce(matched_lessor, req.device_id, "임대인")
         tok = lessor_token(matched_lessor)
         if is_contract_hint:
             target_url = _build_contract_target_url("lessor", req.target_hint, branch=matched_lessor.branch)
@@ -1053,6 +1058,8 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
                 "임차인 비밀번호가 올바르지 않습니다.",
                 hint="가입할 때 설정한 비밀번호를 확인해 주세요.",
             )
+        if not demo:
+            dbind.enforce(matched_tenant, req.device_id, "임차인")
         is_active_resident = matched_tenant.status == "ACTIVE" and bool(matched_tenant.current_room_id or matched_tenant.room_no)
         if is_active_resident:
             role_key = "tenant"

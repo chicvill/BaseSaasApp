@@ -367,6 +367,7 @@
               identifier: acc.identifier,
               password: acc.password,
               target_hint: effectiveHint,
+              device_id: Bass.deviceId(),
             },
           });
           const done = await resolveConsent(res);
@@ -461,7 +462,7 @@
         $("loginPassword").value = "";
         // 본인 확인을 방금 마쳤으므로 새 비밀번호로 곧바로 내 페이지에 들어간다(실패하면 로그인 화면으로)
         try {
-          const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "" } });
+          const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "", device_id: Bass.deviceId() } });
           const done = await resolveConsent(res);
           saveSession(done.user, done.token);
           closeAuthModal();
@@ -702,6 +703,7 @@
             login_mode: "account",
             identifier: rawIdent,
             password: $("loginPassword").value,
+            device_id: Bass.deviceId(),
             target_hint: hint,
           },
         });

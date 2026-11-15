@@ -119,6 +119,18 @@
     }
   }
 
-  global.Bass = { apiBase, api, request, updateAppAlert, showError, withLock, token, setToken, escapeHtml, BassError };
+  // 이 기기를 알아보는 무작위 값(로그인 때 서버에 보내 '등록된 기기'인지 확인). 서버에는 해시만 남는다. 브라우저 데이터를 지우면 새 기기가 된다.
+  function deviceId() {
+    try {
+      let v = global.localStorage.getItem("r3_dev") || "";
+      if (!/^[A-Za-z0-9_-]{24,}$/.test(v)) {
+        const a = new Uint8Array(24); global.crypto.getRandomValues(a);
+        v = Array.from(a, (b) => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[b % 62]).join("");
+        global.localStorage.setItem("r3_dev", v);
+      }
+      return v;
+    } catch (e) { return ""; }
+  }
+  global.Bass = { apiBase, api, request, updateAppAlert, showError, withLock, token, setToken, escapeHtml, deviceId, BassError };
   global.updateAppAlert = updateAppAlert;
 })(window);

@@ -913,7 +913,7 @@
         const chip = p.activated ? '<span style="color:var(--ok);font-weight:700;">✅ 가입 완료</span>' : (sent(p) ? '<span style="color:var(--warn);font-weight:700;">📩 보냄</span>' : '<span class="bass-muted">미발송</span>');
         return `<div class="iv-row" data-i="${i}" style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border);">
           <span style="flex:1;min-width:0;font-size:14px;line-height:1.4;"><strong>${E(p.room_no)}호 ${E(p.tenant_name)}</strong> ${chip}<br><span class="bass-muted">${E(p.phone || "번호 없음")}</span></span>
-          ${p.activated ? `<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">↩ 가입 취소</button>`
+          ${p.activated ? `<button type="button" class="bass-btn bass-btn--sm iv-rereg" style="min-height:44px;">🔁 재등록 문자</button><button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">↩ 가입 취소</button>`
             : `${!p.phone ? "" : (link(p) ? `<button type="button" class="bass-btn bass-btn--sm iv-one" style="min-height:44px;">📩 문자</button>` : `<button type="button" class="bass-btn bass-btn--sm iv-make1" style="min-height:44px;">🔗 링크 만들기</button>`)}<button type="button" class="bass-btn bass-btn--sm iv-cancel" style="min-height:44px;">${(p.invite_pending || sent(p)) ? "✖ 링크 취소" : "↩ 등록 취소"}</button>`}</div>`;
       }).join("");
       body.innerHTML = `
@@ -963,6 +963,20 @@
         const p = rows[Number(row.dataset.i)];
         const one = row.querySelector(".iv-one");
         if (one) one.addEventListener("click", () => send(p));
+        // 🔁 재등록 문자: 비밀번호 분실·폰 교체 때. 임차인이 전화로 요청하면 본인 확인(장부 번호·목소리) 후 한 번에 — 기존 가입·기기 초기화 → 새 링크 → 문자 창
+        const rereg = row.querySelector(".iv-rereg");
+        if (rereg) rereg.addEventListener("click", function () {
+          if (!window.confirm(`${p.room_no}호 ${p.tenant_name}님께 전화로 본인 확인을 하셨나요?\n\n확인되면 기존 비밀번호·간편 비밀번호·등록된 폰이 모두 지워지고, 장부에 적힌 번호(${p.phone})로 새 가입 링크 문자 창이 열립니다.\n(호실·계약·납부는 그대로, 임차인이 새 비밀번호를 직접 정합니다)`)) return;
+          Bass.withLock(this, async () => {
+            await Bass.api(APP_ID, "/tenant-invites/cancel", { method: "POST", body: { branch: currentBranch, room_no: p.room_no } });
+            await issueOne(p);
+            const np = { ...p, activated: false };
+            const sendNow = () => { smsTo(np.phone, msgFor(np)); batch.sent = batch.sent || {}; batch.sent[p.room_no] = true; saveB(batch); };
+            sendNow();
+            Bass.updateAppAlert("success", `${p.room_no}호 ${p.tenant_name}님의 재등록 링크 문자 창을 열었습니다. 보내기를 눌러 주세요.`);
+            setTimeout(draw, 400);
+          });
+        });
         const cancel = row.querySelector(".iv-cancel");
         if (cancel) cancel.addEventListener("click", function () {
           const msg = p.activated

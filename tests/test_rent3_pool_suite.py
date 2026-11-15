@@ -4259,6 +4259,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             blocked = call()
             self.assertEqual(blocked.status_code, 403)                                                 # 스위치를 끄면 실명 인증이 필요
             self.assertIn("실명 본인인증", blocked.text)
+        # 등록된 기기에서만 비밀번호 로그인(RENT3_DEVICE_BIND=1): 처음 로그인한 기기가 등록되고, 다른 기기는 비밀번호가 맞아도 거절
+        devA, devB = "A" * 30, "B" * 30
+        lg = lambda dev: c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x", "device_id": dev})
+        with mock.patch.dict(os.environ, {"RENT3_DEMO_LOGIN": "0", "RENT3_DEVICE_BIND": "1"}):
+            self.assertEqual(lg(devA).status_code, 200)                  # 등록 기기가 없으면 첫 기기를 등록
+            self.assertEqual(lg(devA).status_code, 200)
+            nb = lg(devB)
+            self.assertEqual(nb.status_code, 401)
+            self.assertIn("새 기기", nb.json()["message"])
+            self.assertEqual(lg("").status_code, 401)                    # 기기 값이 없으면 거절
+            self.assertNotIn("B" * 30, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 원문은 저장하지 않는다
+            self.assertEqual(len(Tenant.get("tenant_201").login_devices), 1)
+        t201 = Tenant.get("tenant_201"); t201.login_devices = []; t201.save(action="t")   # (재등록 때는 등록 취소가 비운다 — test_83 에서 확인)
         login = c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x"})
         self.assertEqual(login.status_code, 200, login.text)                                                 # 새 비밀번호로 정상 로그인
         pl = c.post("/api/rent3/pool/auth/pin-login", headers=NA, json={"qk": d["start_url"].split("qk=")[1].split("&")[0], "pin": "2846"})
@@ -5133,11 +5146,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=sunho, json={"branch": "main", "room_no": first["room_no"]}).status_code, 403)
             cn2 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
             self.assertEqual(cn2["kind"], "reset")
+            from apps.rent_dist._rent3_core import devicebind as dv_t
+            tf = Tenant.first(room_no=first["room_no"], branch="main")
+            dv_t.register(tf, "C" * 30)
+            self.assertEqual(len(Tenant.get(tf.id).login_devices), 1)
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).status_code, 200)
+            self.assertEqual(Tenant.get(tf.id).login_devices, [])         # 등록 취소하면 등록된 로그인 기기도 모두 끊긴다
+            self.assertNotIn("login_devices", c.get(f"{LS}/tenant-invites?branch=main", headers=chic).text)
             # 한 호실만 새 링크: 그 호실 것만 만들어지고 다른 사람이 받은 링크는 그대로 쓸 수 있다
-            third = [x for x in again["links"] if x["room_no"] not in (other["room_no"], first["room_no"])][0]
+            third = next((x for x in again["links"] if x["room_no"] not in (other["room_no"], first["room_no"])), None)
             one = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
             self.assertEqual([x["room_no"] for x in one["links"]], [first["room_no"]])
-            self.assertEqual(c.get(f"{PL}/invite/identify?token={third['path'].split('invite=')[1]}", headers=NA).status_code, 200)
+            if third:
+                self.assertEqual(c.get(f"{PL}/invite/identify?token={third['path'].split('invite=')[1]}", headers=NA).status_code, 200)
             # 링크 취소 응답이 없던 호실도 초기화 가능(찌꺼기 정리)
             self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()["kind"], "link")
             self.assertFalse({x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}[first["room_no"]]["activated"])
@@ -5153,7 +5174,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=ph).status_code, 403)
                 self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=ph, json={"branch": "main"}).status_code, 403)
             lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-            for needle in ("showInviteSender", "/tenant-invites/bulk", "/tenant-invites/cancel", "iv-cancel", "↩ 가입 취소", "✖ 링크 취소", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
+            for needle in ("showInviteSender", "/tenant-invites/bulk", "/tenant-invites/cancel", "iv-cancel", "iv-rereg", "🔁 재등록 문자", "↩ 가입 취소", "✖ 링크 취소", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
                 self.assertIn(needle, lapp, needle)
         finally:
             for tid, (pw, pin, dev, cons, ih, ie, ib) in before.items():
