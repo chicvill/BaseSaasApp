@@ -26,7 +26,31 @@
     </div>`;
   }
 
-  // 가맹 신청 요약: 본인인증·건물·등기부 자동 대조 결과와 제출된 등기부 원본 링크
+  // 국세청 홈택스 사업자등록증 확인: 번호 복사 → 홈택스 열기 → 확인·승인 결과 기록 (승인 시 장부 사업자번호 자동 반영)
+  function hometaxBizHtml(l, a) {
+    const biz = a.bizreg || {};
+    const bchk = biz.check;
+    const bv = biz.verification;
+    const bno = biz.business_number || "";
+    const col = bchk ? ({ ok: "var(--ok)", caution: "var(--warn)", high: "var(--err)" }[bchk.level] || "var(--warn)") : "var(--warn)";
+    return `<div style="border:1px dashed var(--border, #475569);border-radius:8px;padding:6px 8px;margin-top:6px;">
+      <div><strong>📷 사업자등록증 홈택스 확인·승인</strong> (국세청 홈택스 사업자상태·진위확인)</div>
+      <div>사업자등록번호: <code>${Bass.escapeHtml(bno || "미입력 — 원본 사진에서 확인")}</code>
+        ${biz.representative_name ? ` · 대표자: <b>${Bass.escapeHtml(biz.representative_name)}</b>` : ""}
+        ${biz.company_name ? ` · 상호: ${Bass.escapeHtml(biz.company_name)}` : ""}
+        ${biz.tax_type ? ` · (${Bass.escapeHtml(biz.tax_type)})` : ""}
+        ${bno ? `<button class="bass-btn bass-btn--sm btn-copy-biz" data-num="${Bass.escapeHtml(bno)}" type="button">사업자번호 복사</button>` : ""}
+        <button class="bass-btn bass-btn--sm btn-open-hometax" data-num="${Bass.escapeHtml(bno)}" type="button">국세청 홈택스 열기 ↗</button>
+      </div>
+      ${bchk ? `<div style="border-left:4px solid ${col};padding:4px 8px;margin-top:4px;">${bchk.auto_pass ? "🟢 10자리 체크섬·대표자 일치" : "🟠 수동 확인 필요"} — ${Bass.escapeHtml(bchk.message)}</div>` : ""}
+      ${bv ? `<div style="margin-top:4px;">${bv.verified ? "✅ 홈택스 확인·승인 완료" : "⚠️ 반려됨"} — ${Bass.escapeHtml(bv.verified_by || "")} · ${Bass.escapeHtml(String(bv.verified_at || "").slice(0, 16).replace("T", " "))}
+        · 번호 <code>${Bass.escapeHtml(bv.business_number || "-")}</code> (${Bass.escapeHtml(bv.hometax_status || "")})${bv.note ? `<br>메모: ${Bass.escapeHtml(bv.note)}` : ""}</div>`
+        : `<div class="bass-muted" style="margin-top:4px;">아직 홈택스 확인·승인을 기록하지 않았습니다. 승인하면 임대인 장부 사업자번호에 반영됩니다.</div>`}
+      <button class="bass-btn bass-btn--sm bass-btn--primary btn-biz-verify" data-id="${l.id}" data-num="${Bass.escapeHtml(bno)}" type="button">✅ 홈택스 확인·승인 기록</button>
+    </div>`;
+  }
+
+  // 가맹 신청 요약: 본인인증·건물·등기부·사업자등록증 자동 대조 결과와 제출된 원본 링크
   function appSummaryHtml(l) {
     const a = l.application || {};
     const s = a.steps || {};
@@ -36,10 +60,12 @@
     const idn = a.identity || {};
     return `<div style="font-size:12.5px;margin:4px 0;line-height:1.6;">
       ${mark(s.identity)} 본인인증${idn.verified ? ` (${Bass.escapeHtml(idn.name)}${idn.fake ? " · <b>시연용 가짜 인증</b>" : ""})` : ""}
-      · ${mark(s.building)} 건물 주소 · ${mark(s.registry)} 등기부 · ${mark(s.submitted)} 제출
+      · ${mark(s.building)} 건물 주소 · ${mark(s.registry)} 등기부 · ${mark(s.bizreg)} 사업자등록증 · ${mark(s.submitted)} 제출
       ${s.registry ? ` · <button class="bass-btn bass-btn--sm btn-view-reg-att" data-id="${Bass.escapeHtml(l.id)}" type="button">등기부 원본 보기</button>` : ""}
+      ${s.bizreg ? ` · <button class="bass-btn bass-btn--sm btn-view-biz-att" data-id="${Bass.escapeHtml(l.id)}" type="button">사업자등록증 원본 보기</button>` : ""}
       ${chk ? `<div style="border-left:4px solid ${col};padding:4px 8px;margin-top:4px;">${chk.auto_pass ? "🟢 자동 대조 일치 (심사 우선)" : "🟠 수동 확인 필요"} — ${Bass.escapeHtml(chk.message)}</div>` : ""}
       ${s.registry ? iirosHtml(l, a) : ""}
+      ${s.bizreg ? hometaxBizHtml(l, a) : ""}
     </div>`;
   }
 
@@ -327,6 +353,54 @@
           const note = (window.prompt(same ? "대조 메모 (예: 소유자·소재지·발급일시 모두 일치)" : "다른 점을 적어 주세요") || "").trim();
           if (!note) { Bass.updateAppAlert("warning", "메모를 남겨야 기록됩니다."); return; }
           const res = await Bass.api(APP_ID, `/lessors/${btn.dataset.id}/registry-verify`, { method: "POST", body: { verified: same, issue_number: num, note } });
+          Bass.updateAppAlert(same ? "success" : "warning", res.message);
+          await refresh();
+        });
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-copy-biz").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(btn.dataset.num); Bass.updateAppAlert("success", "사업자등록번호를 복사했습니다. 국세청 홈택스 조회창에 붙여 넣으세요."); }
+        catch (_) { Bass.updateAppAlert("warning", "복사하지 못했습니다. 번호를 직접 복사해 주세요."); }
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-open-hometax").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.num && navigator.clipboard) navigator.clipboard.writeText(btn.dataset.num).catch(() => {});
+        window.open("https://www.hometax.go.kr/", "_blank", "noopener");
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-view-biz-att").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const tk = Bass.token();
+          const resp = await fetch(`${Bass.apiBase(APP_ID)}/lessors/${encodeURIComponent(btn.dataset.id)}/bizreg-attachment`, {
+            headers: tk ? { Authorization: "Bearer " + tk } : {},
+          });
+          if (!resp.ok) throw new Error(`사업자등록증 원본을 불러오지 못했습니다 (${resp.status})`);
+          const blobUrl = URL.createObjectURL(await resp.blob());
+          window.open(blobUrl, "_blank", "noopener");
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        });
+      });
+    });
+
+    elTabContent.querySelectorAll(".btn-biz-verify").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const num = (window.prompt("국세청 홈택스에서 확인한 사업자등록번호(10자리)를 입력하세요.", btn.dataset.num || "") || "").trim();
+          if (!num) return;
+          const same = window.confirm("국세청 홈택스 조회 결과 정상 '계속사업자'이며 대표자 성명이 일치합니까?\n\n확인 = 승인(장부 반영) / 취소 = 반려");
+          const hometaxStatus = same ? ((window.prompt("홈택스 사업자 상태 (예: 계속사업자(면세), 계속사업자(일반))", "계속사업자") || "").trim() || "계속사업자") : "반려";
+          const note = (window.prompt(same ? "홈택스 확인 메모 (예: 계속사업자·대표자 성명 일치 확인)" : "반려 사유를 적어 주세요 (예: 휴·폐업 또는 대표자 불일치)") || "").trim();
+          if (!note) { Bass.updateAppAlert("warning", "확인 메모(또는 반려 사유)를 남겨야 기록됩니다."); return; }
+          const res = await Bass.api(APP_ID, `/lessors/${btn.dataset.id}/bizreg-verify`, {
+            method: "POST",
+            body: { verified: same, business_number: num, hometax_status: hometaxStatus, note },
+          });
           Bass.updateAppAlert(same ? "success" : "warning", res.message);
           await refresh();
         });

@@ -55,6 +55,7 @@
     ] },
     { title: "건물 설정", items: [
       { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
+      { label: "📷 사업자등록증 촬영 · 홈택스 승인", id: "btnBizRegModal" },
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
     { title: "내 설정", items: [
@@ -122,14 +123,61 @@
   // ── 가맹 신청 패널: 본인인증 → 건물 정보 → 등기부 대조 → 제출 ──
   const CHECK_STYLE = { ok: "var(--ok)", caution: "var(--warn)", high: "var(--err)" };
 
+  // 사업자등록증 올리기: [📷 촬영하기](휴대폰은 카메라가 바로 열림) · [🖼 사진·PDF 선택](갤러리·파일). 고른 파일은 미리보기하고, 사진은 긴 변 2000px JPEG 로 줄여 올린다.
+  const bizPicked = {};
+  function bizPickerHtml(p) {
+    return `<div class="bass-row" style="gap:8px;flex-wrap:wrap;margin:6px 0;">
+        <button type="button" id="${p}Cam" class="bass-btn bass-btn--primary" style="min-height:48px;">📷 촬영하기</button>
+        <button type="button" id="${p}Pic" class="bass-btn" style="min-height:48px;">🖼 사진·PDF 선택</button>
+      </div>
+      <input id="${p}FileCam" type="file" accept="image/*" capture="environment" hidden>
+      <input id="${p}File" type="file" accept="image/*,application/pdf" hidden>
+      <div id="${p}Prev" class="bass-muted" style="font-size:12.5px;">선택한 파일 없음 — 등록증 전체가 반듯하게 보이도록 밝은 곳에서 찍어 주세요.</div>`;
+  }
+  function bindBizPicker(p) {
+    delete bizPicked[p];
+    const g = (id) => document.getElementById(p + id);
+    const take = (inp) => {
+      const file = inp.files && inp.files[0];
+      if (!file) return;
+      if (file.size > 10 * 1024 * 1024 && !/^image\//.test(file.type)) { Bass.updateAppAlert("warning", "PDF 는 10MB 이하만 가능합니다."); return; }
+      bizPicked[p] = file;
+      const prev = g("Prev");
+      if (/^image\//.test(file.type)) {
+        prev.innerHTML = `<img alt="선택한 사업자등록증" src="${URL.createObjectURL(file)}" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid var(--border);display:block;margin-bottom:4px;">${Bass.escapeHtml(file.name || "촬영한 사진")}`;
+      } else {
+        prev.textContent = "📄 " + file.name;
+      }
+    };
+    g("Cam").addEventListener("click", () => g("FileCam").click());
+    g("Pic").addEventListener("click", () => g("File").click());
+    g("FileCam").addEventListener("change", (e) => take(e.target));
+    g("File").addEventListener("change", (e) => take(e.target));
+  }
+  async function bizDataUrl(p) {
+    const file = bizPicked[p];
+    if (!file) return "";
+    const raw = () => new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || !window.createImageBitmap) return raw();
+    try {
+      const bmp = await createImageBitmap(file);
+      const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.max(1, Math.round(bmp.width * k)); cv.height = Math.max(1, Math.round(bmp.height * k));
+      cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+      return cv.toDataURL("image/jpeg", 0.85);
+    } catch (e) { return raw(); }
+  }
+
   async function renderApplication(box, f) {
     const data = await Bass.api(APP_ID, `/franchise/application?branch=${encodeURIComponent(currentBranch)}`);
     const a = data.application, st = a.steps, idn = a.identity, chk = a.registry.check;
+    const biz = a.bizreg || {}, bchk = biz.check, bver = biz.verification;
     const done = (ok) => (ok ? "✅" : "⬜");
     const esc = Bass.escapeHtml;
     box.innerHTML = `
       <div class="bass-card" style="margin-top:10px;border-left:4px solid var(--warn);padding:12px;font-size:13px;line-height:1.6;">
-        <strong>${esc(f.label || "")}</strong> — 매물 공개와 직거래 계약은 가맹 승인 후에 가능합니다. 아래 4단계를 마치고 제출해 주세요.
+        <strong>${esc(f.label || "")}</strong> — 매물 공개와 직거래 계약은 가맹 승인 후에 가능합니다. 아래 단계를 마치고 제출해 주세요.
         ${f.note ? `<div>사유: ${esc(f.note)}</div>` : ""}
         <div style="margin-top:8px;">
           <div><strong>${done(st.identity)} 1. 휴대폰 본인인증</strong>${idn.verified ? ` — ${esc(idn.name)} · ${esc(idn.phone)} ${idn.fake ? "<span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}` : ""}</div>
@@ -158,6 +206,19 @@
           <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">등기부 내용이 Google Gemini로 전송되어 자동 대조되는 것에 동의합니다 (미동의 시 관리자가 직접 확인).</span><input type="checkbox" id="frConsent"></label>
           <button id="btnRegUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button" ${st.identity ? "" : "disabled"}>올리고 대조하기</button>
           ${chk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[chk.level] || "var(--warn)"};padding:6px 10px;background:hsl(232 30% 12% / .55);border-radius:8px;">${esc(chk.message)}${chk.auto_pass ? "" : "<br><span class='bass-muted'>관리자가 원본을 직접 확인한 뒤 결정합니다.</span>"}</div>` : ""}
+        </div>
+        <div style="margin-top:8px;">
+          <div><strong>${done(st.bizreg)} 3-2. 📷 사업자등록증 촬영·제출 (홈택스 확인 후 승인)</strong></div>
+          <div class="field-grid" style="margin:6px 0;">
+            <input id="fbizNo" class="bass-input" placeholder="사업자등록번호 10자리 (예: 123-45-67890)" value="${esc(biz.business_number || "")}">
+            <input id="fbizRep" class="bass-input" placeholder="대표자 성명 (선택)" value="${esc(biz.representative_name || idn.name || "")}">
+            <input id="fbizComp" class="bass-input" placeholder="상호 (선택)" value="${esc(biz.company_name || "")}">
+          </div>
+          ${bizPickerHtml("fbiz")}
+          <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 사업자번호·대표자를 대조하는 것에 동의합니다.</span><input type="checkbox" id="fbizConsent"></label>
+          <button id="btnBizUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📷 사업자등록증 올리고 홈택스 확인 요청</button>
+          ${bchk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[bchk.level] || "var(--warn)"};padding:6px 10px;background:hsl(232 30% 12% / .55);border-radius:8px;">${esc(bchk.message)}</div>` : ""}
+          ${bver ? `<div style="margin-top:4px;font-size:12.5px;">${bver.verified ? `✅ 홈택스 확인·승인 완료 (${esc(bver.business_number)} · ${esc(bver.hometax_status)})` : `⚠️ 반려됨: ${esc(bver.note || "")}`}</div>` : ""}
         </div>
         <div style="margin-top:10px;">
           <div><strong>${done(st.submitted)} 4. 가맹 신청 제출</strong>${a.applied_at ? ` — ${esc(String(a.applied_at).slice(0, 16).replace("T", " "))} 접수, 심사 대기 중` : ""}</div>
@@ -190,6 +251,23 @@
       if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
       const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
       const r = await Bass.api(APP_ID, "/franchise/registry", { method: "POST", body: { branch: currentBranch, attachment_data_url: dataUrl, consent: $q("frConsent").checked } });
+      Bass.updateAppAlert(r.level === "success" ? "success" : "warning", r.message);
+    });
+    bindBizPicker("fbiz");
+    act("btnBizUpload", async () => {
+      const dataUrl = await bizDataUrl("fbiz");
+      if (!dataUrl) { Bass.updateAppAlert("warning", "사업자등록증 사진(또는 PDF)을 먼저 촬영하거나 골라 주세요."); return; }
+      const r = await Bass.api(APP_ID, "/franchise/bizreg", {
+        method: "POST",
+        body: {
+          branch: currentBranch,
+          attachment_data_url: dataUrl,
+          business_number: $q("fbizNo").value.trim(),
+          representative_name: $q("fbizRep").value.trim(),
+          company_name: $q("fbizComp").value.trim(),
+          consent: $q("fbizConsent").checked,
+        },
+      });
       Bass.updateAppAlert(r.level === "success" ? "success" : "warning", r.message);
     });
     act("btnApply", async () => {
@@ -1107,6 +1185,64 @@
       const dr = document.querySelector("[data-r3-drawer]");
       if (dr) dr.classList.remove("is-open");
       showBuildingModal();
+    });
+  }
+
+  async function showBizRegModal() {
+    const data = await Bass.api(APP_ID, `/franchise/application?branch=${encodeURIComponent(currentBranch)}`);
+    const a = data.application || {}, biz = a.bizreg || {}, bchk = biz.check, bver = biz.verification;
+    const esc = Bass.escapeHtml;
+    openModal("📷 사업자등록증 촬영 · 국세청 홈택스 확인 승인", `
+      <div style="font-size:13px;line-height:1.6;">
+        <div class="bass-muted">사업자등록증(또는 임대사업자등록증)을 촬영해 올리시면 10자리 유효성·대표자 대조 후 관리인이 <strong>국세청 홈택스</strong>에서 사업자 상태를 확인해 승인합니다.</div>
+        <div style="margin-top:8px;">현재 승인된 사업자번호: <code>${esc(biz.approved_business_number || "미등록")}</code></div>
+        ${bver ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:hsl(232 30% 12% / .55);">
+          ${bver.verified ? `✅ <strong>홈택스 확인·승인 완료</strong> — <code>${esc(bver.business_number)}</code> (${esc(bver.hometax_status)}) · ${esc(String(bver.verified_at || "").slice(0, 16).replace("T", " "))}`
+            : `⚠️ <strong>반려됨</strong> — 사유: ${esc(bver.note || "")}`}
+        </div>` : biz.uploaded ? `<div style="margin-top:6px;"><span class="bass-badge bass-badge--warn">⏳ 관리자 홈택스 확인·승인 대기 중</span></div>` : ""}
+        ${bchk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[bchk.level] || "var(--warn)"};padding:6px 10px;">${esc(bchk.message)}</div>` : ""}
+        <label class="r3-fld" style="margin-top:10px;">사업자등록번호 10자리 (선택 입력 · 사진에서도 자동 추출)
+          <input id="mbizNo" class="bass-input" placeholder="예: 123-45-67890" value="${esc(biz.business_number || "")}">
+        </label>
+        <div class="r3-grid" style="margin-top:6px;">
+          <label class="r3-fld">대표자 성명<input id="mbizRep" class="bass-input" value="${esc(biz.representative_name || "")}"></label>
+          <label class="r3-fld">상호 (선택)<input id="mbizComp" class="bass-input" value="${esc(biz.company_name || "")}"></label>
+        </div>
+        <label class="r3-fld" style="margin-top:8px;">📷 사업자등록증 사진 촬영 또는 파일(JPG·PNG·PDF) 선택
+          ${bizPickerHtml("mbiz")}
+        </label>
+        <label class="check-row" style="margin:6px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 사업자번호·대표자를 대조하는 것에 동의합니다.</span><input type="checkbox" id="mbizConsent"></label>
+        <button id="mbizSubmit" class="bass-btn bass-btn--primary" type="button" style="margin-top:8px;">📷 사업자등록증 제출 (홈택스 확인 요청)</button>
+      </div>`);
+    bindBizPicker("mbiz");
+    $m("mbizSubmit").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const dataUrl = await bizDataUrl("mbiz");
+        if (!dataUrl) { Bass.updateAppAlert("warning", "사업자등록증 사진(또는 PDF)을 먼저 촬영하거나 골라 주세요."); return; }
+        const r = await Bass.api(APP_ID, "/franchise/bizreg", {
+          method: "POST",
+          body: {
+            branch: currentBranch,
+            attachment_data_url: dataUrl,
+            business_number: $m("mbizNo").value.trim(),
+            representative_name: $m("mbizRep").value.trim(),
+            company_name: $m("mbizComp").value.trim(),
+            consent: $m("mbizConsent").checked,
+          },
+        });
+        Bass.updateAppAlert(r.level === "success" ? "success" : "warning", r.message);
+        await showBizRegModal();
+        await refresh();
+      });
+    });
+  }
+
+  const btnBizRegModal = document.getElementById("btnBizRegModal");
+  if (btnBizRegModal) {
+    btnBizRegModal.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      showBizRegModal().catch(Bass.showError);
     });
   }
 

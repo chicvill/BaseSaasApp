@@ -232,3 +232,77 @@ def analyze(binary: bytes, mime: str, *, lessor_names: List[str], deposit: int, 
     risks = assess_risks(ex, lessor_names=lessor_names, deposit=deposit, property_value=property_value)
     return {"status": "ok", "message": "", "extracted": ex, "risks": risks,
             "analyzed_at": datetime.now().isoformat(timespec="seconds")}
+
+
+BIZ_REG_PROMPT = """당신은 한국 사업자등록증(또는 주택임대사업자 등록증) 문서를 읽어 항목을 추출하는 도구입니다.
+첨부된 사진 또는 PDF를 읽고 아래 JSON 스키마로만 답하세요. 설명이나 마크다운 없이 순수 JSON만 출력합니다.
+
+규칙:
+- 문서에 적힌 내용만 옮기세요. 읽을 수 없거나 없는 값은 추측하지 말고 null 로 두세요.
+- 주민등록번호 뒷자리는 절대 옮기지 마세요.
+- 사업자등록번호는 하이픈 포함 10자리 숫자(예: 123-45-67890)로 적으세요.
+- 날짜는 YYYY-MM-DD 형식.
+- 이 문서가 사업자등록증이 아니면 "document_type"을 "other"로 하세요.
+
+스키마:
+{
+  "document_type": "business_registration" 또는 "other",
+  "readable": true 또는 false,
+  "business_number": "등록번호 XXX-XX-XXXXX (없으면 null)",
+  "company_name": "상호 또는 법인명 (없으면 null)",
+  "representative_name": "성명(대표자) (없으면 null)",
+  "opening_date": "개업연월일 YYYY-MM-DD (없으면 null)",
+  "business_address": "사업장 소재지 (없으면 null)",
+  "tax_type": "일반과세자|간이과세자|면세사업자|법인사업자|기타 중 하나",
+  "issue_number": "문서확인번호 또는 발급번호(없으면 null)"
+}"""
+
+
+def read_bizreg(binary: bytes, mime: str) -> Dict[str, Any]:
+    """Gemini 로 사업자등록증을 읽어 항목을 추출한다."""
+    client = _client()
+    if not client.is_available:
+        return {"status": "unavailable", "raw": None,
+                "message": "서버에 GEMINI_API_KEY가 설정되어 있지 않아 AI 읽기를 쓸 수 없습니다. 사업자등록번호를 직접 입력해 주세요."}
+    b64 = base64.b64encode(binary).decode("ascii")
+    try:
+        text = asyncio.run(client.generate_with_image(BIZ_REG_PROMPT, b64, mime_type=mime))
+    except Exception as exc:
+        return {"status": "failed", "raw": None, "message": f"AI 호출에 실패했습니다: {type(exc).__name__}"}
+    try:
+        raw = json.loads(clean_json_markdown(text))
+    except Exception:
+        return {"status": "failed", "raw": None, "message": "AI 응답을 해석하지 못했습니다. 직접 입력해 주세요."}
+    if not isinstance(raw, dict) or raw.get("mock"):
+        return {"status": "unavailable", "raw": None,
+                "message": "AI 서비스를 쓸 수 없는 상태입니다. 사업자등록번호를 직접 입력해 주세요."}
+    return {"status": "ok", "raw": raw, "message": ""}
+
+
+def normalize_bizreg(raw: Dict[str, Any]) -> Dict[str, Any]:
+    digits = "".join(ch for ch in str(raw.get("business_number") or "") if ch.isdigit())
+    fmt_biz = f"{digits[:3]}-{digits[3:5]}-{digits[5:10]}" if len(digits) == 10 else str(raw.get("business_number") or "").strip()
+    return {
+        "document_type": "business_registration" if raw.get("document_type") == "business_registration" else "other",
+        "readable": bool(raw.get("readable", True)),
+        "business_number": fmt_biz,
+        "company_name": str(raw.get("company_name") or "").strip(),
+        "representative_name": str(raw.get("representative_name") or "").strip(),
+        "opening_date": str(raw.get("opening_date") or "").strip(),
+        "business_address": str(raw.get("business_address") or "").strip(),
+        "tax_type": str(raw.get("tax_type") or "").strip(),
+        "issue_number": str(raw.get("issue_number") or "").strip(),
+    }
+
+
+def analyze_bizreg(binary: bytes, mime: str) -> Dict[str, Any]:
+    res = read_bizreg(binary, mime)
+    if res["status"] != "ok":
+        return {"status": res["status"], "message": res["message"], "extracted": None}
+    return {
+        "status": "ok",
+        "message": "",
+        "extracted": normalize_bizreg(res["raw"]),
+        "analyzed_at": datetime.now().isoformat(timespec="seconds"),
+    }
+

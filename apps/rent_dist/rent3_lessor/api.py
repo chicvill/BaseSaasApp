@@ -180,6 +180,16 @@ class FranchiseRegistryReq(BaseModel):
     consent: bool = False
 
 
+class FranchiseBizRegReq(BaseModel):
+    branch: str = "main"
+    attachment_data_url: str
+    business_number: str = ""
+    representative_name: str = ""
+    company_name: str = ""
+    opening_date: str = ""
+    consent: bool = False
+
+
 class FranchiseSubmitReq(BaseModel):
     branch: str = "main"
 
@@ -257,15 +267,79 @@ def franchise_registry(req: FranchiseRegistryReq):
             lsr.franchise_ai_calls += 1
     check = fr.check_ownership(lsr.identity, (ai or {}).get("extracted"), getattr(bldg, "address", ""))
     lsr.franchise_docs = {
+        **(lsr.franchise_docs or {}),
         "registry_file": saved["file"], "registry_sha256": saved["sha256"], "registry_mime": saved["mime"],
         "uploaded_at": now_iso(), "ai": {"status": ai["status"], "message": ai.get("message", ""),
                                          "extracted": ai.get("extracted")},
         "check": check,
+        "admin_verification": None,
     }
     lsr.applied_at = ""
     lsr.save(action="franchise_registry_uploaded", app_source=APP_SRC)
     return {"success": True, "message": check["message"], "level": "success" if check["auto_pass"] else "warning",
             "application": fr.application_summary(lsr, bldg)}
+
+
+@router.post("/franchise/bizreg")
+def franchise_bizreg(req: FranchiseBizRegReq):
+    """임대인이 촬영·선택한 사업자등록증을 보관하고, 동의 시 Gemini 로 읽어 국세청 10자리 체크섬·대표자명·소재지를 대조한다.
+    최종 반영(lessor.business_number 확정)은 관리인이 국세청 홈택스에서 사업자 상태를 확인하고 승인할 때 이루어진다."""
+    from apps.rent_dist._rent3_core.support import SupportMessage
+    lsr = _my_lessor(req.branch)
+    bldg = Building.first(branch=lsr.branch)
+    saved = fr.save_bizreg_file(lsr.id, req.attachment_data_url)
+    ai: Dict[str, Any] = {"status": "skipped"}
+    if req.consent:
+        if lsr.franchise_ai_calls >= FRANCHISE_AI_MAX_CALLS * 2:
+            raise DomainError("AI 읽기 횟수 한도를 초과했습니다.",
+                              hint="사업자등록번호를 직접 입력해 제출하면 관리자가 원본을 확인합니다.")
+        binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
+        ai = registry_ai.analyze_bizreg(binary, mime)
+        if ai["status"] == "ok":
+            lsr.franchise_ai_calls += 1
+    check = fr.check_bizreg(
+        lsr,
+        (ai or {}).get("extracted"),
+        manual_biz_no=req.business_number,
+        manual_rep_name=req.representative_name,
+        manual_company=req.company_name,
+        manual_opening_date=req.opening_date,
+        building_address=getattr(bldg, "address", "") if bldg else "",
+    )
+    docs = dict(lsr.franchise_docs or {})
+    docs["bizreg"] = {
+        "file": saved["file"],
+        "sha256": saved["sha256"],
+        "mime": saved["mime"],
+        "uploaded_at": now_iso(),
+        "ai": {"status": ai["status"], "message": ai.get("message", ""), "extracted": ai.get("extracted")},
+        "check": check,
+        "admin_verification": None,
+    }
+    lsr.franchise_docs = docs
+    lsr.save(action="franchise_bizreg_uploaded", app_source=APP_SRC)
+    SupportMessage(
+        channel=f"lessor:{lsr.branch}",
+        branch=lsr.branch,
+        room_no="",
+        user_role="lessor",
+        user_id=lsr.id,
+        user_name=lsr.name,
+        sender_role="lessor",
+        sender_name=lsr.name,
+        category="사업자등록증 확인 요청",
+        body=(
+            f"[📷 사업자등록증 제출] {lsr.name} 임대인이 사업자등록증"
+            f"({check.get('business_number') or '번호 미입력'})을 제출했습니다. "
+            "국세청 홈택스에서 사업자 상태를 확인한 뒤 승인해 주세요."
+        ),
+    ).save(action="support_bizreg_submitted", app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": check["message"],
+        "level": "success" if check["auto_pass"] else "warning",
+        "application": fr.application_summary(lsr, bldg),
+    }
 
 
 @router.post("/franchise/submit")

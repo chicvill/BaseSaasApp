@@ -5445,6 +5445,105 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("moPaid", "/mark-paid", "rent5", "기본 월세 5% 인상", "co-open", "정산 이의/미수취 확인 필요"):
             self.assertIn(needle, lj, needle)
 
+    def test_88_lessor_bizreg_photo_upload_hometax_verify_and_approve(self):
+        """88. 임대인 사업자등록증 촬영·제출 → 10자리 체크섬·대표자 자동 대조 → 관리인 국세청 홈택스 확인 후 승인(장부 사업자번호 확정)."""
+        from apps.rent_dist._rent3_core import Lessor
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic, sunho = self._login("admin"), self._login("chic"), self._login("sunho")
+        LS, AD = "/api/rent3_lessor", "/api/rent3_admin"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.business_number, lsr.account_number, dict(lsr.franchise_docs or {}), lsr.franchise_ai_calls)
+        png_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        try:
+            lsr.business_number = ""
+            lsr.account_number = ""
+            lsr.save(action="t")
+            # 남의 지점 업로드 불가
+            self.assertEqual(c.post(f"{LS}/franchise/bizreg", headers=sunho, json={"branch": "main", "attachment_data_url": png_url}).status_code, 403)
+            # 체크섬 틀린 사업자번호: 업로드는 되지만 INVALID_BIZ_NO 경고
+            r_bad = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": "123-45-67899", "representative_name": lsr.name,
+            })
+            self.assertEqual(r_bad.status_code, 200, r_bad.text)
+            self.assertEqual(r_bad.json()["application"]["bizreg"]["check"]["code"], "INVALID_BIZ_NO")
+            # 유효한 10자리 사업자번호(214-86-12349 -> 체크섬 검증): 214861234? 계산해보자: validate_kr_business_number 통과 값 사용
+            from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+            valid_biz = next(f"107-81-5332{d}" for d in range(10) if validate_kr_business_number(f"107-81-5332{d}", strict_checksum=True)["valid"])
+            # 대표자 불일치 시 REP_MISMATCH
+            r_rep = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": valid_biz, "representative_name": "엉뚱대표",
+            })
+            self.assertEqual(r_rep.json()["application"]["bizreg"]["check"]["code"], "REP_MISMATCH")
+            # 정상 제출 (10자리 유효 + 대표자 일치 -> AUTO_MATCH), 단 관리자 승인 전까지는 lsr.business_number 가 비어 있다
+            r_ok = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": valid_biz,
+                "representative_name": lsr.name, "company_name": "시크빌임대",
+            })
+            self.assertEqual(r_ok.status_code, 200, r_ok.text)
+            self.assertEqual(r_ok.json()["application"]["bizreg"]["check"]["code"], "BIZ_NO_ONLY")     # 직접 입력한 대표자는 자동 일치 근거가 아니다
+            # 문서(AI)에서 읽은 대표자가 장부 성명과 같을 때만 AUTO_MATCH
+            from unittest import mock
+            ext = {"document_type": "business_registration", "readable": True, "business_number": valid_biz, "company_name": "시크빌임대",
+                   "representative_name": lsr.name, "opening_date": "", "business_address": "", "tax_type": "면세사업자", "issue_number": ""}
+            with mock.patch("apps.rent_dist._rent3_core.registry_ai.analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext}):
+                r_ai = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png_url, "consent": True})
+            self.assertEqual(r_ai.json()["application"]["bizreg"]["check"]["code"], "AUTO_MATCH")
+            self.assertEqual(Lessor.get(lsr.id).business_number, "")
+
+            # 첨부 원본은 관리인만 볼 수 있다
+            self.assertIn(c.get(f"{AD}/lessors/{lsr.id}/bizreg-attachment", headers=chic).status_code, (401, 403))
+            self.assertEqual(c.get(f"{AD}/lessors/{lsr.id}/bizreg-attachment", headers=admin).status_code, 200)
+
+            # 관리인 홈택스 확인·승인: 메모 없음·유효하지 않은 번호·휴폐업 상태는 승인 거절
+            vf_url = f"{AD}/lessors/{lsr.id}/bizreg-verify"
+            self.assertIn(c.post(vf_url, headers=chic, json={"verified": True, "business_number": valid_biz, "note": "확인"}).status_code, (401, 403))
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "note": ""}).status_code, 400)
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": "123-45-67899", "note": "확인"}).status_code, 400)
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "hometax_status": "폐업자", "note": "확인"}).status_code, 400)
+
+            # 반려 기록 시 장부 번호는 반영되지 않음
+            rej = c.post(vf_url, headers=admin, json={"verified": False, "business_number": valid_biz, "hometax_status": "반려", "note": "사진 흐림"})
+            self.assertEqual(rej.status_code, 200)
+            self.assertFalse(rej.json()["application"]["bizreg"]["verification"]["verified"])
+            self.assertEqual(Lessor.get(lsr.id).business_number, "")
+
+            # 같은 사업자번호를 다른 임대인이 이미 승인받았다면 승인 불가(남의 등록증 도용 방지)
+            other_l = next(o for o in Lessor.all() if o.id != lsr.id)
+            keep_other = other_l.business_number
+            other_l.business_number = valid_biz; other_l.save(action="t")
+            try:
+                self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "note": "확인"}).status_code, 400)
+            finally:
+                other_l.business_number = keep_other; other_l.save(action="t")
+
+            # 정상 홈택스 확인·승인 -> 장부 business_number 확정 + 이제 관리인이 임대인 암호 설정 링크도 발급 가능!
+            app_res = c.post(vf_url, headers=admin, json={
+                "verified": True, "business_number": valid_biz.replace("-", ""), "hometax_status": "계속사업자(면세)", "note": "홈택스 계속사업자·대표자 일치 확인",
+            })
+            self.assertEqual(app_res.status_code, 200, app_res.text)
+            self.assertTrue(app_res.json()["application"]["bizreg"]["verification"]["verified"])
+            self.assertEqual(Lessor.get(lsr.id).business_number, valid_biz)
+            self.assertEqual(c.post(f"{AD}/accounts/lessor-invite", headers=admin, json={"id": lsr.id}).status_code, 200)
+
+            # 화면 문자열 점검
+            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+                lj = fp.read()
+            for needle in ("btnBizRegModal", "showBizRegModal", "/franchise/bizreg", "capture=\"environment\"", "bizPickerHtml", "📷 촬영하기", "🖼 사진·PDF 선택", "bizDataUrl"):
+                self.assertIn(needle, lj, needle)
+            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8") as fp:
+                aj = fp.read()
+            for needle in ("hometaxBizHtml", "btn-biz-verify", "/bizreg-verify", "/bizreg-attachment", "www.hometax.go.kr"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for sm in list(SupportMessage.all()):
+                if sm.category in ("사업자등록증 확인 요청", "사업자등록증 확인 결과"):
+                    sm.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.business_number, lsr.account_number, lsr.franchise_docs, lsr.franchise_ai_calls = keep
+            lsr.invite_hash, lsr.invite_expires, lsr.invite_issued_by = "", "", ""
+            lsr.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

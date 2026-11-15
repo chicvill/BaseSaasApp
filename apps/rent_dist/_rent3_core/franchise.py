@@ -321,16 +321,128 @@ def registry_file_path(lessor: Any):
     return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
 
 
+def save_bizreg_file(lessor_id: str, data_url: str) -> Dict[str, str]:
+    """임대인이 촬영·선택한 사업자등록증 파일을 저장한다 (관리자 홈택스 대조·승인용)."""
+    m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", (data_url or "").strip(), re.DOTALL)
+    if not m or m.group(1).lower() not in ALLOWED_MIME_TO_EXT:
+        raise DomainError("첨부 형식이 올바르지 않습니다.", hint="허용 형식: JPG, PNG, WEBP, GIF, PDF")
+    try:
+        binary = base64.b64decode(m.group(2), validate=False)
+    except Exception:
+        raise DomainError("첨부 파일을 읽지 못했습니다. 다시 촬영하거나 선택해 주세요.")
+    if not binary:
+        raise DomainError("비어 있는 첨부 파일입니다.")
+    if len(binary) > MAX_PHOTO_BYTES:
+        raise DomainError("첨부 파일은 최대 10MB 이하만 허용됩니다.")
+    ext = ALLOWED_MIME_TO_EXT[m.group(1).lower()][0]
+    abs_dir = os.path.join(pool().pool_dir, "uploads", "franchise")
+    os.makedirs(abs_dir, exist_ok=True)
+    filename = f"{lessor_id}_bizreg.{ext}"
+    target = os.path.join(abs_dir, filename)
+    tmp = f"{target}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as fp:
+        fp.write(binary)
+        fp.flush()
+        os.fsync(fp.fileno())
+    os.replace(tmp, target)
+    return {"file": f"uploads/franchise/{filename}", "sha256": hashlib.sha256(binary).hexdigest(), "mime": m.group(1).lower(), "binary_len": str(len(binary))}
+
+
+def bizreg_file_path(lessor: Any):
+    from .broker import EXT_TO_MIME
+    biz = (lessor.franchise_docs or {}).get("bizreg") or {}
+    rel = biz.get("file", "")
+    if not rel:
+        raise DomainError("제출된 사업자등록증이 없습니다.")
+    root = os.path.abspath(os.path.join(pool().pool_dir, "uploads", "franchise"))
+    cand = os.path.abspath(os.path.join(pool().pool_dir, rel))
+    if not cand.startswith(root + os.sep) or not os.path.isfile(cand):
+        raise DomainError("제출된 사업자등록증 파일을 찾을 수 없습니다.")
+    return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
+
+
+def check_bizreg(
+    lessor: Any,
+    extracted: Optional[Dict[str, Any]],
+    manual_biz_no: str = "",
+    manual_rep_name: str = "",
+    manual_company: str = "",
+    manual_opening_date: str = "",
+    building_address: str = "",
+) -> Dict[str, Any]:
+    """사업자등록증 추출값(또는 수동 입력값)의 국세청 10자리 체크섬·대표자명·소재지를 코드로 대조한다.
+    최종 승인은 관리인이 홈택스에서 사업자 상태를 확인한 뒤 기록한다."""
+    from .billing import validate_kr_business_number
+
+    ex = extracted or {}
+    raw_biz = (manual_biz_no or ex.get("business_number") or "").strip()
+    rep_doc = str(ex.get("representative_name") or "").strip()       # 문서에서 읽은 대표자(자동 대조에 쓴다)
+    rep_name = rep_doc or (manual_rep_name or "").strip()            # 직접 입력한 대표자는 표시·불일치 경고에만 쓰고, 자동 일치 근거로는 쓰지 않는다
+    comp_name = (manual_company or ex.get("company_name") or "").strip()
+    open_dt = (manual_opening_date or ex.get("opening_date") or "").strip()
+    biz_addr = str(ex.get("business_address") or "").strip()
+    tax_type = str(ex.get("tax_type") or "").strip()
+
+    def out(code: str, msg: str, level: str, **kw: Any) -> Dict[str, Any]:
+        return {
+            "code": code,
+            "message": msg,
+            "level": level,
+            "auto_pass": code == "AUTO_MATCH",
+            "business_number": kw.pop("business_number", raw_biz),
+            "representative_name": rep_name,
+            "company_name": comp_name,
+            "opening_date": open_dt,
+            "business_address": biz_addr,
+            "tax_type": tax_type,
+            **kw,
+        }
+
+    if ex and ex.get("document_type") == "other" and not manual_biz_no:
+        return out("NOT_BIZREG", "사업자등록증으로 읽히지 않았습니다. 사업자등록번호를 입력하거나 관리자가 원본을 직접 확인합니다.", "high")
+
+    if not raw_biz:
+        return out("NO_BIZ_NO", "사업자등록번호를 읽지 못했습니다. 사업자등록번호 10자리를 함께 입력하거나 관리자가 사진 원본을 확인합니다.", "caution")
+
+    val = validate_kr_business_number(raw_biz, strict_checksum=True)
+    d = val["digits"]
+    fmt_no = f"{d[:3]}-{d[3:5]}-{d[5:10]}" if len(d) == 10 else raw_biz
+    if not val["valid"]:
+        return out("INVALID_BIZ_NO", f"사업자등록번호({raw_biz}) 형식이 올바르지 않습니다: {val['reason']}", "high",
+                   business_number=fmt_no, checksum_ok=False)
+
+    expected_name = _norm_name((lessor.identity or {}).get("name") or lessor.name)
+    rep_norm = _norm_name(rep_name)
+    rep_ok = bool(rep_norm and expected_name and (rep_norm == expected_name or (min(len(rep_norm), len(expected_name)) >= 2 and (expected_name in rep_norm or rep_norm in expected_name))))
+    addr_ok = address_matches(building_address, biz_addr) if biz_addr else None
+
+    if rep_norm and not rep_ok:
+        return out("REP_MISMATCH", f"사업자등록증 대표자({rep_name})가 임대인 성명({lessor.name})과 다릅니다. 공동대표·법인 여부와 홈택스 상태를 관리자가 확인합니다.", "high",
+                   business_number=fmt_no, checksum_ok=True, rep_ok=False, address_ok=addr_ok)
+    if addr_ok is False:
+        return out("ADDRESS_DIFF", f"사업자등록증 번호({fmt_no})와 대표자는 맞지만 사업장 소재지가 건물 주소와 다릅니다. 관리자가 홈택스에서 확인 후 승인합니다.", "caution",
+                   business_number=fmt_no, checksum_ok=True, rep_ok=rep_ok, address_ok=False)
+    if not rep_norm or not rep_doc:
+        return out("BIZ_NO_ONLY", f"사업자등록번호({fmt_no}) 10자리 유효성 검사를 통과했습니다. 관리자가 사진 원본과 홈택스 사업자 상태를 확인한 뒤 승인합니다.", "caution",
+                   business_number=fmt_no, checksum_ok=True, rep_ok=None, address_ok=addr_ok)
+    return out("AUTO_MATCH", f"사업자등록번호({fmt_no}) 10자리 검증 및 대표자({rep_name}) 대조가 일치합니다. 관리자가 국세청 홈택스에서 확인 후 최종 승인합니다.", "ok",
+               business_number=fmt_no, checksum_ok=True, rep_ok=True, address_ok=addr_ok)
+
+
 def application_summary(lessor: Any, building: Any) -> Dict[str, Any]:
     """임대인·관리자 화면에 보여 줄 가맹 신청 진행 상태 (개인정보는 가린다)."""
     docs = lessor.franchise_docs or {}
     idn = lessor.identity or {}
     addr = getattr(building, "address", "") if building else ""
     has_real_address = bool(_address_tokens(addr))
+    biz = docs.get("bizreg") or {}
+    biz_chk = biz.get("check") or {}
+    biz_ver = biz.get("admin_verification") or None
     steps = {
         "identity": bool(idn.get("verified")),
         "building": has_real_address,
         "registry": bool(docs.get("registry_file")),
+        "bizreg": bool(biz.get("file")),
         "submitted": bool(lessor.applied_at),
     }
     return {
@@ -350,6 +462,20 @@ def application_summary(lessor: Any, building: Any) -> Dict[str, Any]:
             "verification": docs.get("admin_verification") or None,
             "check": docs.get("check") or None,
             "uploaded_at": docs.get("uploaded_at", ""),
+        },
+        "bizreg": {
+            "uploaded": steps["bizreg"],
+            "sha256": biz.get("sha256", ""),
+            "ai_status": (biz.get("ai") or {}).get("status", ""),
+            "business_number": biz_chk.get("business_number") or lessor.business_number or "",
+            "representative_name": biz_chk.get("representative_name", ""),
+            "company_name": biz_chk.get("company_name", ""),
+            "opening_date": biz_chk.get("opening_date", ""),
+            "tax_type": biz_chk.get("tax_type", ""),
+            "check": biz_chk or None,
+            "verification": biz_ver,
+            "uploaded_at": biz.get("uploaded_at", ""),
+            "approved_business_number": lessor.business_number or "",
         },
         "applied_at": lessor.applied_at,
         "ready_to_submit": steps["identity"] and steps["building"] and steps["registry"],

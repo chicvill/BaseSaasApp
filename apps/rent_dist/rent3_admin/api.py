@@ -47,6 +47,13 @@ class RegistryVerifyReq(BaseModel):
     note: str = ""
 
 
+class BizRegVerifyReq(BaseModel):
+    verified: bool = True
+    business_number: str = ""   # 관리자가 국세청 홈택스에서 조회·확인한 10자리 사업자등록번호
+    hometax_status: str = "계속사업자"   # 계속사업자(일반/면세/간이) | 휴업자 | 폐업자
+    note: str = ""
+
+
 class RoomLimitReq(BaseModel):
     room_limit: int
 
@@ -244,6 +251,84 @@ def verify_franchise_registry(lessor_id: str, req: RegistryVerifyReq, admin=Depe
 def get_franchise_registry(lessor_id: str):
     """가맹 신청 때 제출된 등기부 원본 (본사 관리자만)."""
     path, mime = fr.registry_file_path(Lessor.require(lessor_id))
+    return FileResponse(path, media_type=mime)
+
+
+@router.post("/lessors/{lessor_id}/bizreg-verify")
+def verify_franchise_bizreg(lessor_id: str, req: BizRegVerifyReq, admin=Depends(require_role("superadmin", "admin")), _nr=Depends(not_revoked)):
+    """관리자가 국세청 홈택스에서 임대인 사업자등록증(사업자상태·대표자·과세유형)을 확인한 뒤 승인 또는 반려를 기록한다.
+    승인(verified=True)되면 임대인 장부의 business_number 에 공식 반영된다."""
+    from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+    from apps.rent_dist._rent3_core.support import SupportMessage
+    lessor = Lessor.require(lessor_id)
+    docs = dict(lessor.franchise_docs or {})
+    biz = dict(docs.get("bizreg") or {})
+    if not biz.get("file"):
+        raise DomainError("제출된 사업자등록증이 없습니다.")
+    chk = biz.get("check") or {}
+    raw_no = (req.business_number or chk.get("business_number") or "").strip()
+    ht_status = (req.hometax_status or "계속사업자").strip()
+    note = (req.note or "").strip()
+    if not note:
+        raise DomainError("홈택스 확인 결과 메모를 남겨 주세요.", hint="예: 홈택스 사업자상태 계속사업자(면세/일반) 및 대표자 일치 확인")
+    fmt_no = raw_no
+    if req.verified:
+        if not raw_no:
+            raise DomainError("홈택스에서 확인한 사업자등록번호 10자리를 입력해 주세요.")
+        val = validate_kr_business_number(raw_no, strict_checksum=True)
+        if not val["valid"]:
+            raise DomainError(f"사업자등록번호({raw_no})가 유효하지 않아 승인할 수 없습니다: {val['reason']}")
+        if any(bad in ht_status for bad in ("폐업", "휴업", "미등록")):
+            raise DomainError(f"홈택스 조회 상태가 '{ht_status}'인 사업자등록증은 승인할 수 없습니다.",
+                              hint="계속사업자 상태인 사업자등록증만 승인할 수 있습니다.")
+        d = val["digits"]
+        fmt_no = f"{d[:3]}-{d[3:5]}-{d[5:10]}"
+        dup = next((o for o in Lessor.all() if o.id != lessor.id and re.sub(r"\D", "", o.business_number or "") == d), None)
+        if dup is not None:      # 같은 사업자번호를 다른 임대인이 이미 쓰고 있으면 승인하지 않는다(남의 등록증 도용 방지)
+            raise DomainError(f"이 사업자등록번호({fmt_no})는 이미 다른 임대인({dup.name})에게 승인되어 있습니다.", hint="동일 사업자의 다른 지점이라면 관리인이 직접 확인한 뒤 한쪽을 정리해 주세요.")
+        lessor.business_number = fmt_no
+
+    ext_no = str(chk.get("business_number") or "")
+    biz["admin_verification"] = {
+        "verified": bool(req.verified),
+        "business_number": fmt_no,
+        "hometax_status": ht_status,
+        "matches_extracted_number": bool(ext_no) and re.sub(r"\D", "", ext_no) == re.sub(r"\D", "", fmt_no),
+        "note": note,
+        "verified_by": getattr(admin, "username", "") or "admin",
+        "verified_at": now_iso(),
+        "file_sha256": biz.get("sha256", ""),
+    }
+    docs["bizreg"] = biz
+    lessor.franchise_docs = docs
+    lessor.save(action="franchise_bizreg_verified" if req.verified else "franchise_bizreg_rejected", app_source=APP_SRC)
+    SupportMessage(
+        channel=f"lessor:{lessor.branch}",
+        branch=lessor.branch,
+        room_no="",
+        user_role="lessor",
+        user_id=lessor.id,
+        user_name=lessor.name,
+        sender_role="admin",
+        sender_name=getattr(admin, "username", "") or "관리인",
+        category="사업자등록증 확인 결과",
+        body=(
+            f"[✅ 사업자등록증 홈택스 확인·승인 완료] 사업자등록번호 {fmt_no} ({ht_status}) 확인이 완료되어 장부에 반영되었습니다. 메모: {note}"
+            if req.verified
+            else f"[⚠️ 사업자등록증 반려] 홈택스 확인 결과 보완이 필요합니다. 사유: {note}"
+        ),
+    ).save(action="support_bizreg_decision", app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": f"홈택스 확인 완료: 사업자등록번호({fmt_no})를 승인하고 장부에 반영했습니다." if req.verified else "사업자등록증 반려 사유를 기록했습니다.",
+        "application": fr.application_summary(lessor, Building.first(branch=lessor.branch)),
+    }
+
+
+@router.get("/lessors/{lessor_id}/bizreg-attachment", dependencies=ADMIN_ONLY)
+def get_franchise_bizreg(lessor_id: str):
+    """임대인이 촬영·제출한 사업자등록증 원본 (본사 관리자만)."""
+    path, mime = fr.bizreg_file_path(Lessor.require(lessor_id))
     return FileResponse(path, media_type=mime)
 
 
