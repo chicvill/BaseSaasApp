@@ -5958,6 +5958,51 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t2.business_number, t2.company_name, t2.ceo_name, t2.business_address, t2.email, t2.biz_submitted_at, t2.biz_ai_calls = keept
             t2.save(action="t")
 
+    def test_93_renewal_skips_identity_steps_and_autoseals_on_both_signatures(self):
+        """재계약: 본인확인·옵션 점검 생략 → 3단계 시작, 5% 기본 월세, 양측 서명 즉시 체결(계약금 0·도어락 유지), 제3자 접근 차단."""
+        c, base = self.client, "/api/rent3_contract"
+        room = next(r for r in Room.all() if r.active_contract_id and r.branch == "main")
+        old = Contract.get(room.active_contract_id)
+        old_rent = old.monthly_rent
+        s = c.post(f"{base}/sessions", json={"branch": "main", "room_no": room.room_no, "mode": "RENEWAL"}).json()["session"]
+        sid = s["id"]
+        got = c.get(f"{base}/sessions/{sid}").json()["session"]
+        self.assertEqual(got["current_step"], 3)
+        for f in ("lessor_checked_tenant_id", "tenant_checked_lessor_id", "step1_lessor_confirmed",
+                  "step1_tenant_locked", "step2_lessor_confirmed", "step2_tenant_locked"):
+            self.assertTrue(got[f], f)
+        self.assertEqual(got["prev_contract_id"], old.id)
+        self.assertEqual(got["terms"]["monthly_rent"], max(old_rent, (int(old_rent * 1.05) // 1000) * 1000))
+        self.assertLessEqual(got["terms"]["monthly_rent"], round(old_rent * 1.05))   # 법정 5% 상한 이내
+        self.assertEqual(got["terms"]["contract_deposit"], 0)
+
+        # 당사자가 아닌 임차인은 열람·서명 불가
+        stranger = next(t for t in ("tenant_202", "tenant_201") if t != f"tenant_{room.room_no}")
+        h = self._login(stranger)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=h).status_code, 403)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step4/sign", headers=h,
+                                json={"role": "tenant", "signature": "도용"}).status_code, 403)
+
+        rev = got["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        r1 = c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": "lessor", "signature": "임대인", "expected_revision": rev})
+        self.assertEqual(r1.status_code, 200, r1.text)
+        self.assertNotEqual(r1.json()["session"]["status"], "COMPLETED")              # 한쪽만 서명하면 체결 안 됨
+        r2 = c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": "tenant", "signature": "임차인", "expected_revision": rev})
+        self.assertEqual(r2.status_code, 200, r2.text)
+        self.assertEqual(r2.json()["session"]["status"], "COMPLETED")
+        new_ct = r2.json()["contract"]
+        self.assertEqual(new_ct["contract_deposit"], 0)
+        self.assertTrue(new_ct["keys_released"])
+        self.assertEqual(new_ct["monthly_rent"], got["terms"]["monthly_rent"])
+        self.assertEqual(Contract.get(old.id).status, "RENEWED")
+        self.assertEqual(Room.get(room.id).active_contract_id, new_ct["id"])
+        # 이미 체결된 세션 재호출은 중복 계약을 만들지 않는다
+        again = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertTrue(again.json().get("already_completed"))
+
 
 if __name__ == "__main__":
     unittest.main()
