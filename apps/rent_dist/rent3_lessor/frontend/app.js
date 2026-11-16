@@ -780,7 +780,6 @@
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">만기 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${ew ? ` · 법정 통지기간 ${Bass.escapeHtml(dotDate(ew.notice_open_date))} ~ ${Bass.escapeHtml(dotDate(ew.notice_deadline_date))}` : ""}
         ${ec ? `<br>현재 상태: <strong>${Bass.escapeHtml(expiryStatusLabel(ec))}</strong>` : "<br>통보 실적이 없습니다."}</div>
       <div class="r3-lbl">① 전출계획 확인 메시지</div>
-      ${msgOf("exMsg1", msg1)}
       <button id="exCopy1" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin:6px 0 12px;">📋 복사 → 임차인 문자창</button>
       <div class="r3-lbl">② 임차인 답변</div>
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px;">
@@ -797,15 +796,14 @@
           <label class="r3-fld">관리비(원)<input id="exFee" class="bass-input" type="number" value="${fee0}"></label>
           <label class="r3-fld">연장 개월<input id="exTerm" class="bass-input" type="number" value="${(ec && ec.proposed_term_months) || 12}"></label>
         </div>
-        ${msgOf("exMsg2", "")}
-        <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
+        <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
           <button id="exCopy2" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
           <button id="exSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📝 갱신 예고 기록·앱 전달</button>
           <button id="exPwRemind" class="bass-btn bass-btn--sm" type="button">🔒 재계약 새 암호 설정 안내·링크 복사</button>
         </div>` : ""}`);
     void body;
     $m("exCopy1").addEventListener("click", async () => {
-      await copyAndSms($m("exMsg1").value, phone);
+      await copyAndSms(msg1, phone);
       if (!ec) {   // 통보 실적 기록(임차인 마이홈에도 회신 요청이 뜬다)
         try {
           await Bass.api(APP_ID, "/expiry/request-check", { method: "POST", body: { branch: currentBranch, room_no: no } });
@@ -833,13 +831,11 @@
     $m("exStay").addEventListener("click", plan("STAY"));
     $m("exOut").addEventListener("click", plan("MOVE_OUT"));
     if (stay) {
-      const compose = () => {
+      const composeRenewalMsg = () => {
         const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
-        $m("exMsg2").value = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n월세는 기본 5% 인상안이며(법정 한도 5% 이내) 금액은 재계약 과정에서 함께 조정할 수 있습니다. 의견 있으시면 알려 주세요.`;
+        return `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n월세는 기본 5% 인상안이며(법정 한도 5% 이내) 금액은 재계약 과정에서 함께 조정할 수 있습니다. 의견 있으시면 알려 주세요.`;
       };
-      ["exDep", "exRent", "exFee", "exTerm"].forEach((id) => $m(id).addEventListener("input", compose));
-      compose();
-      $m("exCopy2").addEventListener("click", () => copyAndSms($m("exMsg2").value, phone));
+      $m("exCopy2").addEventListener("click", () => copyAndSms(composeRenewalMsg(), phone));
       $m("exPwRemind").addEventListener("click", function () {
         Bass.withLock(this, async () => {
           const res = await Bass.api(APP_ID, "/expiry/remind-password", {
@@ -847,7 +843,6 @@
             body: { branch: currentBranch, room_no: no },
           });
           const fullText = (res.sms_text || "").replace(res.url, window.location.origin + res.url);
-          $m("exMsg2").value = fullText;
           await copyAndSms(fullText, phone);
           Bass.updateAppAlert("success", res.message);
         });
@@ -893,8 +888,7 @@
         <label class="r3-fld">체납 공과금(원)<input id="moUtil" class="bass-input" type="number" value="0"></label>
         <label class="r3-fld">파손 복구비(원)<input id="moDmg" class="bass-input" type="number" value="0"></label>
       </div>
-      ${msgOf("moMsg", "")}
-      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
         <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
         <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📤 정산서 보내기</button>
       </div>
@@ -906,11 +900,9 @@
       const lines = [`[${bldgName()}] ${no}호 ${ct.tenant_name}님 전출 정산 안내 (전출일 ${dotDate($m("moDate").value)})`, `임차보증금 ${fmtWon(dep)}`];
       [["체납 월세", unpaid], ["청소비", num("moClean")], ["체납 공과금", num("moUtil")], ["파손 복구비", num("moDmg")]].forEach(([k, v]) => { if (v > 0) lines.push(`- ${k} ${fmtWon(v)}`); });
       lines.push(`환불 예정액 ${fmtWon(refund())}`, "확인 후 말씀해 주시면 등록된 계좌로 보내드리겠습니다.");
-      $m("moMsg").value = lines.join("\n");
+      return lines.join("\n");
     };
-    ["moDate", "moClean", "moUtil", "moDmg"].forEach((id) => $m(id).addEventListener("input", compose));
-    compose();
-    $m("moCopy").addEventListener("click", () => copyAndSms($m("moMsg").value, phone));
+    $m("moCopy").addEventListener("click", () => copyAndSms(compose(), phone));
     const stateOf = () => ((dash && dash.checkouts) || []).find((x) => x.room_no === no && x.status !== "COMPLETED");
     const drawState = () => {
       const co = stateOf(), box = $m("moState");
