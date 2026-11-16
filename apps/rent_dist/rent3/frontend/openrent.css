@@ -1,22 +1,69 @@
-/* apps/rent3/frontend/openrent.css — OpenRent(openrent.co.uk) 벤치마킹 직거래 포털 스타일시트 */
+/* ==============================================================================
+   apps/rent_dist/rent3/frontend/openrent.css
+   Airbnb-Inspired Design System for Rent3 (직거래 및 올인원 임대관리 포털)
+   - Signature Palette: Rausch Coral (#FF385C), Deep Charcoal (#222222), Warm Snow (#F7F7F7)
+   - Iconic Elements: Floating Pill Search Bar, Micro-Elevations, Fluid Card Zooms, Soft Badges
+============================================================================== */
+
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Pretendard:wght@400;500;600;700;800&display=swap");
+
 :root {
-  --or-navy: #1d2d3d;
-  --or-navy-deep: #13202d;
-  --or-blue: #3276b1;
-  --or-blue-hover: #275d8b;
-  --or-sky: #ebf4fb;
-  --or-green: #2eb85c;
-  --or-green-hover: #24964a;
-  --or-green-soft: #eafaf0;
-  --or-amber: #d97706;
-  --or-amber-soft: #fef3c7;
-  --or-bg: #f5f7fa;
-  --or-surface: #ffffff;
-  --or-border: #dce3ec;
-  --or-text: #1e293b;
-  --or-muted: #5b6b7f;
-  --or-radius: 12px;
-  --or-shadow: 0 8px 24px rgba(19, 32, 45, 0.07);
+  /* Airbnb Core Brand Colors */
+  --ab-coral: #FF385C;
+  --ab-coral-hover: #E00B41;
+  --ab-coral-light: #FFF0F2;
+  --ab-coral-gradient: linear-gradient(135deg, #FF385C 0%, #E61E4D 50%, #D70466 100%);
+  
+  --ab-charcoal: #222222;
+  --ab-dark: #1E1E1E;
+  --ab-text-secondary: #717171;
+  --ab-text-muted: #8A8A8A;
+  
+  --ab-bg: #FFFFFF;
+  --ab-surface: #FFFFFF;
+  --ab-subtle-bg: #F7F7F7;
+  --ab-border: #EBEBEB;
+  --ab-border-hover: #B0B0B0;
+  --ab-border-dark: #222222;
+  
+  /* Status Colors */
+  --ab-green: #008A05;
+  --ab-green-light: #F0FDF4;
+  --ab-amber: #C13515;
+  --ab-amber-light: #FFF7ED;
+  --ab-blue: #0284C7;
+  --ab-blue-light: #F0F9FF;
+  
+  /* Radius & Shadows (Airbnb signature pill & soft deep floating) */
+  --ab-radius-sm: 8px;
+  --ab-radius-md: 14px;
+  --ab-radius-lg: 20px;
+  --ab-radius-pill: 9999px;
+  
+  --ab-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --ab-shadow-card: 0 6px 16px rgba(0, 0, 0, 0.08);
+  --ab-shadow-float: 0 16px 36px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.04);
+  --ab-shadow-search: 0 8px 28px rgba(0, 0, 0, 0.12);
+  --ab-transition: all 0.22s cubic-bezier(0.2, 0, 0, 1);
+  
+  /* Backward-compatible variables for Rent3 classes */
+  --or-navy: var(--ab-charcoal);
+  --or-navy-deep: var(--ab-dark);
+  --or-blue: var(--ab-coral);
+  --or-blue-hover: var(--ab-coral-hover);
+  --or-sky: var(--ab-coral-light);
+  --or-green: var(--ab-green);
+  --or-green-hover: #007004;
+  --or-green-soft: var(--ab-green-light);
+  --or-amber: var(--ab-amber);
+  --or-amber-soft: var(--ab-amber-light);
+  --or-bg: var(--ab-subtle-bg);
+  --or-surface: #FFFFFF;
+  --or-border: var(--ab-border);
+  --or-text: var(--ab-charcoal);
+  --or-muted: var(--ab-text-secondary);
+  --or-radius: var(--ab-radius-lg);
+  --or-shadow: var(--ab-shadow-card);
 }
 
 * {
@@ -25,36 +72,37 @@
 
 body.or-body {
   margin: 0;
-  background: var(--or-bg);
-  color: var(--or-text);
-  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  line-height: 1.55;
+  background-color: var(--ab-bg);
+  color: var(--ab-charcoal);
+  font-family: "Pretendard", "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
 }
 
 .or-container {
-  max-width: 1160px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 0 20px;
+  padding: 0 24px;
 }
 
-/* ── Top Navigation Bar (OpenRent Style) ── */
+/* ── 1. Header & Navigation (Airbnb Clean White Topbar) ── */
 .or-navbar {
   position: sticky;
   top: 0;
   z-index: 120;
   background: #ffffff;
-  border-bottom: 1px solid var(--or-border);
-  box-shadow: 0 2px 10px rgba(19, 32, 45, 0.04);
+  border-bottom: 1px solid var(--ab-border);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.05);
 }
 
 .or-navbar__inner {
-  max-width: 1160px;
+  max-width: 1240px;
   margin: 0 auto;
-  padding: 12px 20px;
+  padding: 14px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
@@ -63,224 +111,259 @@ body.or-body {
   align-items: center;
   gap: 10px;
   text-decoration: none;
-  color: var(--or-navy);
+  color: var(--ab-coral);
+  transition: transform 0.15s ease;
+}
+
+.or-brand:hover {
+  transform: scale(1.02);
 }
 
 .or-brand__logo {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--or-blue), #1e5688);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--ab-radius-md);
+  background: var(--ab-coral-gradient);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  font-weight: 800;
-  box-shadow: 0 4px 10px rgba(50, 118, 177, 0.25);
+  font-size: 22px;
+  box-shadow: 0 4px 12px rgba(255, 56, 92, 0.35);
 }
 
 .or-brand__title {
   font-size: 20px;
   font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--or-navy);
+  letter-spacing: -0.03em;
+  color: var(--ab-charcoal);
 }
 
 .or-brand__title span {
-  color: var(--or-blue);
+  color: var(--ab-coral);
 }
 
 .or-brand__tag {
-  background: var(--or-green-soft);
-  color: #157347;
-  font-size: 11.5px;
-  font-weight: 700;
-  padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid #b7ebc6;
+  background: var(--ab-coral-light);
+  color: var(--ab-coral);
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: var(--ab-radius-pill);
+  border: 1px solid rgba(255, 56, 92, 0.2);
+  letter-spacing: -0.01em;
 }
 
 .or-navlinks {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .or-navlink {
-  color: var(--or-navy);
+  color: var(--ab-charcoal);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 600;
-  padding: 6px 4px;
-  cursor: pointer;
-  background: none;
+  padding: 9px 16px;
+  border-radius: var(--ab-radius-pill);
+  transition: background 0.15s ease;
+  background: transparent;
   border: none;
 }
 
 .or-navlink:hover {
-  color: var(--or-blue);
+  background: var(--ab-subtle-bg);
 }
 
 .or-nav-cta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
-/* ── Buttons ── */
+/* ── 2. Airbnb Signature Pill Buttons ── */
 .or-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px 16px;
-  border-radius: 8px;
+  padding: 10px 20px;
+  border-radius: var(--ab-radius-pill);
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
   text-decoration: none;
   border: 1px solid transparent;
-  transition: all 0.16s ease;
+  transition: var(--ab-transition);
   font-family: inherit;
+  user-select: none;
+}
+
+.or-btn:active {
+  transform: scale(0.97);
 }
 
 .or-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
+  transform: none;
 }
 
+/* Primary Coral / Rausch */
+.or-btn--blue,
+.or-btn--coral {
+  background: var(--ab-coral-gradient);
+  color: #fff;
+  border: none;
+  box-shadow: 0 2px 8px rgba(255, 56, 92, 0.28);
+}
+
+.or-btn--blue:hover:not(:disabled),
+.or-btn--coral:hover:not(:disabled) {
+  background: linear-gradient(135deg, #E00B41 0%, #D70466 100%);
+  box-shadow: 0 4px 14px rgba(255, 56, 92, 0.4);
+}
+
+/* Secondary Dark/Green -> Clean Black Outline or Pill */
 .or-btn--green {
-  background: var(--or-green);
+  background: #222222;
   color: #fff;
 }
 
 .or-btn--green:hover:not(:disabled) {
-  background: var(--or-green-hover);
-}
-
-.or-btn--blue {
-  background: var(--or-blue);
-  color: #fff;
-}
-
-.or-btn--blue:hover:not(:disabled) {
-  background: var(--or-blue-hover);
+  background: #000000;
 }
 
 .or-btn--outline {
-  background: #fff;
-  color: var(--or-navy);
-  border-color: #cbd5e1;
+  background: #ffffff;
+  color: var(--ab-charcoal);
+  border: 1px solid var(--ab-border);
+  box-shadow: var(--ab-shadow-sm);
 }
 
 .or-btn--outline:hover:not(:disabled) {
-  border-color: var(--or-blue);
-  color: var(--or-blue);
-  background: var(--or-sky);
+  border-color: var(--ab-border-dark);
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .or-btn--ghost {
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.28);
+  background: transparent;
+  color: var(--ab-charcoal);
+  border: none;
 }
 
 .or-btn--ghost:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.24);
+  background: var(--ab-subtle-bg);
 }
 
 .or-btn--sm {
-  padding: 6px 12px;
-  font-size: 12.5px;
+  padding: 7px 14px;
+  font-size: 13px;
+  border-radius: var(--ab-radius-pill);
 }
 
 .or-user-pill {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: var(--or-sky);
-  border: 1px solid #bfd9f2;
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 13px;
+  background: #ffffff;
+  border: 1px solid var(--ab-border);
+  padding: 6px 14px;
+  border-radius: var(--ab-radius-pill);
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--or-navy);
+  color: var(--ab-charcoal);
+  box-shadow: var(--ab-shadow-sm);
 }
 
-/* ── Active Session Banner ── */
+/* ── 3. Active Session Strip ── */
 .or-session-strip {
-  background: #eef6ff;
-  border-bottom: 1px solid #cfe2f7;
-  padding: 10px 20px;
+  background: #fff;
+  border-bottom: 1px solid var(--ab-border);
+  padding: 12px 24px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 
 .or-session-strip__inner {
-  max-width: 1160px;
+  max-width: 1240px;
   margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  font-size: 13.5px;
-  color: var(--or-navy);
+  font-size: 14px;
+  color: var(--ab-charcoal);
+  font-weight: 600;
 }
 
-/* ── Hero Section & Search Box ── */
+/* ── 4. Hero Section & The Floating Pill Search Bar (Airbnb Centerpiece) ── */
 .or-hero {
-  background: linear-gradient(135deg, var(--or-navy-deep) 0%, #1f3c5a 55%, #2b5c8a 100%);
-  color: #fff;
-  padding: 52px 0 46px;
+  background: radial-gradient(circle at 50% 0%, #FFF5F6 0%, #FFFFFF 65%);
+  color: var(--ab-charcoal);
+  padding: 64px 0 52px;
   position: relative;
-  overflow: hidden;
+  border-bottom: 1px solid var(--ab-border);
 }
 
 .or-hero__eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(46, 184, 92, 0.2);
-  border: 1px solid rgba(46, 184, 92, 0.5);
-  color: #a7f3d0;
-  padding: 5px 14px;
-  border-radius: 999px;
+  background: var(--ab-coral-light);
+  border: 1px solid rgba(255, 56, 92, 0.25);
+  color: var(--ab-coral);
+  padding: 6px 16px;
+  border-radius: var(--ab-radius-pill);
   font-size: 13px;
-  font-weight: 700;
-  margin-bottom: 16px;
+  font-weight: 800;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(255, 56, 92, 0.08);
 }
 
 .or-hero h1 {
-  font-size: 34px;
+  font-size: 40px;
   font-weight: 800;
-  line-height: 1.28;
-  margin: 0 0 12px;
-  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0 0 14px;
+  letter-spacing: -0.03em;
+  color: var(--ab-charcoal);
 }
 
 .or-hero__sub {
-  font-size: 16px;
-  color: #dbeafe;
-  max-width: 760px;
-  margin: 0 auto 28px;
+  font-size: 17px;
+  color: var(--ab-text-secondary);
+  max-width: 720px;
+  margin: 0 auto 34px;
+  line-height: 1.5;
 }
 
+/* Airbnb Signature Capsule / Pill Floating Search Card */
 .or-search-card {
   background: #ffffff;
-  color: var(--or-text);
-  border-radius: 14px;
-  padding: 14px;
-  max-width: 940px;
+  color: var(--ab-charcoal);
+  border-radius: var(--ab-radius-pill);
+  padding: 8px 10px 8px 24px;
+  max-width: 920px;
   margin: 0 auto;
-  box-shadow: 0 18px 40px rgba(9, 18, 28, 0.28);
+  border: 1px solid var(--ab-border);
+  box-shadow: var(--ab-shadow-search);
+  transition: var(--ab-transition);
+}
+
+.or-search-card:focus-within,
+.or-search-card:hover {
+  border-color: #B0B0B0;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
 }
 
 .or-search-grid {
   display: grid;
-  grid-template-columns: 2fr 1.1fr 1.1fr auto;
-  gap: 10px;
+  grid-template-columns: 2.2fr 1.2fr 1.2fr auto;
+  gap: 12px;
   align-items: center;
 }
 
@@ -288,178 +371,197 @@ body.or-body {
 .or-select,
 .or-textarea {
   width: 100%;
-  padding: 11px 13px;
-  border-radius: 8px;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #0f172a;
-  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: var(--ab-radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--ab-charcoal);
+  font-size: 14.5px;
+  font-weight: 600;
   font-family: inherit;
   outline: none;
+  transition: var(--ab-transition);
+}
+
+.or-input::placeholder {
+  color: var(--ab-text-muted);
+  font-weight: 500;
+}
+
+.or-select {
+  cursor: pointer;
+  background-color: transparent;
 }
 
 .or-input:focus,
-.or-select:focus,
-.or-textarea:focus {
-  border-color: var(--or-blue);
-  box-shadow: 0 0 0 3px rgba(50, 118, 177, 0.15);
+.or-select:focus {
+  background: var(--ab-subtle-bg);
 }
 
+.or-search-grid button[type="submit"] {
+  border-radius: var(--ab-radius-pill);
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+/* Airbnb Category Filter Pills */
 .or-filter-bar {
-  max-width: 940px;
-  margin: 14px auto 0;
+  max-width: 980px;
+  margin: 24px auto 0;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .or-chip {
-  background: rgba(255, 255, 255, 0.12);
-  color: #f1f5f9;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  border-radius: 999px;
-  padding: 6px 13px;
-  font-size: 12.5px;
-  font-weight: 600;
+  background: #ffffff;
+  color: var(--ab-charcoal);
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius-pill);
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: var(--ab-transition);
+  box-shadow: var(--ab-shadow-sm);
 }
 
-.or-chip:hover,
+.or-chip:hover {
+  border-color: var(--ab-charcoal);
+  background: var(--ab-subtle-bg);
+}
+
 .or-chip.is-active {
-  background: #ffffff;
-  color: var(--or-navy);
-  border-color: #ffffff;
+  background: var(--ab-charcoal);
+  color: #ffffff;
+  border-color: var(--ab-charcoal);
 }
 
-/* ── Affordability Calculator Drawer ── */
-.or-calc-panel {
-  max-width: 940px;
-  margin: 14px auto 0;
-  background: #ffffff;
-  color: var(--or-text);
-  border-radius: 12px;
-  padding: 18px 20px;
-  text-align: left;
-  box-shadow: var(--or-shadow);
-}
-
-/* ── Trust Strip ── */
+/* ── 5. Trust Metrics Strip (Airbnb Clean Stats) ── */
 .or-trust-strip {
   background: #ffffff;
-  border-bottom: 1px solid var(--or-border);
-  padding: 18px 0;
+  border-bottom: 1px solid var(--ab-border);
+  padding: 24px 0;
 }
 
 .or-trust-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  gap: 20px;
   text-align: center;
 }
 
 .or-trust-item strong {
   display: block;
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 800;
-  color: var(--or-navy);
+  color: var(--ab-charcoal);
+  letter-spacing: -0.02em;
 }
 
 .or-trust-item span {
-  font-size: 12.5px;
-  color: var(--or-muted);
+  font-size: 13.5px;
+  color: var(--ab-text-secondary);
+  font-weight: 500;
+  margin-top: 2px;
+  display: block;
 }
 
-/* ── Role Gateway Cards ── */
+/* ── 6. Role Portal Cards (Lessor, Tenant, Admin, Public) ── */
 .or-section {
-  padding: 40px 0;
+  padding: 56px 0;
 }
 
 .or-section__head {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: 28px;
 }
 
 .or-section__title {
-  font-size: 24px;
+  font-size: 28px;
   font-weight: 800;
-  color: var(--or-navy);
+  color: var(--ab-charcoal);
+  letter-spacing: -0.03em;
   margin: 0;
 }
 
 .or-section__sub {
-  font-size: 14px;
-  color: var(--or-muted);
-  margin: 4px 0 0;
+  font-size: 15px;
+  color: var(--ab-text-secondary);
+  margin: 6px 0 0;
 }
 
 .or-role-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-}
-
-.or-role-card {
-  background: var(--or-surface);
-  border: 1px solid var(--or-border);
-  border-radius: var(--or-radius);
-  padding: 18px;
-  box-shadow: var(--or-shadow);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  transition: transform 0.16s ease, border-color 0.16s ease;
-}
-
-.or-role-card:hover {
-  transform: translateY(-3px);
-  border-color: var(--or-blue);
-}
-
-.or-role-card h3 {
-  margin: 8px 0 6px;
-  font-size: 16.5px;
-  color: var(--or-navy);
-}
-
-.or-role-card p {
-  margin: 0 0 14px;
-  font-size: 13px;
-  color: var(--or-muted);
-}
-
-/* ── Property Listing Cards ── */
-.or-listings-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
   gap: 20px;
 }
 
-.or-prop-card {
-  background: var(--or-surface);
-  border: 1px solid var(--or-border);
-  border-radius: 14px;
-  overflow: hidden;
-  box-shadow: var(--or-shadow);
+.or-role-card {
+  background: #ffffff;
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius-lg);
+  padding: 24px;
+  box-shadow: var(--ab-shadow-sm);
   display: flex;
   flex-direction: column;
-  transition: transform 0.18s ease, border-color 0.18s ease;
+  justify-content: space-between;
+  transition: var(--ab-transition);
+}
+
+.or-role-card:hover {
+  transform: translateY(-5px);
+  border-color: transparent;
+  box-shadow: var(--ab-shadow-card);
+}
+
+.or-role-card h3 {
+  margin: 12px 0 8px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--ab-charcoal);
+}
+
+.or-role-card p {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--ab-text-secondary);
+  line-height: 1.5;
+}
+
+/* ── 7. Airbnb-Style Property Listing Cards (Wide Grid, Image Zoom, Clean Type) ── */
+.or-listings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 28px;
+}
+
+.or-prop-card {
+  background: #ffffff;
+  border-radius: var(--ab-radius-lg);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: var(--ab-transition);
+  cursor: pointer;
+  border: 1px solid var(--ab-border);
 }
 
 .or-prop-card:hover {
-  transform: translateY(-4px);
-  border-color: var(--or-blue);
+  box-shadow: var(--ab-shadow-card);
+  border-color: transparent;
 }
 
 .or-prop-media {
   position: relative;
-  height: 196px;
-  background: #e2e8f0;
+  aspect-ratio: 16 / 10;
+  background: #f1f5f9;
+  overflow: hidden;
 }
 
 .or-prop-media img {
@@ -467,41 +569,49 @@ body.or-body {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 0.35s ease;
+}
+
+.or-prop-card:hover .or-prop-media img {
+  transform: scale(1.04);
 }
 
 .or-prop-badges {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: 14px;
+  left: 14px;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  z-index: 2;
 }
 
 .or-pill {
-  font-size: 11.5px;
-  font-weight: 700;
-  padding: 4px 9px;
-  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 5px 12px;
+  border-radius: var(--ab-radius-pill);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .or-pill--green {
-  background: #16a34a;
+  background: rgba(0, 138, 5, 0.9);
   color: #fff;
 }
 
 .or-pill--amber {
-  background: #d97706;
+  background: rgba(193, 53, 21, 0.9);
   color: #fff;
 }
 
 .or-pill--navy {
-  background: rgba(19, 32, 45, 0.86);
+  background: rgba(34, 34, 34, 0.85);
   color: #fff;
 }
 
 .or-prop-body {
-  padding: 18px;
+  padding: 18px 20px 20px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -509,99 +619,109 @@ body.or-body {
 }
 
 .or-prop-price {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 800;
-  color: var(--or-blue);
+  color: var(--ab-charcoal);
   margin: 4px 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.or-prop-price span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ab-text-secondary);
 }
 
 .or-prop-meta {
-  font-size: 12.5px;
-  color: var(--or-muted);
-  margin-bottom: 10px;
+  font-size: 14px;
+  color: var(--ab-text-secondary);
+  margin-bottom: 12px;
+  font-weight: 500;
 }
 
 .or-tag-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  margin-bottom: 14px;
+  gap: 6px;
+  margin-bottom: 16px;
 }
 
 .or-tag {
-  font-size: 11.5px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: #f1f5f9;
-  color: #334155;
-  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: var(--ab-radius-pill);
+  background: var(--ab-subtle-bg);
+  color: var(--ab-charcoal);
+  border: 1px solid var(--ab-border);
 }
 
-/* ── Dual Audience Pillars (Tenants vs Landlords) ── */
+/* ── 8. Pillars & Co-Sign Banner ── */
 .or-dual-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 22px;
+  gap: 24px;
 }
 
 .or-pillar {
-  background: var(--or-surface);
-  border: 1px solid var(--or-border);
-  border-radius: 16px;
-  padding: 28px;
-  box-shadow: var(--or-shadow);
+  background: #ffffff;
+  border: 1px solid var(--ab-border);
+  border-radius: var(--ab-radius-lg);
+  padding: 32px;
+  box-shadow: var(--ab-shadow-sm);
 }
 
 .or-pillar ul {
-  padding-left: 18px;
-  margin: 14px 0 20px;
-  color: #334155;
-  font-size: 14px;
+  padding-left: 20px;
+  margin: 16px 0 24px;
+  color: var(--ab-charcoal);
+  font-size: 15px;
 }
 
 .or-pillar li {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-/* ── Rent Now Co-Sign Banner ── */
 .or-cosign-banner {
-  background: linear-gradient(135deg, #1d2d3d, #284b6e);
-  color: #fff;
-  border-radius: 16px;
-  padding: 28px;
+  background: linear-gradient(135deg, #222222 0%, #1A1A1A 100%);
+  color: #ffffff;
+  border-radius: var(--ab-radius-lg);
+  padding: 36px;
   display: grid;
   grid-template-columns: 1.4fr 1fr;
-  gap: 22px;
+  gap: 28px;
   align-items: center;
+  box-shadow: var(--ab-shadow-card);
 }
 
 .or-step-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .or-step-badge {
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 600;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: var(--ab-radius-pill);
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
 }
 
-/* ── Modals ── */
+/* ── 9. Modals (Airbnb Floating Center Cards) ── */
 .or-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.62);
-  backdrop-filter: blur(4px);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 250;
   display: none;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 20px;
 }
 
 .or-modal-backdrop.is-open {
@@ -610,257 +730,194 @@ body.or-body {
 
 .or-modal {
   background: #ffffff;
-  color: var(--or-text);
+  color: var(--ab-charcoal);
   width: 100%;
-  max-width: 540px;
-  max-height: 92vh;
+  max-width: 520px;
+  max-height: 90vh;
   overflow-y: auto;
-  border-radius: 16px;
-  padding: 24px;
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.3);
+  border-radius: var(--ab-radius-lg);
+  padding: 32px 28px;
+  box-shadow: var(--ab-shadow-float);
+  animation: abModalPop 0.25s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes abModalPop {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 .or-tabs {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 6px;
-  background: #f1f5f9;
-  padding: 5px;
-  border-radius: 10px;
-  margin-bottom: 18px;
+  background: var(--ab-subtle-bg);
+  padding: 6px;
+  border-radius: var(--ab-radius-pill);
+  margin-bottom: 22px;
 }
 
 .or-tab {
   border: none;
   background: transparent;
-  padding: 9px 8px;
-  border-radius: 7px;
-  font-size: 13px;
+  padding: 10px 8px;
+  border-radius: var(--ab-radius-pill);
+  font-size: 13.5px;
   font-weight: 700;
-  color: var(--or-muted);
+  color: var(--ab-text-secondary);
   cursor: pointer;
+  transition: var(--ab-transition);
 }
 
 .or-tab.is-active {
   background: #ffffff;
-  color: var(--or-navy);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  color: var(--ab-charcoal);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .or-field {
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .or-field label {
   display: block;
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 700;
-  color: #334155;
-  margin-bottom: 5px;
+  color: var(--ab-charcoal);
+  margin-bottom: 6px;
+}
+
+.or-field input,
+.or-field select,
+.or-field textarea {
+  border: 1px solid var(--ab-border) !important;
+  border-radius: var(--ab-radius-md) !important;
+  padding: 12px 14px !important;
+  background: #ffffff !important;
+}
+
+.or-field input:focus,
+.or-field select:focus,
+.or-field textarea:focus {
+  border-color: var(--ab-charcoal) !important;
+  box-shadow: 0 0 0 1px var(--ab-charcoal) !important;
 }
 
 .or-demo-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 7px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .or-demo-btn {
   text-align: left;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--or-border);
-  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: var(--ab-radius-md);
+  border: 1px solid var(--ab-border);
+  background: var(--ab-subtle-bg);
   cursor: pointer;
-  font-size: 12px;
-  color: var(--or-navy);
-  transition: all 0.14s;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ab-charcoal);
+  transition: var(--ab-transition);
 }
 
 .or-demo-btn:hover {
-  border-color: var(--or-blue);
-  background: var(--or-sky);
+  border-color: var(--ab-charcoal);
+  background: #ffffff;
 }
 
+/* ── 10. Drawer Navigation ── */
+.r3-drawer {
+  position: fixed;
+  top: 0;
+  right: -320px;
+  width: 300px;
+  height: 100vh;
+  background: #ffffff;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  z-index: 300;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: right 0.26s cubic-bezier(0.2, 0, 0, 1);
+  overflow-y: auto;
+}
+
+.r3-drawer.is-open {
+  right: 0;
+}
+
+.r3-drawer__group {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ab-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 16px 0 4px;
+}
+
+.r3-drawer a,
+.r3-drawer button {
+  padding: 10px 14px;
+  border-radius: var(--ab-radius-md);
+  color: var(--ab-charcoal);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 14.5px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.r3-drawer a:hover,
+.r3-drawer button:hover {
+  background: var(--ab-subtle-bg);
+}
+
+/* ── 11. Footer ── */
 .or-footer {
-  background: var(--or-navy-deep);
-  color: #94a3b8;
-  padding: 32px 0;
-  font-size: 13px;
-  margin-top: 30px;
+  background: var(--ab-subtle-bg);
+  border-top: 1px solid var(--ab-border);
+  color: var(--ab-text-secondary);
+  padding: 48px 0 40px;
+  font-size: 14px;
+  margin-top: 48px;
 }
 
 .or-footer a {
-  color: #cbd5e1;
+  color: var(--ab-charcoal);
   text-decoration: none;
+  font-weight: 600;
 }
 
 .or-footer a:hover {
-  color: #ffffff;
+  text-decoration: underline;
 }
 
-/* ── OpenRent High-Contrast Alert Banners (최상단 고정 팝업 & z-index 최상위 가독성 강화) ── */
+/* ── 12. Alert Stack Overlay ── */
 #app-alert.bass-alert-stack {
   position: fixed !important;
   top: 24px !important;
   left: 50% !important;
   transform: translateX(-50%) !important;
   width: min(860px, 92vw) !important;
-  max-width: 860px !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  z-index: 99999 !important; /* 모달(z-index: 250)을 포함한 모든 화면 최상단에 표시 */
+  z-index: 99999 !important;
   pointer-events: none;
 }
 
-#app-alert .bass-alert,
-body.or-body .bass-alert {
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
-  font-family: -apple-system, BlinkMacSystemFont, 'Pretendard', 'Noto Sans KR', sans-serif;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-  border-width: 1.5px;
-}
-
-/* 오류 (Error) 배너: 밝은 배경에서도 선명하게 읽히는 진한 버건디/크림슨 (#7f1d1d, #991b1b) */
-#app-alert .bass-alert--error,
-body.or-body .bass-alert--error {
-  color: #7f1d1d !important;
-  background: #fef2f2 !important;
-  border-color: #f87171 !important;
-}
-
-#app-alert .bass-alert--error .bass-alert__icon,
-body.or-body .bass-alert--error .bass-alert__icon {
-  font-size: 22px !important;
-  line-height: 1.2;
-  filter: drop-shadow(0 1px 2px rgba(185, 28, 28, 0.25));
-}
-
-#app-alert .bass-alert--error .bass-alert__msg,
-body.or-body .bass-alert--error .bass-alert__msg {
-  color: #7f1d1d !important;
-  font-weight: 800 !important;
-  font-size: 15px !important;
-  letter-spacing: -0.01em;
-  line-height: 1.4;
-}
-
-#app-alert .bass-alert--error .bass-alert__hint,
-body.or-body .bass-alert--error .bass-alert__hint {
-  color: #991b1b !important;
-  font-weight: 600 !important;
-  font-size: 13.5px !important;
-  opacity: 1 !important;
-  margin-top: 4px !important;
-  line-height: 1.45;
-}
-
-#app-alert .bass-alert--error .bass-alert__close,
-body.or-body .bass-alert--error .bass-alert__close {
-  color: #7f1d1d !important;
-  font-size: 20px !important;
-  font-weight: 800 !important;
-  opacity: 0.75 !important;
-  cursor: pointer;
-  transition: opacity 0.15s, transform 0.15s;
-}
-
-#app-alert .bass-alert--error .bass-alert__close:hover,
-body.or-body .bass-alert--error .bass-alert__close:hover {
-  opacity: 1 !important;
-  transform: scale(1.15);
-  color: #450a0a !important;
-}
-
-/* 경고 (Warning) 배너 */
-#app-alert .bass-alert--warning,
-body.or-body .bass-alert--warning {
-  color: #78350f !important;
-  background: #fffbeb !important;
-  border-color: #f59e0b !important;
-}
-#app-alert .bass-alert--warning .bass-alert__msg,
-body.or-body .bass-alert--warning .bass-alert__msg {
-  color: #78350f !important;
-  font-weight: 800 !important;
-  font-size: 15px !important;
-}
-#app-alert .bass-alert--warning .bass-alert__hint,
-body.or-body .bass-alert--warning .bass-alert__hint {
-  color: #92400e !important;
-  font-weight: 600 !important;
-  opacity: 1 !important;
-  margin-top: 4px !important;
-}
-#app-alert .bass-alert--warning .bass-alert__close,
-body.or-body .bass-alert--warning .bass-alert__close {
-  color: #78350f !important;
-  font-size: 20px !important;
-  font-weight: 800 !important;
-  opacity: 0.75 !important;
-}
-
-/* 성공 (Success) 배너 */
-#app-alert .bass-alert--success,
-body.or-body .bass-alert--success {
-  color: #064e3b !important;
-  background: #ecfdf5 !important;
-  border-color: #10b981 !important;
-}
-#app-alert .bass-alert--success .bass-alert__msg,
-body.or-body .bass-alert--success .bass-alert__msg {
-  color: #064e3b !important;
-  font-weight: 800 !important;
-  font-size: 15px !important;
-}
-#app-alert .bass-alert--success .bass-alert__hint,
-body.or-body .bass-alert--success .bass-alert__hint {
-  color: #047857 !important;
-  font-weight: 600 !important;
-  opacity: 1 !important;
-  margin-top: 4px !important;
-}
-#app-alert .bass-alert--success .bass-alert__close,
-body.or-body .bass-alert--success .bass-alert__close {
-  color: #064e3b !important;
-  font-size: 20px !important;
-  font-weight: 800 !important;
-  opacity: 0.75 !important;
-}
-
-/* 변경/알림 (Diff) 배너 */
-#app-alert .bass-alert--diff,
-body.or-body .bass-alert--diff {
-  color: #7c2d12 !important;
-  background: #fff7ed !important;
-  border-color: #f97316 !important;
-}
-#app-alert .bass-alert--diff .bass-alert__msg,
-body.or-body .bass-alert--diff .bass-alert__msg {
-  color: #7c2d12 !important;
-  font-weight: 800 !important;
-  font-size: 15px !important;
-}
-#app-alert .bass-alert--diff .bass-alert__hint,
-body.or-body .bass-alert--diff .bass-alert__hint {
-  color: #c2410c !important;
-  font-weight: 600 !important;
-  opacity: 1 !important;
-  margin-top: 4px !important;
-}
-#app-alert .bass-alert--diff .bass-alert__close,
-body.or-body .bass-alert--diff .bass-alert__close {
-  color: #7c2d12 !important;
-  font-size: 20px !important;
-  font-weight: 800 !important;
-  opacity: 0.75 !important;
-}
-
-@media (max-width: 900px) {
+/* Responsive Breakpoints */
+@media (max-width: 960px) {
   .or-search-grid {
     grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .or-search-card {
+    border-radius: var(--ab-radius-lg);
+    padding: 16px;
   }
   .or-trust-grid,
   .or-role-grid {
@@ -871,11 +928,11 @@ body.or-body .bass-alert--diff .bass-alert__close {
     grid-template-columns: 1fr;
   }
   .or-hero h1 {
-    font-size: 25px;
+    font-size: 30px;
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 580px) {
   .or-trust-grid,
   .or-role-grid,
   .or-demo-grid {
@@ -884,5 +941,7 @@ body.or-body .bass-alert--diff .bass-alert__close {
   .or-tabs {
     grid-template-columns: 1fr;
   }
+  .or-hero h1 {
+    font-size: 26px;
+  }
 }
-

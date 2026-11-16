@@ -1,0 +1,231 @@
+/* ==============================================================================
+   shared_ui/airbnb_theme.css — Rent3 전용 에어비앤비(Airbnb) 글로벌 디자인 시스템
+   - 에어비앤비 시그니처 룩앤필: 라우쉬 코랄(#FF385C), 오프화이트 서피스, 둥근 알약형(Pill) UI
+   - 카드 글래스/섀도우, 호버 인터랙션, 모바일 친화형 터치 여백
+============================================================================== */
+
+:root {
+  --ab-coral: #FF385C;
+  --ab-coral-dark: #E00B41;
+  --ab-coral-light: #FFF0F2;
+  --ab-coral-grad: linear-gradient(135deg, #FF385C 0%, #E61E4D 50%, #D70466 100%);
+  
+  --ab-dark: #222222;
+  --ab-gray-text: #717171;
+  --ab-gray-light: #F7F7F7;
+  --ab-border: #EBEBEB;
+  
+  --ab-shadow-card: 0 6px 18px rgba(0, 0, 0, 0.08);
+  --ab-shadow-hover: 0 12px 28px rgba(0, 0, 0, 0.12);
+  --ab-radius-pill: 9999px;
+  --ab-radius-card: 20px;
+}
+
+/* ── 1. 바디 및 공통 배경 ── */
+body {
+  background: #FAFAFA !important;
+  color: #222222 !important;
+  font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* ── 2. 에어비앤비 스타일 카드 (모던 화이트 + 부드러운 그림자) ── */
+.bass-card,
+.item-card,
+.room-card,
+.listing-card,
+.kpi-box {
+  background: #FFFFFF !important;
+  border: 1px solid #EBEBEB !important;
+  border-radius: var(--ab-radius-card) !important;
+  box-shadow: var(--ab-shadow-card) !important;
+  color: #222222 !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.bass-card:hover,
+.item-card:hover,
+.room-card:hover,
+.listing-card:hover {
+  border-color: #D6D6D6 !important;
+  box-shadow: var(--ab-shadow-hover) !important;
+}
+
+/* ── 3. 에어비앤비 시그니처 알약형(Pill) 버튼 ── */
+.bass-btn {
+  border-radius: var(--ab-radius-pill) !important;
+  font-weight: 700 !important;
+  padding: 10px 20px !important;
+  transition: all 0.18s ease !important;
+  border: 1px solid transparent !important;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.bass-btn:active {
+  transform: scale(0.96) !important;
+}
+
+/* Primary Coral 버튼 */
+.bass-btn--primary,
+.tab-btn.is-active,
+.or-btn--blue,
+.or-btn--coral {
+  background: var(--ab-coral-grad) !important;
+  color: #FFFFFF !important;
+  border: none !important;
+  box-shadow: 0 3px 10px rgba(255, 56, 92, 0.32) !important;
+}
+
+.bass-btn--primary:hover,
+.tab-btn.is-active:hover {
+  background: linear-gradient(135deg, #E00B41 0%, #D70466 100%) !important;
+  box-shadow: 0 5px 14px rgba(255, 56, 92, 0.45) !important;
+}
+
+/* 일반 기본/보조 버튼 */
+.bass-btn:not(.bass-btn--primary):not(.is-active) {
+  background: #FFFFFF !important;
+  color: #222222 !important;
+  border: 1px solid #DDDDDD !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05) !important;
+}
+
+.bass-btn:not(.bass-btn--primary):not(.is-active):hover {
+  border-color: #222222 !important;
+  background: #F7F7F7 !important;
+}
+
+.bass-btn--sm {
+  padding: 6px 14px !important;
+  font-size: 13.5px !important;
+}
+
+/* ── 4. 탭 내비게이션 바 (에어비앤비 캡슐 알약) ── */
+.tabs, .nav-pills {
+  background: #F2F2F2 !important;
+  padding: 5px !important;
+  border-radius: var(--ab-radius-pill) !important;
+  display: inline-flex !important;
+  gap: 4px !important;
+  border: none !important;
+}
+
+.tab-btn {
+  border-radius: var(--ab-radius-pill) !important;
+  padding: 8px 18px !important;
+  font-size: 14px !important;
+  color: #717171 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.tab-btn:hover:not(.is-active) {
+  color: #222222 !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+}
+
+/* ── 5. 뱃지 & 태그 (에어비앤비 감성 라운드 칩) ── */
+.bass-badge,
+.month-chip,
+.who-badge {
+  border-radius: var(--ab-radius-pill) !important;
+  padding: 5px 12px !important;
+  font-weight: 700 !important;
+  font-size: 12.5px !important;
+  letter-spacing: -0.01em !important;
+  border: 1px solid #EBEBEB !important;
+  background: #F7F7F7 !important;
+  color: #222222 !important;
+}
+
+.bass-badge--ok,
+.month-PAID {
+  background: #F0FDF4 !important;
+  color: #166534 !important;
+  border-color: #BBF7D0 !important;
+}
+
+.bass-badge--err,
+.month-UNPAID {
+  background: #FEF2F2 !important;
+  color: #991B1B !important;
+  border-color: #FECACA !important;
+}
+
+/* ── 6. 입력 폼 & 셀렉트 ── */
+input, select, textarea,
+.bass-input, .bass-select {
+  background: #FFFFFF !important;
+  color: #222222 !important;
+  border: 1px solid #B0B0B0 !important;
+  border-radius: 12px !important;
+  padding: 10px 14px !important;
+  font-family: inherit !important;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+input:focus, select:focus, textarea:focus,
+.bass-input:focus, .bass-select:focus {
+  border-color: #222222 !important;
+  box-shadow: 0 0 0 1px #222222 !important;
+  outline: none !important;
+}
+
+/* ── 7. 모달 & 다이얼로그 (에어비앤비 플로팅 카드) ── */
+.r3-modal__box,
+.cm-card,
+.dlg {
+  background: #FFFFFF !important;
+  color: #222222 !important;
+  border-radius: 24px !important;
+  border: 1px solid #EBEBEB !important;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.16) !important;
+}
+
+.r3-modal__head {
+  color: #222222 !important;
+  font-weight: 800 !important;
+  border-bottom: 1px solid #F0F0F0 !important;
+  padding-bottom: 14px !important;
+}
+
+/* ── 8. 상단 헤더 & 타이틀 ── */
+h1, h2, h3 {
+  color: #222222 !important;
+  letter-spacing: -0.03em !important;
+}
+
+.bass-muted {
+  color: #717171 !important;
+}
+
+/* ── 9. 표 (Table) ── */
+table {
+  background: #FFFFFF !important;
+  color: #222222 !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  border-radius: 14px !important;
+  border: 1px solid #EBEBEB !important;
+  overflow: hidden;
+}
+
+th {
+  background: #F7F7F7 !important;
+  color: #717171 !important;
+  font-weight: 700 !important;
+  border-bottom: 1px solid #EBEBEB !important;
+}
+
+td {
+  border-bottom: 1px solid #F2F2F2 !important;
+  color: #222222 !important;
+}
+
+tr:last-child td {
+  border-bottom: none !important;
+}
