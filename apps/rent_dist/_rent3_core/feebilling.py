@@ -50,7 +50,14 @@ class FranchiseFee(PoolObj):
     pay_method: str = ""
     pay_memo: str = ""
     registered_by: str = ""
-    invoice_status: str = "NONE"             # NONE(미발행) / ISSUED(발행 기록) / CANCELLED(발행 취소)
+    invoice_status: str = "NONE"             # NONE(미발행) / PENDING(API 접수·발행 중) / ISSUED(발행 완료) / FAILED(API 발행 실패)
+    invoice_via: str = ""                    # manual(홈택스 발행 후 승인번호 기록) / bolta(API 연계)
+    invoice_key: str = ""                    # API 접수번호(issuanceKey)
+    invoice_client_ref: str = ""             # 요청 관리번호(시도마다 새로)
+    invoice_attempts: int = 0
+    invoice_error: str = ""
+    invoice_requested_at: str = ""
+    last_webhook_id: str = ""
     invoice_nts_no: str = ""                 # 국세청 전자세금계산서 승인번호 24자리
     invoice_issue_date: str = ""             # 작성(발행)일
     invoice_issued_at: str = ""              # 기록 시각
@@ -170,12 +177,19 @@ def record_invoice(fee: FranchiseFee, nts_no: str, issue_date: str = "", by: str
         raise DomainError("입금이 등록된 가맹비만 세금계산서를 기록할 수 있습니다.")
     if fee.invoice_status == "ISSUED":
         raise DomainError("이미 세금계산서가 기록된 청구입니다.", hint="잘못 기록했다면 [발행 취소 기록] 후 다시 입력해 주세요.")
+    if fee.invoice_status == "PENDING":
+        raise DomainError("API로 발행 중인 건입니다.", hint="결과를 기다리거나 [발행 상태 확인]을 눌러 주세요. 직접 기록하면 이중 발행이 될 수 있습니다.")
     nts = _norm_nts(nts_no)
-    if any(f.id != fee.id and f.invoice_status == "ISSUED" and f.invoice_nts_no == nts for f in FranchiseFee.all()):
-        raise DomainError("이미 다른 청구에 기록된 승인번호입니다.")
     idate = (issue_date or date_today().isoformat()).strip()
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", idate):
         raise DomainError("작성일은 YYYY-MM-DD 형식이어야 합니다.")
+    return finalize_invoice(fee, nts, idate, by, "manual")
+
+
+def finalize_invoice(fee: FranchiseFee, nts: str, idate: str, by: str, via: str) -> FranchiseFee:
+    """승인번호가 확정된 발행 건을 기록하고 임대인 장부 경비로 등록한다(수동 기록·API 완료 공통)."""
+    if any(f.id != fee.id and f.invoice_status == "ISSUED" and f.invoice_nts_no == nts for f in FranchiseFee.all()):
+        raise DomainError("이미 다른 청구에 기록된 승인번호입니다.")
     lsr = Lessor.get(fee.id_lessor)
     bldg = Building.first(branch=fee.branch)
     p = platform_info()
@@ -183,11 +197,99 @@ def record_invoice(fee: FranchiseFee, nts_no: str, issue_date: str = "", by: str
                  amount=fee.total_amount, vendor=p["name"], vendor_business_number=p["business_number"], vendor_tax_type="GENERAL",
                  memo=f"전자세금계산서 승인번호 {nts}", evidence_type="TAX_INVOICE", usage_scope="COMMON").save(action="franchise_fee_outlay", app_source="rent3_fee")
     fee.invoice_status, fee.invoice_nts_no, fee.invoice_issue_date, fee.invoice_issued_at, fee.invoice_by, fee.outlay_id = "ISSUED", nts, idate, now_iso(), by, out.id
+    fee.invoice_via, fee.invoice_error = via, ''
     fee.save(action="franchise_fee_invoice_recorded", app_source="rent3_fee")
     if lsr is not None:
         _thread_notice(lsr, f"[🧾 세금계산서 발급 완료] {fee.billing_month} 가맹비 {_fmt_won(fee.total_amount)} 전자세금계산서(승인번호 {nts}, 작성일 {idate})를 발급했습니다. "
                        "장부의 경비로 자동 등록되었고, ☰ 💳 가맹비 납부·세금계산서에서 종합소득세 증빙을 받을 수 있습니다.", "가맹비 세금계산서")
     return fee
+
+
+# ───────── 전자세금계산서 API(볼타) 연계 ─────────
+def submit_invoice_api(fee: FranchiseFee, by: str = "관리인") -> FranchiseFee:
+    """입금이 등록된 건의 전자세금계산서를 API 로 접수한다. 접수되면 '발행 중'(PENDING)이고, 결과는 웹훅 또는 상태 확인으로 확정한다."""
+    from . import etaxinvoice as et
+    if fee.status != "PAID":
+        raise DomainError("입금이 등록된 가맹비만 발행할 수 있습니다.")
+    if fee.invoice_status in ("ISSUED", "PENDING"):
+        raise DomainError("이미 발행했거나 발행 중인 청구입니다.", hint="[발행 상태 확인]으로 결과를 확인해 주세요." if fee.invoice_status == "PENDING" else "")
+    lsr = Lessor.get(fee.id_lessor)
+    if lsr is None:
+        raise DomainError("임대인을 찾을 수 없습니다.")
+    bldg = Building.first(branch=fee.branch)
+    try:
+        res = et.issue(fee, lsr, bldg.building_name if bldg else "")
+    except et._NetworkUncertain as exc:
+        fee.invoice_status, fee.invoice_client_ref, fee.invoice_requested_at = "PENDING", exc.client_ref, now_iso()
+        fee.invoice_error = "접수 여부 불확실 — 발행 상태 확인으로 확인하세요"
+        fee.save(action="franchise_fee_invoice_uncertain", app_source="rent3_fee")
+        raise
+    except DomainError as exc:
+        fee.invoice_status, fee.invoice_error = "FAILED", str(exc.message if hasattr(exc, "message") else exc)[:300]
+        fee.save(action="franchise_fee_invoice_failed", app_source="rent3_fee")
+        raise
+    fee.invoice_status, fee.invoice_via, fee.invoice_key, fee.invoice_client_ref = "PENDING", "bolta", res["issuance_key"], res["client_ref"]
+    fee.invoice_error, fee.invoice_requested_at, fee.invoice_by = "", now_iso(), by
+    fee.save(action="franchise_fee_invoice_submitted", app_source="rent3_fee")
+    return fee
+
+
+def refresh_invoice(fee: FranchiseFee) -> FranchiseFee:
+    """발행 중인 건의 결과를 조회 API 로 확인한다. 승인번호가 확인되면 확정(장부 경비 등록·임대인 알림), 아직이면 그대로 둔다."""
+    from . import etaxinvoice as et
+    if fee.invoice_status != "PENDING" or not fee.invoice_key:
+        return fee
+    got = et.retrieve(fee.invoice_key)
+    if got is None:
+        return fee
+    nts = got["nts_no"]
+    d = re.sub(r"\D", "", nts)
+    nts = f"{d[:8]}-{d[8:16]}-{d[16:]}" if len(d) == 24 else nts
+    return finalize_invoice(fee, nts, (got["issued_at"] or fee.paid_at or date_today().isoformat())[:10], fee.invoice_by or "API", "bolta")
+
+
+def refresh_pending() -> int:
+    """발행 중인 모든 건을 확인한다(관리인 목록을 열 때). 확정된 건수를 돌려준다."""
+    from . import etaxinvoice as et
+    if not et.enabled():
+        return 0
+    n = 0
+    for f in FranchiseFee.find(invoice_status="PENDING"):
+        if not f.invoice_key:
+            continue
+        try:
+            if refresh_invoice(f).invoice_status == "ISSUED":
+                n += 1
+        except Exception:      # 일시적 오류는 다음 조회 때 다시
+            continue
+    return n
+
+
+def handle_webhook(event: Dict[str, Any], webhook_id: str) -> str:
+    """검증을 마친 웹훅 이벤트 처리. 성공 이벤트는 승인번호를 조회 API 로 다시 확인해 확정하고, 실패 이벤트는 실패로 기록한다. 같은 webhook-id 는 한 번만."""
+    data = (event or {}).get("data") or {}
+    key = str(data.get("issuanceKey") or "")
+    fee = next((f for f in FranchiseFee.all() if key and f.invoice_key == key), None)
+    if fee is None:
+        return "unknown"
+    if webhook_id and fee.last_webhook_id == webhook_id:
+        return "duplicate"
+    fee.last_webhook_id = webhook_id
+    et = (event or {}).get("eventType", "")
+    if et == "TAX_INVOICE_ISSUANCE_SUCCESS":
+        fee.save(action="franchise_fee_webhook", app_source="rent3_fee")
+        refresh_invoice(fee)
+        return "issued"
+    if et == "TAX_INVOICE_ISSUANCE_FAILURE":
+        cause = data.get("cause") or {}
+        fee.invoice_status, fee.invoice_error = "FAILED", f"{cause.get('code', '')} {cause.get('message', '')}".strip()[:300] or "발행 실패"
+        fee.save(action="franchise_fee_invoice_failed", app_source="rent3_fee")
+        lsr = Lessor.get(fee.id_lessor)
+        if lsr is not None:
+            _thread_notice(lsr, f"[⚠️ 세금계산서 발행 실패] {fee.billing_month} 가맹비 세금계산서 발행이 실패했습니다. 관리인이 확인 후 다시 발행합니다.", "가맹비 세금계산서")
+        return "failed"
+    fee.save(action="franchise_fee_webhook", app_source="rent3_fee")
+    return "ignored"
 
 
 def cancel_invoice(fee: FranchiseFee, memo: str = "", by: str = "관리인") -> FranchiseFee:
@@ -202,6 +304,7 @@ def cancel_invoice(fee: FranchiseFee, memo: str = "", by: str = "관리인") -> 
             out.delete(action="franchise_fee_outlay_removed", app_source="rent3_fee")
     fee.pay_memo = (fee.pay_memo + f" | 세금계산서 {fee.invoice_nts_no} 취소({by}): {memo.strip()}").strip(" |")
     fee.invoice_status, fee.invoice_nts_no, fee.invoice_issue_date, fee.outlay_id = "NONE", "", "", ""
+    fee.invoice_key, fee.invoice_via, fee.invoice_error = "", "", ""
     fee.save(action="franchise_fee_invoice_cancelled", app_source="rent3_fee")
     return fee
 
@@ -210,7 +313,7 @@ def public(f: FranchiseFee) -> Dict[str, Any]:
     d = f.model_dump()
     d["overdue"] = f.overdue
     d["state_label"] = ("취소" if f.status == "CANCELLED" else ("납부 완료" if f.status == "PAID" else ("연체" if f.overdue else "납부 대기")))
-    d["invoice_label"] = {"NONE": ("발행 대기" if f.status == "PAID" else "-"), "ISSUED": "발행 완료", "CANCELLED": "취소"}.get(f.invoice_status, f.invoice_status)
+    d["invoice_label"] = {"NONE": ("발행 대기" if f.status == "PAID" else "-"), "PENDING": "발행 중(국세청 전송 대기)", "ISSUED": "발행 완료", "FAILED": "발행 실패", "CANCELLED": "취소"}.get(f.invoice_status, f.invoice_status)
     return d
 
 
@@ -243,7 +346,7 @@ def hometax_csv(month: str) -> str:
     p = platform_info()
     lines = ["﻿작성일자,공급자 사업자번호,공급받는자 사업자번호,공급받는자 상호,공급받는자 대표자,공급가액,세액,합계,품목,비고"]
     for f in sorted(FranchiseFee.find(status="PAID"), key=lambda x: (x.billing_month, x.branch)):
-        if f.invoice_status == "ISSUED" or (month and f.billing_month != month):
+        if f.invoice_status in ("ISSUED", "PENDING") or (month and f.billing_month != month):
             continue
         lsr = Lessor.get(f.id_lessor)
         biz = (lsr.business_number if lsr else "") or "(사업자번호 미승인)"

@@ -228,18 +228,22 @@
     if (!box) return;
     const E = Bass.escapeHtml, won = (n) => Number(n || 0).toLocaleString("ko-KR") + "원";
     const r = await Bass.api(APP_ID, "/fees");
-    const sm = r.summary || {}, pl = r.platform || {};
+    const sm = r.summary || {}, pl = r.platform || {}, et = r.etax || {};
     const chip = (f) => `<span class="bass-badge ${f.status === "PAID" ? "bass-badge--ok" : "bass-badge--warn"}">${E(f.state_label)}</span> <span class="bass-badge ${f.invoice_status === "ISSUED" ? "bass-badge--ok" : ""}">🧾 ${E(f.invoice_label)}</span>`;
     box.innerHTML = `
       <div style="font-size:13px;line-height:1.7;margin-bottom:6px;">청구 <strong>${won(sm.billed)}</strong> · 입금 <strong>${won(sm.paid)}</strong> · 미납 <strong>${won(sm.unpaid)}</strong>${sm.overdue ? ` · <span style="color:var(--err);font-weight:700;">연체 ${sm.overdue}건</span>` : ""}
         ${sm.invoice_waiting ? ` · <span style="color:var(--warn);font-weight:700;">🧾 세금계산서 발행 대기 ${sm.invoice_waiting}건</span>` : ""}</div>
+      <div class="bass-muted" style="font-size:12px;margin-bottom:6px;">${et.enabled ? `🧾 전자세금계산서 API 연계 켜짐(${et.sandbox ? "테스트 키 · 국세청 미연동" : "운영 키"}) — ${et.auto ? "납부 등록 즉시 자동 발행" : "[🧾 API로 발행] 단추로 발행"}${et.webhook_configured ? "" : " · ⚠️ 웹훅 서명 키 없음(상태 확인 단추로만 결과 반영)"}` : `⚪ 전자세금계산서 API 연계 꺼짐 — 홈택스에서 발행한 뒤 승인번호를 기록하세요.${(et.missing || []).length ? ` (설정 필요: ${E((et.missing || []).join(", "))})` : ""}`}</div>
       <div class="bass-muted" style="font-size:12px;margin-bottom:6px;">${r.auto ? "🟢 자동 청구·통보 켜짐 — 매달 화면을 열 때 이번 달 청구가 없으면 만들어 통보합니다." : "⚪ 자동 청구·통보 꺼짐 — 월 가맹비 금액과 공급자 사업자번호를 확인한 뒤 서버 환경변수 RENT3_FEE_AUTO=1 로 켜세요. 그 전에는 아래 [이번 달 청구·통보 만들기]로 직접 만듭니다."}</div>
       ${pl.business_number ? "" : `<div class="bass-muted" style="font-size:12px;margin-bottom:6px;">⚠️ 공급자(플랫폼) 사업자번호가 서버 환경변수(RENT3_PLATFORM_BIZ_NO)에 없어 CSV·장부 경비에 비어 보입니다.</div>`}
       ${(r.fees || []).map((f) => `<div class="fee-row" data-id="${E(f.id)}" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;">
           <strong>${E(f.billing_month)}</strong> · ${E(f.lessor_name)} (${E(f.branch)}) · <strong>${won(f.total_amount)}</strong> <span class="bass-muted">(공급가 ${won(f.supply_amount)} + 부가세 ${won(f.vat_amount)})</span> · 기한 ${E(f.due_date)}<br>
           ${chip(f)}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}${f.invoice_nts_no ? ` <code>${E(f.invoice_nts_no)}</code>` : ""}<br>
           ${f.status === "NOTICED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-paid" style="min-height:44px;">💰 납부 등록</button>` : ""}
-          ${f.status === "PAID" && f.invoice_status !== "ISSUED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-inv" style="min-height:44px;">🧾 세금계산서 승인번호 기록</button>` : ""}
+          ${f.invoice_error ? `<span style="color:var(--err);font-size:12.5px;">⚠️ ${E(f.invoice_error)}</span><br>` : ""}
+          ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) && et.enabled ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-api" style="min-height:44px;">🧾 API로 발행</button>` : ""}
+          ${f.invoice_status === "PENDING" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-refresh" style="min-height:44px;">🔄 발행 상태 확인</button>` : ""}
+          ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) ? `<button type="button" class="bass-btn bass-btn--sm fee-inv" style="min-height:44px;">✍️ 홈택스 발행분 승인번호 기록</button>` : ""}
           ${f.invoice_status === "ISSUED" ? `<button type="button" class="bass-btn bass-btn--sm fee-invcancel" style="min-height:44px;">✖ 발행 기록 취소</button>` : ""}
         </div>`).join("") || '<div class="bass-muted">청구 내역이 없습니다. 월 가맹비가 있는 가맹 임대인에게 매달 자동으로 청구됩니다.</div>'}
       <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-top:10px;">
@@ -258,6 +262,22 @@
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, `/fees/${f.id}/paid`, { method: "POST", body: { amount: amt, paid_date: date } });
         Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    }));
+    box.querySelectorAll(".fee-api").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      if (!window.confirm(`${f.lessor_name}에게 ${won(f.total_amount)} 전자세금계산서를 API로 발행합니다.${et.sandbox ? "\n(테스트 키라 국세청에는 전송되지 않습니다)" : "\n발행하면 국세청에 전송됩니다."}\n계속할까요?`)) return;
+      Bass.withLock(this, async () => {
+        try { const res = await Bass.api(APP_ID, `/fees/${f.id}/invoice-auto`, { method: "POST", body: {} }); Bass.updateAppAlert("success", res.message); }
+        finally { await loadFeeBox(); }
+      });
+    }));
+    box.querySelectorAll(".fee-refresh").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/invoice-refresh`, { method: "POST", body: {} });
+        Bass.updateAppAlert(res.fee.invoice_status === "ISSUED" ? "success" : "warning", res.message);
         await loadFeeBox();
       });
     }));

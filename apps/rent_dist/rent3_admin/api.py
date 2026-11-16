@@ -401,15 +401,16 @@ def _admin_label(request: Request) -> str:
 @router.get("/fees", dependencies=ADMIN_ONLY)
 def list_franchise_fees(month: str = ""):
     """가맹비 청구 현황(자동 통보 포함). month 를 주면 그 청구월만."""
-    from apps.rent_dist._rent3_core import feebilling as fb
+    from apps.rent_dist._rent3_core import feebilling as fb, etaxinvoice as et
     ensure_pool_seeded()
     fb.ensure_notices()
+    fb.refresh_pending()          # API 로 발행 중인 건의 결과를 확인
     rows = [f for f in fb.FranchiseFee.all() if f.status != "CANCELLED" and (not month or f.billing_month == month)]
     rows.sort(key=lambda f: (f.billing_month, f.branch), reverse=True)
     tot = lambda xs: sum(int(f.total_amount) for f in xs)
     paid = [f for f in rows if f.status == "PAID"]
     biz = {l.id: l.business_number for l in Lessor.all()}
-    return {"success": True, "platform": fb.platform_info(), "month": month or fb.month_key(), "auto": fb.auto_enabled(),
+    return {"success": True, "platform": fb.platform_info(), "month": month or fb.month_key(), "auto": fb.auto_enabled(), "etax": et.status_info(),
             "fees": [{**fb.public(f), "lessor_business_number": biz.get(f.id_lessor, "")} for f in rows],
             "summary": {"billed": tot(rows), "paid": tot(paid), "unpaid": tot([f for f in rows if f.status == "NOTICED"]),
                         "overdue": len([f for f in rows if f.overdue]), "invoice_waiting": len([f for f in paid if f.invoice_status != "ISSUED"])},
@@ -437,8 +438,48 @@ def set_fee_plan(lessor_id: str, req: FeePlanReq):
 @router.post("/fees/{fee_id}/paid", dependencies=ADMIN_ONLY)
 def register_fee_paid(fee_id: str, req: FeePaidReq, request: Request):
     from apps.rent_dist._rent3_core import feebilling as fb
+    from apps.rent_dist._rent3_core import etaxinvoice as et
     fee = fb.register_payment(fb.FranchiseFee.require(fee_id), req.amount, req.paid_date, req.method, req.memo, _admin_label(request))
-    return {"success": True, "message": f"{fee.billing_month} 가맹비 납부를 등록했습니다. 홈택스에서 전자세금계산서를 발행한 뒤 승인번호를 기록해 주세요.", "fee": fb.public(fee)}
+    msg = f"{fee.billing_month} 가맹비 납부를 등록했습니다. 홈택스에서 전자세금계산서를 발행한 뒤 승인번호를 기록해 주세요."
+    if et.auto_on_payment():        # 즉시 발급: 입금 등록과 함께 API 로 접수(실패해도 납부 등록은 유지)
+        try:
+            fee = fb.submit_invoice_api(fee, _admin_label(request))
+            msg = f"{fee.billing_month} 가맹비 납부를 등록하고 전자세금계산서를 API 로 접수했습니다. 국세청 전송 결과는 곧 자동으로 반영됩니다."
+        except DomainError as exc:
+            msg = f"납부는 등록했지만 세금계산서 자동 발행은 되지 않았습니다: {exc.message if hasattr(exc, 'message') else exc} — [🧾 API로 발행] 또는 홈택스 발행 후 승인번호 기록으로 처리해 주세요."
+            fee = fb.FranchiseFee.require(fee_id)
+    return {"success": True, "message": msg, "fee": fb.public(fee)}
+
+
+@router.post("/fees/{fee_id}/invoice-auto", dependencies=ADMIN_ONLY)
+def issue_fee_invoice_api(fee_id: str, request: Request):
+    """전자세금계산서를 API(볼타)로 발행 접수한다."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.submit_invoice_api(fb.FranchiseFee.require(fee_id), _admin_label(request))
+    return {"success": True, "message": "전자세금계산서 발행을 접수했습니다. 국세청 전송 결과는 잠시 뒤 자동 반영됩니다(발행 상태 확인으로 바로 확인할 수도 있습니다).", "fee": fb.public(fee)}
+
+
+@router.post("/fees/{fee_id}/invoice-refresh", dependencies=ADMIN_ONLY)
+def refresh_fee_invoice(fee_id: str):
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.refresh_invoice(fb.FranchiseFee.require(fee_id))
+    done = fee.invoice_status == "ISSUED"
+    return {"success": True, "message": ("발행이 완료되어 승인번호를 기록했습니다." if done else "아직 국세청 전송 결과가 없습니다(테스트 키는 10~30초, 운영 키는 약 10분 걸립니다)."), "fee": fb.public(fee)}
+
+
+@router.post("/webhooks/etax")
+async def etax_webhook(request: Request):
+    """볼타 웹훅 수신(서명 검증 필수, 인증 토큰 없음). 성공 이벤트는 조회 API 로 승인번호를 다시 확인해 확정한다."""
+    import json as _json
+    from apps.rent_dist._rent3_core import feebilling as fb, etaxinvoice as et
+    raw = await request.body()
+    et.verify_webhook(dict(request.headers), raw)
+    try:
+        event = _json.loads(raw.decode("utf-8"))
+    except ValueError:
+        raise DomainError("웹훅 본문을 읽지 못했습니다.")
+    result = fb.handle_webhook(event, request.headers.get("webhook-id", ""))
+    return {"success": True, "result": result}
 
 
 @router.post("/fees/{fee_id}/invoice", dependencies=ADMIN_ONLY)

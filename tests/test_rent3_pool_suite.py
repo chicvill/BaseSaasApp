@@ -5646,6 +5646,152 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number = keep
             lsr.save(action="t")
 
+    def test_90_etax_invoice_api_bolta_issue_poll_webhook_and_failures(self):
+        """90. 전자세금계산서 API(볼타) 연계: 필수 정보 점검 → 정발행 접수(요청 본문·헤더) → 발행 중 → 조회로 승인번호 확정(경비 등록) / 서명 검증된 웹훅(중복·실패) / 거절·네트워크 불확실(재전송 금지)·자동 발행."""
+        import base64, hashlib, hmac, json, time
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Outlay, etaxinvoice as et, feebilling as fb
+        from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin = self._login("admin")
+        AD = "/api/rent3_admin"
+        ok_no = lambda pre: next(f"{pre}{d}" for d in range(10) if validate_kr_business_number(f"{pre}{d}", strict_checksum=True)["valid"])
+        sup_no, buy_no = ok_no("2208162600"[:9]).replace("-", ""), ok_no("107815332").replace("-", "")
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number, lsr.email)
+        secret_raw = b"unit-test-secret-key-0123456789ab"
+        secret = "whsec_" + base64.b64encode(secret_raw).decode()
+        env = {"RENT3_ETAX_PROVIDER": "bolta", "RENT3_BOLTA_API_KEY": "test_abc", "RENT3_BOLTA_WEBHOOK_SECRET": secret, "RENT3_FEE_AUTO": "1",
+               "RENT3_PLATFORM_NAME": "렌트쓰리", "RENT3_PLATFORM_BIZ_NO": sup_no, "RENT3_PLATFORM_CEO": "홍길동", "RENT3_PLATFORM_EMAIL": "tax@rent3.example"}
+        calls = []
+        state = {"issue": (200, {"issuanceKey": "KEY1"}), "retrieve": (404, {})}
+
+        def fake_http(method, url, headers, body=None):
+            calls.append((method, url, headers, body))
+            if url.endswith("/v1/taxInvoices/issue"):
+                r = state["issue"]
+                if isinstance(r, Exception):
+                    raise r
+                return r
+            return state["retrieve"]
+
+        def hook(event, wid, ts=None, secret_key=secret_raw):
+            raw = json.dumps(event).encode()
+            ts = str(int(ts or time.time()))
+            sig = base64.b64encode(hmac.new(secret_key, f"{wid}.{ts}.".encode() + raw, hashlib.sha256).digest()).decode()
+            return c.post(f"{AD}/webhooks/etax", content=raw, headers={"webhook-id": wid, "webhook-timestamp": ts, "webhook-signature": f"v1,{sig}", "content-type": "application/json", **self.NOAUTH})
+
+        def fresh_fee():
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            f = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            return f.id
+
+        with mock.patch.dict(os.environ, env), mock.patch.object(et, "_http", side_effect=fake_http):
+            try:
+                lsr.app_fee, lsr.business_number, lsr.email = 33000, "", ""
+                lsr.save(action="t")
+                fid = fresh_fee()
+                pay = lambda fid_: c.post(f"{AD}/fees/{fid_}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16"})
+                self.assertEqual(c.get(f"{AD}/fees", headers=admin).json()["etax"]["enabled"], True)
+                # 납부 등록은 되지만(자동 발행 시도 실패) 필수 정보가 없으면 발행되지 않고 이유를 알려 준다
+                with mock.patch.dict(os.environ, {"RENT3_ETAX_AUTO": "1"}):
+                    r0 = pay(fid)
+                self.assertEqual(r0.status_code, 200, r0.text)
+                self.assertIn("사업자번호", r0.json()["message"])
+                self.assertEqual(fb.FranchiseFee.get(fid).status, "PAID")
+                self.assertEqual(calls, [])                                                               # 정보가 부족하면 API 를 부르지 않는다
+                lsr = Lessor.get(lsr.id); lsr.business_number, lsr.email = buy_no, "lessor@example.com"; lsr.save(action="t")
+                # 접수: 요청 본문·헤더 확인 → 발행 중
+                self.assertIn(c.post(f"{AD}/fees/{fid}/invoice-auto", headers=self._login("chic")).status_code, (401, 403))
+                r1 = c.post(f"{AD}/fees/{fid}/invoice-auto", headers=admin)
+                self.assertEqual(r1.status_code, 200, r1.text)
+                m, url, hd, body = calls[-1]
+                self.assertEqual((m, url), ("POST", "https://xapi.bolta.io/v1/taxInvoices/issue"))
+                self.assertTrue(hd["Authorization"].startswith("Basic ") and hd["Bolta-Client-Reference-Id"] == f"{fid}-1")
+                self.assertEqual(base64.b64decode(hd["Authorization"][6:]).decode(), "test_abc:")
+                self.assertEqual((body["taxType"], body["purpose"], body["date"]), ("TAXABLE", "RECEIPT", "2026-11-16"))
+                self.assertEqual((body["supplier"]["identificationNumber"], body["supplied"]["identificationNumber"]), (sup_no, buy_no))
+                self.assertEqual((body["items"][0]["supplyCost"], body["items"][0]["tax"]), (30000, 3000))
+                self.assertEqual(body["supplied"]["managers"][0]["email"], "lessor@example.com")
+                fee = fb.FranchiseFee.get(fid)
+                self.assertEqual((fee.invoice_status, fee.invoice_key), ("PENDING", "KEY1"))
+                # 발행 중에는 중복 접수·수동 기록 불가, 발행 대기 목록에서도 빠진다
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-auto", headers=admin).status_code, 400)
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": "20261116-41000000-12345678"}).status_code, 400)
+                # 아직 결과 없음 → 그대로 발행 중
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-refresh", headers=admin).json()["fee"]["invoice_status"], "PENDING")
+                # 조회로 승인번호 확정 → 발행 완료·장부 경비 등록
+                state["retrieve"] = (200, {"issuanceKey": "KEY1", "ntsTransactionId": "202611164100000012345678", "issuedAt": "2026-11-16T10:00:00+09:00"})
+                r2 = c.post(f"{AD}/fees/{fid}/invoice-refresh", headers=admin).json()["fee"]
+                self.assertEqual((r2["invoice_status"], r2["invoice_nts_no"], r2["invoice_via"]), ("ISSUED", "20261116-41000000-12345678", "bolta"))
+                self.assertEqual(Outlay.get(r2["outlay_id"]).amount, 33000)
+                # 웹훅: 서명 검증·중복·실패 이벤트
+                fid2 = fresh_fee(); pay(fid2)
+                state["issue"] = (200, {"issuanceKey": "KEY2"})
+                c.post(f"{AD}/fees/{fid2}/invoice-auto", headers=admin)
+                ev = {"eventType": "TAX_INVOICE_ISSUANCE_SUCCESS", "data": {"issuanceKey": "KEY2", "taxInvoiceUrl": "https://x"}}
+                self.assertEqual(hook(ev, "wh1", secret_key=b"wrong-key-xxxxxxxxxxxxxxxxxxxxxxxxxxx").status_code, 400)      # 서명 불일치
+                self.assertEqual(hook(ev, "wh1", ts=time.time() - 3600).status_code, 400)                              # 오래된 시각
+                self.assertEqual(c.post(f"{AD}/webhooks/etax", content=b"{}", headers={**self.NOAUTH}).status_code, 400)     # 헤더 없음
+                self.assertEqual(fb.FranchiseFee.get(fid2).invoice_status, "PENDING")                                   # 검증 실패는 아무것도 바꾸지 않는다
+                state["retrieve"] = (200, {"issuanceKey": "KEY2", "ntsTransactionId": "202611164100000099999999", "issuedAt": "2026-11-16T11:00:00+09:00"})
+                good = hook(ev, "wh2")
+                self.assertEqual((good.status_code, good.json()["result"]), (200, "issued"))
+                self.assertEqual(fb.FranchiseFee.get(fid2).invoice_nts_no, "20261116-41000000-99999999")
+                self.assertEqual(hook(ev, "wh2").json()["result"], "duplicate")
+                # 실패 웹훅 → 실패 기록 → 같은 청구를 다시 접수(요청 관리번호는 -2)
+                fid3 = fresh_fee(); pay(fid3)
+                state["issue"] = (200, {"issuanceKey": "KEY3"}); state["retrieve"] = (404, {})
+                c.post(f"{AD}/fees/{fid3}/invoice-auto", headers=admin)
+                bad = hook({"eventType": "TAX_INVOICE_ISSUANCE_FAILURE", "data": {"issuanceKey": "KEY3", "cause": {"code": "INVALID_SUPPLIED_BUSINESS", "message": "휴업"}}}, "wh3")
+                self.assertEqual(bad.json()["result"], "failed")
+                f3 = fb.FranchiseFee.get(fid3)
+                self.assertEqual(f3.invoice_status, "FAILED")
+                self.assertIn("INVALID_SUPPLIED_BUSINESS", f3.invoice_error)
+                state["issue"] = (200, {"issuanceKey": "KEY3B"})
+                self.assertEqual(c.post(f"{AD}/fees/{fid3}/invoice-auto", headers=admin).status_code, 200)
+                self.assertEqual(calls[-1][2]["Bolta-Client-Reference-Id"], f"{fid3}-2")
+                # 거절(400)은 실패, 네트워크 오류·5xx 는 '접수 불확실'(재전송 금지)
+                fid4 = fresh_fee(); pay(fid4)
+                state["issue"] = (400, {"code": "INVALID_REQUEST", "message": "사업자번호 오류"})
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)
+                self.assertEqual(fb.FranchiseFee.get(fid4).invoice_status, "FAILED")
+                state["issue"] = ConnectionError("down")
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)
+                u = fb.FranchiseFee.get(fid4)
+                self.assertEqual((u.invoice_status, u.invoice_client_ref), ("PENDING", f"{fid4}-2"))
+                n_calls = len(calls)
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)           # 불확실 상태에서 다시 접수하지 않는다
+                self.assertEqual(len(calls), n_calls)
+                # 자동 발행: 납부 등록 직후 접수
+                fid5 = fresh_fee()
+                state["issue"] = (200, {"issuanceKey": "KEY5"})
+                with mock.patch.dict(os.environ, {"RENT3_ETAX_AUTO": "1"}):
+                    r5 = pay(fid5)
+                self.assertEqual(fb.FranchiseFee.get(fid5).invoice_status, "PENDING")
+                self.assertIn("접수", r5.json()["message"])
+                # 서명 키 없으면 웹훅 거절
+                with mock.patch.dict(os.environ, {"RENT3_BOLTA_WEBHOOK_SECRET": ""}):
+                    self.assertEqual(hook(ev, "wh9").status_code, 400)
+                # 화면 문자열
+                aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+                for needle in ("fee-api", "/invoice-auto", "fee-refresh", "/invoice-refresh", "API로 발행", "발행 상태 확인"):
+                    self.assertIn(needle, aj, needle)
+            finally:
+                for f0 in list(fb.FranchiseFee.all()):
+                    f0.delete(action="t")
+                for o in list(Outlay.find(category="platform_fee")):
+                    o.delete(action="t")
+                for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                    if m0.category.startswith("가맹비"):
+                        m0.delete(action="t")
+                lsr = Lessor.get(lsr.id)
+                lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number, lsr.email = keep
+                lsr.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()
