@@ -746,13 +746,32 @@ class Contract(PoolObj):
             if p.payment_kind == "MONTHLY_RENT"
         ]
         total_pool_paid = sum(p.total_amount for p in pays)
-        remaining_credit = total_pool_paid
 
-        rows: List[Dict[str, Any]] = []
-        total_due = 0
+        # 수납 상계 순서: ① 각 납부 건은 먼저 '그 건에 적힌 청구월'의 청구액을 채우고(달 단위로 바로 보이게),
+        # ② 남는 금액(청구액을 넘는 납부·청구월이 없거나 범위 밖인 납부·이월 합산 납부)은 가장 오래된 미납 달부터 채운다(FIFO).
+        # 이렇게 해야 '납부 내역이 있는 달이 미납으로 나오는' 일이 없고, 부족분이 실제로 비어 있는 달에 표시된다. 총 미납액은 예전 방식과 같다.
+        labelled: Dict[str, int] = {}
+        for p in pays:
+            ym0 = (p.billing_month or "")[:7]
+            if len(ym0) == 7 and ym0[:4].isdigit() and ym0[4] == "-" and ym0[5:7].isdigit():
+                labelled[ym0] = labelled.get(ym0, 0) + p.total_amount
+
+        specs: List[Dict[str, Any]] = []
         for idx in range(start_idx, end_idx + 1):
             ym_str = index_to_ym(idx)
             spec = self.due_for_month(ym_str)
+            specs.append(spec)
+        first_alloc: Dict[str, int] = {}
+        for spec in specs:
+            if spec["rule_state"] == "POSTPAID_MOVE_IN_EXEMPT" or spec["due"] == 0:
+                continue
+            first_alloc[spec["ym"]] = min(spec["due"], labelled.get(spec["ym"], 0))
+        remaining_credit = total_pool_paid - sum(first_alloc.values())
+
+        rows: List[Dict[str, Any]] = []
+        total_due = 0
+        for spec in specs:
+            ym_str = spec["ym"]
             due = spec["due"]
             total_due += due
 
@@ -776,8 +795,10 @@ class Contract(PoolObj):
                 })
                 continue
 
-            allocated = min(due, remaining_credit)
-            remaining_credit -= allocated
+            direct = first_alloc.get(ym_str, 0)
+            extra = min(due - direct, remaining_credit)
+            remaining_credit -= extra
+            allocated = direct + extra
             unpaid = due - allocated
             if unpaid == 0:
                 st = "PAID"

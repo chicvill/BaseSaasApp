@@ -6003,6 +6003,43 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(again.status_code, 200, again.text)
         self.assertTrue(again.json().get("already_completed"))
 
+    def test_93_ledger_allocates_labelled_month_first_then_fifo(self):
+        """93. 원장 상계: 각 납부 건은 먼저 '적힌 청구월'을 채우고 남는 금액만 오래된 미납부터 채운다 → 납부 내역이 있는 달이 미납으로 나오지 않고, 비어 있는 달이 미납으로 나온다(총 미납액은 FIFO와 같다)."""
+        from apps.rent_dist._rent3_core import Contract, Pay
+        ct = next(x for x in Contract.find(branch="main", status="ACTIVE") if x.monthly_rent + x.maintenance_fee > 0)
+        base = ct.ledger()
+        payable = [m for m in base["months"] if m["due"] > 0 and m["status"] not in ("EXEMPT_POSTPAID", "ZERO_DUE")]
+        self.assertGreaterEqual(len(payable), 3)
+        before_paid = base["total_paid"]
+        due_total = sum(m["due"] for m in payable)
+        # 가장 최근 두 달만 정확히 납부한 상황(앞선 달들은 비어 있음)을 만든다: 기존 납부를 잠시 치워 두고 시험
+        olds = [(x, x.model_dump()) for x in Pay.find(id_contract=ct.id)]
+        made = []
+        try:
+            for x, _ in olds:
+                x.delete(action="t")
+            for m in payable[-2:]:
+                made.append(Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payment_kind="MONTHLY_RENT", billing_month=m["ym"],
+                                paid_date=m["ym"] + "-10", total_amount=m["due"]).save(action="t"))
+            lg = ct.ledger()
+            by = {m["ym"]: m for m in lg["months"]}
+            for m in payable[-2:]:
+                self.assertEqual((by[m["ym"]]["unpaid"], by[m["ym"]]["status"]), (0, "PAID"), m["ym"])     # 납부 내역이 있는 달은 미납이 아니다
+            self.assertEqual(lg["oldest_unpaid_ym"], payable[0]["ym"])                                       # 비어 있는 가장 오래된 달부터 미납
+            self.assertEqual(lg["total_unpaid"], due_total - sum(m["due"] for m in payable[-2:]))             # 총 미납액은 FIFO 계산과 같다
+            # 남는 금액: 청구월이 없는 큰 납부는 가장 오래된 미납부터 채운다
+            made.append(Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payment_kind="MONTHLY_RENT", billing_month="",
+                            paid_date="2026-01-01", total_amount=payable[0]["due"]).save(action="t"))
+            lg2 = ct.ledger()
+            self.assertEqual({m["ym"]: m["status"] for m in lg2["months"]}[payable[0]["ym"]], "PAID")
+            self.assertEqual(lg2["total_unpaid"], lg["total_unpaid"] - payable[0]["due"])
+        finally:
+            for x in made:
+                x.delete(action="t")
+            for _, d in olds:
+                Pay(**d).save(action="t")
+        self.assertEqual(ct.ledger()["total_paid"], before_paid)
+
 
 if __name__ == "__main__":
     unittest.main()
