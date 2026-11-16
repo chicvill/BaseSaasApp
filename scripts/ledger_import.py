@@ -269,6 +269,8 @@ def import_ledger(lessor, bldg, spec: dict, base_dir: str) -> dict:
             nonlocal n_p
             if total <= 0:
                 return
+            if Pay.first(idempotency_key=f"import:{branch}:{no}:{key}") is not None:      # 같은 장부를 다시 가져와도 납부가 겹치지 않게
+                return
             fee_part = fee_amt if fee_amt is not None else (round(total * rec["fee"] / (rec["rent"] + rec["fee"])) if rec["fee"] else 0)
             Pay(branch=branch, id_building=bldg.id, id_room=room.id, room_no=no, id_contract=cid, id_tenant=tid,
                 payer_name=rec["name"], billing_month=ym, paid_date=when.isoformat(),

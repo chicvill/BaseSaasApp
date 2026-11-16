@@ -636,6 +636,12 @@
         <div style="margin-top:8px;">${rows}</div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🔎 Data Pool 중복 점검</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">엑셀·장부를 여러 번 읽어 들였거나 같은 입금이 두 번 기록됐는지 점검합니다. <strong>점검만으로는 아무것도 바뀌지 않습니다.</strong> 내용이 완전히 같은 납부만 [중복 정리]로 지울 수 있고(가장 먼저 만든 한 건을 남김), 지우기 전에 자동 백업합니다.</div>
+        <button id="btnDupScan" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 중복 점검</button>
+        <div id="dupResult" style="margin-top:10px;font-size:13px;line-height:1.7;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>🏢 임대인 암호 설정 · 6개월 변경 권유</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">전화로 본인 확인을 마친 임대인에게 <strong>1회용 비밀번호 설정 링크</strong>(7일 유효, 4칸 대조 필수)를 보내거나, 6개월(180일)이 지난 임대인에게 <strong>새 암호 설정 권유 메시지·링크</strong>를 보냅니다(새 비밀번호를 정하기 전까지 기존 비밀번호와 등록 기기는 유지됩니다).</div>
         <select id="opsLessor" class="bass-select" style="width:100%;min-height:44px;margin-bottom:8px;">
@@ -692,6 +698,27 @@
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    document.getElementById("btnDupScan").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const E = Bass.escapeHtml, out = document.getElementById("dupResult");
+        const r = await Bass.api(APP_ID, "/pool-duplicates");
+        const ex = r.exact_duplicate_groups || [];
+        const line = (p) => `${E(p.branch)} ${E(p.room_no)}호 ${E(p.billing_month)} · ${Number(p.amount).toLocaleString("ko-KR")}원 · 납부일 ${E(p.paid_date)} · <code>${E(p.id)}</code>`;
+        out.innerHTML = `<div>납부 ${r.payments_total}건 점검 — <strong style="color:${r.removable_count ? "var(--err)" : "var(--ok)"};">내용이 같은 중복 ${r.removable_count}건</strong> · 같은 달 여러 건(참고) ${(r.same_month_multiple || []).length}건 · 같은 호실 계약 중복 ${(r.duplicate_contracts || []).length}건 · 임차인 중복 ${(r.duplicate_tenants || []).length}건 · 호실 중복 ${(r.duplicate_rooms || []).length}건</div>
+          ${ex.slice(0, 20).map((g) => `<div style="padding:6px 0;border-bottom:1px solid var(--border);">남김: ${line(g.keep)}<br>${g.duplicates.map((d) => `<span style="color:var(--err);">지움 대상: ${line(d)}</span>`).join("<br>")}</div>`).join("")}
+          ${(r.same_month_multiple || []).slice(0, 10).map((m) => `<div class="bass-muted" style="padding:4px 0;">참고(나눠 낸 정상 납부일 수 있음) ${E(m.contract)} ${E(m.billing_month)}: ${m.payments.map((p) => `${Number(p.amount).toLocaleString("ko-KR")}원(${E(p.paid_date)})`).join(" + ")}</div>`).join("")}
+          ${r.removable_count ? `<button id="btnDupRemove" class="bass-btn" type="button" style="min-height:44px;margin-top:8px;">🧹 중복 ${r.removable_count}건 정리 (자동 백업 후)</button>` : ""}`;
+        const rm = document.getElementById("btnDupRemove");
+        if (rm) rm.addEventListener("click", function () {
+          if (!window.confirm(`내용이 완전히 같은 중복 납부 ${r.removable_count}건을 지웁니다(가장 먼저 만든 건은 남김). 지우기 전에 풀 전체를 백업합니다. 계속할까요?`)) return;
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, "/pool-duplicates/remove", { method: "POST", body: { apply: true } });
+            Bass.updateAppAlert("success", res.message);
+            out.innerHTML = `<strong>${E(res.message)}</strong>`;
+          });
+        });
+      });
+    });
     const lsrOut = document.getElementById("opsLessorResult");
     document.getElementById("btnLessorInvite").addEventListener("click", function () {
       Bass.withLock(this, async () => {

@@ -6040,6 +6040,51 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 Pay(**d).save(action="t")
         self.assertEqual(ct.ledger()["total_paid"], before_paid)
 
+    def test_94_pool_duplicate_scan_and_safe_remove_and_reseed_idempotent(self):
+        """94. Data Pool 중복 점검: 내용이 같은 납부는 자동 정리 대상(가장 먼저 만든 한 건 유지·자동 백업), 같은 달 나눠 낸 납부는 참고만, 관리인 전용, 시드를 다시 돌려도 납부가 겹치지 않음."""
+        from apps.rent_dist._rent3_core import Contract, Pay, ensure_pool_seeded
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        self.assertIn(c.get(f"{AD}/pool-duplicates", headers=chic).status_code, (401, 403))
+        self.assertIn(c.post(f"{AD}/pool-duplicates/remove", headers=chic, json={"apply": True}).status_code, (401, 403))
+        ct = next(x for x in Contract.find(branch="main", status="ACTIVE") if x.monthly_rent > 0)
+        base = dict(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payment_kind="MONTHLY_RENT", billing_month="2031-01", paid_date="2031-01-10", total_amount=123000)
+        made = []
+        try:
+            first = Pay(**base).save(action="t"); made.append(first)
+            before = c.get(f"{AD}/pool-duplicates", headers=admin).json()
+            self.assertEqual(before["removable_count"], 0)
+            dup = Pay(**base).save(action="t"); made.append(dup)                             # 같은 입금을 두 번 기록
+            split = Pay(**{**base, "billing_month": "2031-02", "total_amount": 100000}).save(action="t"); made.append(split)
+            split2 = Pay(**{**base, "billing_month": "2031-02", "total_amount": 23000, "paid_date": "2031-02-15"}).save(action="t"); made.append(split2)   # 나눠 낸 정상 납부
+            rep = c.get(f"{AD}/pool-duplicates", headers=admin).json()
+            self.assertEqual(rep["removable_count"], 1)
+            grp = rep["exact_duplicate_groups"][0]
+            self.assertEqual({grp["keep"]["id"], *[d["id"] for d in grp["duplicates"]]}, {first.id, dup.id})                  # 한 건만 남기고 나머지가 정리 대상(만든 시각이 같은 초면 임의)
+            first, dup = Pay.get(grp["keep"]["id"]), Pay.get(grp["duplicates"][0]["id"])
+            self.assertTrue(any(m["billing_month"] == "2031-02" for m in rep["same_month_multiple"]))                           # 나눠 낸 납부는 참고만
+            dry = c.post(f"{AD}/pool-duplicates/remove", headers=admin, json={"apply": False}).json()
+            self.assertEqual((dry["applied"], dry["would_remove"]), (False, 1))
+            self.assertIsNotNone(Pay.get(dup.id))                                                                              # 점검만으로는 지우지 않는다
+            done = c.post(f"{AD}/pool-duplicates/remove", headers=admin, json={"apply": True}).json()
+            self.assertEqual((done["applied"], done["removed"]), (True, 1))
+            self.assertTrue(done["backup"])
+            self.assertIsNone(Pay.get(dup.id))
+            self.assertIsNotNone(Pay.get(first.id))
+            self.assertIsNotNone(Pay.get(split.id)); self.assertIsNotNone(Pay.get(split2.id))                                  # 나눠 낸 납부는 그대로
+            # 시드를 다시 돌려도 시드 납부가 겹치지 않는다
+            ensure_pool_seeded(force=True)
+            ensure_pool_seeded(force=True)
+            keys = [p.idempotency_key for p in Pay.all() if p.idempotency_key.startswith("seed:")]
+            self.assertEqual(len(keys), len(set(keys)))                                                                         # 같은 시드 납부가 겹치지 않는다
+            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("btnDupScan", "/pool-duplicates", "btnDupRemove", "중복 점검"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for x in made:
+                x.delete(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -719,6 +719,28 @@ def settle_lessor_fee(lessor_id: str):
     }
 
 
+class DupRemoveReq(BaseModel):
+    apply: bool = False
+
+
+@router.get("/pool-duplicates", dependencies=ADMIN_ONLY)
+def pool_duplicates():
+    """Data Pool 중복 점검(읽기 전용): 내용이 같은 납부(자동 정리 가능)·같은 달 여러 건·같은 호실의 계약/임차인 중복."""
+    from apps.rent_dist._rent3_core import dupcheck
+    ensure_pool_seeded()
+    return {"success": True, **dupcheck.scan()}
+
+
+@router.post("/pool-duplicates/remove", dependencies=ADMIN_ONLY)
+def remove_pool_duplicates(req: DupRemoveReq):
+    """내용이 완전히 같은 중복 납부만 정리한다(가장 먼저 만든 한 건을 남김). apply=false 면 점검만, true 면 풀 전체를 먼저 백업한 뒤 지운다."""
+    from apps.rent_dist._rent3_core import dupcheck
+    ensure_pool_seeded()
+    res = dupcheck.remove_exact(apply=req.apply)
+    msg = (f"중복 납부 {res['removed']}건을 지웠습니다(백업 {res['backup']})." if res["applied"] else f"지울 수 있는 중복 납부 {res['would_remove']}건을 찾았습니다(아직 지우지 않았습니다).")
+    return {"success": True, "message": msg, **res}
+
+
 @router.get("/pool/{collection}", dependencies=ADMIN_ONLY)
 def inspect_pool_collection(collection: str, q: str = ""):
     ensure_pool_seeded()

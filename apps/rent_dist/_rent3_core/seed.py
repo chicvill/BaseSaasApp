@@ -514,6 +514,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
             total_amount=550000,
             payment_kind="MONTHLY_RENT",
             method="TRANSFER",
+            id=f"pay_seed_201_{ym}",          # 고정 id — 시드를 다시 돌려도 같은 납부가 또 생기지 않는다(덮어쓴다)
             idempotency_key=f"seed:201:{ym}",
         ).save("seeded", app_source=src)
 
@@ -533,6 +534,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
         total_amount=500000,
         payment_kind="MONTHLY_RENT",
         method="KAKAOPAY",
+        id="pay_seed_301_2026-10",
         idempotency_key="seed:301:2026-10",
     ).save("seeded", app_source=src)
 
@@ -552,6 +554,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
         total_amount=1100000,
         payment_kind="MONTHLY_RENT",
         method="TRANSFER",
+        id="pay_seed_101_2026-10",
         idempotency_key="seed:101:2026-10",
     ).save("seeded", app_source=src)
 
