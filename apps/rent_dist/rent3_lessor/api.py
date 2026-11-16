@@ -2,6 +2,7 @@
 apps/rent3_lessor/api.py — 임대인 전용 API 라우터.
 """
 from datetime import date
+import re
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
@@ -183,6 +184,9 @@ class FranchiseRegistryReq(BaseModel):
 class FranchiseBizRegReq(BaseModel):
     branch: str = "main"
     attachment_data_url: str
+    email: str = ""                  # 세금계산서·현금영수증 수신 이메일(필수에 가깝다 — 비면 발급 정보 카드가 경고한다)
+    business_type: str = ""          # 업태
+    business_item: str = ""          # 종목
     business_number: str = ""
     representative_name: str = ""
     company_name: str = ""
@@ -306,6 +310,21 @@ def franchise_bizreg(req: FranchiseBizRegReq):
         manual_opening_date=req.opening_date,
         building_address=getattr(bldg, "address", "") if bldg else "",
     )
+    ex = (ai or {}).get("extracted") or {}
+    email = (req.email or "").strip()
+    if email:
+        from apps.rent_dist._rent3_core import validate_email_format
+        if not validate_email_format(email):
+            raise DomainError("이메일 형식이 올바르지 않습니다.", hint="세금계산서를 받을 이메일을 정확히 입력해 주세요(예: name@example.com).")
+        lsr.email = email
+    btype = (req.business_type or ex.get("business_type") or "").strip()
+    bitem = (req.business_item or ex.get("business_item") or "").strip()
+    if bldg is not None and (btype or bitem):          # 공급자 업태·종목(세금계산서 공급자 정보)
+        if btype:
+            bldg.biz_type = btype
+        if bitem:
+            bldg.biz_item = bitem
+        bldg.save(action="franchise_bizreg_biz_type", app_source=APP_SRC)
     docs = dict(lsr.franchise_docs or {})
     docs["bizreg"] = {
         "file": saved["file"],
@@ -1408,6 +1427,30 @@ class TaxInvoiceStatusReq(BaseModel):
     write_date: str = ""
     supply_amount: Optional[int] = None
     tax_amount: Optional[int] = None
+
+
+class CashReceiptReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    billing_month: str
+    approval_no: str
+
+
+@router.post("/tax/cash-receipt")
+def record_rent_cash_receipt(req: CashReceiptReq):
+    """홈택스에서 발급한 월세 현금영수증 승인번호를 그 호실·청구월의 납부 건에 기록한다(임차인 연말정산 납부확인서에 표시)."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    no = re.sub(r"\D", "", req.approval_no or "")
+    if not 6 <= len(no) <= 12:
+        raise DomainError("현금영수증 승인번호는 숫자 6~12자리로 입력해 주세요.")
+    pays = [p for p in Pay.find(branch=b_id, room_no=req.room_no) if p.payment_kind == "MONTHLY_RENT" and TaxAndCertificateService.payment_tax_ym(p) == req.billing_month]
+    if not pays:
+        raise DomainError(f"{req.room_no}호 {req.billing_month} 월세 납부 내역이 없어 기록할 수 없습니다.")
+    for p in pays:
+        p.cash_receipt_no = no
+        p.save(action="rent_cash_receipt_recorded", app_source=APP_SRC)
+    return {"success": True, "message": f"{req.room_no}호 {req.billing_month} 월세 {len(pays)}건에 현금영수증 승인번호({no})를 기록했습니다."}
 
 
 @router.post("/tax/invoices/status")

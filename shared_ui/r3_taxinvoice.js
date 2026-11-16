@@ -36,7 +36,22 @@
     } catch (e) { return false; }
   }
 
+  // 현금영수증 값(식별번호·금액·구분)을 항목별 복사 행으로
+  function cashRows(c, o) {
+    var r = [];
+    function add(l, v) { if (v !== "" && v != null) r.push({ g: "현금영수증", l: l, v: String(v) }); }
+    add("발급 구분", c.kind); add(c.identifier_label || "식별번호", c.identifier); add("거래일자", c.date); add("금액", Number(c.amount || 0));
+    add("품목", c.item || (o.items && o.items[0] && o.items[0].name)); add("이메일(선택)", c.email);
+    return r;
+  }
+
   function openCard(o) {
+    if (o.cash && o.taxAvailable !== false && !o.cashOnly) return openTabs(o);
+    return render(o, o.cash && (o.taxAvailable === false || o.cashOnly) ? "cash" : "tax");
+  }
+  function openTabs(o) { return render(o, "tax"); }
+
+  function render(o, mode) {
     var sup = o.supplier || {}, buy = o.buyer || {}, items = o.items || [];
     var supply = items.reduce(function (a, x) { return a + Number(x.supply || 0); }, 0);
     var tax = items.reduce(function (a, x) { return a + Number(x.tax || 0); }, 0);
@@ -52,6 +67,7 @@
       add("품목", p + "이름", x.name); add("품목", p + "공급가액", Number(x.supply || 0)); add("품목", p + "세액", Number(x.tax || 0));
     });
     add("품목", "합계금액", supply + tax); add("비고", "비고", o.note);
+    if (mode === "cash") rows = cashRows(o.cash, o);
 
     var groups = []; rows.forEach(function (r) { if (groups.indexOf(r.g) < 0) groups.push(r.g); });
     var plain = o.title + "\n" + groups.map(function (g) {
@@ -65,13 +81,15 @@
       ? '<div style="border-left:4px solid #f59e0b;background:rgba(245,158,11,.12);padding:8px 10px;border-radius:8px;margin-bottom:10px;font-size:13px;line-height:1.6;">⚠️ <strong>비어 있는 필수 정보</strong>: ' + esc(o.missing.join(", ")) + "<br>홈택스에서 발급하려면 먼저 채워 주세요.</div>" : "";
     ov.innerHTML = '<div style="width:100%;max-width:600px;max-height:92vh;overflow-y:auto;background:#17172e;color:#eceaf7;border:1px solid #334;border-radius:16px 16px 0 0;padding:14px 14px 22px;">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;"><strong style="font-size:15px;">🧾 ' + esc(o.title) + '</strong><button type="button" data-x style="min-width:44px;min-height:44px;font-size:18px;">✕</button></div>' +
-      '<ol style="margin:0 0 10px 18px;padding:0;font-size:13px;line-height:1.7;"><li>아래 값을 <strong>항목별로 복사</strong>하거나 <strong>전체 복사</strong>합니다.</li>' +
-      '<li><strong>홈택스 열기</strong> → 공급자 본인 인증서로 로그인 → <em>전자(세금)계산서 발급(건별)</em> 메뉴에 붙여 넣습니다.</li>' +
-      '<li>발급이 끝나면 <strong>국세청 승인번호</strong>를 앱에 기록합니다.</li></ol>' +
-      missing +
+      (o.cash ? '<div style="display:flex;gap:6px;margin-bottom:8px;"><button type="button" data-mode="tax"' + (o.taxAvailable === false ? " disabled" : "") + ' style="flex:1;min-height:44px;font-weight:' + (mode === "tax" ? "800" : "400") + ';border:' + (mode === "tax" ? "2px solid #6366f1" : "1px solid #334") + ';">🧾 세금계산서</button><button type="button" data-mode="cash" style="flex:1;min-height:44px;font-weight:' + (mode === "cash" ? "800" : "400") + ';border:' + (mode === "cash" ? "2px solid #6366f1" : "1px solid #334") + ';">💵 현금영수증</button></div>' : "") +
+      (mode === "cash" && o.taxAvailable === false ? '<div style="border-left:4px solid #6366f1;background:rgba(99,102,241,.12);padding:8px 10px;border-radius:8px;margin-bottom:10px;font-size:13px;line-height:1.6;">ℹ️ <strong>사업자등록번호가 없어 세금계산서는 발급할 수 없습니다.</strong> 현금영수증(소득공제용)으로 발급합니다.</div>' : "") +
+      (mode === "cash"
+        ? '<ol style="margin:0 0 10px 18px;padding:0;font-size:13px;line-height:1.7;"><li>아래 값을 항목별로 복사하거나 전체 복사합니다.</li><li><strong>홈택스 열기</strong> → 공급자 본인 인증서로 로그인 → <em>현금영수증 발급</em> 메뉴에 식별번호·금액을 입력합니다.</li><li>발급이 끝나면 <strong>현금영수증 승인번호</strong>를 앱에 기록합니다.</li></ol>'
+        : '<ol style="margin:0 0 10px 18px;padding:0;font-size:13px;line-height:1.7;"><li>아래 값을 <strong>항목별로 복사</strong>하거나 <strong>전체 복사</strong>합니다.</li><li><strong>홈택스 열기</strong> → 공급자 본인 인증서로 로그인 → <em>전자(세금)계산서 발급(건별)</em> 메뉴에 붙여 넣습니다.</li><li>발급이 끝나면 <strong>국세청 승인번호</strong>를 앱에 기록합니다.</li></ol>') +
+      (mode === "cash" ? "" : missing) +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;"><button type="button" data-all style="min-height:46px;padding:0 14px;font-weight:700;">📋 전체 복사</button>' +
       '<a href="' + HOMETAX + '" target="_blank" rel="noopener" data-ht style="display:inline-flex;align-items:center;min-height:46px;padding:0 14px;font-weight:700;border:1px solid #6366f1;border-radius:8px;color:#c7d2fe;text-decoration:none;">🏛️ 홈택스 열기 ↗</a>' +
-      (o.onRecord ? '<button type="button" data-rec style="min-height:46px;padding:0 14px;font-weight:700;">' + esc(o.recordLabel || "✍️ 발급했어요 — 승인번호 기록") + "</button>" : "") + "</div>" +
+      (o.onRecord ? '<button type="button" data-rec style="min-height:46px;padding:0 14px;font-weight:700;">' + esc(mode === "cash" ? "✍️ 현금영수증 발급했어요 — 승인번호 기록" : (o.recordLabel || "✍️ 발급했어요 — 승인번호 기록")) + "</button>" : "") + "</div>" +
       '<div data-msg style="min-height:18px;font-size:12.5px;color:#86efac;margin-bottom:4px;"></div>' +
       groups.map(function (g) {
         return '<div style="font-weight:800;margin:10px 0 4px;font-size:13px;opacity:.85;">' + esc(g) + "</div>" + rows.filter(function (r) { return r.g === g; }).map(function (r, i) {
@@ -85,10 +103,12 @@
     function close() { ov.remove(); }
     ov.addEventListener("click", function (e) {
       if (e.target === ov || e.target.closest("[data-x]")) { close(); return; }
+      var md = e.target.closest("[data-mode]");
+      if (md && !md.disabled) { close(); render(o, md.getAttribute("data-mode")); return; }
       var one = e.target.closest("[data-copy]");
       if (one) { copy(one.getAttribute("data-copy")).then(function (ok) { say(ok ? "복사했습니다" : "복사하지 못했습니다 — 값을 길게 눌러 직접 복사해 주세요"); }); return; }
       if (e.target.closest("[data-all]")) { copy(plain).then(function (ok) { say(ok ? "전체를 복사했습니다" : "복사하지 못했습니다"); }); return; }
-      if (e.target.closest("[data-rec]")) { close(); o.onRecord(); }
+      if (e.target.closest("[data-rec]")) { close(); o.onRecord(mode); }
     });
     return ov;
   }

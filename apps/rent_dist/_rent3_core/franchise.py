@@ -321,7 +321,7 @@ def registry_file_path(lessor: Any):
     return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
 
 
-def save_bizreg_file(lessor_id: str, data_url: str) -> Dict[str, str]:
+def save_bizreg_file(lessor_id: str, data_url: str) -> Dict[str, str]:      # lessor_id 자리에 임차인 id 도 쓴다(파일명 접두사)
     """임대인이 촬영·선택한 사업자등록증 파일을 저장한다 (관리자 홈택스 대조·승인용)."""
     m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", (data_url or "").strip(), re.DOTALL)
     if not m or m.group(1).lower() not in ALLOWED_MIME_TO_EXT:
@@ -476,6 +476,9 @@ def application_summary(lessor: Any, building: Any) -> Dict[str, Any]:
             "verification": biz_ver,
             "uploaded_at": biz.get("uploaded_at", ""),
             "approved_business_number": lessor.business_number or "",
+            "email": lessor.email or "",
+            "business_type": getattr(building, "biz_type", "") if building else "",
+            "business_item": getattr(building, "biz_item", "") if building else "",
         },
         "applied_at": lessor.applied_at,
         "ready_to_submit": steps["identity"] and steps["building"] and steps["registry"],

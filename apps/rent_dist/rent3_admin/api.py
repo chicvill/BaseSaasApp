@@ -489,6 +489,19 @@ def fee_invoice_card(fee_id: str):
     return {"success": True, "card": fb.invoice_card(fb.FranchiseFee.require(fee_id))}
 
 
+class FeeCashReq(BaseModel):
+    approval_no: str
+    issue_date: str = ""
+
+
+@router.post("/fees/{fee_id}/cash-receipt", dependencies=ADMIN_ONLY)
+def record_fee_cash_receipt(fee_id: str, req: FeeCashReq, request: Request):
+    """홈택스에서 발급한 현금영수증 승인번호를 기록한다(사업자번호가 없는 임대인의 가맹비 등)."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.record_cash_receipt(fb.FranchiseFee.require(fee_id), req.approval_no, req.issue_date, _admin_label(request))
+    return {"success": True, "message": f"{fee.billing_month} 가맹비 현금영수증(승인번호 {fee.invoice_nts_no})을 기록했고 임대인 장부의 경비로 등록했습니다.", "fee": fb.public(fee)}
+
+
 @router.post("/fees/{fee_id}/invoice", dependencies=ADMIN_ONLY)
 def record_fee_invoice(fee_id: str, req: FeeInvoiceReq, request: Request):
     from apps.rent_dist._rent3_core import feebilling as fb

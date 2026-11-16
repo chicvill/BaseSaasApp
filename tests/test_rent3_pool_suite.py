@@ -3459,7 +3459,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
         self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
-                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut"})
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo"})
         for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
                        'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
             self.assertIn(needle, menu, needle)
@@ -5834,6 +5834,129 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr = Lessor.get(lsr.id)
             lsr.app_fee, lsr.business_number, lsr.email = keep
             lsr.save(action="t")
+
+    def test_92_cash_receipt_bizreg_email_and_tenant_business_submission(self):
+        """92. 현금영수증(가맹비·월세 기록, 사업자번호 없는 임대인은 현금영수증 카드)·사업자등록증 제출 시 이메일/업태/종목 반영·임차인 사업자 정보 제출(AI 읽기 모의, 체크섬, 본인만)."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Building, Contract, DirectChat, Lessor, Outlay, Pay, Tenant, feebilling as fb, registry_ai
+        from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD, LS, TN = "/api/rent3_admin", "/api/rent3_lessor", "/api/rent3_tenant"
+        valid = next(f"214-81-2345{d}" for d in range(10) if validate_kr_business_number(f"214-81-2345{d}", strict_checksum=True)["valid"])
+        png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        lsr = Lessor.first(branch="main")
+        bld = Building.first(branch="main")
+        keep = (lsr.app_fee, lsr.business_number, lsr.email, lsr.account_number, dict(lsr.franchise_docs or {}), bld.biz_type, bld.biz_item)
+        t = Tenant.get("tenant_201")
+        keept = (t.business_number, t.company_name, t.ceo_name, t.business_address, t.email, t.biz_submitted_at, t.biz_ai_calls)
+        made_pay = None
+        try:
+            # ── 임대인 사업자등록증 제출: 이메일·업태·종목 입력 반영(이메일 형식 오류는 거절)
+            bad = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "business_number": valid, "email": "nope"})
+            self.assertEqual(bad.status_code, 400)
+            ok = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "business_number": valid, "email": "lessor@example.com",
+                                                                      "business_type": "부동산업", "business_item": "비주거용 건물 임대업"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual((Lessor.get(lsr.id).email, Building.first(branch="main").biz_type, Building.first(branch="main").biz_item), ("lessor@example.com", "부동산업", "비주거용 건물 임대업"))
+            self.assertEqual(ok.json()["application"]["bizreg"]["email"], "lessor@example.com")
+            # AI 읽기가 업태·종목을 주면 직접 입력이 없을 때 채운다
+            ext = {"document_type": "business_registration", "readable": True, "business_number": valid, "company_name": "상호", "representative_name": lsr.name, "opening_date": "",
+                   "business_address": "", "business_type": "서비스업", "business_item": "공유오피스", "tax_type": "일반과세자", "issue_number": ""}
+            with mock.patch.object(registry_ai, "analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext}):
+                c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "consent": True})
+            self.assertEqual(Building.first(branch="main").biz_type, "서비스업")
+
+            # ── 가맹비 현금영수증: 사업자번호 없는 임대인 → 세금계산서 불가·현금영수증(휴대폰) 카드, 기록·장부 경비·증빙 CSV·취소
+            lsr = Lessor.get(lsr.id); lsr.app_fee, lsr.business_number, lsr.phone = 33000, "", "010-1234-5678"; lsr.save(action="t")
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            fee = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            c.post(f"{AD}/fees/{fee.id}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16"})
+            card = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertFalse(card["tax_available"])
+            self.assertEqual((card["cash"]["kind"], card["cash"]["identifier"], card["cash"]["amount"]), ("소득공제용", "01012345678", 33000))
+            cr = lambda no, **kw: c.post(f"{AD}/fees/{fee.id}/cash-receipt", headers=admin, json={"approval_no": no, "issue_date": "2026-11-16", **kw})
+            self.assertIn(c.post(f"{AD}/fees/{fee.id}/cash-receipt", headers=chic, json={"approval_no": "123456789"}).status_code, (401, 403))
+            self.assertEqual(cr("12").status_code, 400)
+            done = cr("123456789")
+            self.assertEqual(done.status_code, 200, done.text)
+            f1 = done.json()["fee"]
+            self.assertEqual((f1["receipt_type"], f1["invoice_status"], f1["invoice_nts_no"]), ("CASH_RECEIPT", "ISSUED", "123456789"))
+            out = Outlay.get(f1["outlay_id"])
+            self.assertEqual((out.evidence_type, out.is_vat_deductible), ("CASH_RECEIPT", False))        # 현금영수증은 매입세액 공제 아님
+            self.assertEqual(cr("987654321").status_code, 400)                                           # 이미 기록됨
+            self.assertIn("현금영수증 발행", c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic).text)
+            self.assertEqual(c.post(f"{AD}/fees/{fee.id}/invoice-cancel", headers=admin, json={"memo": "오기재"}).status_code, 200)
+            self.assertIsNone(Outlay.get(out.id))
+            self.assertEqual(fb.FranchiseFee.get(fee.id).receipt_type, "TAX_INVOICE")
+            # 사업자번호가 있으면 카드는 세금계산서+현금영수증(지출증빙용)
+            lsr = Lessor.get(lsr.id); lsr.business_number, lsr.email = valid, "lessor@example.com"; lsr.save(action="t")
+            card2 = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertTrue(card2["tax_available"])
+            self.assertEqual(card2["cash"]["kind"], "지출증빙용")
+
+            # ── 임차인 사업자등록증 제출
+            t = Tenant.get("tenant_201")
+            tk = self._login("tenant_201")
+            sub = lambda **kw: c.post(f"{TN}/myhome/tenant_201/business-registration", headers=tk, json=kw)
+            self.assertEqual(sub(attachment_data_url=png, business_number="123-45-67899", email="t@example.com").status_code, 400)      # 체크섬 오류
+            t = Tenant.get("tenant_201"); t.email = ""; t.save(action="t")
+            self.assertEqual(sub(attachment_data_url=png, business_number=valid).status_code, 400)                                      # 이메일 없음
+            self.assertEqual(sub(attachment_data_url=png).status_code, 400)                                                             # 번호 없음(AI 동의 없음)
+            ext2 = {**ext, "business_number": valid, "company_name": "임차상사", "representative_name": "임차대표", "business_address": "서울 중구 1"}
+            with mock.patch.object(registry_ai, "analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext2}):
+                good = sub(attachment_data_url=png, consent=True, email="t@example.com")
+            self.assertEqual(good.status_code, 200, good.text)
+            t = Tenant.get("tenant_201")
+            self.assertEqual((t.business_number, t.company_name, t.ceo_name, t.email), (valid, "임차상사", "임차대표", "t@example.com"))
+            self.assertTrue(any("사업자 정보 제출" in m.message for m in DirectChat.find(branch="main", room_no=t.room_no)))      # 임대인에게 알림
+            self.assertEqual(c.get(f"{TN}/myhome/tenant_201/business-registration", headers=tk).json()["business"]["business_number"], valid)
+            self.assertEqual(c.post(f"{TN}/myhome/tenant_202/business-registration", headers=tk, json={"business_number": valid, "email": "x@e.com"}).status_code, 403)   # 남의 계정 불가
+
+            # ── 월세 현금영수증 승인번호 기록(납부 건이 있어야, 임대인만)
+            pay = next((p for p in Pay.find(branch="main") if p.payment_kind == "MONTHLY_RENT"), None)
+            if pay is None:                      # 시드에 월세 납부가 없으면 한 건 만든다(끝나면 지운다)
+                ct0 = Contract.first(branch="main", status="ACTIVE")
+                pay = made_pay = Pay(branch="main", id_contract=ct0.id, room_no=ct0.room_no, id_tenant=ct0.id_tenant, payment_kind="MONTHLY_RENT", total_amount=ct0.monthly_rent,
+                                     paid_date="2026-11-10", billing_month="2026-11").save(action="t")
+            rno = pay.room_no
+            ym = Pay.__mro__ and __import__("apps.rent_dist._rent3_core.billing", fromlist=["TaxAndCertificateService"]).TaxAndCertificateService.payment_tax_ym(pay)
+            rc = c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": ym, "approval_no": "55443322"})
+            self.assertEqual(rc.status_code, 200, rc.text)
+            self.assertEqual(Pay.get(pay.id).cash_receipt_no, "55443322")
+            self.assertEqual(c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": "1999-01", "approval_no": "55443322"}).status_code, 400)
+            self.assertEqual(c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": ym, "approval_no": "1"}).status_code, 400)
+
+            # ── 화면 문자열
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            for needle in ("data-mode", "💵 현금영수증", "사업자등록번호가 없어 세금계산서는 발급할 수 없습니다"):
+                self.assertIn(needle, rd("shared_ui", "r3_taxinvoice.js"), needle)
+            for needle in ("fbizEmail", "mbizEmail", "mbizType", "/tax/cash-receipt", "💵 현금영수증 정보·홈택스"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), needle)
+            for needle in ("recordCash", "/cash-receipt"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+            for needle in ("btnBizInfo", "/business-registration", "tbCam", "tbEmail"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), needle)
+        finally:
+            if made_pay is not None:
+                made_pay.delete(action="t")
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            for o in list(Outlay.find(category="platform_fee")):
+                o.delete(action="t")
+            for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m0.category.startswith("가맹비") or m0.category.startswith("사업자"):
+                    m0.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.business_number, lsr.email, lsr.account_number, lsr.franchise_docs, bt, bi = keep
+            lsr.save(action="t")
+            b2 = Building.first(branch="main"); b2.biz_type, b2.biz_item = bt, bi; b2.save(action="t")
+            t2 = Tenant.get("tenant_201")
+            t2.business_number, t2.company_name, t2.ceo_name, t2.business_address, t2.email, t2.biz_submitted_at, t2.biz_ai_calls = keept
+            t2.save(action="t")
 
 
 if __name__ == "__main__":

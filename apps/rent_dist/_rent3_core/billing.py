@@ -1122,6 +1122,7 @@ class TaxAndCertificateService:
                 "buyer_company_name": buyer["comp_name"],
                 "buyer_ceo_name": buyer["ceo_name"],
                 "buyer_email": buyer["email"],
+                "tenant_phone": (ct.tenant_phone if ct and ct.tenant_phone else (tn.phone if tn else "")),
                 "buyer_address": buyer_addr,
                 "buyer_business_address_custom": buyer["custom_addr"],
                 "buyer_address_is_fallback": not bool(buyer["custom_addr"]),

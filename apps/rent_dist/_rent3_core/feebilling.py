@@ -51,6 +51,7 @@ class FranchiseFee(PoolObj):
     pay_memo: str = ""
     registered_by: str = ""
     invoice_status: str = "NONE"             # NONE(미발행) / PENDING(API 접수·발행 중) / ISSUED(발행 완료) / FAILED(API 발행 실패)
+    receipt_type: str = "TAX_INVOICE"        # TAX_INVOICE(전자세금계산서) / CASH_RECEIPT(현금영수증: 사업자번호가 없는 임대인·소득공제·지출증빙)
     invoice_via: str = ""                    # manual(홈택스 발행 후 승인번호 기록) / bolta(API 연계)
     invoice_key: str = ""                    # API 접수번호(issuanceKey)
     invoice_client_ref: str = ""             # 요청 관리번호(시도마다 새로)
@@ -186,6 +187,35 @@ def record_invoice(fee: FranchiseFee, nts_no: str, issue_date: str = "", by: str
     return finalize_invoice(fee, nts, idate, by, "manual")
 
 
+def record_cash_receipt(fee: FranchiseFee, approval_no: str, issue_date: str = "", by: str = "관리인") -> FranchiseFee:
+    """홈택스에서 발급한 현금영수증의 승인번호를 기록한다(사업자번호가 없는 임대인·소득공제·지출증빙). 세금계산서가 아니므로 부가세 매입세액 공제는 되지 않는다."""
+    if fee.status != "PAID":
+        raise DomainError("입금이 등록된 가맹비만 현금영수증을 기록할 수 있습니다.")
+    if fee.invoice_status in ("ISSUED", "PENDING"):
+        raise DomainError("이미 증빙이 기록되었거나 발행 중인 청구입니다.", hint="바꾸려면 먼저 [발행 기록 취소]를 해 주세요.")
+    no = re.sub(r"\D", "", str(approval_no or ""))
+    if not 6 <= len(no) <= 12:
+        raise DomainError("현금영수증 승인번호는 숫자 6~12자리로 입력해 주세요.", hint="홈택스 현금영수증 발급 결과의 승인번호를 그대로 입력해 주세요.")
+    idate = (issue_date or date_today().isoformat()).strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", idate):
+        raise DomainError("발급일은 YYYY-MM-DD 형식이어야 합니다.")
+    if any(f.id != fee.id and f.invoice_status == "ISSUED" and f.invoice_nts_no == no for f in FranchiseFee.all()):
+        raise DomainError("이미 다른 청구에 기록된 승인번호입니다.")
+    lsr = Lessor.get(fee.id_lessor)
+    bldg = Building.first(branch=fee.branch)
+    p = platform_info()
+    out = Outlay(branch=fee.branch, id_building=(bldg.id if bldg else ""), category=EXPENSE_CATEGORY, title=f"가맹비 {fee.billing_month} (현금영수증)", expense_date=idate,
+                 amount=fee.total_amount, vendor=p["name"], vendor_business_number=p["business_number"], vendor_tax_type="GENERAL", memo=f"현금영수증 승인번호 {no}",
+                 evidence_type="CASH_RECEIPT", usage_scope="COMMON", vat_deductible=False).save(action="franchise_fee_outlay", app_source="rent3_fee")
+    fee.receipt_type, fee.invoice_status, fee.invoice_nts_no, fee.invoice_issue_date, fee.invoice_issued_at, fee.invoice_by, fee.outlay_id = "CASH_RECEIPT", "ISSUED", no, idate, now_iso(), by, out.id
+    fee.invoice_via, fee.invoice_error = "manual", ""
+    fee.save(action="franchise_fee_cash_receipt_recorded", app_source="rent3_fee")
+    if lsr is not None:
+        _thread_notice(lsr, f"[💵 현금영수증 발급 완료] {fee.billing_month} 가맹비 {_fmt_won(fee.total_amount)} 현금영수증(승인번호 {no}, 발급일 {idate})을 발급했습니다. "
+                       "장부 경비로 등록되었습니다(현금영수증은 부가세 매입세액 공제 대상이 아니며, 종합소득세 경비 증빙으로 쓸 수 있습니다).", "가맹비 현금영수증")
+    return fee
+
+
 def finalize_invoice(fee: FranchiseFee, nts: str, idate: str, by: str, via: str) -> FranchiseFee:
     """승인번호가 확정된 발행 건을 기록하고 임대인 장부 경비로 등록한다(수동 기록·API 완료 공통)."""
     if any(f.id != fee.id and f.invoice_status == "ISSUED" and f.invoice_nts_no == nts for f in FranchiseFee.all()):
@@ -304,7 +334,7 @@ def cancel_invoice(fee: FranchiseFee, memo: str = "", by: str = "관리인") -> 
             out.delete(action="franchise_fee_outlay_removed", app_source="rent3_fee")
     fee.pay_memo = (fee.pay_memo + f" | 세금계산서 {fee.invoice_nts_no} 취소({by}): {memo.strip()}").strip(" |")
     fee.invoice_status, fee.invoice_nts_no, fee.invoice_issue_date, fee.outlay_id = "NONE", "", "", ""
-    fee.invoice_key, fee.invoice_via, fee.invoice_error = "", "", ""
+    fee.invoice_key, fee.invoice_via, fee.invoice_error, fee.receipt_type = "", "", "", "TAX_INVOICE"
     fee.save(action="franchise_fee_invoice_cancelled", app_source="rent3_fee")
     return fee
 
@@ -330,7 +360,12 @@ def invoice_card(fee: FranchiseFee) -> Dict[str, Any]:
     if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$", buy["email"] or ""):
         missing.append("공급받는자 이메일(임대인 정보)")
     wd = fee.paid_at or f"{fee.billing_month}-01"
+    biz_ok = validate_kr_business_number(buy["business_number"], strict_checksum=True)["valid"]
+    phone = re.sub(r"\D", "", (lsr.phone if lsr else "") or "")
+    cash = {"identifier": (buy["business_number"] if biz_ok else phone), "identifier_label": ("사업자등록번호(지출증빙용)" if biz_ok else "휴대폰 번호(소득공제용)"),
+            "kind": ("지출증빙용" if biz_ok else "소득공제용"), "amount": int(fee.total_amount), "date": wd, "email": buy["email"], "item": f"{fee.billing_month} 플랫폼 가맹비"}
     return {"title": f"가맹비 {fee.billing_month} 세금계산서 ({fee.lessor_name})", "write_date": wd, "purpose": "영수", "tax_type": "과세",
+            "tax_available": biz_ok, "cash": cash,
             "supplier": sup, "buyer": buy, "items": [{"name": f"{fee.billing_month} 플랫폼 가맹비", "supply": int(fee.supply_amount), "tax": int(fee.vat_amount)}],
             "note": "", "missing": missing, "total": int(fee.total_amount)}
 
@@ -339,6 +374,7 @@ def public(f: FranchiseFee) -> Dict[str, Any]:
     d = f.model_dump()
     d["overdue"] = f.overdue
     d["state_label"] = ("취소" if f.status == "CANCELLED" else ("납부 완료" if f.status == "PAID" else ("연체" if f.overdue else "납부 대기")))
+    d["receipt_label"] = "현금영수증" if f.receipt_type == "CASH_RECEIPT" else "전자세금계산서"
     d["invoice_label"] = {"NONE": ("발행 대기" if f.status == "PAID" else "-"), "PENDING": "발행 중(국세청 전송 대기)", "ISSUED": "발행 완료", "FAILED": "발행 실패", "CANCELLED": "취소"}.get(f.invoice_status, f.invoice_status)
     return d
 
@@ -358,9 +394,10 @@ def evidence_csv(lessor: Lessor, year: int) -> str:
     ev = evidence(lessor.id, year)
     p = ev["platform"]
     lines = ["﻿구분,청구월,입금일,작성일,공급가액,부가세,합계,국세청 승인번호,공급자 상호,공급자 사업자번호,공급받는자,공급받는자 사업자번호"]
-    for kind, rows in (("세금계산서 발행", ev["issued"]), ("발행 대기(증빙 아님)", ev["pending"])):
+    for kind, rows in (("증빙 발행", ev["issued"]), ("발행 대기(증빙 아님)", ev["pending"])):
         for r in rows:
-            lines.append(",".join(str(x) for x in [kind, r["billing_month"], r["paid_at"], r["invoice_issue_date"], r["supply_amount"], r["vat_amount"], r["total_amount"],
+            kind_l = (f"{r['receipt_label']} 발행" if kind == "증빙 발행" else kind)
+            lines.append(",".join(str(x) for x in [kind_l, r["billing_month"], r["paid_at"], r["invoice_issue_date"], r["supply_amount"], r["vat_amount"], r["total_amount"],
                                                   r["invoice_nts_no"], p["name"], p["business_number"], lessor.name, lessor.business_number]))
     t = ev["totals"]
     lines.append(f"합계(발행분),,,,{t['issued_supply']},{t['issued_vat']},{t['issued_total']},,,,,")

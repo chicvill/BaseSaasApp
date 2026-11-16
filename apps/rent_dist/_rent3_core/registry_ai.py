@@ -253,6 +253,8 @@ BIZ_REG_PROMPT = """당신은 한국 사업자등록증(또는 주택임대사�
   "representative_name": "성명(대표자) (없으면 null)",
   "opening_date": "개업연월일 YYYY-MM-DD (없으면 null)",
   "business_address": "사업장 소재지 (없으면 null)",
+  "business_type": "업태 (없으면 null)",
+  "business_item": "종목 (없으면 null)",
   "tax_type": "일반과세자|간이과세자|면세사업자|법인사업자|기타 중 하나",
   "issue_number": "문서확인번호 또는 발급번호(없으면 null)"
 }"""
@@ -290,6 +292,8 @@ def normalize_bizreg(raw: Dict[str, Any]) -> Dict[str, Any]:
         "representative_name": str(raw.get("representative_name") or "").strip(),
         "opening_date": str(raw.get("opening_date") or "").strip(),
         "business_address": str(raw.get("business_address") or "").strip(),
+        "business_type": str(raw.get("business_type") or "").strip(),
+        "business_item": str(raw.get("business_item") or "").strip(),
         "tax_type": str(raw.get("tax_type") or "").strip(),
         "issue_number": str(raw.get("issue_number") or "").strip(),
     }

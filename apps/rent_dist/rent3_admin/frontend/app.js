@@ -238,7 +238,7 @@
       ${pl.business_number ? "" : `<div class="bass-muted" style="font-size:12px;margin-bottom:6px;">⚠️ 공급자(플랫폼) 사업자번호가 서버 환경변수(RENT3_PLATFORM_BIZ_NO)에 없어 CSV·장부 경비에 비어 보입니다.</div>`}
       ${(r.fees || []).map((f) => `<div class="fee-row" data-id="${E(f.id)}" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;">
           <strong>${E(f.billing_month)}</strong> · ${E(f.lessor_name)} (${E(f.branch)}) · <strong>${won(f.total_amount)}</strong> <span class="bass-muted">(공급가 ${won(f.supply_amount)} + 부가세 ${won(f.vat_amount)})</span> · 기한 ${E(f.due_date)}<br>
-          ${chip(f)}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}${f.invoice_nts_no ? ` <code>${E(f.invoice_nts_no)}</code>` : ""}<br>
+          ${chip(f)}${f.receipt_type === "CASH_RECEIPT" && f.invoice_status === "ISSUED" ? ` <span class="bass-badge">💵 현금영수증</span>` : ""}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}${f.invoice_nts_no ? ` <code>${E(f.invoice_nts_no)}</code>` : ""}<br>
           ${f.status === "NOTICED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-paid" style="min-height:44px;">💰 납부 등록</button>` : ""}
           ${f.invoice_error ? `<span style="color:var(--err);font-size:12.5px;">⚠️ ${E(f.invoice_error)}</span><br>` : ""}
           ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-card" style="min-height:44px;">📋 발급 정보 · 홈택스</button>` : ""}
@@ -277,12 +277,23 @@
         await loadFeeBox();
       });
     };
+    const recordCash = (f) => {
+      const no = (window.prompt("홈택스 현금영수증 발급 후 승인번호 (숫자 6~12자리)") || "").trim();
+      if (!no) return;
+      const date = (window.prompt("발급일 (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "").trim();
+      Bass.withLock(null, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/cash-receipt`, { method: "POST", body: { approval_no: no, issue_date: date } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    };
     box.querySelectorAll(".fee-card").forEach((b) => b.addEventListener("click", function () {
       const f = r.fees.find((x) => x.id === fid(this));
       Bass.withLock(this, async () => {
         const { card } = await Bass.api(APP_ID, `/fees/${f.id}/invoice-card`);
         R3Tax.openCard({ title: card.title, writeDate: card.write_date, purpose: card.purpose, taxType: card.tax_type, supplier: card.supplier, buyer: card.buyer,
-          items: card.items, note: card.note, missing: card.missing, onRecord: () => recordFee(f) });
+          items: card.items, note: card.note, missing: card.missing, cash: card.cash, taxAvailable: card.tax_available,
+          onRecord: (mode) => (mode === "cash" ? recordCash(f) : recordFee(f)) });
       });
     }));
     box.querySelectorAll(".fee-api").forEach((b) => b.addEventListener("click", function () {

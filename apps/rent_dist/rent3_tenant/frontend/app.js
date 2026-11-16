@@ -41,6 +41,7 @@
       { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
     ] },
     { title: "내 설정", items: [
+      { label: "🏢 사업자 정보 · 세금계산서 요청", id: "btnBizInfo", userOnly: true },
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
     ] },
@@ -129,6 +130,56 @@
   if (btnSupportChat) btnSupportChat.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportChat(); });
   const btnShortcut = document.getElementById("btnShortcut");
   if (btnShortcut) btnShortcut.addEventListener("click", () => { closeDrawer(); R3Shell.openShortcutSettings(); });
+  // 🏢 사업자 임차인: 사업자등록증 촬영·선택(AI가 읽어 채움) + 세금계산서 받을 이메일. 번호가 없으면 세금계산서 대신 현금영수증을 요청한다.
+  const btnBizInfo = document.getElementById("btnBizInfo");
+  if (btnBizInfo) btnBizInfo.addEventListener("click", async () => {
+    closeDrawer();
+    const E = Bass.escapeHtml;
+    const cur = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/business-registration`);
+    const b = cur.business || {};
+    const body = R3.openModal("🏢 사업자 정보 · 세금계산서 요청", `
+      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">사업자등록증을 올리면 번호·상호·대표자를 읽어 채웁니다(AI 읽기는 아래 동의 시에만). <strong>사업자등록번호가 없으면</strong> 세금계산서 대신 <strong>현금영수증</strong>을 임대인에게 요청하세요(☰ 임대인과 메시지).</div>
+      ${cur.submitted_at ? `<div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">마지막 제출 ${E(String(cur.submitted_at).slice(0, 16).replace("T", " "))}</div>` : ""}
+      <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin:6px 0;"><button type="button" id="tbCam" class="bass-btn bass-btn--primary" style="min-height:48px;">📷 촬영하기</button><button type="button" id="tbPic" class="bass-btn" style="min-height:48px;">🖼 사진·PDF 선택</button></div>
+      <input id="tbFileCam" type="file" accept="image/*" capture="environment" hidden><input id="tbFile" type="file" accept="image/*,application/pdf" hidden>
+      <div id="tbPrev" class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">선택한 파일 없음</div>
+      <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 채우는 것에 동의합니다.</span><input type="checkbox" id="tbConsent"></label>
+      <div class="r3-grid" style="margin-top:6px;">
+        <label class="r3-fld">사업자등록번호<input id="tbNo" class="bass-input" placeholder="123-45-67890" value="${E(b.business_number || "")}"></label>
+        <label class="r3-fld">상호<input id="tbComp" class="bass-input" value="${E(b.company_name || "")}"></label>
+        <label class="r3-fld">대표자<input id="tbCeo" class="bass-input" value="${E(b.ceo_name || "")}"></label>
+        <label class="r3-fld">세금계산서 받을 이메일<input id="tbEmail" class="bass-input" type="email" value="${E(b.email || "")}"></label>
+      </div>
+      <label class="r3-fld" style="margin-top:6px;">사업장 주소<input id="tbAddr" class="bass-input" value="${E(b.business_address || "")}"></label>
+      <button id="tbSubmit" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;margin-top:10px;width:100%;">제출</button>`);
+    let picked = null;
+    const take = (inp) => { const f = inp.files && inp.files[0]; if (!f) return; picked = f; body.querySelector("#tbPrev").textContent = "📎 " + (f.name || "촬영한 사진"); };
+    body.querySelector("#tbCam").addEventListener("click", () => body.querySelector("#tbFileCam").click());
+    body.querySelector("#tbPic").addEventListener("click", () => body.querySelector("#tbFile").click());
+    body.querySelector("#tbFileCam").addEventListener("change", (e) => take(e.target));
+    body.querySelector("#tbFile").addEventListener("change", (e) => take(e.target));
+    const toUrl = async (file) => {
+      const raw = () => new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+      if (!/^image\/(jpeg|png|webp)$/.test(file.type) || !window.createImageBitmap) return raw();
+      try {
+        const bmp = await createImageBitmap(file); const k = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+        const cv = document.createElement("canvas"); cv.width = Math.max(1, Math.round(bmp.width * k)); cv.height = Math.max(1, Math.round(bmp.height * k));
+        cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height); return cv.toDataURL("image/jpeg", 0.85);
+      } catch (_) { return raw(); }
+    };
+    body.querySelector("#tbSubmit").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const g = (id) => body.querySelector("#" + id).value.trim();
+        const res = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/business-registration`, { method: "POST", body: {
+          attachment_data_url: picked ? await toUrl(picked) : "", consent: body.querySelector("#tbConsent").checked,
+          business_number: g("tbNo"), company_name: g("tbComp"), ceo_name: g("tbCeo"), email: g("tbEmail"), business_address: g("tbAddr") } });
+        Bass.updateAppAlert("success", res.message);
+        const bb = res.business || {};
+        body.querySelector("#tbNo").value = bb.business_number || ""; body.querySelector("#tbComp").value = bb.company_name || ""; body.querySelector("#tbCeo").value = bb.ceo_name || "";
+        body.querySelector("#tbAddr").value = bb.business_address || ""; body.querySelector("#tbEmail").value = bb.email || "";
+      });
+    });
+  });
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
   R3Shell.watchSupport();

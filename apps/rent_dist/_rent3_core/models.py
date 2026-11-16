@@ -241,6 +241,8 @@ class Tenant(PoolObj):
     company_name: str = ""                   # 사업자 상호/법인명 (세금계산서 공급받는자 상호)
     ceo_name: str = ""                       # 사업자 대표자명 (세금계산서 공급받는자 성명)
     business_address: str = ""               # 사업자등록증상 사업장 주소 (미입력 시 호실 주소 사용)
+    biz_submitted_at: str = ""               # 임차인이 사업자등록증을 직접 제출한 시각(임대인이 확인 후 세금계산서 발급)
+    biz_ai_calls: int = 0                    # 사업자등록증 AI 읽기 호출 수(남용 방지)
     car_number: str = ""
     car_model: str = ""
     doorlock_pwd: str = "1234*"

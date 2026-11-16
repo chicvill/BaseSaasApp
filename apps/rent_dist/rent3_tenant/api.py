@@ -411,6 +411,72 @@ def agree_checkout(settlement_id: str, req: CheckoutAgreeReq, request: Request):
     }
 
 
+class TenantBizRegReq(BaseModel):
+    attachment_data_url: str = ""
+    email: str = ""
+    business_number: str = ""
+    company_name: str = ""
+    ceo_name: str = ""
+    business_address: str = ""
+    consent: bool = False
+
+
+@router.post("/myhome/{tenant_id}/business-registration", dependencies=[Depends(tenant_scope)])
+def submit_tenant_business_registration(tenant_id: str, req: TenantBizRegReq):
+    """사업자 임차인이 사업자등록증 사진과 수신 이메일을 내면(동의 시 AI가 읽어 채움) 세금계산서 발급 정보에 반영하고 임대인에게 알린다.
+    사업자등록번호는 10자리 체크섬이 맞아야 하고, 사업자 상태 확인은 임대인이 세금계산서를 발급할 때 홈택스에서 한다."""
+    from apps.rent_dist._rent3_core import franchise as fr, registry_ai, validate_email_format
+    from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+    ensure_pool_seeded()
+    t = Tenant.get(tenant_id)
+    if not t or t.status != "ACTIVE":
+        raise NotFound("입주 중인 임차인만 사업자 정보를 낼 수 있습니다.")
+    ex: dict = {}
+    saved = None
+    if (req.attachment_data_url or "").strip():
+        saved = fr.save_bizreg_file(t.id, req.attachment_data_url)
+        if req.consent:
+            if int(t.biz_ai_calls or 0) >= 6:
+                raise DomainError("AI 읽기 횟수 한도를 넘었습니다.", hint="사업자등록번호·상호·대표자를 직접 입력해 주세요.")
+            binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
+            ai = registry_ai.analyze_bizreg(binary, mime)
+            if ai["status"] == "ok":
+                t.biz_ai_calls = int(t.biz_ai_calls or 0) + 1
+                ex = ai.get("extracted") or {}
+    num = (req.business_number or ex.get("business_number") or "").strip()
+    if not num:
+        raise DomainError("사업자등록번호를 읽지 못했습니다.", hint="사진이 선명한지 확인하거나 사업자등록번호 10자리를 직접 입력해 주세요.")
+    val = validate_kr_business_number(num, strict_checksum=True)
+    if not val["valid"]:
+        raise DomainError(f"사업자등록번호({num})가 올바르지 않습니다: {val['reason']}", hint="번호를 다시 확인해 주세요. 번호가 없으면 세금계산서 대신 현금영수증을 요청하세요.")
+    email = (req.email or t.email or "").strip()
+    if not validate_email_format(email):
+        raise DomainError("세금계산서를 받을 이메일을 입력해 주세요.", hint="예: name@example.com")
+    d = val["digits"]
+    t.business_number = f"{d[:3]}-{d[3:5]}-{d[5:]}"
+    t.company_name = (req.company_name or ex.get("company_name") or t.company_name or "").strip()
+    t.ceo_name = (req.ceo_name or ex.get("representative_name") or t.ceo_name or "").strip()
+    t.business_address = (req.business_address or ex.get("business_address") or t.business_address or "").strip()
+    t.email = email
+    t.biz_submitted_at = now_iso()
+    t.save(action="tenant_business_registration_submitted", app_source=APP_SRC)
+    room = Room.get(t.current_room_id) if t.current_room_id else Room.first(branch=t.branch, room_no=t.room_no)
+    DirectChat(branch=t.branch, id_room=(room.id if room else ""), room_no=t.room_no, sender_role="tenant", sender_name=t.name,
+               message=f"[🏢 사업자 정보 제출] {t.room_no}호 {t.name} 세입자가 사업자등록증 정보(사업자번호 {t.business_number}, 상호 {t.company_name or '-'})와 세금계산서 수신 이메일을 제출했습니다. "
+                       "세금계산서 발급 시 홈택스에서 사업자 상태를 확인해 주세요.").save(action="chat_auto_sent", app_source=APP_SRC)
+    missing = [k for k, v in (("상호", t.company_name), ("대표자", t.ceo_name)) if not v]
+    return {"success": True, "message": "사업자 정보를 제출했습니다. 임대인이 세금계산서를 발급합니다." + (f" (비어 있는 항목: {', '.join(missing)} — 아래에서 직접 입력해 다시 제출하세요)" if missing else ""),
+            "business": {"business_number": t.business_number, "company_name": t.company_name, "ceo_name": t.ceo_name, "business_address": t.business_address, "email": t.email}, "file_saved": bool(saved)}
+
+
+@router.get("/myhome/{tenant_id}/business-registration", dependencies=[Depends(tenant_scope)])
+def get_tenant_business_registration(tenant_id: str):
+    t = Tenant.get(tenant_id)
+    if not t:
+        raise NotFound("임차인 정보를 찾을 수 없습니다.")
+    return {"success": True, "business": {"business_number": t.business_number, "company_name": t.company_name, "ceo_name": t.ceo_name, "business_address": t.business_address, "email": t.email}, "submitted_at": t.biz_submitted_at}
+
+
 @router.post("/myhome/{tenant_id}/checkout/request", dependencies=[Depends(tenant_scope)])
 def request_checkout(tenant_id: str, req: CheckoutRequestReq):
     """임차인이 퇴실을 먼저 신청한다(채팅 카드로 임대인에게 전달, 연말정산 자료 미리 받기 안내 포함)."""

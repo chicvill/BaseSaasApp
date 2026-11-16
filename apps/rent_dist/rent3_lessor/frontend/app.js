@@ -213,6 +213,9 @@
             <input id="fbizNo" class="bass-input" placeholder="사업자등록번호 10자리 (예: 123-45-67890)" value="${esc(biz.business_number || "")}">
             <input id="fbizRep" class="bass-input" placeholder="대표자 성명 (선택)" value="${esc(biz.representative_name || idn.name || "")}">
             <input id="fbizComp" class="bass-input" placeholder="상호 (선택)" value="${esc(biz.company_name || "")}">
+            <input id="fbizEmail" class="bass-input" type="email" placeholder="세금계산서 받을 이메일" value="${esc(biz.email || "")}">
+            <input id="fbizType" class="bass-input" placeholder="업태 (예: 부동산업)" value="${esc(biz.business_type || "")}">
+            <input id="fbizItem" class="bass-input" placeholder="종목 (예: 비주거용 건물 임대업)" value="${esc(biz.business_item || "")}">
           </div>
           ${bizPickerHtml("fbiz")}
           <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 사업자번호·대표자를 대조하는 것에 동의합니다.</span><input type="checkbox" id="fbizConsent"></label>
@@ -265,6 +268,7 @@
           business_number: $q("fbizNo").value.trim(),
           representative_name: $q("fbizRep").value.trim(),
           company_name: $q("fbizComp").value.trim(),
+          email: $q("fbizEmail").value.trim(), business_type: $q("fbizType").value.trim(), business_item: $q("fbizItem").value.trim(),
           consent: $q("fbizConsent").checked,
         },
       });
@@ -1207,6 +1211,9 @@
         <div class="r3-grid" style="margin-top:6px;">
           <label class="r3-fld">대표자 성명<input id="mbizRep" class="bass-input" value="${esc(biz.representative_name || "")}"></label>
           <label class="r3-fld">상호 (선택)<input id="mbizComp" class="bass-input" value="${esc(biz.company_name || "")}"></label>
+          <label class="r3-fld">세금계산서 받을 이메일<input id="mbizEmail" class="bass-input" type="email" value="${esc(biz.email || "")}"></label>
+          <label class="r3-fld">업태<input id="mbizType" class="bass-input" placeholder="예: 부동산업" value="${esc(biz.business_type || "")}"></label>
+          <label class="r3-fld">종목<input id="mbizItem" class="bass-input" placeholder="예: 비주거용 건물 임대업" value="${esc(biz.business_item || "")}"></label>
         </div>
         <label class="r3-fld" style="margin-top:8px;">📷 사업자등록증 사진 촬영 또는 파일(JPG·PNG·PDF) 선택
           ${bizPickerHtml("mbiz")}
@@ -1227,6 +1234,7 @@
             business_number: $m("mbizNo").value.trim(),
             representative_name: $m("mbizRep").value.trim(),
             company_name: $m("mbizComp").value.trim(),
+            email: $m("mbizEmail").value.trim(), business_type: $m("mbizType").value.trim(), business_item: $m("mbizItem").value.trim(),
             consent: $m("mbizConsent").checked,
           },
         });
@@ -2175,7 +2183,7 @@
                   <td>${Bass.escapeHtml(inv.buyer_email || "-")}</td>
                   <td>${fmtWon(inv.supply_amount)}<br><span class="bass-muted" style="font-size:12.5px;">세액 ${fmtWon(inv.tax_amount)}</span><br><span class="bass-badge ${inv.charge_type === "02" ? "bass-badge--warn" : "bass-badge--ok"}">${Bass.escapeHtml(inv.charge_type_label || (inv.charge_type === "02" ? "청구(02)" : "영수(01)"))}</span></td>
                   <td>${statusBadge(inv)}</td>
-                  <td><button type="button" class="bass-btn bass-btn--sm bass-btn--primary btn-inv-card" data-idx="${idx}" style="min-height:44px;">📋 발급 정보·홈택스</button><br><button type="button" class="bass-btn bass-btn--sm btn-inv-status" data-idx="${idx}" style="min-height:44px;margin-top:4px;">발행기록</button></td>
+                  <td><button type="button" class="bass-btn bass-btn--sm bass-btn--primary btn-inv-card" data-idx="${idx}" style="min-height:44px;">${(inv.buyer_business_number_digits || "").length === 10 && inv.buyer_business_number_checksum_ok ? "📋 발급 정보·홈택스" : "💵 현금영수증 정보·홈택스"}</button><br><button type="button" class="bass-btn bass-btn--sm btn-inv-status" data-idx="${idx}" style="min-height:44px;margin-top:4px;">발행기록</button></td>
                 </tr>
               `).join("")}
             </tbody>
@@ -2299,12 +2307,24 @@
         if (!inv) return;
         const wd = String(inv.write_date || "").replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
         const miss = [...(inv.missing_fields || [])];
+        const bizOk = (inv.buyer_business_number_digits || "").length === 10 && Boolean(inv.buyer_business_number_checksum_ok);
         R3Tax.openCard({
           title: `${inv.billing_month} ${inv.room_no}호 임대료 세금계산서`, writeDate: wd, purpose: inv.charge_type === "01" ? "영수" : "청구", taxType: "과세",
           supplier: { business_number: supInfo.business_number, company_name: supInfo.company_name, ceo_name: supInfo.ceo_name, address: supInfo.address, biz_type: supInfo.biz_type, biz_item: supInfo.biz_item, email: supInfo.email },
           buyer: { business_number: inv.buyer_business_number, company_name: inv.buyer_company_name, ceo_name: inv.buyer_ceo_name, address: inv.buyer_address, email: inv.buyer_email },
           items: [{ name: inv.item_name, supply: inv.supply_amount, tax: inv.tax_amount }], missing: miss,
-          onRecord: () => { const rec = elTabContent.querySelectorAll(".btn-inv-status")[Number(btn.dataset.idx)]; if (rec) rec.click(); },
+          taxAvailable: bizOk,
+          cash: { kind: bizOk ? "지출증빙용" : "소득공제용", identifier: bizOk ? inv.buyer_business_number_digits : String(inv.tenant_phone || "").replace(/\D/g, ""), identifier_label: bizOk ? "사업자등록번호(지출증빙용)" : "휴대폰 번호(소득공제용)",
+                  date: wd, amount: Number(inv.total_amount || 0), item: inv.item_name, email: inv.buyer_email },
+          onRecord: (mode) => {
+            if (mode !== "cash") { const rec = elTabContent.querySelectorAll(".btn-inv-status")[Number(btn.dataset.idx)]; if (rec) rec.click(); return; }
+            const no = (window.prompt("홈택스 현금영수증 발급 후 승인번호 (숫자 6~12자리)") || "").trim();
+            if (!no) return;
+            Bass.withLock(null, async () => {
+              const res = await Bass.api(APP_ID, "/tax/cash-receipt", { method: "POST", body: { branch: currentBranch, room_no: inv.room_no, billing_month: inv.billing_month, approval_no: no } });
+              Bass.updateAppAlert("success", res.message);
+            });
+          },
         });
       });
     });
