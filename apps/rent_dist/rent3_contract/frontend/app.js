@@ -866,8 +866,15 @@
       callBadge.textContent = "연결됨";
     }
 
+    const isRenewal = s.mode === "RENEWAL";
+    const stepperBar = document.getElementById("stepperBar");
+    if (stepperBar) stepperBar.style.gridTemplateColumns = isRenewal ? "repeat(3, 1fr)" : "repeat(5, 1fr)";
+    const newLabels = { 1: "① 본인확인", 2: "② 옵션점검", 3: "③ 조건", 4: "④ 서명", 5: "⑤ 체결" };
+    const renLabels = { 3: "① 조건(5%)", 4: "② 서명", 5: "③ 체결" };
     document.querySelectorAll(".step-pill").forEach((pill) => {
       const n = Number(pill.dataset.step);
+      pill.hidden = isRenewal && n < 3;
+      pill.textContent = isRenewal ? (renLabels[n] || "") : (newLabels[n] || "");
       const connected = s.call_status !== "CALLING";
       pill.classList.toggle("is-now", connected && s.status !== "COMPLETED" && n === s.current_step);
       pill.classList.toggle("is-done", connected && (n < s.current_step || s.status === "COMPLETED"));

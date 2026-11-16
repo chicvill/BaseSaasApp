@@ -433,6 +433,32 @@ class CoSignSession(PoolObj):
             and self.step1_tenant_locked
         )
 
+    def ensure_renewal_ready(self) -> "CoSignSession":
+        """재계약 세션은 본인 확인·옵션 점검을 생략하고 바로 3단계(조건 확인·승인)부터 시작한다."""
+        if self.mode != "RENEWAL" or self.status != "IN_PROGRESS":
+            return self
+        if (
+            self.lessor_checked_tenant_id
+            and self.tenant_checked_lessor_id
+            and self.step1_lessor_confirmed
+            and self.step1_tenant_locked
+            and self.step2_lessor_confirmed
+            and self.step2_tenant_locked
+            and self.current_step >= 3
+        ):
+            return self
+        self.lessor_checked_tenant_id = True
+        self.tenant_checked_lessor_id = True
+        self.step1_lessor_confirmed = True
+        self.step1_tenant_locked = True
+        self.step2_lessor_confirmed = True
+        self.step2_tenant_locked = True
+        if not self.tenant_recheck_at:
+            self.tenant_recheck_at = now_iso()
+        if self.current_step < 3:
+            self.current_step = 3
+        return self.save(action="renewal_auto_skipped_id_check", app_source="rent3_contract")
+
     @classmethod
     def open_session(
         cls,
@@ -487,6 +513,8 @@ class CoSignSession(PoolObj):
         ]
 
         is_renewal = (mode == "RENEWAL")
+        base_rent = prev_ct.monthly_rent if prev_ct else room.monthly_rent
+        renewal_rent_5pct = max(base_rent, (int(base_rent * 1.05) // 1000) * 1000)
         now_str = now_iso()
         session = cls(
             mode=mode,
@@ -543,7 +571,7 @@ class CoSignSession(PoolObj):
                 "vat_separate": True,
                 "contract_deposit": 0 if is_renewal else 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
-                "monthly_rent": prev_ct.monthly_rent if prev_ct else room.monthly_rent,
+                "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else room.monthly_rent),
                 "maintenance_fee": prev_ct.maintenance_fee if prev_ct else room.maintenance_fee,
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,

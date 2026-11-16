@@ -421,6 +421,7 @@ def get_session(token: str, request: Request):
     if s.is_idle_expired():
         CoSignSession.expire_idle(s.branch, s.room_no)
         s = CoSignSession.by_code_or_id(token)
+    s.ensure_renewal_ready()
     contract = Contract.get(s.created_contract_id) if s.created_contract_id else None
     who = _chat_actor(request, s) if claims_from(request) else {"role": ""}
     return {

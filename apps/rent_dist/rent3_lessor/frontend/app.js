@@ -772,7 +772,8 @@
     const dep0 = (ec && ec.proposed_deposit) || r.deposit;
     // 재계약 기본안: 월세 5% 인상(천 원 단위 내림, 법정 한도 안). 예고 전에는 이 값이 채워지고 임대인이 고칠 수 있으며, 공동 재계약방에서 서로 조정한다.
     const rent5 = Math.max(Number(r.monthly_rent || 0), Math.floor(Number(r.monthly_rent || 0) * 1.05 / 1000) * 1000);
-    const rent0 = (ec && ec.proposed_monthly_rent) || rent5;
+    const previewed = Boolean(ec && /RENEWAL_/.test(ec.status || ""));
+    const rent0 = (previewed && ec.proposed_monthly_rent) ? ec.proposed_monthly_rent : rent5;
     const fee0 = (ec && ec.proposed_maintenance_fee != null && ec.status !== "AWAITING_TENANT") ? ec.proposed_maintenance_fee : r.maintenance_fee;
     const maxDep = Math.round(Number(r.deposit || 0) * 1.05);
     const maxRent = Math.round(Number(r.monthly_rent || 0) * 1.05);
