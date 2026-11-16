@@ -302,22 +302,11 @@ def verify_franchise_bizreg(lessor_id: str, req: BizRegVerifyReq, admin=Depends(
     docs["bizreg"] = biz
     lessor.franchise_docs = docs
     lessor.save(action="franchise_bizreg_verified" if req.verified else "franchise_bizreg_rejected", app_source=APP_SRC)
-    SupportMessage(
-        channel=f"lessor:{lessor.branch}",
-        branch=lessor.branch,
-        room_no="",
-        user_role="lessor",
-        user_id=lessor.id,
-        user_name=lessor.name,
-        sender_role="admin",
-        sender_name=getattr(admin, "username", "") or "관리인",
-        category="사업자등록증 확인 결과",
-        body=(
-            f"[✅ 사업자등록증 홈택스 확인·승인 완료] 사업자등록번호 {fmt_no} ({ht_status}) 확인이 완료되어 장부에 반영되었습니다. 메모: {note}"
-            if req.verified
-            else f"[⚠️ 사업자등록증 반려] 홈택스 확인 결과 보완이 필요합니다. 사유: {note}"
-        ),
-    ).save(action="support_bizreg_decision", app_source=APP_SRC)
+    sup.post_admin_message(
+        lessor, getattr(admin, "username", "") or "관리인",
+        (f"[✅ 사업자등록증 홈택스 확인·승인 완료] 사업자등록번호 {fmt_no} ({ht_status}) 확인이 완료되어 장부에 반영되었습니다. 메모: {note}" if req.verified
+         else f"[⚠️ 사업자등록증 반려] 홈택스 확인 결과 보완이 필요합니다. 사유: {note}"),
+        category="사업자등록증 확인 결과")
     return {
         "success": True,
         "message": f"홈택스 확인 완료: 사업자등록번호({fmt_no})를 승인하고 장부에 반영했습니다." if req.verified else "사업자등록증 반려 사유를 기록했습니다.",
@@ -377,6 +366,102 @@ def _require_lessor_proof(lsr) -> None:
     if not any(len(_re.sub(r"\D", "", str(v or ""))) >= 4 for v in (lsr.business_number, lsr.account_number)):
         raise DomainError(f"{lsr.name} 임대인의 장부에 사업자번호·계좌번호가 없어 본인 확인 증빙이 없습니다.",
                           hint="가맹 신청 정보에서 사업자번호 또는 계좌번호를 먼저 등록한 뒤 링크를 발급해 주세요.")
+
+
+# ───────── 가맹비 징수 통보 · 납부 등록 · 세금계산서 발행 기록 ─────────
+class FeePlanReq(BaseModel):
+    app_fee: int                  # 월 가맹비(부가세 포함 금액, 원). 0 이면 청구하지 않는다
+
+
+class FeePaidReq(BaseModel):
+    amount: int
+    paid_date: str = ""
+    method: str = "계좌이체"
+    memo: str = ""
+
+
+class FeeInvoiceReq(BaseModel):
+    nts_confirm_no: str
+    issue_date: str = ""
+
+
+class FeeInvoiceCancelReq(BaseModel):
+    memo: str = ""
+
+
+class FeeGenerateReq(BaseModel):
+    month: str = ""
+
+
+def _admin_label(request: Request) -> str:
+    from apps.rent_dist._rent3_core.authz import claims_from
+    return str((claims_from(request) or {}).get("u") or "관리인")
+
+
+@router.get("/fees", dependencies=ADMIN_ONLY)
+def list_franchise_fees(month: str = ""):
+    """가맹비 청구 현황(자동 통보 포함). month 를 주면 그 청구월만."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    ensure_pool_seeded()
+    fb.ensure_notices()
+    rows = [f for f in fb.FranchiseFee.all() if f.status != "CANCELLED" and (not month or f.billing_month == month)]
+    rows.sort(key=lambda f: (f.billing_month, f.branch), reverse=True)
+    tot = lambda xs: sum(int(f.total_amount) for f in xs)
+    paid = [f for f in rows if f.status == "PAID"]
+    biz = {l.id: l.business_number for l in Lessor.all()}
+    return {"success": True, "platform": fb.platform_info(), "month": month or fb.month_key(), "auto": fb.auto_enabled(),
+            "fees": [{**fb.public(f), "lessor_business_number": biz.get(f.id_lessor, "")} for f in rows],
+            "summary": {"billed": tot(rows), "paid": tot(paid), "unpaid": tot([f for f in rows if f.status == "NOTICED"]),
+                        "overdue": len([f for f in rows if f.overdue]), "invoice_waiting": len([f for f in paid if f.invoice_status != "ISSUED"])},
+            "lessors": [{"id": l.id, "name": l.name, "branch": l.branch, "app_fee": l.app_fee, "status": l.status, "business_number": l.business_number} for l in Lessor.all()]}
+
+
+@router.post("/fees/generate", dependencies=ADMIN_ONLY)
+def generate_franchise_fees(req: FeeGenerateReq):
+    from apps.rent_dist._rent3_core import feebilling as fb
+    ensure_pool_seeded()
+    made = fb.ensure_notices(req.month, force=True)
+    return {"success": True, "message": f"{req.month or fb.month_key()} 가맹비 {len(made)}건을 새로 청구·통보했습니다(이미 있는 청구는 건너뜀).", "created": len(made)}
+
+
+@router.post("/lessors/{lessor_id}/fee-plan", dependencies=ADMIN_ONLY)
+def set_fee_plan(lessor_id: str, req: FeePlanReq):
+    lessor = Lessor.require(lessor_id)
+    if req.app_fee < 0 or req.app_fee > 10_000_000:
+        raise DomainError("월 가맹비는 0원 이상 1,000만 원 이하로 입력해 주세요.")
+    lessor.app_fee = int(req.app_fee)
+    lessor.save(action="franchise_fee_plan_changed", app_source=APP_SRC)
+    return {"success": True, "message": f"{lessor.name} 임대인의 월 가맹비를 {int(req.app_fee):,}원(부가세 포함)으로 정했습니다. 다음 청구부터 적용됩니다."}
+
+
+@router.post("/fees/{fee_id}/paid", dependencies=ADMIN_ONLY)
+def register_fee_paid(fee_id: str, req: FeePaidReq, request: Request):
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.register_payment(fb.FranchiseFee.require(fee_id), req.amount, req.paid_date, req.method, req.memo, _admin_label(request))
+    return {"success": True, "message": f"{fee.billing_month} 가맹비 납부를 등록했습니다. 홈택스에서 전자세금계산서를 발행한 뒤 승인번호를 기록해 주세요.", "fee": fb.public(fee)}
+
+
+@router.post("/fees/{fee_id}/invoice", dependencies=ADMIN_ONLY)
+def record_fee_invoice(fee_id: str, req: FeeInvoiceReq, request: Request):
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.record_invoice(fb.FranchiseFee.require(fee_id), req.nts_confirm_no, req.issue_date, _admin_label(request))
+    return {"success": True, "message": f"{fee.billing_month} 가맹비 세금계산서(승인번호 {fee.invoice_nts_no})를 기록했고 임대인 장부의 경비로 등록했습니다.", "fee": fb.public(fee)}
+
+
+@router.post("/fees/{fee_id}/invoice-cancel", dependencies=ADMIN_ONLY)
+def cancel_fee_invoice(fee_id: str, req: FeeInvoiceCancelReq, request: Request):
+    from apps.rent_dist._rent3_core import feebilling as fb
+    fee = fb.cancel_invoice(fb.FranchiseFee.require(fee_id), req.memo, _admin_label(request))
+    return {"success": True, "message": "세금계산서 기록을 취소하고 장부에 등록했던 경비도 지웠습니다. 홈택스에서 수정·재발행한 뒤 다시 기록해 주세요.", "fee": fb.public(fee)}
+
+
+@router.get("/fees/export-hometax-csv", dependencies=ADMIN_ONLY)
+def export_fee_hometax_csv(month: str = ""):
+    """입금 확인 후 세금계산서 발행 전인 가맹비 목록(홈택스 일괄 발급용 참고 CSV)."""
+    from fastapi.responses import Response
+    from apps.rent_dist._rent3_core import feebilling as fb
+    return Response(content=fb.hometax_csv(month).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="franchise_fee_hometax_{month or "all"}.csv"'})
 
 
 @router.get("/accounts/lessors", dependencies=ADMIN_ONLY)

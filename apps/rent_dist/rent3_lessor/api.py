@@ -318,22 +318,8 @@ def franchise_bizreg(req: FranchiseBizRegReq):
     }
     lsr.franchise_docs = docs
     lsr.save(action="franchise_bizreg_uploaded", app_source=APP_SRC)
-    SupportMessage(
-        channel=f"lessor:{lsr.branch}",
-        branch=lsr.branch,
-        room_no="",
-        user_role="lessor",
-        user_id=lsr.id,
-        user_name=lsr.name,
-        sender_role="lessor",
-        sender_name=lsr.name,
-        category="사업자등록증 확인 요청",
-        body=(
-            f"[📷 사업자등록증 제출] {lsr.name} 임대인이 사업자등록증"
-            f"({check.get('business_number') or '번호 미입력'})을 제출했습니다. "
-            "국세청 홈택스에서 사업자 상태를 확인한 뒤 승인해 주세요."
-        ),
-    ).save(action="support_bizreg_submitted", app_source=APP_SRC)
+    from apps.rent_dist._rent3_core import support as sup_chat
+    sup_chat.post_user_message(lsr, f"[📷 사업자등록증 제출] 사업자등록증({check.get('business_number') or '번호 미입력'})을 제출했습니다. 국세청 홈택스에서 사업자 상태를 확인한 뒤 승인해 주세요.")
     return {
         "success": True,
         "message": check["message"],
@@ -376,9 +362,35 @@ def get_status(branch: str = "main"):
     }
 
 
+@router.get("/franchise-fees")
+def my_franchise_fees(branch: str = "main", year: Optional[int] = None):
+    """내 가맹비 청구·납부·세금계산서 내역과 연도별 종합소득세 증빙 요약. 조회할 때 이번 달 청구가 없으면 자동으로 만들어 통보한다."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    ensure_pool_seeded()
+    lsr = _my_lessor(branch)
+    fb.ensure_notices(branch=lsr.branch)
+    yr = year or date_today().year
+    fees = sorted(fb.FranchiseFee.find(id_lessor=lsr.id), key=lambda f: f.billing_month, reverse=True)
+    return {"success": True, "monthly_fee": lsr.app_fee, "business_number": lsr.business_number, "platform": fb.platform_info(),
+            "fees": [fb.public(f) for f in fees if f.status != "CANCELLED"], "evidence": fb.evidence(lsr.id, yr)}
+
+
+@router.get("/franchise-fees/export-csv")
+def export_franchise_fees_csv(branch: str = "main", year: Optional[int] = None):
+    """종합소득세 증빙용 가맹비 납부·세금계산서 내역 CSV(발행분과 발행 대기분을 구분)."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    ensure_pool_seeded()
+    lsr = _my_lessor(branch)
+    yr = year or date_today().year
+    return Response(content=fb.evidence_csv(lsr, yr).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="franchise_fee_evidence_{lsr.branch}_{yr}.csv"'})
+
+
 @router.get("/dashboard")
 def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core import feebilling as _fb
+    _fb.ensure_notices(branch=normalize_branch_id(branch))      # 이번 달 가맹비 청구·통보가 아직 없으면 만든다(여러 번 불러도 한 번만)
     b_id = normalize_branch_id(branch)
     ref_dt = RentBillingNotice._parse_ref_date(as_of_date)
     buildings = Building.all()

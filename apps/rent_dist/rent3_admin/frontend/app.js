@@ -222,9 +222,97 @@
     return (d.rooms || []).flatMap((r) => (r.sessions || []).map((x) => ({ ...x, room_no: r.room_no })));
   }
 
+  // 💳 가맹비 징수 통보·납부 등록·세금계산서 기록 (앱은 국세청에 직접 발행하지 않는다 — 홈택스에서 발행한 뒤 승인번호를 기록)
+  async function loadFeeBox() {
+    const box = document.getElementById("feeBox");
+    if (!box) return;
+    const E = Bass.escapeHtml, won = (n) => Number(n || 0).toLocaleString("ko-KR") + "원";
+    const r = await Bass.api(APP_ID, "/fees");
+    const sm = r.summary || {}, pl = r.platform || {};
+    const chip = (f) => `<span class="bass-badge ${f.status === "PAID" ? "bass-badge--ok" : "bass-badge--warn"}">${E(f.state_label)}</span> <span class="bass-badge ${f.invoice_status === "ISSUED" ? "bass-badge--ok" : ""}">🧾 ${E(f.invoice_label)}</span>`;
+    box.innerHTML = `
+      <div style="font-size:13px;line-height:1.7;margin-bottom:6px;">청구 <strong>${won(sm.billed)}</strong> · 입금 <strong>${won(sm.paid)}</strong> · 미납 <strong>${won(sm.unpaid)}</strong>${sm.overdue ? ` · <span style="color:var(--err);font-weight:700;">연체 ${sm.overdue}건</span>` : ""}
+        ${sm.invoice_waiting ? ` · <span style="color:var(--warn);font-weight:700;">🧾 세금계산서 발행 대기 ${sm.invoice_waiting}건</span>` : ""}</div>
+      <div class="bass-muted" style="font-size:12px;margin-bottom:6px;">${r.auto ? "🟢 자동 청구·통보 켜짐 — 매달 화면을 열 때 이번 달 청구가 없으면 만들어 통보합니다." : "⚪ 자동 청구·통보 꺼짐 — 월 가맹비 금액과 공급자 사업자번호를 확인한 뒤 서버 환경변수 RENT3_FEE_AUTO=1 로 켜세요. 그 전에는 아래 [이번 달 청구·통보 만들기]로 직접 만듭니다."}</div>
+      ${pl.business_number ? "" : `<div class="bass-muted" style="font-size:12px;margin-bottom:6px;">⚠️ 공급자(플랫폼) 사업자번호가 서버 환경변수(RENT3_PLATFORM_BIZ_NO)에 없어 CSV·장부 경비에 비어 보입니다.</div>`}
+      ${(r.fees || []).map((f) => `<div class="fee-row" data-id="${E(f.id)}" style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;">
+          <strong>${E(f.billing_month)}</strong> · ${E(f.lessor_name)} (${E(f.branch)}) · <strong>${won(f.total_amount)}</strong> <span class="bass-muted">(공급가 ${won(f.supply_amount)} + 부가세 ${won(f.vat_amount)})</span> · 기한 ${E(f.due_date)}<br>
+          ${chip(f)}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}${f.invoice_nts_no ? ` <code>${E(f.invoice_nts_no)}</code>` : ""}<br>
+          ${f.status === "NOTICED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-paid" style="min-height:44px;">💰 납부 등록</button>` : ""}
+          ${f.status === "PAID" && f.invoice_status !== "ISSUED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-inv" style="min-height:44px;">🧾 세금계산서 승인번호 기록</button>` : ""}
+          ${f.invoice_status === "ISSUED" ? `<button type="button" class="bass-btn bass-btn--sm fee-invcancel" style="min-height:44px;">✖ 발행 기록 취소</button>` : ""}
+        </div>`).join("") || '<div class="bass-muted">청구 내역이 없습니다. 월 가맹비가 있는 가맹 임대인에게 매달 자동으로 청구됩니다.</div>'}
+      <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button id="feeGen" type="button" class="bass-btn bass-btn--sm" style="min-height:44px;">🔔 이번 달 청구·통보 만들기</button>
+        <button id="feeCsv" type="button" class="bass-btn bass-btn--sm" style="min-height:44px;">📥 홈택스 발행용 목록(CSV)</button>
+        <select id="feeLessor" class="bass-select" style="min-height:44px;">${(r.lessors || []).map((l) => `<option value="${E(l.id)}">${E(l.name)} · ${E(l.branch)} (${won(l.app_fee)})</option>`).join("")}</select>
+        <button id="feePlan" type="button" class="bass-btn bass-btn--sm" style="min-height:44px;">⚙️ 월 가맹비 설정</button>
+      </div>`;
+    const fid = (el) => el.closest(".fee-row").dataset.id;
+    box.querySelectorAll(".fee-paid").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      const amt = Number((window.prompt(`입금액(원) — 청구액 ${won(f.total_amount)}과 같아야 합니다.`, String(f.total_amount)) || "").replace(/\D/g, ""));
+      if (!amt) return;
+      const date = (window.prompt("입금일 (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "").trim();
+      if (!date) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/paid`, { method: "POST", body: { amount: amt, paid_date: date } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    }));
+    box.querySelectorAll(".fee-inv").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      window.alert(`홈택스에서 ${f.lessor_name} (사업자번호 ${f.lessor_business_number || "미승인"})에게 ${won(f.total_amount)}(공급가 ${won(f.supply_amount)} + 부가세 ${won(f.vat_amount)}) 전자세금계산서를 발행한 뒤, 승인번호 24자리를 입력해 주세요.`);
+      const no = (window.prompt("국세청 승인번호 24자리 (예: 20261116-41000000-12345678)") || "").trim();
+      if (!no) return;
+      const date = (window.prompt("작성일 (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "").trim();
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/invoice`, { method: "POST", body: { nts_confirm_no: no, issue_date: date } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    }));
+    box.querySelectorAll(".fee-invcancel").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      const memo = (window.prompt(`세금계산서(${f.invoice_nts_no}) 기록을 취소합니다. 취소 사유를 적어 주세요.`) || "").trim();
+      if (!memo) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/invoice-cancel`, { method: "POST", body: { memo } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    }));
+    document.getElementById("feeGen").addEventListener("click", function () {
+      Bass.withLock(this, async () => { const res = await Bass.api(APP_ID, "/fees/generate", { method: "POST", body: {} }); Bass.updateAppAlert("success", res.message); await loadFeeBox(); });
+    });
+    document.getElementById("feeCsv").addEventListener("click", async () => {
+      const resp = await fetch(`${Bass.apiBase(APP_ID)}/fees/export-hometax-csv`, { headers: { Authorization: "Bearer " + Bass.token() } });
+      if (!resp.ok) { Bass.updateAppAlert("error", "내려받지 못했습니다."); return; }
+      const a = document.createElement("a"); a.href = URL.createObjectURL(await resp.blob()); a.download = "franchise_fee_hometax.csv"; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+    document.getElementById("feePlan").addEventListener("click", function () {
+      const id = document.getElementById("feeLessor").value;
+      const cur = (r.lessors.find((l) => l.id === id) || {}).app_fee || 0;
+      const v = window.prompt("월 가맹비(원, 부가세 포함 금액). 0 이면 청구하지 않습니다.", String(cur));
+      if (v === null) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/lessors/${encodeURIComponent(id)}/fee-plan`, { method: "POST", body: { app_fee: Number(String(v).replace(/\D/g, "") || 0) } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    });
+  }
+
   function renderLessorsTab() {
     const lessors = ov.lessors || [];
     elTabContent.innerHTML = `
+      <div class="bass-card" style="margin-bottom:14px;">
+        <h3>💳 가맹비 징수 · 납부 등록 · 세금계산서</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:6px;">매달 가맹 임대인에게 <strong>자동으로 청구·통보</strong>됩니다. 입금을 확인하면 <strong>납부 등록</strong>, 홈택스에서 전자세금계산서를 발행한 뒤 <strong>승인번호를 기록</strong>하면 임대인 장부의 경비로 자동 등록되어 종합소득세 증빙이 됩니다. (앱이 국세청에 직접 발행하지는 않습니다.)</div>
+        <div id="feeBox" class="bass-muted">불러오는 중...</div>
+      </div>
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>➕ 신규 임대인(건물주) 및 건물 가맹 등록 (users.json · buildings.json 즉시 반영)</h3>
         <div class="field-grid" style="margin:10px 0;">
@@ -257,7 +345,7 @@
                 ${l.status === "ACTIVE" ? `<button class="bass-btn bass-btn--sm btn-decide" data-id="${l.id}" data-d="suspend" type="button">⛔ 정지</button>` : ""}
                 <button class="bass-btn bass-btn--sm btn-limit" data-id="${l.id}" data-limit="${l.room_limit}" type="button">호실 한도</button>
                 <span class="bass-badge ${l.app_fee_status === "PAID" ? "bass-badge--ok" : "bass-badge--warn"}">사용료 ${l.app_fee_status}</span>
-                ${l.app_fee_status !== "PAID" ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-settle-fee" data-id="${l.id}" type="button">💰 사용료 완납 정산</button>` : ""}
+                ${l.app_fee_status !== "PAID" ? `<span class="bass-muted" style="font-size:12px;">납부 등록은 위 💳 가맹비 청구에서</span>` : ""}
               </div>
             </div>
           </div>
@@ -265,6 +353,7 @@
       </div>
     `;
 
+    loadFeeBox().catch(Bass.showError);
     document.getElementById("btnAddLessor").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const branch = document.getElementById("nlBranch").value.trim();

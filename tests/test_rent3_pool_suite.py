@@ -5544,6 +5544,108 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr.invite_hash, lsr.invite_expires, lsr.invite_issued_by = "", "", ""
             lsr.save(action="t")
 
+    def test_89_franchise_fee_notice_payment_taxinvoice_and_lessor_evidence(self):
+        """89. 가맹비: 자동 청구·통보(중복 없음) → 관리인 납부 등록(청구액과 같아야 함) → 세금계산서 승인번호 기록(24자리·중복 불가) → 임대인 장부 경비 자동 등록 → 임대인 연도별 증빙(CSV), 남의 자료·관리인 기능 접근 불가."""
+        from apps.rent_dist._rent3_core import Lessor, Outlay, feebilling as fb
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic, sunho = self._login("admin"), self._login("chic"), self._login("sunho")
+        AD, LS = "/api/rent3_admin", "/api/rent3_lessor"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number)
+        lsr.app_fee = 33000; lsr.save(action="t")
+        for f0 in list(fb.FranchiseFee.all()):            # 다른 시험에서 대시보드를 열 때 자동 청구가 생겼을 수 있어 처음 상태로
+            f0.delete(action="t")
+        for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+            if m0.category.startswith("가맹비"):
+                m0.delete(action="t")
+        nts = "20261116-41000000-12345678"
+        from unittest import mock
+        env_auto = mock.patch.dict(os.environ, {"RENT3_FEE_AUTO": "1"})
+        try:
+            # 기본(자동 꺼짐): 조회만으로는 청구가 생기지 않고, 관리인의 직접 생성만 된다
+            self.assertEqual([f for f in c.get(f"{AD}/fees", headers=admin).json()["fees"] if f["id_lessor"] == lsr.id], [])
+            self.assertEqual(c.get(f"{AD}/fees", headers=admin).json()["auto"], False)
+            env_auto.start()
+            self.assertIn(c.get(f"{AD}/fees", headers=chic).status_code, (401, 403))                        # 임대인은 관리인 기능 불가
+            lst = c.get(f"{AD}/fees", headers=admin)
+            self.assertEqual(lst.status_code, 200, lst.text)
+            mine = [f for f in lst.json()["fees"] if f["id_lessor"] == lsr.id]
+            self.assertEqual(len(mine), 1)
+            fee = mine[0]
+            self.assertEqual((fee["supply_amount"], fee["vat_amount"], fee["total_amount"], fee["status"]), (30000, 3000, 33000, "NOTICED"))
+            self.assertEqual(len([f for f in c.get(f"{AD}/fees", headers=admin).json()["fees"] if f["id_lessor"] == lsr.id]), 1)   # 다시 조회해도 중복 청구 없음
+            self.assertEqual(c.post(f"{AD}/fees/generate", headers=admin, json={}).json()["created"], 0)
+            notices = [m for m in SupportMessage.find(thread_user=f"lessor:{lsr.id}") if m.category == "가맹비 징수 통보"]
+            self.assertEqual(len(notices), 1)                                                                 # 통보는 한 번만
+            fid = fee["id"]
+            # 임대인: 내 내역만, 남의 지점은 403
+            mf = c.get(f"{LS}/franchise-fees?branch=main", headers=chic)
+            self.assertEqual(mf.status_code, 200, mf.text)
+            self.assertEqual([f["id"] for f in mf.json()["fees"]], [fid])
+            self.assertEqual(c.get(f"{LS}/franchise-fees?branch=main", headers=sunho).status_code, 403)
+            # 납부 등록: 금액 불일치·권한·중복
+            pay = lambda **kw: c.post(f"{AD}/fees/{fid}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16", **kw})
+            self.assertEqual(pay(amount=30000).status_code, 400)
+            self.assertIn(c.post(f"{AD}/fees/{fid}/paid", headers=chic, json={"amount": 33000}).status_code, (401, 403))
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": nts}).status_code, 400)   # 입금 전엔 세금계산서 기록 불가
+            self.assertEqual(pay().status_code, 200)
+            self.assertEqual(pay().status_code, 400)
+            self.assertEqual(Lessor.get(lsr.id).app_fee_status, "PAID")
+            # 세금계산서: 승인번호 24자리·중복 불가 → 장부 경비 자동 등록
+            inv = lambda no, **kw: c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": no, "issue_date": "2026-11-16", **kw})
+            self.assertEqual(inv("12345").status_code, 400)
+            ok = inv(nts)
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(ok.json()["fee"]["invoice_nts_no"], nts)
+            out = Outlay.get(ok.json()["fee"]["outlay_id"])
+            self.assertEqual((out.amount, out.category, out.evidence_type, out.is_vat_deductible), (33000, "platform_fee", "TAX_INVOICE", True))
+            self.assertEqual(inv(nts).status_code, 400)                                                       # 이미 기록됨
+            # 임대인 증빙: 발행분은 증빙, 합계·CSV 에 승인번호
+            ev = c.get(f"{LS}/franchise-fees?branch=main&year=2026", headers=chic).json()["evidence"]
+            self.assertEqual((ev["totals"]["count_issued"], ev["totals"]["issued_total"], ev["totals"]["issued_vat"]), (1, 33000, 3000))
+            csv = c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic)
+            self.assertEqual(csv.status_code, 200)
+            self.assertIn(nts, csv.text)
+            self.assertEqual(c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=sunho).status_code, 403)
+            # 발행 취소: 사유 필요, 장부 경비도 지움 → 증빙에서 빠지고 '발행 대기'로
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-cancel", headers=admin, json={"memo": ""}).status_code, 400)
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-cancel", headers=admin, json={"memo": "공급가액 오기재"}).status_code, 200)
+            self.assertIsNone(Outlay.get(out.id))
+            ev2 = c.get(f"{LS}/franchise-fees?branch=main&year=2026", headers=chic).json()["evidence"]
+            self.assertEqual((ev2["totals"]["count_issued"], ev2["totals"]["count_pending"]), (0, 1))
+            self.assertIn("발행 대기", c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic).text)
+            # 홈택스 발행용 목록(관리인만)
+            self.assertIn(c.get(f"{AD}/fees/export-hometax-csv", headers=chic).status_code, (401, 403))
+            self.assertEqual(c.get(f"{AD}/fees/export-hometax-csv", headers=admin).status_code, 200)
+            # 월 가맹비 변경(관리인만)
+            self.assertEqual(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=admin, json={"app_fee": 44000}).status_code, 200)
+            self.assertEqual(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=admin, json={"app_fee": -1}).status_code, 400)
+            self.assertIn(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=chic, json={"app_fee": 1}).status_code, (401, 403))
+            # 화면 문자열
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            aj = rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js")
+            for needle in ("loadFeeBox", "/fees/", "fee-paid", "fee-inv", "승인번호", "/fees/export-hometax-csv", "feePlan"):
+                self.assertIn(needle, aj, needle)
+            lj = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+            for needle in ("btnFeeEvidence", "showFeeEvidenceModal", "/franchise-fees", "종합소득세 증빙", "feeCsvDl"):
+                self.assertIn(needle, lj, needle)
+        finally:
+            try:
+                env_auto.stop()
+            except RuntimeError:
+                pass
+            for f in list(fb.FranchiseFee.all()):
+                f.delete(action="t")
+            for o in list(Outlay.find(category="platform_fee")):
+                o.delete(action="t")
+            for m in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m.category.startswith("가맹비"):
+                    m.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number = keep
+            lsr.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

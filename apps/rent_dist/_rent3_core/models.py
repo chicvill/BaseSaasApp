@@ -48,6 +48,7 @@ EXPENSE_CATEGORIES = {
     "insurance": "건물 화재보험·배상책임",
     "repair_maint": "공용시설 수선 및 소모품",
     "internet_tv": "건물 인터넷·IPTV 단체선",
+    "platform_fee": "플랫폼 가맹비(이용료)",
     "congrat_condol": "경조사비·업무추진비 (종소세 전용·부가세 불공제)",
     "other": "기타 일반 잡비",
 }

@@ -43,7 +43,7 @@
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
     ] },
-    { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }] },
+    { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }, { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" }] },
     { title: "임차인 소통 · 시설", items: [
       { label: "💬 메시지", tab: "messages" },
       { label: "🔧 A/S 접수", tab: "ops" },
@@ -1234,6 +1234,47 @@
         await showBizRegModal();
         await refresh();
       });
+    });
+  }
+
+  // 💳 가맹비 납부·세금계산서 내역과 종합소득세 증빙(CSV·인쇄). 발행된 세금계산서는 장부 경비로 자동 등록되어 세무 허브에도 들어간다.
+  async function showFeeEvidenceModal(year) {
+    const yr = year || Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    const r = await Bass.api(APP_ID, `/franchise-fees?branch=${encodeURIComponent(currentBranch)}&year=${yr}`);
+    const E = Bass.escapeHtml, ev = r.evidence || {}, t = ev.totals || {}, pl = r.platform || {};
+    const row = (f) => `<div style="padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;line-height:1.6;">
+        <strong>${E(f.billing_month)}</strong> · ${fmtWon(f.total_amount)} <span class="bass-muted">(공급가 ${fmtWon(f.supply_amount)} + 부가세 ${fmtWon(f.vat_amount)})</span><br>
+        <span class="bass-badge ${f.status === "PAID" ? "bass-badge--ok" : "bass-badge--warn"}">${E(f.state_label)}</span>
+        <span class="bass-badge ${f.invoice_status === "ISSUED" ? "bass-badge--ok" : ""}">🧾 ${E(f.invoice_label)}</span>
+        ${f.status === "NOTICED" ? ` <span class="bass-muted">납부 기한 ${E(f.due_date)}</span>` : ""}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}
+        ${f.invoice_nts_no ? `<br><span class="bass-muted">승인번호</span> <code>${E(f.invoice_nts_no)}</code> <span class="bass-muted">작성일 ${E(f.invoice_issue_date)}</span>` : ""}</div>`;
+    const body = openModal("💳 가맹비 납부 · 세금계산서 · 종합소득세 증빙", `
+      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">월 가맹비 <strong>${fmtWon(r.monthly_fee)}</strong>(부가세 포함) · 공급자 ${E(pl.name || "")} ${E(pl.business_number || "")}<br>
+        <span class="bass-muted">입금이 확인되면 전자세금계산서가 발급되고, 발급된 건은 <strong>장부의 경비(증빙: 세금계산서)</strong>로 자동 등록되어 부가세 매입세액·종합소득세 경비에 들어갑니다.</span></div>
+      ${(r.fees || []).map(row).join("") || '<div class="bass-muted">청구 내역이 없습니다.</div>'}
+      <div class="bass-card" style="margin-top:12px;padding:10px 12px;">
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+          <strong>${yr}년 종합소득세 증빙</strong>
+          <select id="feeYear" class="bass-select" style="min-height:44px;">${[yr + 1, yr, yr - 1, yr - 2].map((y) => `<option value="${y}" ${y === yr ? "selected" : ""}>${y}년</option>`).join("")}</select>
+        </div>
+        <div style="font-size:13.5px;line-height:1.8;margin-top:6px;">세금계산서 발행분 <strong>${t.count_issued || 0}건 · ${fmtWon(t.issued_total)}</strong> (공급가 ${fmtWon(t.issued_supply)} + 부가세 ${fmtWon(t.issued_vat)})<br>
+          ${t.count_pending ? `<span style="color:var(--warn);font-weight:700;">발행 대기 ${t.count_pending}건 · ${fmtWon(t.pending_total)}</span> <span class="bass-muted">— 세금계산서가 발급되기 전에는 증빙이 아닙니다.</span>` : `<span class="bass-muted">발행 대기 없음</span>`}</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button id="feeCsvDl" type="button" class="bass-btn bass-btn--primary" style="min-height:46px;">📥 증빙 CSV 내려받기</button>
+          <button id="feePrint" type="button" class="bass-btn" style="min-height:46px;">🖨️ 인쇄 / PDF 저장</button>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">종합소득세 신고 때 CSV(또는 인쇄본)와 홈택스의 전자세금계산서 조회 내역을 함께 보관하세요. 세무 허브의 경비 자료에도 같은 금액이 들어 있습니다.</div>
+      </div>`);
+    body.querySelector("#feeYear").addEventListener("change", (e) => showFeeEvidenceModal(Number(e.target.value)).catch(Bass.showError));
+    body.querySelector("#feeCsvDl").addEventListener("click", () => downloadWithAuth(`/franchise-fees/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${yr}`, `franchise_fee_evidence_${yr}.csv`));
+    body.querySelector("#feePrint").addEventListener("click", () => window.print());
+  }
+  const btnFeeEvidence = document.getElementById("btnFeeEvidence");
+  if (btnFeeEvidence) {
+    btnFeeEvidence.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      showFeeEvidenceModal().catch(Bass.showError);
     });
   }
 
