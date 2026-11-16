@@ -873,7 +873,12 @@
       $m("exSend").addEventListener("click", function () {
         Bass.withLock(this, async () => {
           const res = await openOrSyncRenewal();
+          const sid = res && res.check && res.check.cosign_session_id;
           Bass.updateAppAlert(res.level || "success", res.message, res.hint);
+          if (sid) {
+            window.location.href = `/rent3_contract/?session=${encodeURIComponent(sid)}&role=lessor`;
+            return;
+          }
           await refresh();
           showExpiryModal(no);
         });
