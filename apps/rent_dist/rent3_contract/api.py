@@ -753,13 +753,23 @@ def sign_step4(session_id: str, req: Step4SignReq):
         expected_revision=req.expected_revision,
         app_source=APP_SRC,
     )
+    ct_dump = None
+    if s.status == "COMPLETED" and s.created_contract_id:
+        ct_obj = Contract.get(s.created_contract_id)
+        if ct_obj:
+            ct_dump = ct_obj.model_dump()
     return {
         "success": True,
         "message": (
-            "상호 신분증·등기 확인 기반 양측 전자서명 및 SHA-256 계약원본 무결성 봉인이 완료되었습니다!"
-            if s.integrity_hash else f"{'임대인' if req.role == 'lessor' else '임차인'} 전자서명이 날인되었습니다."
+            f"🎉 비대면 재계약 체결 완료! 계약서({s.created_contract_id})가 봉인되었습니다."
+            if s.status == "COMPLETED"
+            else (
+                "상호 신분증·등기 확인 기반 양측 전자서명 및 SHA-256 계약원본 무결성 봉인이 완료되었습니다!"
+                if s.integrity_hash else f"{'임대인' if req.role == 'lessor' else '임차인'} 전자서명이 날인되었습니다."
+            )
         ),
         "session": s.model_dump(),
+        **({"contract": ct_dump} if ct_dump is not None else {}),
     }
 
 

@@ -549,6 +549,7 @@ class ExpiryRenewalCheck(PoolObj):
             message=(
                 f"[📅 만기 6~2개월 전 전출계획 확인 요청] {room.room_no}호 계약 만기일({ct.expiry_date}, "
                 f"법정 통지마감 {win['notice_deadline_date']})을 앞두고 퇴실(전출) 계획 여부를 확인 중입니다. "
+                f"연장(전출의사 없음) 시에는 월세 5% 범위 내 인상 조건으로 재계약이 진행됩니다. "
                 f"임차인 마이홈에서 [전출 예정] 또는 [전출의사 없음(연장 희망)]을 회신해 주세요.{extra}"
             ),
             quick_action_label="마이홈 전출계획 회신",

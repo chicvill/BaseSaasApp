@@ -1803,7 +1803,10 @@
   function renderStep3(s) {
     const t = s.terms || {};
     elStepPanel.innerHTML = `
-      <h3>③ 계약 조건 및 특약사항 공동 작성 (Revision v${s.revision})</h3>
+      <h3>${s.mode === "RENEWAL" ? `③ 비대면 재계약 조건 확인 및 승인 (Revision v${s.revision})` : `③ 계약 조건 및 특약사항 공동 작성 (Revision v${s.revision})`}</h3>
+      ${s.mode === "RENEWAL" ? `<div class="call-banner" style="margin:0 0 10px;border-color:var(--primary-2);background:#f0f9ff;color:#0c4a6e;">
+        <strong>🔄 비대면 재계약</strong> — 기존 계약 당사자이므로 본인 확인(신분증·등기부) 없이 바로 <strong>재계약 승인 → 전자서명</strong>으로 체결됩니다.
+      </div>` : ""}
       <p class="bass-muted" style="font-size:13px;">보증금·계약금·월세·관리비·입주일·계약기간은 상대에게 <strong>제안</strong>하고 <strong>수락</strong>을 받아야 바뀝니다. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.</p>
       <div class="term-grid">
         ${[["deposit", "보증금", fmtWon(t.deposit)], ["contract_deposit", "계약금", fmtWon(t.contract_deposit)], ["monthly_rent", "월세", fmtWon(t.monthly_rent)],
@@ -1863,7 +1866,7 @@
       </div>
       ${chatSummary.open_count > 0 ? `<div class="call-banner" style="margin:8px 0;"><div style="font-weight:800;margin-bottom:4px;">답하지 않은 제안·수정 요청이 ${chatSummary.open_count}건 있습니다</div><div style="font-size:12.5px;margin-bottom:8px;">모두 처리(수락·거절·철회)해야 최종 동의할 수 있습니다.</div><button id="btnOpenChat3" type="button" class="bass-btn bass-btn--sm bass-btn--primary">💬 대화 열기</button></div>` : ""}
       <button id="btnAgreeStep3" class="bass-btn bass-btn--primary" style="width:100%;" type="button"${chatSummary.open_count > 0 ? " disabled" : ""}>
-        🔒 계약 조건 전체 동의 (v${s.revision}) · ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"}
+        ${s.mode === "RENEWAL" ? "🔒 재계약 승인" : "🔒 계약 조건 전체 동의"} (v${s.revision}) · ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"}
       </button>
     `;
 
@@ -1963,7 +1966,7 @@
     const canSignNow = okLogin && okMutualId && okRegistry && okStep3;
 
     elStepPanel.innerHTML = `
-      <h3>④ 신분증·등기부 확인 검증 요약 및 자필 전자서명</h3>
+      <h3>${s.mode === "RENEWAL" ? "④ 재계약 전자서명 (양측 서명 완료 시 즉시 체결)" : "④ 신분증·등기부 확인 검증 요약 및 자필 전자서명"}</h3>
       <p class="bass-muted" style="font-size:13px;">
         로그인 본인인증, 서로 신분증 확인 체크, 등기부등본 열람 확인, 계약조건 합의가 모두 완료되어야 서명이 날인되며 SHA-256 해시로 봉인됩니다.
       </p>
@@ -2071,9 +2074,11 @@
           body: { role: currentRole, signature: sigPayload, expected_revision: s.revision },
         });
         activeSession = res.session;
+        if (res.contract) sealedContract = res.contract;
         isEditingForm = false;
         viewStep = activeSession.current_step;
         Bass.updateAppAlert("success", res.message);
+        if (activeSession.status === "COMPLETED" && !sealedContract) await fetchActiveSession(true);
         renderWorkspace();
       });
     });

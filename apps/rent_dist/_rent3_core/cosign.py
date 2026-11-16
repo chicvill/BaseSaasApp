@@ -486,6 +486,7 @@ class CoSignSession(PoolObj):
             for o in (room.option_list or [])
         ]
 
+        is_renewal = (mode == "RENEWAL")
         now_str = now_iso()
         session = cls(
             mode=mode,
@@ -507,7 +508,7 @@ class CoSignSession(PoolObj):
             responded_at=now_str if call_status == "CONNECTED" else "",
             lessor_login_verified=lessor_login_verified,
             tenant_login_verified=tenant_login_verified,
-            current_step=1,
+            current_step=3 if is_renewal else 1,
             status="IN_PROGRESS",
             revision=1,
             registry_data={
@@ -517,7 +518,13 @@ class CoSignSession(PoolObj):
                 "clean_title": room.registry_info.get("clean_title", True),
                 "checked_date": date_today().isoformat(),
             },
-            step1_lessor_confirmed=(initiated_by_role == "lessor" or call_status == "CONNECTED"),
+            lessor_checked_tenant_id=is_renewal,
+            tenant_checked_lessor_id=is_renewal,
+            step1_lessor_confirmed=True if is_renewal else (initiated_by_role == "lessor" or call_status == "CONNECTED"),
+            step1_tenant_locked=is_renewal,
+            step2_lessor_confirmed=is_renewal,
+            step2_tenant_locked=is_renewal,
+            tenant_recheck_at=now_str if is_renewal else "",
             option_checks=opts,
             terms={
                 "tenant_name": t_name,
@@ -534,13 +541,17 @@ class CoSignSession(PoolObj):
                 "pay_timing": room.pay_timing or "후불",
                 "vat_target": prev_ct.vat_target if prev_ct else room.vat_applicable,
                 "vat_separate": True,
-                "contract_deposit": 300000,
+                "contract_deposit": 0 if is_renewal else 300000,
                 "deposit": prev_ct.deposit if prev_ct else room.deposit,
                 "monthly_rent": prev_ct.monthly_rent if prev_ct else room.monthly_rent,
                 "maintenance_fee": prev_ct.maintenance_fee if prev_ct else room.maintenance_fee,
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,
                 "special_terms": (
+                    "1. 본 계약은 기존 임대차 계약의 만기 연장(재계약)으로, 본인 확인 및 기존 시설·옵션을 승계하며 비대면으로 체결함.\n"
+                    "2. 보증금 및 월세 조정은 주택임대차보호법 제7조(5% 상한) 범위 내에서 합의함.\n"
+                    "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음."
+                ) if is_renewal else (
                     "1. 본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.\n"
                     "2. 임대인과 임차인은 각자 본인인증 로그인 후 서로의 실물 신분증과 등기부등본을 대조·확인하였음.\n"
                     "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n"
@@ -1121,6 +1132,10 @@ class CoSignSession(PoolObj):
             self.integrity_hash = self.compute_integrity_hash()
             if self.current_step < 5:
                 self.current_step = 5
+            if self.mode == "RENEWAL":
+                self.save(action=f"step4_signed_by_{role}", app_source=app_source)
+                self.complete_step5_and_seal(payment_method="RENEWAL_CARRYOVER", app_source=app_source)
+                return self
 
         return self.save(action=f"step4_signed_by_{role}", app_source=app_source)
 
@@ -1138,7 +1153,7 @@ class CoSignSession(PoolObj):
         self._ensure_risk_ok()
         if not (self.lessor_signature and self.tenant_signature):
             raise DomainError("임대인과 임차인 양측 전자서명이 모두 완료되어야 최종 체결할 수 있습니다.")
-        if not self.tenant_recheck_at:
+        if not self.tenant_recheck_at and self.mode != "RENEWAL":
             raise DomainError(
                 "임차인의 체결 직전 등기부 재열람 확인이 필요합니다.",
                 hint="계약 후 잔금 전에 근저당·소유자가 바뀌는 사고를 막기 위해, 임차인이 인터넷등기소에서 다시 열람한 뒤 확인해야 체결할 수 있습니다.",
@@ -1227,8 +1242,8 @@ class CoSignSession(PoolObj):
             pay_timing=t_info.get("pay_timing", "후불"),
             vat_target=bool(t_info.get("vat_target") or t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
             vat_separate=bool(t_info.get("vat_separate", True)),
-            contract_deposit=int(t_info.get("contract_deposit", 300000)),
-            keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다
+            contract_deposit=int(t_info.get("contract_deposit", 0 if self.mode == "RENEWAL" else 300000)),
+            keys_released=(self.mode == "RENEWAL"),  # 재계약은 기존 입주자 도어락 유지, 신규는 잔금 입금 확인 후 교부
             insurance_proof_required=bool(self.needs_insurance_refusal_clause(t_info) and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"),
             mortgage_cleanup_required=bool(t_info.get("mortgage_cleanup_clause")),  # 잔금 시 근저당 말소 특약 — 잔금일에 말소 확인이 있어야 교부
             deposit=int(t_info.get("deposit", room.deposit)),

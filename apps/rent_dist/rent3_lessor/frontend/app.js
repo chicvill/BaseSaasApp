@@ -766,7 +766,7 @@
     const ec = r.expiry_check;
     const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
     const deadline = ew && ew.notice_deadline_date ? `${dotDate(ew.notice_deadline_date)}까지 ` : "";
-    const msg1 = `[${bldgName()}] ${no}호 ${ct.tenant_name}님 안녕하세요, 임대인입니다.\n계약 만기가 ${dotDate(ct.expiry_date)}입니다. 만기 후 이사(전출) 계획이 있으신지 ${deadline}알려 주시기 바랍니다.\n이사 계획이 없으시면 갱신 조건을 따로 안내드리겠습니다.`;
+    const msg1 = `[${bldgName()}] ${no}호 ${ct.tenant_name}님 안녕하세요, 임대인입니다.\n계약 만기가 ${dotDate(ct.expiry_date)}입니다. 만기 후 이사(전출) 계획이 있으신지 ${deadline}알려 주시기 바랍니다.\n연장(전출의사 없음) 시에는 월세 5% 범위 내에서 인상된 조건으로 재계약이 진행됩니다. 자세한 조건은 따로 안내드리겠습니다.`;
     const stay = Boolean(ec && (ec.tenant_plan === "STAY" || /RENEWAL/.test(ec.status || "")));
     const moveOut = Boolean(ec && ec.tenant_plan === "MOVE_OUT");
     const dep0 = (ec && ec.proposed_deposit) || r.deposit;
@@ -797,8 +797,9 @@
           <label class="r3-fld">연장 개월<input id="exTerm" class="bass-input" type="number" value="${(ec && ec.proposed_term_months) || 12}"></label>
         </div>
         <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
-          <button id="exCopy2" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
-          <button id="exSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📝 갱신 예고 기록·앱 전달</button>
+          <button id="exCopy2" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📞 재계약 창 호출 문자 (만기 3~5일 전)</button>
+          <button id="exSend" class="bass-btn bass-btn--sm" type="button">📝 갱신 예고 기록·앱 전달</button>
+          ${ec && ec.cosign_session_id ? `<a class="bass-btn bass-btn--sm" href="/rent3_contract/?session=${Bass.escapeHtml(ec.cosign_session_id)}&role=lessor">🤝 재계약 창 열기 (승인·서명)</a>` : ""}
           <button id="exPwRemind" class="bass-btn bass-btn--sm" type="button">🔒 재계약 새 암호 설정 안내·링크 복사</button>
         </div>` : ""}`);
     void body;
@@ -831,11 +832,33 @@
     $m("exStay").addEventListener("click", plan("STAY"));
     $m("exOut").addEventListener("click", plan("MOVE_OUT"));
     if (stay) {
-      const composeRenewalMsg = () => {
-        const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
-        return `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)}) 이후 ${tm}개월 연장 조건을 안내드립니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)}\n월세는 기본 5% 인상안이며(법정 한도 5% 이내) 금액은 재계약 과정에서 함께 조정할 수 있습니다. 의견 있으시면 알려 주세요.`;
+      const openOrSyncRenewal = async () => {
+        const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
+          method: "POST",
+          body: {
+            branch: currentBranch, room_no: no,
+            proposed_deposit: Number($m("exDep").value || 0), proposed_monthly_rent: Number($m("exRent").value || 0),
+            proposed_maintenance_fee: Number($m("exFee").value || 0), proposed_term_months: Number($m("exTerm").value || 12),
+            renewal_note: "전출의사가 없으셔서 연장 재계약 조건을 사전 예고드립니다.", open_cosign_session: true,
+          },
+        });
+        return res;
       };
-      $m("exCopy2").addEventListener("click", () => copyAndSms(composeRenewalMsg(), phone));
+      $m("exCopy2").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
+          let sid = ec && ec.cosign_session_id;
+          if (!sid) {
+            const res = await openOrSyncRenewal();
+            sid = res.check && res.check.cosign_session_id;
+            await refresh();
+          }
+          const url = `${window.location.origin}/rent3_contract/?session=${encodeURIComponent(sid || "")}&role=tenant`;
+          const callMsg = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)})를 앞두고 비대면 재계약 창으로 호출합니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)} (${tm}개월 연장)\n본인 확인 없이 아래 링크에서 재계약 조건 승인 후 전자서명만 하시면 비대면 재계약이 완료됩니다.\n${url}`;
+          await copyAndSms(callMsg, phone);
+          showExpiryModal(no);
+        });
+      });
       $m("exPwRemind").addEventListener("click", function () {
         Bass.withLock(this, async () => {
           const res = await Bass.api(APP_ID, "/expiry/remind-password", {
@@ -849,15 +872,7 @@
       });
       $m("exSend").addEventListener("click", function () {
         Bass.withLock(this, async () => {
-          const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
-            method: "POST",
-            body: {
-              branch: currentBranch, room_no: no,
-              proposed_deposit: Number($m("exDep").value || 0), proposed_monthly_rent: Number($m("exRent").value || 0),
-              proposed_maintenance_fee: Number($m("exFee").value || 0), proposed_term_months: Number($m("exTerm").value || 12),
-              renewal_note: "전출의사가 없으셔서 연장 재계약 조건을 사전 예고드립니다.", open_cosign_session: true,
-            },
-          });
+          const res = await openOrSyncRenewal();
           Bass.updateAppAlert(res.level || "success", res.message, res.hint);
           await refresh();
           showExpiryModal(no);
