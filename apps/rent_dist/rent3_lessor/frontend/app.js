@@ -448,40 +448,13 @@
     return `[${bldgName()}] ${r.room_no}호 ${(r.contract && r.contract.tenant_name) || ""}님, 아래 월세가 아직 확인되지 않았습니다.\n${list}\n합계 ${fmtWon(r.ledger.total_unpaid)}. 확인 후 입금 부탁드립니다.`;
   }
 
-  function showReceiptModal(rn, pay, remain) {
+  // 수납확인 메시지 복사 → 임차인 문자창 자동 실행 (모달 없이 바로 문자창 오픈)
+  async function sendReceiptSms(rn, pay, remain) {
     const r = roomOf(rn);
     const ct = r && r.contract;
     const phone = (ct && ct.tenant_phone) || (r && r.tenant && r.tenant.phone) || "";
-    const tenantName = (ct && ct.tenant_name) || (r && r.tenant && r.tenant.name) || "임차인";
     const msgVal = receiptMsg[rn] || receiptText(pay, remain || 0);
-
-    const modalHtml = `
-      <div style="background:#FFF7ED;border:1.5px solid #FDBA74;border-radius:18px;padding:16px 14px;margin-bottom:8px;">
-        <div style="font-size:13.5px;font-weight:700;color:#C2410C;margin-bottom:8px;display:flex;align-items:center;gap:6px;">
-          <span>✅</span>
-          <span>${Bass.escapeHtml(rn)}호 (${Bass.escapeHtml(tenantName)}) 수납 처리 완료</span>
-        </div>
-        <div style="font-size:12.5px;color:#7C2D12;margin-bottom:10px;line-height:1.45;">
-          수납이 정상 처리되었습니다. 아래 안내 메시지를 복사해 임차인에게 문자로 전송하세요.
-        </div>
-        <label class="r3-lbl" style="color:#9A3412;font-size:12.5px;">✉️ 임차인에게 보낼 수납확인 메시지</label>
-        <textarea id="smsModalReceiptMsg" class="bass-input r3-msg" rows="5" style="background:#FFFFFF !important;border:1px solid #FDBA74 !important;border-radius:12px;font-size:13px;line-height:1.5;width:100%;box-sizing:border-box;margin-top:4px;">${Bass.escapeHtml(msgVal)}</textarea>
-        <button id="btnSmsModalCopy" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:12px;font-size:14.5px;font-weight:800;display:flex;align-items:center;justify-content:center;gap:6px;">
-          📋 수납확인 메시지 복사 → 임차인 문자창
-        </button>
-      </div>
-    `;
-
-    openModal(`✉️ 수납 완료 안내 · ${rn}호`, modalHtml);
-    const copyBtn = document.getElementById("btnSmsModalCopy");
-    if (copyBtn) {
-      copyBtn.addEventListener("click", async () => {
-        const ta = document.getElementById("smsModalReceiptMsg");
-        const textToCopy = ta ? ta.value : msgVal;
-        await copyAndSms(textToCopy, phone);
-        closeModal();
-      });
-    }
+    await copyAndSms(msgVal, phone);
   }
 
   // 📵 분실 폰: 그 임차인의 간편 비밀번호·바로가기를 모두 해제
@@ -590,7 +563,7 @@
       payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})` };
       selRoomNo = rn;
       await refresh();
-      showReceiptModal(rn, pay, remain);
+      await sendReceiptSms(rn, pay, remain);
     };
     body.querySelectorAll("[data-notice]").forEach((card) => {
       const id = card.dataset.notice;
@@ -1515,7 +1488,7 @@
       await refresh();
       const pi = document.getElementById("roomPick");
       if (pi) pi.scrollIntoView({ behavior: "smooth", block: "start" });
-      showReceiptModal(rn, pay, remain);
+      await sendReceiptSms(rn, pay, remain);
     }
     renderRoomPanel();
   }
