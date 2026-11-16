@@ -491,6 +491,31 @@
     }).catch(Bass.showError);
   }
 
+  // 🔍 원장 상태: 저장된 납부 건(출처·적힌 청구월)과 상계 결과·선수금·이상 징후를 보여 주고, 잘못 들어간 건은 여기서 삭제한다
+  async function showLedgerStateModal(no) {
+    const E = Bass.escapeHtml;
+    const r = await Bass.api(APP_ID, `/payments/ledger-state?branch=${encodeURIComponent(currentBranch)}&room_no=${encodeURIComponent(no)}`);
+    const body = openModal(`🔍 ${E(no)}호 ${E(r.tenant_name || "")} · 수납 원장 상태`, `
+      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">청구 합계 <strong>${fmtWon(r.total_due)}</strong> · 받은 돈 <strong>${fmtWon(r.total_paid)}</strong> · 미납 <strong style="color:${r.total_unpaid ? "var(--err)" : "var(--ok)"};">${fmtWon(r.total_unpaid)}</strong> · 선수금 <strong>${fmtWon(r.advance_credit)}</strong></div>
+      ${(r.anomalies || []).map((a) => `<div style="border-left:4px solid var(--warn);padding:6px 10px;margin-bottom:6px;font-size:13px;line-height:1.6;">⚠️ ${E(a.msg)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;margin-bottom:8px;">✅ 이상 징후 없음</div>'}
+      <div class="r3-lbl">저장된 납부 건 (적힌 청구월 · 출처)</div>
+      ${(r.payments || []).slice().reverse().slice(0, 60).map((p) => `<div data-pay="${E(p.id)}" style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;">
+        <span style="flex:1;min-width:0;"><strong>${E(p.billing_month || "-")}</strong> · ${fmtWon(p.total)} · 입금 ${E(p.paid_date)}<br><span class="bass-muted">${E(p.source)} · 기록 ${E(String(p.created_at || "").slice(0, 16).replace("T", " "))}${(p.allocated_months || []).length > 1 ? ` · 상계 ${E(p.allocated_months.join(", "))}` : ""}</span></span>
+        <button type="button" class="bass-btn bass-btn--sm ls-del" style="min-height:40px;">삭제</button></div>`).join("")}
+      <div class="r3-lbl" style="margin-top:10px;">달별 상계 결과 (밀린 달부터 표시)</div>
+      ${(r.months || []).filter((m) => m.due > 0).slice().reverse().slice(0, 36).map((m) => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;${m.unpaid ? "color:var(--err);" : ""}"><span>${E(m.ym)}</span><span>청구 ${fmtWon(m.due)} · 상계 ${fmtWon(m.paid)}${m.unpaid ? ` · <strong>미납 ${fmtWon(m.unpaid)}</strong>` : ""}${m.labelled_total && m.labelled_total !== m.due ? ` · 이 달로 적힌 납부 ${fmtWon(m.labelled_total)}` : ""}</span></div>`).join("")}`);
+    body.querySelectorAll(".ls-del").forEach((b) => b.addEventListener("click", function () {
+      const id = this.closest("[data-pay]").dataset.pay;
+      if (!window.confirm("이 납부 건을 삭제할까요? 그 달 청구액은 다시 미납으로 돌아올 수 있습니다.")) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, "/payments/delete", { method: "POST", body: { branch: currentBranch, pay_id: id } });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+        await showLedgerStateModal(no);
+      });
+    }));
+  }
+
   // ① 수납내역(호실 카드 아래에 항상 펼쳐 둔다): 직접 수납(현금 등) · 월별 납부 내역(날짜·금액 고치기) · 수납확인 메시지
   function renderPayInline(no) {
     const r = roomOf(no);
@@ -548,7 +573,8 @@
           <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
         </div>
       </div>
-      <div class="r3-lbl">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span></div>
+      ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(245,158,11,.14);border:1px solid var(--warn);font-size:13px;">⚠️ 선수금 ${fmtWon(lg.advance_credit)}이 쌓여 있습니다(밀린 청구보다 많이 받음). 중복 수납이 아닌지 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하세요.</div>` : ""}
+      <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
       <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
     const body = host;
@@ -585,9 +611,16 @@
     });
     $m("pmDirect").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: Number($m("pmAmt").value || 0) } }));
+        const amt = Number($m("pmAmt").value || 0);
+        const noUnpaid = Number(lg.total_unpaid || 0) <= 0;
+        // 밀린 청구가 없는데 받는 돈은 선수금이 된다 — 이미 받은 입금을 또 기록하는 것은 아닌지 먼저 묻는다
+        if (noUnpaid && !window.confirm(`${no}호는 밀린 청구가 없습니다.\n${fmtWon(amt)}을 선수금으로 적립할까요?\n(이미 받은 입금을 또 기록하는 것이라면 취소하세요)`)) return;
+        await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: amt, allow_advance: noUnpaid } }));
       });
     });
+    const openState = () => showLedgerStateModal(no).catch(Bass.showError);
+    if ($m("pmState")) $m("pmState").addEventListener("click", openState);
+    if ($m("pmState2")) $m("pmState2").addEventListener("click", openState);
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
       const delBtn = row.querySelector(".pr-del");
       if (delBtn) {

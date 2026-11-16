@@ -77,6 +77,7 @@ class CollectPaymentReq(BaseModel):
     paid_date: Optional[str] = None
     method: str = "TRANSFER"
     up_to_ym: Optional[str] = None
+    allow_advance: bool = False      # 밀린 청구가 없어도 선수금으로 적립(확인을 받은 뒤에만 true)
 
 
 class SmsPasteReq(BaseModel):
@@ -673,9 +674,54 @@ def collect_payment(req: CollectPaymentReq, request: Request):
         method=req.method,
         up_to_ym=req.up_to_ym,
         app_source="rent3_lessor_pin" if pc else APP_SRC,
+        allow_advance=req.allow_advance,
     )
     _pin_pay_record(pc, res)
     return {"success": True, **res}
+
+
+@router.get("/payments/ledger-state")
+def payment_ledger_state(branch: str = "main", room_no: str = ""):
+    """한 호실의 수납 원장 상태(저장된 납부 건·적힌 청구월·상계 결과·선수금)와 이상 징후(같은 달 여러 건·선수금·미납인데 납부 있는 달)를 보여 준다."""
+    from apps.rent_dist._rent3_core.billing import TaxAndCertificateService
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    room = Room.first(branch=b_id, room_no=room_no)
+    ct = (Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None)
+    if ct is None:
+        raise DomainError(f"{room_no}호에 활성 계약이 없습니다.")
+    lg = ct.ledger()
+    pays = sorted((x for x in Pay.find(id_contract=ct.id) if x.payment_kind == "MONTHLY_RENT"), key=lambda x: (x.billing_month, x.paid_date, x.created_at))
+
+    def source(p):
+        k = p.idempotency_key or ""
+        if k.startswith("import:") or TaxAndCertificateService.is_carryover_payment(p):
+            return "장부 이관"
+        if k.startswith("csv:"):
+            return "엑셀 올리기"
+        if k.startswith("seed:"):
+            return "시험 데이터"
+        return "문자 수납" if p.method == "BANK_SMS" else "앱에서 수납"
+
+    by_ym: Dict[str, List[Any]] = {}
+    for p in pays:
+        by_ym.setdefault((p.billing_month or "")[:7], []).append(p)
+    months = []
+    for m in lg["months"]:
+        ps = by_ym.get(m["ym"], [])
+        months.append({"ym": m["ym"], "due": m["due"], "paid": m["paid"], "unpaid": m["unpaid"], "status": m["status"],
+                       "labelled_total": sum(x.total_amount for x in ps), "pay_ids": [x.id for x in ps]})
+    anomalies = []
+    for ym, ps in by_ym.items():
+        due = next((m["due"] for m in lg["months"] if m["ym"] == ym), 0)
+        if len(ps) > 1 and sum(x.total_amount for x in ps) > due > 0:
+            anomalies.append({"kind": "SAME_MONTH_OVER", "ym": ym, "msg": f"{ym}월에 납부가 {len(ps)}건(합계 {sum(x.total_amount for x in ps):,}원)으로 청구액 {due:,}원보다 많습니다. 중복 수납이면 한 건을 삭제하세요.", "pay_ids": [x.id for x in ps]})
+    if lg["advance_credit"] > 0:
+        anomalies.append({"kind": "ADVANCE_CREDIT", "ym": "", "msg": f"선수금 {lg['advance_credit']:,}원이 쌓여 있습니다(밀린 청구보다 많이 받은 금액). 중복 수납이 아닌지 확인하세요.", "pay_ids": []})
+    return {"success": True, "room_no": room.room_no, "tenant_name": ct.tenant_name, "total_due": lg["total_due"], "total_paid": lg["total_paid"], "total_unpaid": lg["total_unpaid"],
+            "advance_credit": lg["advance_credit"], "months": months, "anomalies": anomalies,
+            "payments": [{"id": p.id, "billing_month": p.billing_month, "paid_date": p.paid_date, "total": p.total_amount, "source": source(p), "created_at": p.created_at,
+                          "allocated_months": [a.get("ym") for a in (p.allocated_months or [])]} for p in pays]}
 
 
 class PayEditReq(BaseModel):

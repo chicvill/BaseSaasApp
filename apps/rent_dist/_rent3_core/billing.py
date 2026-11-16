@@ -6,6 +6,8 @@ from __future__ import annotations
 import csv
 import io
 import re
+from datetime import datetime
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 
 from core.errors import Conflict, DomainError, NotFound
@@ -100,6 +102,7 @@ class FifoPaymentEngine:
         raw_sms: str = "",
         up_to_ym: Optional[str] = None,
         app_source: str = "rent3_lessor",
+        allow_advance: bool = False,
     ) -> Dict[str, Any]:
         b_id = normalize_branch_id(branch)
         if amount <= 0:
@@ -120,20 +123,42 @@ class FifoPaymentEngine:
 
         p_date = paid_date or date_today().isoformat()
         p_name = (payer_name or contract.tenant_name or "세입자").strip()
-        idem_key = f"{room.id}:{p_name}:{amount}:{p_date}:{raw_sms.strip()[:40]}"
+        base_key = f"{room.id}:{p_name}:{amount}:{p_date}:{raw_sms.strip()[:40]}"
+        idem_key = base_key
 
-        # 중복 입금 원천 차단 (Idempotency -> 황색 경고 유도)
-        dup = Pay.first(idempotency_key=idem_key)
-        if dup:
-            raise Conflict(
-                f"이미 등록된 동일 입금 내역입니다 ({room.room_no}호 {p_name} {amount:,}원, {p_date}).",
-                hint="중복 수납이 자동 차단되었습니다. 수납 내역 장부를 확인해 주세요.",
-            )
+        # 중복 입금 차단: 문자는 '같은 문자 본문'이면 같은 입금이므로 영구 차단한다.
+        # 직접 수납(문자 본문 없음)은 같은 호실·같은 금액·같은 날 입금이 실제로 여러 번 있을 수 있으므로(예: 두 달치를 나눠 받음),
+        # 방금(30초 안) 같은 요청이 또 온 경우(이중 클릭)만 막고 그 밖에는 새 입금으로 기록한다.
+        if raw_sms.strip():
+            if Pay.first(idempotency_key=base_key):
+                raise Conflict(
+                    f"이미 등록된 동일 입금 내역입니다 ({room.room_no}호 {p_name} {amount:,}원, {p_date}).",
+                    hint="같은 문자가 이미 수납되었습니다. 수납 내역 장부를 확인해 주세요.",
+                )
+        else:
+            now_s = datetime.now()
+            for q in Pay.find(id_contract=contract.id):
+                if (q.idempotency_key or "").split("#", 1)[0] == base_key and q.created_at:
+                    try:
+                        if (now_s - datetime.fromisoformat(q.created_at)).total_seconds() < 30:
+                            raise Conflict(
+                                f"방금 같은 금액({amount:,}원)을 수납했습니다 ({room.room_no}호 {p_name}).",
+                                hint="버튼을 두 번 눌렀다면 이미 처리된 것입니다. 수납 내역을 확인해 주세요. (다른 입금이라면 30초 뒤에 다시 수납하세요)",
+                            )
+                    except ValueError:
+                        pass
+            idem_key = f"{base_key}#{uuid4().hex[:8]}"
 
         # FIFO 상계 전 원장 조회
         target_ym = up_to_ym or current_ym()
         before_ledger = contract.ledger(up_to_ym=target_ym)
         unpaid_rows = [r for r in before_ledger["months"] if r["unpaid"] > 0]
+        if not unpaid_rows and not allow_advance:
+            raise DomainError(
+                f"{room.room_no}호는 밀린 청구가 없어 {amount:,}원을 어느 달에도 상계할 수 없습니다.",
+                hint="미리 받은 돈(선수금)으로 적립하려면 확인 후 다시 수납하세요. 이미 받은 입금이면 같은 수납이 중복 기록되는 것이니 수납 내역을 먼저 확인해 주세요.",
+                code="NO_UNPAID",
+            )
 
         remaining = amount
         allocations: List[Dict[str, Any]] = []
@@ -315,6 +340,17 @@ class FifoPaymentEngine:
             room_no = by_name.room_no
         else:
             room_no = parsed["room_no"] or (chk["room_contract"].room_no if chk["room_contract"] else "")
+        # 밀린 청구가 없는 호실에 입금 문자가 오면 어느 달에도 상계되지 않는다 → 선수금인지 중복 문자인지 확인을 받는다(force 로 다시 요청하면 선수금 적립)
+        tgt = Contract.first(branch=b_id, room_no=room_no, status="ACTIVE") if room_no else None
+        if tgt is not None and not force:
+            led = tgt.ledger(up_to_ym=up_to_ym or current_ym())
+            if led["total_unpaid"] <= 0:
+                return {
+                    "needs_confirm": True, "level": "warning",
+                    "message": f"{room_no}호는 밀린 청구가 없습니다. 이 입금은 선수금으로 적립됩니다.",
+                    "issues": [{"field": "advance", "msg": f"{room_no}호는 모든 달이 납부 완료 상태입니다. 이미 수납한 입금의 문자라면 반영하지 마세요(중복). 미리 받은 돈이면 계속해 선수금으로 적립합니다."}],
+                    "parsed": parsed, "by_name": {"room_no": room_no, "tenant_name": tgt.tenant_name},
+                }
         result = cls.collect(
             branch=b_id,
             room_no=room_no,
@@ -325,6 +361,7 @@ class FifoPaymentEngine:
             raw_sms=sms_text,
             up_to_ym=up_to_ym,
             app_source=app_source,
+            allow_advance=True,      # 위에서 밀린 청구가 없는 경우의 확인을 이미 받았다
         )
         result["parsed"] = parsed
         if issues:

@@ -4486,7 +4486,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         room_no = fallback["room_no"]
         amt = min(250000, int(target["ledger"]["total_unpaid"])) if target else 250000
         r_col = c.post("/api/rent3_lessor/payments/collect", headers=chic,
-                       json={"branch": "main", "room_no": room_no, "amount": amt})
+                       json={"branch": "main", "room_no": room_no, "amount": amt, "allow_advance": True})
         self.assertEqual(r_col.status_code, 200, r_col.text)
         pid = r_col.json()["payment"]["id"]
         self.assertIsNotNone(Pay.get(pid))
@@ -4701,6 +4701,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 3) 호실·이름 모두 맞고 금액이 월 청구액이면 경고 없이 바로 수납
         t3 = f"[신한] 11/15 {a.room_no}호 {a.tenant_name} {monthly:,}원 입금"
         r = c.post(url, json={"branch": "main", "sms_text": t3}).json()
+        if Contract.get(a.id).ledger()["total_unpaid"] <= 0:         # 밀린 청구가 없으면 선수금인지 중복 문자인지 먼저 묻는다
+            self.assertTrue(r["needs_confirm"] and [i["field"] for i in r["issues"]] == ["advance"])
+            r = c.post(url, json={"branch": "main", "sms_text": t3, "force": True}).json()
         self.assertTrue(r.get("success") and not r.get("needs_confirm"))
         # 4) 입금자명으로 계약을 못 찾으면 진행할 수 없고 오류로 원본 수정 안내
         r = c.post(url, json={"branch": "main", "sms_text": f"[신한] 11/16 {a.room_no}호 없는사람 {monthly:,}원 입금", "force": True})
@@ -4835,7 +4838,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertTrue(r.json()["devices"][0]["pay_ok"])
                 self.assertTrue(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["pay_ok"])
                 # 허용 기기: 문자 수납 가능 + 한도 기록, 수정·삭제는 여전히 403
-                r = c.post(f"{LS}/payments/sms-paste", headers=pin, json={"branch": "main", "sms_text": sms})
+                r = c.post(f"{LS}/payments/sms-paste", headers=pin, json={"branch": "main", "sms_text": sms, "force": True})
                 self.assertEqual(r.status_code, 200, r.text)
                 self.assertEqual(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["left_n"], 24)
                 paid = Pay.get(r.json()["payment"]["id"])
@@ -4854,7 +4857,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(full.status_code, 403)
                 self.assertIn("한도", full.json()["message"])
                 # 비밀번호 로그인(일반 토큰)은 한도와 무관
-                self.assertEqual(c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 200)
+                self.assertEqual(c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": 1000, "allow_advance": True}).status_code, 200)
                 # 끄면 즉시 다시 403
                 self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": False}).status_code, 200)
                 self.assertEqual(c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 403)
@@ -6084,6 +6087,94 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         finally:
             for x in made:
                 x.delete(action="t")
+
+    def test_95_collect_scenarios_direct_repeat_gap_delete_no_unpaid_and_ledger_state(self):
+        """95. 수납 알고리즘 회귀(사용자 보고): ①같은 금액·같은 날 직접 수납을 연달아 해도(30초 이중 클릭만 차단) 새 입금으로 기록 ②가운데 달을 삭제한 뒤 문자·직접 수납이 모두 그 빈 달을 채움
+        ③밀린 청구가 없으면 직접·문자 모두 선수금 확인 없이는 기록되지 않음 ④원장 상태 API(적힌 달·출처·선수금·이상 징후)."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import Contract, Pay
+        c = self.client
+        chic = self._login("chic")
+        LS = "/api/rent3_lessor"
+        ct = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        monthly = ct.monthly_rent + ct.maintenance_fee + ct.compute_vat()
+        olds = [(x, x.model_dump()) for x in Pay.find(id_contract=ct.id)]
+        made = []
+        try:
+            for x, _ in olds:
+                x.delete(action="t")
+            from apps.rent_dist._rent3_core import date_today, current_ym
+            ym_now = current_ym()
+            # 밀린 달 3개(지난 3달)가 되게 계약 시작을 당긴다
+            keep_move = ct.move_in_date
+            y, m = int(ym_now[:4]), int(ym_now[5:7])
+            m0 = m - 2
+            y0 = y - (1 if m0 <= 0 else 0); m0 = m0 + (12 if m0 <= 0 else 0)
+            ct.move_in_date = f"{y0:04d}-{m0:02d}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            lg0 = ct.ledger()
+            due_months = [r["ym"] for r in lg0["months"] if r["due"] > 0]
+            self.assertGreaterEqual(len(due_months), 3)
+            pay = lambda **kw: c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": monthly, **kw})
+            # ① 직접 수납 두 번(같은 금액·같은 날): 둘째는 30초 안이면 이중 클릭으로 막고, 문자 수납과 섞어도 각각 한 달씩 채운다
+            r1 = pay(); self.assertEqual(r1.status_code, 200, r1.text)
+            made.append(r1.json()["payment"]["id"])
+            r2 = pay(); self.assertEqual(r2.status_code, 409, r2.text)                                      # 방금 같은 요청(이중 클릭)
+            # 30초가 지난 같은 금액 입금은 새 입금: 기록 시각을 되돌려 시뮬레이션
+            first = Pay.get(r1.json()["payment"]["id"]); first.created_at = (__import__("datetime").datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds"); first.save(action="t")
+            r3 = pay(); self.assertEqual(r3.status_code, 200, r3.text)
+            made.append(r3.json()["payment"]["id"])
+            labels = [Pay.get(i).billing_month for i in made]
+            self.assertEqual(labels, due_months[:2])                                                         # 가장 오래된 빈 달부터 한 달씩
+            # ② 가운데 달 삭제 → 그 달이 미납, 문자·직접 수납 모두 그 달을 채운다
+            self.assertEqual(c.post(f"{LS}/payments/delete", headers=chic, json={"branch": "main", "pay_id": made[0]}).status_code, 200)
+            lg1 = ct.ledger()
+            self.assertEqual([r["ym"] for r in lg1["months"] if r["unpaid"] > 0 and r["ym"] in due_months[:3]], [due_months[0], due_months[2]])
+            sms = f"[신한] {date_today().month}/{date_today().day} 201호 {ct.tenant_name} {monthly:,}원 입금"
+            rs = c.post(f"{LS}/payments/sms-paste", headers=chic, json={"branch": "main", "sms_text": sms})
+            self.assertEqual(rs.status_code, 200, rs.text)
+            made.append(rs.json()["payment"]["id"])
+            self.assertEqual(Pay.get(made[-1]).billing_month, due_months[0])                                 # 삭제한 가장 오래된 빈 달
+            # ③ 밀린 청구를 모두 채운 뒤: 직접 수납은 선수금 확인 없이는 거절, 문자는 확인 요청
+            old_ts = (__import__("datetime").datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds")
+            for i in made:                                                                                   # 30초 이중 클릭 창이 지난 것으로 본다
+                px = Pay.get(i)
+                if px is not None:
+                    px.created_at = old_ts; px.save(action="t")
+            rest = ct.ledger()["total_unpaid"]
+            self.assertGreater(rest, 0)
+            ra = c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": rest})
+            self.assertEqual(ra.status_code, 200, ra.text)
+            made.append(ra.json()["payment"]["id"])
+            self.assertEqual(ct.ledger()["total_unpaid"], 0)
+            before_n = len(Pay.find(id_contract=ct.id))
+            Pay.get(made[-1]).created_at  # (직전 수납도 30초 창 밖으로)
+            lastp = Pay.get(made[-1]); lastp.created_at = old_ts; lastp.save(action="t")
+            blocked = c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": monthly})
+            self.assertEqual((blocked.status_code, blocked.json().get("code")), (400, "NO_UNPAID"))
+            sms2 = f"[신한] {date_today().month}/{date_today().day} 201호 {ct.tenant_name} {monthly:,}원 입금 잔액 9,999원"
+            ask = c.post(f"{LS}/payments/sms-paste", headers=chic, json={"branch": "main", "sms_text": sms2}).json()
+            self.assertTrue(ask["needs_confirm"] and [i["field"] for i in ask["issues"]] == ["advance"])
+            self.assertEqual(len(Pay.find(id_contract=ct.id)), before_n)                                     # 확인 전에는 아무것도 저장되지 않는다
+            adv = c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": monthly, "allow_advance": True})
+            self.assertEqual(adv.status_code, 200, adv.text)
+            made.append(adv.json()["payment"]["id"])
+            # ④ 원장 상태: 선수금과 이상 징후·출처가 보인다
+            st = c.get(f"{LS}/payments/ledger-state?branch=main&room_no=201", headers=chic).json()
+            self.assertEqual(st["advance_credit"], monthly)
+            self.assertTrue(any(a["kind"] == "ADVANCE_CREDIT" for a in st["anomalies"]))
+            self.assertTrue(all(p["source"] in ("앱에서 수납", "문자 수납") for p in st["payments"]))
+            self.assertEqual(c.get(f"{LS}/payments/ledger-state?branch=main&room_no=201", headers=self._login("sunho")).status_code, 403)
+            lj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("showLedgerStateModal", "pmState", "/payments/ledger-state", "allow_advance", "선수금"):
+                self.assertIn(needle, lj, needle)
+        finally:
+            for i in made:
+                px = Pay.get(i)
+                if px is not None:
+                    px.delete(action="t")
+            ct = Contract.get(ct.id); ct.move_in_date = keep_move; ct.save(action="t")
+            for _, d in olds:
+                Pay(**d).save(action="t")
 
 
 if __name__ == "__main__":
