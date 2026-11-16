@@ -801,10 +801,18 @@
   });
 
   // 검색 & 필터 바인딩
+  const navFind = $("navFindListings");
+  if (navFind) {
+    navFind.addEventListener("click", (e) => {
+      e.preventDefault();
+      $("heroSearchForm").scrollIntoView({ behavior: "smooth", block: "start" });
+      $("searchKeyword").focus({ preventScroll: true });
+    });
+  }
   $("heroSearchForm").addEventListener("submit", (e) => {
     e.preventDefault();
     renderListings();
-    $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("heroSearchForm").scrollIntoView({ behavior: "smooth", block: "start" });
   });
   $("searchBranch").addEventListener("change", renderListings);
   $("searchCategory").addEventListener("change", renderListings);
@@ -840,7 +848,7 @@
       "success",
       `월세+관리비 ${fmtMan(state.maxMonthlyWon)} 이하 · 보증금 ${fmtMan(state.maxDepositWon)} 이하 조건으로 필터링했습니다.`
     );
-    $("listingsSection").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("heroSearchForm").scrollIntoView({ behavior: "smooth", block: "start" });
   });
   $("btnResetBudget").addEventListener("click", () => {
     state.budgetActive = false;
