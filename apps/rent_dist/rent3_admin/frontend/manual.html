@@ -42,8 +42,8 @@
     <h2>2. 임대인 가맹 심사 (등기부 & 사업자등록증 홈택스 확인·승인) 절차</h2>
     <ol>
       <li><strong>등기부 원본 확인 (인터넷등기소):</strong> 임대인이 가맹 신청 시 올린 등기부의 AI 추출 <strong>발급확인번호</strong>를 복사해 <strong>[인터넷등기소 열기 ↗]</strong>에서 조회한 뒤, 소유자·소재지·근저당 일치 여부를 <strong>[📝 원본 대조 결과 기록]</strong>으로 남깁니다.</li>
-      <li><strong>사업자등록증 확인·승인 (국세청 홈택스):</strong> 임대인이 촬영·제출한 사업자등록증의 <strong>10자리 국세청 체크섬·대표자 성명 자동 대조 결과</strong>와 <strong>[사업자등록증 원본 보기]</strong>를 확인합니다.</li>
-      <li><strong>[사업자번호 복사] → [국세청 홈택스 열기 ↗]</strong>에서 사업자 상태가 정상 <code>계속사업자</code>인지 확인한 후 <strong>[✅ 홈택스 확인·승인 기록]</strong>을 누르면, 임대인 장부의 공식 <code>business_number</code>로 확정되며 지원 채팅으로 승인 알림이 발송됩니다(휴·폐업 또는 번호 불일치 시 승인 차단).</li>
+      <li><strong>사업자등록증 확인·승인 (국세청 홈택스):</strong> 임대인이 <strong>[📷 촬영하기]</strong> 또는 <strong>[🖼 사진·PDF 선택]</strong>으로 제출한 사업자등록증(세금계산서 수신용 <strong>이메일·업태·종목</strong> 포함)의 <strong>10자리 국세청 체크섬·AI 추출 대표자 성명 대조 결과</strong>와 <strong>[사업자등록증 원본 보기]</strong>를 확인합니다.</li>
+      <li><strong>[사업자번호 복사] → [국세청 홈택스 열기 ↗]</strong>에서 사업자 상태가 정상 <code>계속사업자</code>인지 확인한 후 <strong>[✅ 홈택스 확인·승인 기록]</strong>을 누르면, 임대인 장부의 공식 <code>business_number</code>로 확정되며 지원 채팅으로 승인 알림이 발송됩니다(휴·폐업, 번호 오류, 다른 임대인이 이미 승인받은 중복 사업자번호는 승인 차단).</li>
     </ol>
 
     <h2>3. 관리인 → 임대인 암호 설정 링크 발급 및 6개월 변경 권유</h2>
@@ -53,17 +53,23 @@
       <li><strong>6개월(180일) 정기 변경 권유:</strong> 비밀번호 변경 후 180일이 지난 임대인은 목록에 <code>⚠️ 6개월 경과 권유 대상</code>으로 표시됩니다. <strong>[🔒 6개월 새 암호 설정 권유 발송]</strong>을 누르면 지원 채팅과 문자로 권유 링크가 전달되며, 임대인이 새 비밀번호를 설정하기 전까지 기존 비밀번호와 등록 기기는 그대로 유지됩니다.</li>
     </ol>
 
-    <h2>4. 관리인 → 임대인 월 가맹비 징수 및 전자세금계산서 발급 과정</h2>
+    <h2>4. 관리인 → 임대인 월 가맹비 징수 · 세금계산서 및 현금영수증 발급 과정</h2>
     <ol>
       <li><strong>월 가맹비 청구·통보:</strong> <strong>[🏢 임대인 가맹 · 월 가맹비]</strong> 탭 상단에서 <strong>[이번 달 청구·통보 만들기]</strong>를 누르면(또는 <code>RENT3_FEE_AUTO=1</code> 자동 모드), 가맹 승인된 임대인별로 월 이용료(공급가액 + 부가세 10%, 납부기한 매월 10일) 청구가 생성되고 지원 채팅으로 통보됩니다.</li>
       <li><strong>입금 확인 및 납부 등록:</strong> 임대인이 가맹비를 입금하면 해당 청구 행의 <strong>[💰 납부 등록]</strong>을 눌러 입금일·금액(청구액과 일치 필수)·결제수단을 기록합니다.</li>
-      <li><strong>전자세금계산서 발급 (2가지 방식 지원):</strong>
+      <li><strong>세금계산서 또는 현금영수증 발급 (임대인 사업자번호 유무에 따라 자동 분기):</strong>
         <ul>
-          <li><strong>① 볼타(Bolta) API 자동/즉시 발행:</strong> 서버에 <code>RENT3_ETAX_PROVIDER=bolta</code> 및 API 키가 설정된 경우, 납부 등록 즉시(<code>RENT3_ETAX_AUTO=1</code>) 또는 <strong>[⚡ 전자세금계산서 즉시 발행]</strong> 버튼 클릭 시 영수(<code>RECEIPT</code>) 전자세금계산서가 발행 접수됩니다. 국세청 전송 완료 웹훅(또는 <strong>[🔄 발행 상태 확인]</strong> 조회)으로 <strong>24자리 국세청 승인번호(<code>ntsTransactionId</code>)</strong>가 자동 확정됩니다.</li>
-          <li><strong>② 홈택스 직접 발행 후 승인번호 기록:</strong> <strong>[📥 홈택스 발행용 CSV]</strong>를 내려받아 국세청 홈택스에서 발행한 뒤, 부여된 <strong>24자리 승인번호(예: <code>20261116-12345678-12345678</code>)</strong>를 <strong>[🧾 세금계산서 승인번호 기록]</strong>에 입력합니다.</li>
+          <li><strong>① [📋 발급 정보 · 홈택스] 공용 카드 (기본 수동 발급 루틴):</strong> 청구 행의 <strong>[📋 발급 정보 · 홈택스]</strong>를 누르면 공급자(플랫폼)와 공급받는자(임대인)의 사업자번호·상호·대표자·주소·업태·종목·이메일·공급가액·세액이 항목별 <strong>[복사]</strong>(숫자는 쉼표 제외) 및 <strong>[📋 전체 복사]</strong>와 함께 표시됩니다. <strong>[🏛️ 홈택스 열기 ↗]</strong>로 홈택스에서 발급한 뒤, 같은 창 안의 <strong>[✍️ 발급했어요 — 승인번호 기록]</strong>을 눌러 <strong>국세청 24자리 승인번호</strong>를 기록합니다.</li>
+          <li><strong>② 사업자등록번호가 없는 임대인 → 💵 현금영수증 발급:</strong> 임대인에게 승인된 사업자등록번호가 없으면 세금계산서 탭이 비활성화되고 <strong>[💵 현금영수증]</strong> 탭(휴대폰 번호 기준 소득공제용, 사업자번호가 있으면 지출증빙용도 선택 가능)이 열립니다. 홈택스에서 현금영수증을 발급한 뒤 <strong>[✍️ 현금영수증 발급했어요 — 승인번호 기록]</strong>을 눌러 <strong>승인번호(숫자 6~12자리)</strong>를 기록합니다.</li>
+          <li><strong>③ 볼타(Bolta) API 자동/즉시 발행 (선택 연동):</strong> 서버에 <code>RENT3_ETAX_PROVIDER=bolta</code>가 설정된 경우 납부 등록 즉시(<code>RENT3_ETAX_AUTO=1</code>) 또는 <strong>[🧾 API로 발행]</strong> 버튼으로 전자세금계산서를 접수하고 웹훅/조회 API(<code>ntsTransactionId</code>)로 24자리 승인번호를 자동 확정합니다(응답 불확실 시 이중 발행 방지를 위해 재전송을 막고 <strong>[🔄 발행 상태 확인]</strong>으로만 조회).</li>
         </ul>
       </li>
-      <li><strong>임대인 장부 경비 자동 반영:</strong> 세금계산서 승인번호가 확정되는 즉시, 해당 임대인의 지출 장부(<code>outlays.json</code>)에 <strong>적격증빙(전자세금계산서) · 일반과세자 공용경비(<code>platform_fee</code>)</strong>로 자동 등재되어 임대인의 부가세 매입세액 공제 및 5월 종합소득세 필요경비에 자동 반영됩니다.</li>
+      <li><strong>임대인 장부 경비 자동 반영 (세금계산서 vs 현금영수증 구분):</strong>
+        <ul>
+          <li><strong>전자세금계산서(24자리 승인번호) 기록 시:</strong> 임대인 지출 장부(<code>outlays.json</code>)에 <code>evidence_type="TAX_INVOICE"</code>(부가세 매입세액 공제 가능 + 종소세 필요경비)로 자동 등재됩니다.</li>
+          <li><strong>현금영수증(6~12자리 승인번호) 기록 시:</strong> 임대인 지출 장부에 <code>evidence_type="CASH_RECEIPT"</code>, <strong>부가세 매입세액 불공제(<code>vat_deductible=False</code>)</strong>로 등재되어 <strong>5월 종합소득세 필요경비 증빙으로만</strong> 정확히 반영됩니다.</li>
+        </ul>
+      </li>
     </ol>
   </main>
 <script src="/shared/ui/phone_fmt.js"></script>

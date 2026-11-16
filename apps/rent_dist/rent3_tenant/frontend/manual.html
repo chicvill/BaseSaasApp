@@ -37,6 +37,7 @@
         <tr><td>중개 지면계약서 열람</td><td>공인중개사 입회로 체결되어 임대인이 등록한 종이 임대차계약서 원본 사본 열람·다운로드</td><td><code>contracts.json</code>, <code>uploads/contracts/*</code></td></tr>
         <tr><td>월세 납부 · 세액공제</td><td>월별 FIFO 원장 확인, 납입일 3일 전 안내 · 납입일 1일 후 미납 통보 확인 및 즉시 납부(납부 즉시 미납통보 자동 해소), 17% 세액공제 공식 증명서 A4 인쇄</td><td><code>payments.json</code>, <code>ops.json</code>, <code>contracts.json</code></td></tr>
         <tr><td>채팅형 퇴실 정산 · 퇴실 후 조회</td><td>퇴실 신청, 정산서 확인 및 본인 명의 계좌 동의(또는 이의 제기), 보증금 수취 확인(<code>[✅ 받았습니다]</code>), 퇴실 후 다음 해 2월 말까지 연말정산 납부확인서·정산서 조회 전용 접속</td><td><code>ops.json</code>, <code>users.json</code></td></tr>
+        <tr><td>사업자 정보 · 세금계산서 요청</td><td>사업자등록증 촬영·제출(AI 자동 읽기, 10자리 체크섬·이메일 검증)로 임대인에게 세금계산서 발급 정보 전달, 사업자번호 없는 경우 현금영수증 발급 안내</td><td><code>users.json</code>, <code>contracts.json</code>, <code>ops.json</code></td></tr>
       </tbody>
     </table>
 
@@ -58,6 +59,12 @@
       </li>
       <li><strong>STEP 3 (송금 확인 및 퇴실 완료):</strong> 임대인이 보증금을 이체하고 송금 완료를 표시하면 입금을 확인한 뒤 <strong>[✅ 받았습니다]</strong>를 누릅니다(미입금 시 <strong>[❌ 못 받았습니다]</strong> 클릭, 별도 이의 없이 7일이 지나면 자동 확정).</li>
       <li><strong>STEP 4 (퇴실 후 다음 해 2월 말까지 읽기 전용 접속):</strong> 퇴실이 확정되면 바로가기·간편번호·등록 기기는 자동 정리되지만, <strong>퇴실한 다음 해 2월 말까지는 기존 아이디·비밀번호로 로그인하여 연말정산 납부확인서와 퇴실 정산서를 조회·인쇄</strong>할 수 있습니다.</li>
+    </ol>
+
+    <h2>4. 사업자등록증 제출(세금계산서 요청) 및 현금영수증 확인</h2>
+    <ol>
+      <li><strong>사업자 임차인 (세금계산서 요청):</strong> <strong>☰ 더보기 ▸ 🏢 사업자 정보 · 세금계산서 요청</strong>에서 <strong>[📷 촬영하기]</strong> 또는 <strong>[🖼 사진·PDF 선택]</strong>으로 사업자등록증을 올리고(AI 동의 시 자동 입력) <strong>사업자등록번호(10자리 체크섬 필수) · 상호 · 대표자 · 수신 이메일(필수) · 사업장 주소</strong>를 제출하면 임대인에게 채팅 알림이 전달되고 세금계산서 발급 대장에 즉시 반영됩니다.</li>
+      <li><strong>비사업자 임차인 (현금영수증 및 연말정산 납부확인서):</strong> 사업자등록번호가 없는 경우 <strong>☰ 임대인과 메시지</strong>로 현금영수증 발급을 요청하면 임대인이 휴대폰 번호 기준으로 홈택스 현금영수증을 발급·기록하며, 승인번호는 <strong>🧾 연말정산 납부확인서</strong>에 함께 표시됩니다.</li>
     </ol>
   </main>
 <script src="/shared/ui/phone_fmt.js"></script>
