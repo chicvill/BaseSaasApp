@@ -82,12 +82,13 @@
     return copyText(text).then(function (ok) {
       if (global.Bass && global.Bass.updateAppAlert) {
         global.Bass.updateAppAlert(ok ? "success" : "warning",
-          ok ? "복사했습니다 — 임차인 문자창에 붙여넣어 보내세요." : "복사에 실패했습니다. 글을 직접 길게 눌러 복사해 주세요.");
+          ok ? "복사했습니다 — 문자창에서 전송만 누르거나 붙여넣어 보내세요." : "복사에 실패했습니다. 글을 직접 길게 눌러 복사해 주세요.");
       }
       var d = String(phone || "").replace(/\D/g, "");
       if (ok && d && /Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        var sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "&" : "?";
         var a = document.createElement("a");
-        a.href = "sms:" + d;
+        a.href = "sms:" + d + sep + "body=" + encodeURIComponent(text || "");
         a.click();
       }
       return ok;
