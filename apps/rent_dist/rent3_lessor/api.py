@@ -77,7 +77,7 @@ class CollectPaymentReq(BaseModel):
     paid_date: Optional[str] = None
     method: str = "TRANSFER"
     up_to_ym: Optional[str] = None
-    allow_advance: bool = False      # 밀린 청구가 없어도 선수금으로 적립(확인을 받은 뒤에만 true)
+    target_ym: Optional[str] = None  # 채울 달(미납으로 표시된 달). 비우면 가장 오래된 미납 달부터
 
 
 class SmsPasteReq(BaseModel):
@@ -674,7 +674,7 @@ def collect_payment(req: CollectPaymentReq, request: Request):
         method=req.method,
         up_to_ym=req.up_to_ym,
         app_source="rent3_lessor_pin" if pc else APP_SRC,
-        allow_advance=req.allow_advance,
+        target_ym=req.target_ym,
     )
     _pin_pay_record(pc, res)
     return {"success": True, **res}

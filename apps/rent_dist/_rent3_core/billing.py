@@ -102,8 +102,11 @@ class FifoPaymentEngine:
         raw_sms: str = "",
         up_to_ym: Optional[str] = None,
         app_source: str = "rent3_lessor",
-        allow_advance: bool = False,
+        target_ym: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """입금을 '월 칸'에 채운다. target_ym 이 있으면 그 달의 빈칸(미납)부터, 없으면 가장 오래된 미납 달부터 채우고,
+        한 입금이 여러 달에 걸치면 달마다 납부 건을 하나씩 만들어 각 건에 자기 청구월을 적는다(건이 달을 가로질러 숨어 있지 않게).
+        미납 합계보다 많은 입금(선수금)은 받지 않고 오류로 처리한다."""
         b_id = normalize_branch_id(branch)
         if amount <= 0:
             raise DomainError("입금 금액은 0원보다 커야 합니다.", hint="정확한 수납 금액을 입력해 주세요.")
@@ -130,7 +133,7 @@ class FifoPaymentEngine:
         # 직접 수납(문자 본문 없음)은 같은 호실·같은 금액·같은 날 입금이 실제로 여러 번 있을 수 있으므로(예: 두 달치를 나눠 받음),
         # 방금(30초 안) 같은 요청이 또 온 경우(이중 클릭)만 막고 그 밖에는 새 입금으로 기록한다.
         if raw_sms.strip():
-            if Pay.first(idempotency_key=base_key):
+            if any((q.idempotency_key or "") == base_key or (q.idempotency_key or "").startswith(base_key + ":") for q in Pay.find(id_contract=contract.id)):
                 raise Conflict(
                     f"이미 등록된 동일 입금 내역입니다 ({room.room_no}호 {p_name} {amount:,}원, {p_date}).",
                     hint="같은 문자가 이미 수납되었습니다. 수납 내역 장부를 확인해 주세요.",
@@ -149,100 +152,86 @@ class FifoPaymentEngine:
                         pass
             idem_key = f"{base_key}#{uuid4().hex[:8]}"
 
-        # FIFO 상계 전 원장 조회
-        target_ym = up_to_ym or current_ym()
-        before_ledger = contract.ledger(up_to_ym=target_ym)
+        # 월 칸 채우기 전 원장 조회
+        tgt = up_to_ym or current_ym()
+        before_ledger = contract.ledger(up_to_ym=tgt)
         unpaid_rows = [r for r in before_ledger["months"] if r["unpaid"] > 0]
-        if not unpaid_rows and not allow_advance:
+        total_unpaid = sum(r["unpaid"] for r in unpaid_rows)
+        if not unpaid_rows:
             raise DomainError(
-                f"{room.room_no}호는 밀린 청구가 없어 {amount:,}원을 어느 달에도 상계할 수 없습니다.",
-                hint="미리 받은 돈(선수금)으로 적립하려면 확인 후 다시 수납하세요. 이미 받은 입금이면 같은 수납이 중복 기록되는 것이니 수납 내역을 먼저 확인해 주세요.",
+                f"{room.room_no}호는 밀린 청구가 없습니다. {amount:,}원은 받을 수 없습니다(선수금은 받지 않습니다).",
+                hint="이미 받은 입금을 또 기록하려는 것은 아닌지 수납 내역(🔍 원장 상태)을 확인해 주세요.",
                 code="NO_UNPAID",
             )
+        if amount > total_unpaid:
+            raise DomainError(
+                f"입금액 {amount:,}원이 {room.room_no}호의 밀린 금액 {total_unpaid:,}원보다 많습니다(선수금은 받지 않습니다).",
+                hint=f"밀린 금액 {total_unpaid:,}원 이하로 입력해 주세요. 이미 받은 입금이면 중복 기록이 아닌지 확인해 주세요.",
+                code="OVER_UNPAID",
+            )
+        order = list(unpaid_rows)
+        if target_ym:
+            hit = next((r for r in unpaid_rows if r["ym"] == target_ym), None)
+            if hit is None:
+                raise DomainError(f"{target_ym}월은 밀린 청구가 아닙니다.", hint="미납으로 표시된 달을 골라 주세요(이미 납부된 달에는 수납할 수 없습니다).", code="NOT_UNPAID_MONTH")
+            order = [hit] + [r for r in unpaid_rows if r["ym"] != target_ym]
 
         remaining = amount
         allocations: List[Dict[str, Any]] = []
-        rent_part = 0
-        maint_part = 0
-        vat_part = 0
-
-        for row in unpaid_rows:
+        for row in order:
             if remaining <= 0:
                 break
             take = min(remaining, row["unpaid"])
             remaining -= take
-            allocations.append({
-                "ym": row["ym"],
-                "allocated": take,
-                "remaining_unpaid_in_month": row["unpaid"] - take,
-                "cleared": (row["unpaid"] - take) == 0,
-            })
+            allocations.append({"ym": row["ym"], "allocated": take, "remaining_unpaid_in_month": row["unpaid"] - take, "cleared": (row["unpaid"] - take) == 0, "_row": row})
 
-        # 월세·관리비·부가세 나누기: 상계된 달의 청구 구성비를 따른다 (부가세가 없던 달에 부가세가 잡히지 않게)
-        row_by_ym = {r["ym"]: r for r in before_ledger["months"]}
-        alloc_total = sum(a["allocated"] for a in allocations)
-        if alloc_total > 0:
-            rp = mp = vp = 0.0
-            for a in allocations:
-                row = row_by_ym.get(a["ym"]) or {}
-                due = row.get("due") or 0
-                if due > 0:
-                    rp += a["allocated"] * (row.get("rent") or 0) / due
-                    mp += a["allocated"] * (row.get("maintenance") or 0) / due
-                    vp += a["allocated"] * (row.get("vat") or 0) / due
-            vat_part = round(vp)
-            maint_part = round(mp)
-            rent_part = amount - vat_part - maint_part
-        elif contract.monthly_rent + contract.maintenance_fee + contract.compute_vat() > 0:
-            monthly_std = contract.monthly_rent + contract.maintenance_fee + contract.compute_vat()
-            ratio = amount / monthly_std
-            rent_part = round(contract.monthly_rent * ratio)
-            vat_part = round(contract.compute_vat() * ratio)
-            maint_part = max(0, amount - rent_part - vat_part)
-        else:
-            rent_part = amount
+        pay_objs: List[Pay] = []
+        multi = len(allocations) > 1
+        for a in allocations:
+            row = a["_row"]
+            due = row.get("due") or 0
+            vat_part = round(a["allocated"] * (row.get("vat") or 0) / due) if due > 0 else 0
+            maint_part = round(a["allocated"] * (row.get("maintenance") or 0) / due) if due > 0 else 0
+            rent_part = a["allocated"] - vat_part - maint_part
+            pay_objs.append(Pay(
+                branch=b_id,
+                id_building=room.id_building,
+                id_room=room.id,
+                room_no=room.room_no,
+                id_contract=contract.id,
+                id_tenant=contract.id_tenant,
+                payer_name=p_name,
+                billing_month=a["ym"],
+                paid_date=p_date,
+                rent_amount=rent_part,
+                maintenance_amount=maint_part,
+                vat_amount=vat_part,
+                total_amount=a["allocated"],
+                payment_kind="MONTHLY_RENT",
+                method=method,
+                allocated_months=[{k: v for k, v in a.items() if k != "_row"}],
+                idempotency_key=(f"{idem_key}:{a['ym']}" if multi else idem_key),
+                raw_sms=raw_sms,
+            ).save(action="fifo_payment_collected", app_source=app_source))
+        for a in allocations:
+            a.pop("_row", None)
+        pay_obj = pay_objs[0]
 
-        billing_ym = allocations[0]["ym"] if allocations else target_ym
-        pay_obj = Pay(
-            branch=b_id,
-            id_building=room.id_building,
-            id_room=room.id,
-            room_no=room.room_no,
-            id_contract=contract.id,
-            id_tenant=contract.id_tenant,
-            payer_name=p_name,
-            billing_month=billing_ym,
-            paid_date=p_date,
-            rent_amount=rent_part,
-            maintenance_amount=maint_part,
-            vat_amount=vat_part,
-            total_amount=amount,
-            payment_kind="MONTHLY_RENT",
-            method=method,
-            allocated_months=allocations,
-            idempotency_key=idem_key,
-            raw_sms=raw_sms,
-        ).save(action="fifo_payment_collected", app_source=app_source)
-
-        after_ledger = contract.ledger(up_to_ym=target_ym)
+        after_ledger = contract.ledger(up_to_ym=tgt)
         from .ops import RentBillingNotice
         RentBillingNotice.resolve_paid_for_contract(contract.id, after_ledger, app_source=app_source)
         diff = before_ledger["total_unpaid"] - amount
+        months_txt = ", ".join(a["ym"] for a in allocations)
         if after_ledger["total_unpaid"] > 0:
             banner_level = "diff"
-            banner_msg = (
-                f"{room.room_no}호 {amount:,}원 FIFO 수납 반영 완료 — "
-                f"잔여 미납액 {after_ledger['total_unpaid']:,}원이 남아 있습니다."
-            )
-        elif remaining > 0 and not unpaid_rows:
-            banner_level = "warning"
-            banner_msg = f"{room.room_no}호 미납액이 없어 {amount:,}원이 선수금(크레딧)으로 적립되었습니다."
+            banner_msg = f"{room.room_no}호 {amount:,}원을 {months_txt}에 반영했습니다 — 아직 비어 있는 달의 미납 {after_ledger['total_unpaid']:,}원이 남아 있습니다."
         else:
             banner_level = "success"
-            banner_msg = f"{room.room_no}호 {p_name}님 {amount:,}원 FIFO 순차 완납 처리되었습니다."
+            banner_msg = f"{room.room_no}호 {p_name}님 {amount:,}원을 {months_txt}에 반영했습니다 — 모든 달이 납부 완료되었습니다."
 
         return {
             "payment": pay_obj.model_dump(),
+            "payments": [x.model_dump() for x in pay_objs],
             "allocations": allocations,
             "ledger": after_ledger,
             "difference": diff,
@@ -340,17 +329,6 @@ class FifoPaymentEngine:
             room_no = by_name.room_no
         else:
             room_no = parsed["room_no"] or (chk["room_contract"].room_no if chk["room_contract"] else "")
-        # 밀린 청구가 없는 호실에 입금 문자가 오면 어느 달에도 상계되지 않는다 → 선수금인지 중복 문자인지 확인을 받는다(force 로 다시 요청하면 선수금 적립)
-        tgt = Contract.first(branch=b_id, room_no=room_no, status="ACTIVE") if room_no else None
-        if tgt is not None and not force:
-            led = tgt.ledger(up_to_ym=up_to_ym or current_ym())
-            if led["total_unpaid"] <= 0:
-                return {
-                    "needs_confirm": True, "level": "warning",
-                    "message": f"{room_no}호는 밀린 청구가 없습니다. 이 입금은 선수금으로 적립됩니다.",
-                    "issues": [{"field": "advance", "msg": f"{room_no}호는 모든 달이 납부 완료 상태입니다. 이미 수납한 입금의 문자라면 반영하지 마세요(중복). 미리 받은 돈이면 계속해 선수금으로 적립합니다."}],
-                    "parsed": parsed, "by_name": {"room_no": room_no, "tenant_name": tgt.tenant_name},
-                }
         result = cls.collect(
             branch=b_id,
             room_no=room_no,
@@ -361,7 +339,6 @@ class FifoPaymentEngine:
             raw_sms=sms_text,
             up_to_ym=up_to_ym,
             app_source=app_source,
-            allow_advance=True,      # 위에서 밀린 청구가 없는 경우의 확인을 이미 받았다
         )
         result["parsed"] = parsed
         if issues:

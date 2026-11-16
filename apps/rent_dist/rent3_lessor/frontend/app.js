@@ -544,8 +544,7 @@
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
     });
-    const oldest = (lg.months || []).find((m) => m.unpaid > 0);
-    const defAmt = oldest ? oldest.unpaid : Number(r.monthly_rent || 0) + Number(r.maintenance_fee || 0);
+    const unpaidMonths = (lg.months || []).filter((m) => m.unpaid > 0 && m.ym >= startYm);
     const notices = (dash.transfer_notices || []).filter((n) => n.room_no === no);
     const noticeHtml = notices.map((n) => `<div class="bass-card" style="padding:10px;margin-bottom:10px;border-color:var(--warn);" data-notice="${Bass.escapeHtml(n.id)}">
         <div style="font-size:13.5px;font-weight:700;">📨 임차인이 ${fmtWon(n.amount)} 이체했다고 알렸습니다</div>
@@ -567,13 +566,14 @@
       ${flashHtml}
       ${noticeHtml}
       <div class="r3-subbox r3-subbox--direct">
-        <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금 등 은행 문자가 없는 경우)</label>
-        <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
-          <input id="pmAmt" class="bass-input" type="number" style="width:124px;" value="${defAmt}" aria-label="직접 수납액">
+        <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금 등 은행 문자가 없는 경우) <span class="bass-muted">— 비어 있는(미납) 달을 골라 채웁니다</span></label>
+        ${unpaidMonths.length ? `<div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+          <select id="pmYm" class="bass-select" style="min-height:44px;" aria-label="수납할 달">${unpaidMonths.map((m) => `<option value="${m.ym}">${shortYm(m.ym)} 미납 ${fmtWon(m.unpaid)}</option>`).join("")}</select>
+          <input id="pmAmt" class="bass-input" type="number" style="width:124px;" value="${unpaidMonths[0].unpaid}" aria-label="직접 수납액">
           <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
-        </div>
+        </div>` : `<div class="bass-muted" style="font-size:13px;">✅ 비어 있는 달이 없습니다(밀린 청구 없음). 선수금은 받지 않습니다.</div>`}
       </div>
-      ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(245,158,11,.14);border:1px solid var(--warn);font-size:13px;">⚠️ 선수금 ${fmtWon(lg.advance_credit)}이 쌓여 있습니다(밀린 청구보다 많이 받음). 중복 수납이 아닌지 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하세요.</div>` : ""}
+      ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(239,68,68,.14);border:1px solid var(--err);font-size:13px;">⚠️ 오류: 청구액보다 ${fmtWon(lg.advance_credit)}을 더 받은 것으로 기록되어 있습니다(선수금은 받지 않습니다). 중복 수납일 수 있으니 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하고 잘못 들어간 건을 삭제하세요.</div>` : ""}
       <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
       <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
@@ -582,11 +582,12 @@
 
     const after = async (res) => {
       Bass.updateAppAlert(res.level || "success", res.message);
-      const pay = res.payment || {};
+      const pay0 = res.payment || {};
+      const pay = (res.payments || []).length > 1 ? { ...pay0, total_amount: res.payments.reduce((a, x) => a + Number(x.total_amount || 0), 0) } : pay0;   // 여러 달에 걸친 입금은 합계로 안내
       const rn = pay.room_no || no;
       const remain = (res.ledger && res.ledger.total_unpaid) || 0;
       receiptMsg[rn] = receiptText(pay, remain);
-      payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})` };
+      payFlash = { no: rn, text: `${rn}호 ${fmtWon(pay.total_amount || 0)} 수납 처리 완료 (${dotDate(pay.paid_date || "")})${(res.allocations || []).length ? ` — ${(res.allocations || []).map((x) => shortYm(x.ym)).join(", ")}` : ""}` };
       selRoomNo = rn;
       await refresh();
       await sendReceiptSms(rn, pay, remain);
@@ -609,15 +610,14 @@
         });
       });
     });
-    $m("pmDirect").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const amt = Number($m("pmAmt").value || 0);
-        const noUnpaid = Number(lg.total_unpaid || 0) <= 0;
-        // 밀린 청구가 없는데 받는 돈은 선수금이 된다 — 이미 받은 입금을 또 기록하는 것은 아닌지 먼저 묻는다
-        if (noUnpaid && !window.confirm(`${no}호는 밀린 청구가 없습니다.\n${fmtWon(amt)}을 선수금으로 적립할까요?\n(이미 받은 입금을 또 기록하는 것이라면 취소하세요)`)) return;
-        await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: amt, allow_advance: noUnpaid } }));
+    if ($m("pmYm")) {
+      $m("pmYm").addEventListener("change", () => { const m = unpaidMonths.find((x) => x.ym === $m("pmYm").value); if (m) $m("pmAmt").value = m.unpaid; });     // 달을 바꾸면 그 달의 미납액이 기본값
+      $m("pmDirect").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: Number($m("pmAmt").value || 0), target_ym: $m("pmYm").value } }));
+        });
       });
-    });
+    }
     const openState = () => showLedgerStateModal(no).catch(Bass.showError);
     if ($m("pmState")) $m("pmState").addEventListener("click", openState);
     if ($m("pmState2")) $m("pmState2").addEventListener("click", openState);
