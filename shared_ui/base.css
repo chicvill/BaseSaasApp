@@ -116,7 +116,7 @@ code { background: hsl(230 30% 30% / .5); padding: .1em .4em; border-radius: 6px
 .bass-badge--pulse::before { animation: bass-pulse 1.6s infinite; }
 
 /* ── 맥락별 컬러 안내 배너 (updateAppAlert) ── */
-.bass-alert-stack { position: sticky; top: 12px; z-index: 50; display: grid; gap: 10px; margin: 12px 0; }
+.bass-alert-stack { position: sticky; top: 12px; z-index: 99999; display: grid; gap: 10px; margin: 12px 0; }
 .bass-alert {
   display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start;
   padding: 14px 16px; border-radius: 14px; border: 1px solid;
@@ -130,6 +130,29 @@ code { background: hsl(230 30% 30% / .5); padding: .1em .4em; border-radius: 6px
 .bass-alert--warning { color: hsl(44 100% 80%); background: hsl(44 90% 30% / .28); border-color: hsl(44 96% 58% / .45); }
 .bass-alert--diff    { color: hsl(26 100% 82%); background: hsl(26 90% 30% / .28); border-color: hsl(26 95% 60% / .5); }
 .bass-alert--error   { color: hsl(356 100% 86%); background: hsl(356 80% 30% / .3); border-color: hsl(356 85% 62% / .5); }
+/* 밝은 테마 / OpenRent 포털 전용 고대비 에러 배너 */
+body.or-body .bass-alert--error,
+.bass-alert--light.bass-alert--error {
+  color: #7f1d1d !important;
+  background: #fef2f2 !important;
+  border-color: #f87171 !important;
+}
+body.or-body .bass-alert--error .bass-alert__msg,
+.bass-alert--light.bass-alert--error .bass-alert__msg {
+  color: #7f1d1d !important;
+  font-weight: 800 !important;
+}
+body.or-body .bass-alert--error .bass-alert__hint,
+.bass-alert--light.bass-alert--error .bass-alert__hint {
+  color: #991b1b !important;
+  opacity: 1 !important;
+  font-weight: 600 !important;
+}
+body.or-body .bass-alert--error .bass-alert__close,
+.bass-alert--light.bass-alert--error .bass-alert__close {
+  color: #7f1d1d !important;
+  opacity: 0.8 !important;
+}
 .bass-alert--success { color: hsl(152 80% 82%); background: hsl(152 60% 22% / .32); border-color: hsl(152 65% 50% / .45); }
 .bass-alert.is-leaving { animation: bass-fade-out .3s var(--ease) forwards; }
 

@@ -1,0 +1,1350 @@
+"""
+apps/_rent3_core/cosign.py — 임대인·임차인이 각각 로그인 후 매물 선택 호출·응답으로 시작하는 공동 임대계약 객체 (`CoSignSession`).
+
+저장 파일: `data/rent3_pool/cosign_sessions.json`
+핵심 불변식:
+  1. 각자 로그인 본인인증 & 호출·응답 개시(Call & Respond Handshake):
+     - 임대인(갑)과 임차인(을)은 각각 로그인 과정에서 본인인증을 거친 상태로 진입한다.
+     - 둘 중 어느 한쪽이 먼저 공동계약 화면에서 매물(호실)을 선택해 상대방을 호출(`CALLING`)하고, 상대방이 응답(`CONNECTED`)함으로써 공동계약이 시작된다.
+  2. 상호 신분증 대조 체크 & 등기부등본 확인 후 서명(Strict Pre-Sign Gate):
+     - Step 1: 양측 로그인 본인인증 확인 + 서로 상대방의 실물 신분증을 대조하여 본인 확인이 되었음을 상호 체크(`lessor_checked_tenant_id`, `tenant_checked_lessor_id`) + 대법원 등기부등본 권리관계 확인 체크(`step1_lessor_confirmed`, `step1_tenant_locked`)
+     - Step 2: 호실 옵션/시설 상태 실물 공동 체크 및 상호 잠금
+     - Step 3: 보증금/월세/관리비/선후불/특약 공동 작성 -> 단 1글자라도 수정 시 revision 증가 및 양측 동의 자동 초기화(Revision Lock)!
+     - Step 4: (호출응답 완료 + 양측 로그인 본인인증 + 상호 신분증 확인 체크 + 등기부등본 확인 체크 + 조건 합의가 모두 완료된 경우에만) 양측 모바일 자필 전자서명 날인 -> SHA-256 계약원본 무결성 해시 봉인
+     - Step 5: 계약금 입금 확인 즉시 공동 Data Pool(`contracts.json`, `rooms.json`, `users.json`, `payments.json`, `ops.json`) 일괄 업데이트!
+  3. 신규 계약(`NEW`) 및 5% 상한 검증이 내장된 만기 재계약(`RENEWAL`)을 모두 지원한다.
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import os
+import random
+import re
+from datetime import datetime, timedelta
+from typing import Any, ClassVar, Dict, List, Optional
+from uuid import uuid4
+
+from pydantic import Field
+
+from core.errors import Conflict, DomainError, NotFound
+from .models import (
+    Building,
+    Contract,
+    Lessor,
+    Pay,
+    Room,
+    Tenant,
+    add_months_str,
+    date_today,
+    normalize_branch_id,
+)
+from .ops import DirectChat, RtmsReport
+from .broker import ALLOWED_MIME_TO_EXT, EXT_TO_MIME, MAX_PHOTO_BYTES
+from .pool import PoolObj, now_iso, pool
+
+
+# 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다.
+IDLE_EXPIRE = timedelta(hours=24)
+# ── 등기부 위험 차단 정책 ──────────────────────────────────────────────
+HIGH_DEPOSIT = 50_000_000            # 고액 보증금 기준(초과): 선순위 근저당이 있으면 보증보험 또는 말소 특약이 필요
+LOW_DEPOSIT = 20_000_000             # 소액 월세 기준(이하): 근저당이 있으면 강한 위험 확인이 필요
+INSURED_STATUS = ("가입 완료", "가입 예정")   # 보증보험으로 인정하는 상태. 보증보험은 계약서 체결 뒤에야 발급되므로 '가입 예정'도 인정하되 아래 거절 특약이 자동으로 필수 삽입된다
+INSURANCE_CLAUSE = ("임차인이 보증금 반환보증(보증보험)에 가입하지 못하거나 가입이 거절되면 이 계약은 무효로 하고, "
+                    "임대인은 받은 계약금 전액을 즉시 반환한다.")
+CLEANUP_CLAUSE = ("임대인은 잔금일까지 선순위 근저당권을 전액 말소하고, 말소된 등기사항증명서를 임차인에게 제시한다. "
+                  "말소되지 않으면 임차인은 잔금 지급을 거절하고 계약을 해제할 수 있으며, 임대인은 받은 계약금을 즉시 반환한다.")
+
+
+class RegistryBlocked(DomainError):
+    """등기부 확인 결과 계약을 더는 진행할 수 없는 경우(소유자 불일치·압류 등). 체크로 넘어갈 수 없고 계약이 중단된다."""
+    status_code = 409
+    level = "error"
+
+
+IDLE_EXPIRE_DRAFT = timedelta(hours=72)  # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
+MAX_LIVE_PER_TENANT = 2  # 한 임차인이 동시에 진행할 수 있는 계약 수 (호실 선점·잠금 악용 방지)
+
+
+class CoSignSession(PoolObj):
+    normalize_phones = False  # 무결성 해시 대상: 입력 원문 보존
+    """임대인·임차인 실시간 호출·응답 및 상호 신분·등기 확인 기반 공동 임대계약 세션 객체."""
+    collection: ClassVar[str] = "cosign_sessions"
+    label: ClassVar[str] = "공동 임대계약 세션"
+
+    id: str = Field(default_factory=lambda: f"cs_{uuid4().hex[:8]}")
+    session_code: str = Field(default_factory=lambda: f"{random.randint(100000, 999999)}")
+    mode: str = "NEW"                        # NEW (신규계약) / RENEWAL (조건변경 재계약)
+    prev_contract_id: str = ""
+    branch: str = "main"
+    id_building: str = ""
+    building_name: str = ""
+    building_address: str = ""
+    id_room: str = ""
+    room_no: str = ""
+    id_lessor: str = ""
+    lessor_name: str = ""
+    lessor_phone: str = ""
+    lessor_account: str = ""
+    id_tenant: str = ""
+
+    # 호출·응답 핸드셰이크 및 로그인 본인인증 상태
+    initiated_by_role: str = "lessor"        # lessor / tenant (먼저 매물을 선택해 호출한 주체)
+    call_status: str = "CONNECTED"           # CALLING (상대방 응답 대기) / CONNECTED (양측 응답·접속 완료)
+    called_at: str = Field(default_factory=now_iso)
+    responded_at: str = ""
+    lessor_login_verified: bool = True       # 임대인 로그인 본인인증 완료 여부
+    tenant_login_verified: bool = True       # 임차인 로그인 본인인증 완료 여부
+
+    current_step: int = 1                    # 1..5
+    status: str = "IN_PROGRESS"              # IN_PROGRESS / COMPLETED / CANCELLED
+    revision: int = 1                        # 조건 변경 시마다 +1 증가 (위변조 원천 차단)
+
+    # Step 1: 상호 신분증 확인 체크 & 대법원 등기부등본 권리 분석
+    lessor_checked_tenant_id: bool = False   # 임대인이 임차인 신분증을 대조·본인확인 체크했는지 여부
+    lessor_id_checked_at: str = ""
+    tenant_checked_lessor_id: bool = False   # 임차인이 임대인 신분증을 대조·본인확인 체크했는지 여부
+    tenant_id_checked_at: str = ""
+
+    registry_data: Dict[str, Any] = Field(default_factory=dict)
+    step1_lessor_confirmed: bool = False     # 임대인 등기부등본 제시/확인
+    step1_tenant_locked: bool = False        # 임차인 등기부등본 열람/확인 잠금
+    # 임차인이 인터넷등기소에서 '직접' 열람해 확인한 내용 (임대인이 제시한 서류와는 별개로 검증)
+    tenant_registry: Dict[str, Any] = Field(default_factory=dict)
+    registry_attachment_file: str = ""       # uploads/registry/<session>.<ext>
+    registry_attachment_name: str = ""
+    registry_attachment_sha256: str = ""
+    tenant_recheck_at: str = ""              # 체결 직전 재열람(변동 없음) 확인 시각
+    cancel_reason: str = ""                  # 취소 사유(당사자 취소·재열람 변동·자동 해제) — 상대방 화면에 그대로 보인다
+    cancelled_by: str = ""                   # lessor / tenant / system
+    cancelled_at: str = ""
+    chat_purged_at: str = ""                 # 취소 후 90일(보관 기간) 만료로 계약방 대화를 지운 시각
+    registry_ai_times: List[str] = Field(default_factory=list)  # AI 읽기 호출 시각(월별 집계용)
+    registry_ai_calls: int = 0               # Gemini 등기부 읽기 호출 횟수 (비용 상한용)
+    registry_ai_result: Dict[str, Any] = Field(default_factory=dict)  # 마지막 AI 읽기 결과(참고용)
+
+    # Step 2: 호실 옵션 및 시설 공동 점검표
+    option_checks: List[Dict[str, Any]] = Field(default_factory=list)
+    facility_notes: str = "도배·장판·수압·배수·도어락 현장 동반 확인 이상 없음"
+    draft_prefilled_at: str = ""            # 대면 전 사전 작성 시각(있으면 자동 해제 기한이 72시간)
+    facility_photos: List[Dict[str, Any]] = Field(default_factory=list)  # 시설 점검 사진(당사자가 현장에서 촬영): id·file·sha256·caption·by_role·uploaded_at
+    step2_lessor_confirmed: bool = False
+    step2_tenant_locked: bool = False
+
+    # Step 3: 계약 조건 및 특약 공동 작성
+    terms: Dict[str, Any] = Field(default_factory=dict)
+    step3_lessor_agreed: bool = False
+    step3_tenant_agreed: bool = False
+
+    # Step 4: 양측 본인확인 및 자필 전자서명
+    lessor_verified: bool = True
+    tenant_verified: bool = False
+    lessor_signature: str = ""
+    lessor_signed_at: str = ""
+    tenant_signature: str = ""
+    tenant_signed_at: str = ""
+    integrity_hash: str = ""
+
+    # Step 5: 계약금 결제 확인 및 최종 계약 원장 생성 결과
+    deposit_paid_confirmed: bool = False
+    payment_method: str = "TRANSFER"
+    created_contract_id: str = ""
+    fixed_date_no: str = ""
+    completed_at: str = ""
+
+    def summary(self) -> str:
+        c_tag = "호출중" if self.call_status == "CALLING" else f"Step {self.current_step}/5"
+        return f"공동계약 [{self.room_no}호] {c_tag} ({self.status}, rev={self.revision})"
+
+    def compute_integrity_hash(self) -> str:
+        """현재 세션 데이터로 계산한 무결성 해시. 서명 시점에 저장한 값과 비교해 변조 여부를 확인한다."""
+        return Contract.compute_integrity_hash({
+            "session_id": self.id,
+            "revision": self.revision,
+            "identity_verification": {
+                "lessor_login_verified": self.lessor_login_verified,
+                "tenant_login_verified": self.tenant_login_verified,
+                "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
+                "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
+            },
+            "registry_data": self.registry_data,
+            "option_checks": self.option_checks,
+            "terms": self.terms,
+            "lessor_signature": self.lessor_signature,
+            "tenant_signature": self.tenant_signature,
+        })
+
+    def is_jeonse(self) -> bool:
+        t = self.terms or {}
+        return t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
+
+    @staticmethod
+    def _norm_name(v: Any) -> str:
+        # 괄호 안 직함(예: "김임대 (시크빌 대표)")과 공백은 비교에서 제외
+        return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(v or "")))
+
+    def needs_insurance_refusal_clause(self, terms: Optional[Dict[str, Any]] = None) -> bool:
+        """전세·고액 보증금 계약에서 임차인이 보증보험을 '가입 예정'이라고 했으면 '가입 거절 시 계약 무효·계약금 전액 반환' 특약이 필수다."""
+        t = terms if terms is not None else (self.terms or {})
+        jeonse = t.get("lease_type") == "전세" or int(t.get("monthly_rent") or 0) == 0
+        needs = jeonse or int(t.get("deposit") or 0) > HIGH_DEPOSIT
+        return needs and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"
+
+    def _sync_cleanup_clause(self, terms: Dict[str, Any]) -> Dict[str, Any]:
+        """자동 특약을 특약사항 본문과 맞춘다.
+        ① '잔금 시 근저당 말소 특약': 임대인이 체크하면 표준 문구가 들어가고 풀면 빠진다.
+        ② '보증보험 가입 거절 시 계약 무효·계약금 반환': 임차인이 '가입 예정'이면 **자동 필수 삽입** — 사용자가 본문에서 지워도 다시 들어간다."""
+        out = dict(terms)
+        text = str(out.get("special_terms") or "")
+        for clause, wanted in ((CLEANUP_CLAUSE, bool(out.get("mortgage_cleanup_clause"))),
+                               (INSURANCE_CLAUSE, self.needs_insurance_refusal_clause(out))):
+            has = clause in text
+            if wanted and not has:
+                n = len([ln for ln in text.splitlines() if ln.strip()]) + 1
+                text = (text.rstrip() + "\n" if text.strip() else "") + f"{n}. " + clause
+            elif not wanted and has:
+                text = text.replace(clause, "")
+                text = "\n".join(ln for ln in text.splitlines() if ln.strip() not in {f"{i}." for i in range(1, 30)}).rstrip()
+        out["special_terms"] = text
+        return out
+
+    def deposit_amount(self) -> int:
+        return int((self.terms or {}).get("deposit") or 0)
+
+    def needs_guarantee_info(self) -> bool:
+        """전세이거나 보증금이 고액(5천만 원 초과)이면 보증보험 가입 여부를 확인해야 한다."""
+        return self.is_jeonse() or self.deposit_amount() > HIGH_DEPOSIT
+
+    def is_low_deposit_monthly(self) -> bool:
+        return (not self.is_jeonse()) and self.deposit_amount() <= LOW_DEPOSIT
+
+    def mortgage_exposure(self, tenant_rec: Optional[Dict[str, Any]] = None) -> int:
+        """임대인이 제시한 값과 임차인이 직접 본 값(저장된 값 또는 방금 제출한 값) 중 큰 근저당 채권최고액."""
+        mine = tenant_rec if tenant_rec is not None else (self.tenant_registry or {})
+        return max(int((self.registry_data or {}).get("mortgage_amount") or 0), int(mine.get("mortgage_amount") or 0))
+
+    def hard_block_reasons(self, rec: Dict[str, Any]) -> List[str]:
+        """확인 체크로도 넘어갈 수 없는 절대 차단 사유: 소유자 불일치, 압류·가압류·신탁·경매개시·임차권등기."""
+        out: List[str] = []
+        lr = self.registry_data or {}
+        if lr.get("owner_name") and self._norm_name(lr["owner_name"]) != self._norm_name(rec.get("owner_name")):
+            out.append(f"등기부 소유자({rec.get('owner_name')})가 임대인이 제시한 소유자({lr['owner_name']})와 다릅니다")
+        if rec.get("seizure_or_trust") == "있음":
+            out.append("압류·가압류·가처분·신탁·경매개시결정·임차권등기가 등기부에 있습니다")
+        return out
+
+    def risk_blockers(self) -> List[str]:
+        """진행 차단 사유(조건을 갖추면 풀린다): 선순위 근저당이 있는 전세·고액 보증금에 보증보험도 말소 특약도 없는 경우."""
+        out: List[str] = []
+        if not (self.tenant_registry or {}).get("submitted"):
+            return out
+        if self.needs_guarantee_info() and self.mortgage_exposure() > 0:
+            status = (self.tenant_registry or {}).get("guarantee_status")
+            insured = status in INSURED_STATUS and (status != "가입 예정" or INSURANCE_CLAUSE in str((self.terms or {}).get("special_terms") or ""))
+            clause = bool((self.terms or {}).get("mortgage_cleanup_clause"))
+            if not (insured or clause):
+                out.append("선순위 근저당이 있는 전세·고액 보증금(5천만 원 초과) 계약은 보증보험 '가입 완료·가입 예정(거절 시 계약 무효 특약 포함)' 또는 '잔금 시 근저당 말소 특약'이 있어야 진행할 수 있습니다")
+        return out
+
+    def _ensure_risk_ok(self) -> None:
+        blockers = self.risk_blockers()
+        if blockers:
+            raise DomainError(blockers[0], hint="임대인이 계약 조건에서 '잔금 시 근저당 말소 특약'을 넣거나, 임차인이 보증보험 가입을 완료한 뒤 등기부 확인 값을 다시 제출해 주세요.")
+
+    def registry_mismatches(self) -> List[str]:
+        """임대인이 제시한 등기 정보와 임차인이 직접 열람한 결과의 불일치·위험 항목."""
+        tr = self.tenant_registry or {}
+        if not tr.get("submitted"):
+            return []
+        lr = self.registry_data or {}
+        out: List[str] = []
+
+        norm = self._norm_name
+
+        if lr.get("owner_name") and norm(lr.get("owner_name")) != norm(tr.get("owner_name")):
+            out.append(f"소유자가 다릅니다 (임대인 제시: {lr.get('owner_name')} / 직접 열람: {tr.get('owner_name')})")
+        if int(lr.get("mortgage_amount") or 0) != int(tr.get("mortgage_amount") or 0):
+            out.append(
+                f"근저당 채권최고액이 다릅니다 (임대인 제시: {int(lr.get('mortgage_amount') or 0):,}원 / "
+                f"직접 열람: {int(tr.get('mortgage_amount') or 0):,}원)"
+            )
+        if lr.get("issue_number") and tr.get("issue_number") and norm(lr["issue_number"]) != norm(tr["issue_number"]):
+            out.append("발급확인번호가 다릅니다")
+        if tr.get("seizure_or_trust") == "있음":
+            out.append("압류·가압류·가처분·신탁등기가 있다고 확인되었습니다")
+        return out
+
+    def submit_tenant_registry(
+        self,
+        data: Dict[str, Any],
+        attachment_data_url: str = "",
+        attachment_name: str = "",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임차인이 인터넷등기소에서 직접 열람한 결과를 기록한다 (필수 항목·불일치 확인 검증)."""
+        self._ensure_ready_for_steps()
+        if not self.step1_lessor_confirmed:
+            raise DomainError("임대인이 등기부 정보를 먼저 제시해야 대조할 수 있습니다.")
+        if not data.get("viewed_directly"):
+            raise DomainError(
+                "인터넷등기소에서 직접 열람했다는 확인이 필요합니다.",
+                hint="임대인이 준 사진·PDF가 아니라, 본인이 인터넷등기소(iros.go.kr)에서 직접 열람한 결과를 입력해 주세요.",
+            )
+        if not str(data.get("viewed_at", "")).strip():
+            raise DomainError("열람 일시를 입력해 주세요.")
+        if not str(data.get("owner_name", "")).strip():
+            raise DomainError("직접 열람한 등기부의 갑구 소유자 성명을 입력해 주세요.")
+        try:
+            raw_m = data.get("mortgage_amount")
+            if raw_m is None:
+                raise ValueError
+            mortgage = int(raw_m)
+            if mortgage < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise DomainError("을구 근저당 채권최고액을 숫자로 입력해 주세요 (없으면 0).")
+        if data.get("seizure_or_trust") not in ("없음", "있음"):
+            raise DomainError("압류·가압류·가처분·신탁등기 여부를 선택해 주세요.")
+        if self.needs_guarantee_info() and data.get("guarantee_status") not in ("가입 완료", "가입 예정", "가입 안 함"):
+            raise DomainError(
+                "전세 또는 고액 보증금(5천만 원 초과) 계약은 보증금 반환보증 가입 여부를 선택해야 합니다.",
+                hint="HUG·SGI 등 보증 가입 가능 여부를 계약 전에 확인해 주세요.",
+            )
+
+        rec = {
+            "submitted": True,
+            "viewed_directly": True,
+            "viewed_at": str(data["viewed_at"]).strip(),
+            "issue_number": str(data.get("issue_number", "")).strip(),
+            "issue_number_verified": bool(data.get("issue_number_verified")),
+            "owner_name": str(data["owner_name"]).strip(),
+            "mortgage_amount": mortgage,
+            "seizure_or_trust": data["seizure_or_trust"],
+            "guarantee_status": str(data.get("guarantee_status", "")).strip(),
+            "mismatch_ack": bool(data.get("mismatch_ack")),
+            "low_deposit_risk_ack": bool(data.get("low_deposit_risk_ack")),
+            "ai_assisted": bool(self.registry_ai_result),
+            "submitted_at": now_iso(),
+        }
+        hard = self.hard_block_reasons(rec)
+        if hard:
+            # 절대 차단: 확인 체크로 넘어갈 수 없다. 근거(임차인이 본 값)를 남기고 계약을 즉시 중단한다.
+            self.tenant_registry = {**rec, "blocked": hard}
+            self.status = "CANCELLED"
+            self.cancel_reason = "등기부 확인 결과 계약을 진행할 수 없어 중단되었습니다: " + " / ".join(hard)
+            self.cancelled_by, self.cancelled_at = "system", now_iso()
+            self.save(action="cosign_blocked_by_registry_policy", app_source=app_source)
+            raise RegistryBlocked(
+                "등기부 확인 결과 계약을 더는 진행할 수 없어 중단했습니다: " + " / ".join(hard),
+                hint="임차인 보호를 위해 이 항목은 확인 체크로 넘어갈 수 없습니다. 문제가 해소된 뒤 임대인이 새로 계약을 호출해 주세요.",
+            )
+        if self.is_low_deposit_monthly() and self.mortgage_exposure(rec) > 0 and not rec["low_deposit_risk_ack"]:
+            self.tenant_registry = {}
+            raise DomainError(
+                "⚠️ 위험: 소액 보증금에 선순위 근저당이 있습니다. 경매가 되면 보증금을 돌려받지 못할 수 있습니다.",
+                hint="위험을 이해했다면 '소액 보증금 위험을 확인하고 계속' 항목에 체크해 다시 제출해 주세요.",
+            )
+        self.tenant_registry = rec
+        synced = self._sync_cleanup_clause(self.terms or {})   # 보증보험 '가입 예정'이면 거절 특약을 자동으로 넣는다
+        if synced != self.terms:
+            self.terms = synced
+        mism = self.registry_mismatches()
+        if mism and not rec["mismatch_ack"]:
+            self.tenant_registry = {}
+            raise DomainError(
+                "임대인이 제시한 내용과 직접 열람한 내용이 다르거나 위험 항목이 있습니다.",
+                hint=" / ".join(mism) + " — 내용을 확인했다면 '차이를 확인하고 계속' 항목에 체크해 주세요.",
+            )
+
+        if attachment_data_url:
+            self.registry_attachment_file, self.registry_attachment_sha256 = self._save_registry_attachment(
+                self.id, attachment_data_url
+            )
+            self.registry_attachment_name = (attachment_name or "").strip()[:120]
+        return self.save(action="tenant_registry_submitted", app_source=app_source)
+
+    @staticmethod
+    def _save_registry_attachment(session_id: str, data_url: str):
+        m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", data_url.strip(), re.DOTALL)
+        if not m or m.group(1).lower() not in ALLOWED_MIME_TO_EXT:
+            raise DomainError("첨부 형식이 올바르지 않습니다.", hint="허용 형식: JPG, PNG, WEBP, GIF, PDF")
+        try:
+            binary = base64.b64decode(m.group(2), validate=False)
+        except Exception:
+            raise DomainError("첨부 파일을 읽지 못했습니다. 다시 선택해 주세요.")
+        if not binary:
+            raise DomainError("비어 있는 첨부 파일입니다.")
+        if len(binary) > MAX_PHOTO_BYTES:
+            raise DomainError("첨부 파일은 최대 10MB 이하만 허용됩니다.")
+        ext = ALLOWED_MIME_TO_EXT[m.group(1).lower()][0]
+        abs_dir = os.path.join(pool().pool_dir, "uploads", "registry")
+        os.makedirs(abs_dir, exist_ok=True)
+        filename = f"{session_id}.{ext}"
+        target = os.path.join(abs_dir, filename)
+        tmp = f"{target}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fp:
+            fp.write(binary)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp, target)
+        return f"uploads/registry/{filename}", hashlib.sha256(binary).hexdigest()
+
+    def registry_attachment_path(self):
+        if not self.registry_attachment_file:
+            raise NotFound("첨부된 등기부 열람 자료가 없습니다.")
+        root = os.path.abspath(pool().pool_dir)
+        cand = os.path.abspath(os.path.join(root, self.registry_attachment_file))
+        if not cand.startswith(root + os.sep) or not os.path.isfile(cand):
+            raise NotFound("첨부 파일을 찾을 수 없습니다.")
+        mime = EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
+        return cand, mime, self.registry_attachment_name or os.path.basename(cand)
+
+    def cancel(self, role: str, reason: str, app_source: str = "rent3_contract") -> "CoSignSession":
+        """체결 전에 당사자가 계약을 취소한다. 사유는 필수이며 상대방 화면에 그대로 보인다. 호실은 즉시 다시 열린다."""
+        self._ensure_in_progress()
+        why = (reason or "").strip()
+        if len(why) < 2:
+            raise DomainError("취소 사유를 입력해 주세요.", hint="상대방 화면에 그대로 표시됩니다.")
+        who = "임대인" if role == "lessor" else "임차인"
+        self.status = "CANCELLED"
+        self.cancel_reason = f"{who}이 계약을 취소했습니다: {why[:200]}"
+        self.cancelled_by, self.cancelled_at = ("lessor" if role == "lessor" else "tenant"), now_iso()
+        return self.save(action=f"cosign_cancelled_by_{self.cancelled_by}", app_source=app_source)
+
+    def recheck_registry(self, changed: bool, app_source: str = "rent3_contract") -> "CoSignSession":
+        """체결 직전 임차인이 등기부를 다시 열람한 결과. 변동이 있으면 계약을 중단한다."""
+        self._ensure_in_progress()
+        if self.current_step < 4:
+            raise DomainError("서명 단계 이후에 체결 직전 재열람을 확인할 수 있습니다.")
+        if changed:
+            self.status = "CANCELLED"
+            self.cancel_reason = "임차인이 체결 직전 등기부에서 변동(근저당·압류 등)을 확인해 계약이 중단되었습니다."
+            self.cancelled_by, self.cancelled_at = "tenant", now_iso()
+            self.tenant_registry = {**self.tenant_registry, "recheck_changed": True}
+            return self.save(action="cosign_cancelled_registry_changed", app_source=app_source)
+        self.tenant_recheck_at = now_iso()
+        return self.save(action="tenant_registry_rechecked", app_source=app_source)
+
+    def is_step1_fully_verified(self) -> bool:
+        return (
+            self.lessor_checked_tenant_id
+            and self.tenant_checked_lessor_id
+            and self.step1_lessor_confirmed
+            and self.step1_tenant_locked
+        )
+
+    @classmethod
+    def open_session(
+        cls,
+        branch: str,
+        room_no: str,
+        tenant_name: str = "",
+        tenant_phone: str = "",
+        mode: str = "NEW",
+        initiated_by_role: str = "lessor",
+        call_status: str = "CONNECTED",
+        lessor_login_verified: bool = True,
+        tenant_login_verified: bool = True,
+        id_tenant: str = "",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        b_id = normalize_branch_id(branch)
+        room = Room.first(branch=b_id, room_no=room_no)
+        if not room:
+            raise NotFound(f"{b_id} 지점에서 '{room_no}호'를 찾을 수 없습니다.")
+
+        bldg = Building.get(room.id_building) or Building.first(branch=b_id)
+        lessor = Lessor.get(bldg.id_lessor) if (bldg and bldg.id_lessor) else Lessor.first(branch=b_id)
+
+        prev_ct: Optional[Contract] = None
+        if mode == "RENEWAL":
+            prev_ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+            if not prev_ct:
+                raise DomainError(f"{room.room_no}호에 갱신할 기존 활성 계약이 없습니다.")
+
+        matched_t: Optional[Tenant] = Tenant.get(id_tenant) if id_tenant else None
+        if not matched_t and tenant_phone:
+            digits = re.sub(r"\D", "", tenant_phone)
+            if len(digits) >= 8:
+                matched_t = next((t for t in Tenant.all() if re.sub(r"\D", "", t.phone) == digits), None)
+
+        move_in_default = (
+            prev_ct.expiry_date if prev_ct and prev_ct.expiry_date
+            else (room.available_from if re_is_date(room.available_from) else date_today().isoformat())
+        )
+        t_name = tenant_name or (matched_t.name if matched_t else (prev_ct.tenant_name if prev_ct else ""))
+        t_phone = tenant_phone or (matched_t.phone if matched_t else (prev_ct.tenant_phone if prev_ct else ""))
+        resolved_tid = matched_t.id if matched_t else (prev_ct.id_tenant if prev_ct else "")
+
+        opts = [
+            {
+                "item": o.get("item", "옵션"),
+                "quantity": o.get("quantity", 1),
+                "condition": o.get("condition", "정상"),
+                "checked": True,
+            }
+            for o in (room.option_list or [])
+        ]
+
+        now_str = now_iso()
+        session = cls(
+            mode=mode,
+            prev_contract_id=prev_ct.id if prev_ct else "",
+            branch=b_id,
+            id_building=bldg.id if bldg else "",
+            building_name=bldg.building_name if bldg else b_id,
+            building_address=bldg.address if bldg else "",
+            id_room=room.id,
+            room_no=room.room_no,
+            id_lessor=lessor.id if lessor else "",
+            lessor_name=lessor.name if lessor else "김임대",
+            lessor_phone=lessor.phone if lessor else "010-1212-3434",
+            lessor_account=lessor.account_number if lessor else "국민 123-456-789012",
+            id_tenant=resolved_tid,
+            initiated_by_role=initiated_by_role,
+            call_status=call_status,
+            called_at=now_str,
+            responded_at=now_str if call_status == "CONNECTED" else "",
+            lessor_login_verified=lessor_login_verified,
+            tenant_login_verified=tenant_login_verified,
+            current_step=1,
+            status="IN_PROGRESS",
+            revision=1,
+            registry_data={
+                "issue_number": room.registry_info.get("issue_number", "1101-2026-884920"),
+                "owner_name": lessor.name if lessor else room.registry_info.get("owner_name", "김임대"),
+                "mortgage_amount": room.registry_info.get("mortgage_amount", 0),
+                "clean_title": room.registry_info.get("clean_title", True),
+                "checked_date": date_today().isoformat(),
+            },
+            step1_lessor_confirmed=(initiated_by_role == "lessor" or call_status == "CONNECTED"),
+            option_checks=opts,
+            terms={
+                "tenant_name": t_name,
+                "tenant_phone": t_phone,
+                "tenant_email": matched_t.email if matched_t else (prev_ct.tenant_email if prev_ct else ""),
+                "tenant_car_number": matched_t.car_number if matched_t else "",
+                "tax_invoice_requested": bool(
+                    (prev_ct.tax_invoice_requested or prev_ct.tenant_business_number) if prev_ct else False
+                ),
+                "tenant_business_number": matched_t.business_number if matched_t else (prev_ct.tenant_business_number if prev_ct else ""),
+                "tenant_company_name": matched_t.company_name if matched_t else (prev_ct.tenant_company_name if prev_ct else ""),
+                "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
+                "lease_type": room.lease_type or "월세",
+                "pay_timing": room.pay_timing or "후불",
+                "vat_target": prev_ct.vat_target if prev_ct else room.vat_applicable,
+                "vat_separate": True,
+                "contract_deposit": 300000,
+                "deposit": prev_ct.deposit if prev_ct else room.deposit,
+                "monthly_rent": prev_ct.monthly_rent if prev_ct else room.monthly_rent,
+                "maintenance_fee": prev_ct.maintenance_fee if prev_ct else room.maintenance_fee,
+                "move_in_date": move_in_default,
+                "lease_term_months": 12,
+                "special_terms": (
+                    "1. 본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.\n"
+                    "2. 임대인과 임차인은 각자 본인인증 로그인 후 서로의 실물 신분증과 등기부등본을 대조·확인하였음.\n"
+                    "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n"
+                    "4. 월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함."
+                ),
+            },
+        ).save(action="cosign_session_opened", app_source=app_source)
+
+        callee_role = "tenant" if initiated_by_role == "lessor" else "lessor"
+        caller_name = session.lessor_name if initiated_by_role == "lessor" else (t_name or "임차인")
+        msg_prefix = "[📞 실시간 공동계약 호출]" if call_status == "CALLING" else "[🤝 공동 임대계약방 개설]"
+        DirectChat(
+            branch=b_id,
+            id_room=room.id,
+            room_no=room.room_no,
+            sender_role=initiated_by_role,
+            sender_name=caller_name,
+            message=(
+                f"{msg_prefix} {session.building_name} {room.room_no}호 공동계약 요청이 도착했습니다. "
+                f"본인 로그인 후 공동계약 화면에서 호출에 응답하여 계약을 시작해 주세요."
+            ),
+            quick_action_label="호출 응답 및 공동계약 입장",
+            quick_action_url=f"/rent3_contract/?session={session.id}&role={callee_role}",
+        ).save(action="cosign_call_sent", app_source=app_source)
+
+        return session
+
+    def is_idle_expired(self, now: Optional[datetime] = None) -> bool:
+        """진행 중인 세션이 IDLE_EXPIRE 동안 무응답(변화 없음)이면 True."""
+        if self.status != "IN_PROGRESS":
+            return False
+        try:
+            last = datetime.fromisoformat(self.updated_at)
+        except (TypeError, ValueError):
+            return False
+        window = IDLE_EXPIRE_DRAFT if (self.draft_prefilled_at and self.call_status == "CALLING") else IDLE_EXPIRE
+        return (now or datetime.now()) - last >= max(window, IDLE_EXPIRE)
+
+    @classmethod
+    def expire_idle(cls, branch: str = "", room_no: str = "") -> int:
+        """무응답 세션을 자동 해제(CANCELLED)한다. 해제한 건수를 돌려준다."""
+        kw: Dict[str, Any] = {"status": "IN_PROGRESS"}
+        if branch:
+            kw["branch"] = normalize_branch_id(branch)
+        if room_no:
+            kw["room_no"] = room_no
+        n = 0
+        for x in cls.find(**kw):
+            if x.is_idle_expired():
+                x.status = "CANCELLED"
+                x.cancel_reason = "24시간 이상 응답이 없어 자동 해제되었습니다."
+                x.cancelled_by, x.cancelled_at = "system", now_iso()
+                x.save(action="cosign_expired_idle", app_source="rent3_contract")
+                n += 1
+        return n
+
+    @classmethod
+    def ai_calls_this_month(cls, branch: str) -> int:
+        ym = now_iso()[:7]
+        return sum(1 for x in cls.find(branch=normalize_branch_id(branch)) for t in x.registry_ai_times if t.startswith(ym))
+
+    @classmethod
+    def live_for_room(cls, branch: str, room_no: str) -> Optional["CoSignSession"]:
+        """해당 호실에 진행 중(IN_PROGRESS)인 계약 세션. 없으면 None. (무응답 세션은 먼저 해제)"""
+        cls.expire_idle(branch, room_no)
+        return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=room_no, status="IN_PROGRESS")), None)
+
+    def _tenant_identity_evidence(self) -> Dict[str, Any]:
+        """봉인 때 남기는 임차인 본인인증 증거 (업체·시각·가짜 여부). 생년월일 등 개인정보는 싣지 않는다."""
+        t = Tenant.get(self.id_tenant) if self.id_tenant else None
+        if t is None:
+            ph = re.sub(r"\D", "", str((self.terms or {}).get("tenant_phone") or ""))
+            t = next((x for x in Tenant.all() if ph and re.sub(r"\D", "", x.phone) == ph), None)
+        idn = (t.identity if t else {}) or {}
+        return {"verified": bool(idn.get("verified")), "provider": idn.get("provider", ""), "assurance": idn.get("assurance", ""),
+                "fake": bool(idn.get("fake")), "verified_at": idn.get("verified_at", "")}
+
+    def is_tenant_party(self, id_tenant: str = "", phone: str = "") -> bool:
+        """이 계약의 임차인 당사자인지(계정 ID 또는 연락처 일치)."""
+        if id_tenant and self.id_tenant and id_tenant.strip() == self.id_tenant:
+            return True
+        digits = re.sub(r"\D", "", phone or "")
+        mine = re.sub(r"\D", "", str((self.terms or {}).get("tenant_phone") or ""))
+        return bool(digits and mine and digits == mine)
+
+    @classmethod
+    def call_counterparty(
+        cls,
+        caller_role: str,
+        branch: str,
+        room_no: str,
+        tenant_name: str = "",
+        tenant_phone: str = "",
+        id_tenant: str = "",
+        mode: str = "NEW",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임대인 또는 임차인 중 먼저 공동계약 화면에서 매물을 선택한 측이 상대를 호출(CALLING)하여 세션을 시작한다."""
+        role_norm = "tenant" if caller_role == "tenant" else "lessor"
+        if role_norm == "tenant" and (not tenant_name.strip() or not tenant_phone.strip()) and not id_tenant:
+            raise DomainError(
+                "임차인 로그인 본인인증 정보(성명·연락처)가 필요합니다.",
+                hint="먼저 임차인 계정으로 로그인한 뒤 매물을 선택해 임대인을 호출해 주세요.",
+            )
+        if role_norm == "lessor" and mode == "NEW" and not (tenant_name.strip() or tenant_phone.strip() or id_tenant):
+            raise DomainError(
+                "호출할 임차인(예비 세입자)을 선택하거나 성명·연락처를 입력해 주세요.",
+                hint="가입된 임차인 목록에서 선택하거나 연락처를 입력하면 해당 임차인에게 호출이 전송됩니다.",
+            )
+
+        if not Lessor.franchise_open(normalize_branch_id(branch)):
+            raise DomainError(
+                "가맹 승인된 건물만 직거래 계약을 시작할 수 있습니다.",
+                hint="이 건물은 가맹 심사 중이거나 이용이 정지되었습니다.",
+            )
+
+        if role_norm == "tenant":
+            mine = [x for x in cls.find(status="IN_PROGRESS") if x.is_tenant_party(id_tenant, tenant_phone)
+                    and not (x.branch == normalize_branch_id(branch) and x.room_no == room_no)]
+            if len(mine) >= MAX_LIVE_PER_TENANT:
+                raise DomainError(
+                    f"동시에 진행할 수 있는 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
+                    hint="진행 중인 계약을 마치거나 취소한 뒤 다른 호실을 선택해 주세요.",
+                )
+
+        # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
+        # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)
+        cls.expire_idle(branch, room_no)
+        b_id = normalize_branch_id(branch)
+        live = next(
+            (x for x in cls.find(branch=b_id, room_no=room_no, status="IN_PROGRESS") if x.mode == mode),
+            None,
+        )
+        if live:
+            # 진행 중인 계약에는 그 계약의 당사자만 다시 들어올 수 있다. 다른 임차인은 접근 불가.
+            if role_norm == "tenant" and not live.is_tenant_party(id_tenant, tenant_phone):
+                raise DomainError(
+                    f"{room_no}호는 다른 임차인과 계약이 진행 중입니다.",
+                    hint="진행 중인 계약이 끝나거나 취소된 뒤에 다시 시도해 주세요.",
+                )
+            return live
+
+        return cls.open_session(
+            branch=branch,
+            room_no=room_no,
+            tenant_name=tenant_name.strip(),
+            tenant_phone=tenant_phone.strip(),
+            mode=mode,
+            initiated_by_role=role_norm,
+            call_status="CALLING",
+            lessor_login_verified=(role_norm == "lessor"),
+            tenant_login_verified=(role_norm == "tenant"),
+            id_tenant=id_tenant.strip(),
+            app_source=app_source,
+        )
+
+    def respond_to_call(
+        self,
+        responder_role: str,
+        responder_name: str = "",
+        responder_phone: str = "",
+        id_tenant: str = "",
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """호출받은 상대방(임대인 또는 임차인)이 본인 로그인 상태에서 응답하여 공동계약을 정식 개시(CONNECTED)한다."""
+        self._ensure_in_progress()
+        role_norm = "tenant" if responder_role == "tenant" else "lessor"
+        if self.call_status == "CALLING" and role_norm == self.initiated_by_role:
+            other_ko = "임차인" if self.initiated_by_role == "lessor" else "임대인"
+            raise DomainError(
+                f"현재 {other_ko}의 호출 응답을 기다리는 중입니다.",
+                hint=f"{other_ko}이(가) 로그인 후 [호출 응답 및 계약 시작] 버튼을 눌러야 연결됩니다.",
+            )
+
+        if role_norm == "tenant":
+            self.tenant_login_verified = True
+            if id_tenant.strip():
+                self.id_tenant = id_tenant.strip()
+            merged_terms = {**self.terms}
+            if responder_name.strip():
+                merged_terms["tenant_name"] = responder_name.strip()
+            if responder_phone.strip():
+                merged_terms["tenant_phone"] = responder_phone.strip()
+            self.terms = merged_terms
+        else:
+            self.lessor_login_verified = True
+            self.step1_lessor_confirmed = True
+
+        self.call_status = "CONNECTED"
+        self.responded_at = now_iso()
+        self.save(action=f"call_responded_by_{role_norm}", app_source=app_source)
+
+        resp_label = self.lessor_name if role_norm == "lessor" else str(self.terms.get("tenant_name") or "임차인")
+        DirectChat(
+            branch=self.branch,
+            id_room=self.id_room,
+            room_no=self.room_no,
+            sender_role=role_norm,
+            sender_name=resp_label,
+            message=f"[✅ 공동계약 호출 응답 완료] {resp_label}님이 입장하여 양측 연결이 완료되었습니다. 신분증 상호 확인 및 등기부등본 확인을 진행해 주세요.",
+        ).save(action="cosign_call_connected", app_source=app_source)
+
+        return self
+
+    @classmethod
+    def by_code_or_id(cls, token: str) -> "CoSignSession":
+        key = (token or "").strip()
+        found = cls.get(key) or cls.first(session_code=key)
+        if not found:
+            raise NotFound(
+                f"공동 계약 세션('{key}')을 찾을 수 없습니다.",
+                hint="공동계약 호출 목록에서 세션을 선택해 주세요.",
+            )
+        return found
+
+    def verify_counterparty_id(
+        self,
+        role: str,
+        checked: bool = True,
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """임대인과 임차인이 서로 상대방의 신분증을 확인하여 본인임을 체크한다."""
+        self._ensure_ready_for_steps()
+        if not (self.lessor_login_verified and self.tenant_login_verified):
+            raise DomainError("양측 모두 본인인증 로그인이 완료된 상태여야 신분증 대조 체크를 진행할 수 있습니다.")
+
+        if role == "lessor":
+            if not self.terms.get("tenant_name"):
+                raise DomainError("확인할 임차인 성명 정보가 아직 등록되지 않았습니다.")
+            self.lessor_checked_tenant_id = checked
+            self.lessor_id_checked_at = now_iso() if checked else ""
+        else:
+            self.tenant_checked_lessor_id = checked
+            self.tenant_id_checked_at = now_iso() if checked else ""
+
+        if not checked:
+            self.lessor_signature = ""
+            self.tenant_signature = ""
+            self.integrity_hash = ""
+
+        if self.is_step1_fully_verified() and self.current_step < 2:
+            self.current_step = 2
+
+        return self.save(action=f"id_card_checked_by_{role}_{checked}", app_source=app_source)
+
+    def confirm_step1(
+        self,
+        role: str,
+        registry_updates: Optional[Dict[str, Any]] = None,
+        checked_counterparty_id: Optional[bool] = None,
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        self._ensure_ready_for_steps()
+        if checked_counterparty_id is not None:
+            if role == "lessor":
+                self.lessor_checked_tenant_id = checked_counterparty_id
+                self.lessor_id_checked_at = now_iso() if checked_counterparty_id else ""
+            else:
+                self.tenant_checked_lessor_id = checked_counterparty_id
+                self.tenant_id_checked_at = now_iso() if checked_counterparty_id else ""
+
+        if registry_updates and role == "lessor":
+            self.registry_data = {**self.registry_data, **registry_updates}
+            self.step1_tenant_locked = False
+        if role == "lessor":
+            self.step1_lessor_confirmed = True
+        else:
+            if not self.step1_lessor_confirmed:
+                raise DomainError("먼저 임대인의 등기부등본 정보 제시가 완료되어야 합니다.")
+            if not (self.tenant_registry or {}).get("submitted"):
+                raise DomainError(
+                    "임차인이 인터넷등기소에서 직접 열람한 결과를 먼저 입력해야 합니다.",
+                    hint="임대인이 보여준 서류만으로는 확인 완료 처리할 수 없습니다.",
+                )
+            self.step1_tenant_locked = True
+
+        if self.is_step1_fully_verified() and self.current_step < 2:
+            self.current_step = 2
+        return self.save(action=f"step1_confirmed_by_{role}", app_source=app_source)
+
+    def confirm_step2(
+        self,
+        role: str,
+        option_checks: Optional[List[Dict[str, Any]]] = None,
+        facility_notes: Optional[str] = None,
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        self._ensure_ready_for_steps()
+        if option_checks is not None:
+            self.option_checks = option_checks
+            if role == "lessor":
+                self.step2_tenant_locked = False
+        if facility_notes is not None:
+            self.facility_notes = facility_notes
+        if role == "lessor":
+            self.step2_lessor_confirmed = True
+        else:
+            self.step2_lessor_confirmed = True
+            self.step2_tenant_locked = True
+        if self.step2_lessor_confirmed and self.step2_tenant_locked and self.current_step < 3:
+            self.current_step = 3
+        return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
+
+    PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
+                                            "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause",
+                                            "vat_target", "vat_separate", "tax_invoice_requested",
+                                            "tenant_business_number", "tenant_company_name", "tenant_ceo_name", "tenant_email")
+    PREFILL_TENANT_KEYS: ClassVar[tuple] = ("tenant_email", "tenant_car_number", "tax_invoice_requested",
+                                            "tenant_business_number", "tenant_company_name", "tenant_ceo_name")
+    MAX_FACILITY_PHOTOS: ClassVar[int] = 12
+    FACILITY_MIME: ClassVar[Dict[str, str]] = {"image/jpeg": "jpg", "image/jpg": "jpg", "image/png": "png", "image/webp": "webp"}
+
+    def prefill(self, role: str, updates: Dict[str, Any], app_source: str = "rent3_contract") -> "CoSignSession":
+        """대면 전 사전 작성. 상대가 아직 연결하기 전(CALLING)에만 가능하다.
+        임대인은 계약 조건(입주일·금액·특약)을, 임차인은 본인 연락 정보(이메일·차량번호)를 미리 적는다.
+        여기서 적은 값은 '초안'일 뿐이다 — 만난 뒤 ③단계에서 양쪽이 조건을 다시 보고 동의해야 효력이 생긴다."""
+        self._ensure_in_progress()
+        if self.call_status != "CALLING":
+            raise DomainError("이미 양쪽이 연결되어 사전 작성을 할 수 없습니다.", hint="연결 뒤의 조건 변경은 ③단계에서 하며 양쪽 동의를 다시 받습니다.")
+        allowed = self.PREFILL_LESSOR_KEYS if role == "lessor" else self.PREFILL_TENANT_KEYS
+        bad = [k for k in updates if k not in allowed]
+        if bad:
+            raise DomainError(f"이 역할이 미리 적을 수 없는 항목입니다: {', '.join(bad)}",
+                              hint="임대인은 계약 조건, 임차인은 이메일·차량번호만 사전 작성할 수 있습니다.")
+        merged = {**self.terms}
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        for k, v in updates.items():
+            if v is None:
+                continue
+            if k in int_fields:
+                try:
+                    v = int(v)
+                except (TypeError, ValueError):
+                    raise DomainError(f"{k} 는 숫자여야 합니다.")
+                if v < 0:
+                    raise DomainError("금액·기간은 0 이상이어야 합니다.")
+            elif isinstance(v, str):
+                v = v.strip()
+            if k == "move_in_date" and not re_is_date(str(v)):
+                raise DomainError("입주일은 YYYY-MM-DD 형식이어야 합니다.")
+            if k == "pay_timing" and v not in ("후불", "선불"):
+                raise DomainError("월세 납부 시기는 후불 또는 선불이어야 합니다.")
+            if k == "lease_type" and v not in ("월세", "전세"):
+                raise DomainError("임대 유형은 월세 또는 전세여야 합니다.")
+            merged[k] = v
+        merged = self._sync_cleanup_clause(merged)
+        if int(merged.get("contract_deposit", 0)) > int(merged.get("deposit", 0)):
+            raise DomainError("계약금은 보증금보다 클 수 없습니다.")
+        if self.mode == "RENEWAL" and self.prev_contract_id and role == "lessor":
+            prev_ct = Contract.get(self.prev_contract_id)
+            if prev_ct:
+                prev_ct.validate_renewal_cap(new_deposit=int(merged.get("deposit", 0)), new_rent=int(merged.get("monthly_rent", 0)))
+        self.terms = merged
+        self.draft_prefilled_at = now_iso()
+        return self.save(action=f"prefilled_by_{role}", app_source=app_source)
+
+    def add_facility_photo(self, role: str, data_url: str, caption: str = "", app_source: str = "rent3_contract") -> Dict[str, Any]:
+        """시설 점검 사진을 올린다(점검 단계에서만). 파일은 서버에 저장하고 SHA-256 을 남겨, 퇴실 정산 때 입주 당시 상태의 증거가 된다."""
+        self._ensure_ready_for_steps()
+        if self.current_step > 2:
+            raise DomainError("시설 점검 단계가 끝나 사진을 더 올릴 수 없습니다.", hint="점검 사진은 합의된 뒤 바뀌지 않도록 고정됩니다.")
+        if len(self.facility_photos) >= self.MAX_FACILITY_PHOTOS:
+            raise DomainError(f"점검 사진은 최대 {self.MAX_FACILITY_PHOTOS}장까지 올릴 수 있습니다.")
+        m = re.match(r"^data:([a-zA-Z0-9.+/-]+);base64,(.+)$", (data_url or "").strip(), re.DOTALL)
+        ext = self.FACILITY_MIME.get(m.group(1).lower()) if m else None
+        if not m or not ext:
+            raise DomainError("사진 형식이 올바르지 않습니다.", hint="허용 형식: JPG, PNG, WEBP")
+        try:
+            binary = base64.b64decode(m.group(2), validate=False)
+        except Exception:
+            raise DomainError("사진을 읽지 못했습니다. 다시 선택해 주세요.")
+        if not binary:
+            raise DomainError("비어 있는 사진입니다.")
+        if len(binary) > MAX_PHOTO_BYTES:
+            raise DomainError("사진은 한 장당 10MB 이하만 허용됩니다.")
+        pid = uuid4().hex[:10]
+        abs_dir = os.path.join(pool().pool_dir, "uploads", "facility", self.id)
+        os.makedirs(abs_dir, exist_ok=True)
+        target = os.path.join(abs_dir, f"{pid}.{ext}")
+        tmp = f"{target}.{os.getpid()}.tmp"
+        with open(tmp, "wb") as fp:
+            fp.write(binary)
+            fp.flush()
+            os.fsync(fp.fileno())
+        os.replace(tmp, target)
+        rec = {"id": pid, "file": f"uploads/facility/{self.id}/{pid}.{ext}", "sha256": hashlib.sha256(binary).hexdigest(),
+               "caption": (caption or "").strip()[:80], "by_role": "lessor" if role == "lessor" else "tenant",
+               "uploaded_at": now_iso()}
+        self.facility_photos = [*self.facility_photos, rec]
+        # 점검 내용이 바뀌었으니 양쪽 확인을 모두 다시 받는다(상대가 보지 못한 사진에 동의한 것이 되지 않게)
+        self.step2_tenant_locked = False
+        self.step2_lessor_confirmed = False
+        self.save(action=f"facility_photo_added_by_{role}", app_source=app_source)
+        return rec
+
+    def remove_facility_photo(self, role: str, photo_id: str, app_source: str = "rent3_contract") -> None:
+        self._ensure_ready_for_steps()
+        if self.current_step > 2:
+            raise DomainError("시설 점검 단계가 끝나 사진을 지울 수 없습니다.")
+        rec = next((p for p in self.facility_photos if p["id"] == photo_id), None)
+        if rec is None:
+            raise NotFound("사진을 찾을 수 없습니다.")
+        if rec["by_role"] != ("lessor" if role == "lessor" else "tenant"):
+            raise DomainError("본인이 올린 사진만 지울 수 있습니다.")
+        self.facility_photos = [p for p in self.facility_photos if p["id"] != photo_id]
+        self.step2_tenant_locked = False
+        self.step2_lessor_confirmed = False
+        self.save(action=f"facility_photo_removed_by_{role}", app_source=app_source)
+
+    def facility_photo_path(self, photo_id: str):
+        rec = next((p for p in self.facility_photos if p["id"] == photo_id), None)
+        if rec is None:
+            raise NotFound("사진을 찾을 수 없습니다.")
+        root = os.path.abspath(os.path.join(pool().pool_dir, "uploads", "facility"))
+        cand = os.path.abspath(os.path.join(pool().pool_dir, rec["file"]))
+        if not cand.startswith(root + os.sep) or not os.path.isfile(cand):
+            raise NotFound("사진 파일을 찾을 수 없습니다.")
+        return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
+
+    # 3단계에서 '제안 → 상대 수락'으로만 바뀌는 6개 항목 (POST /terms 로는 직접 못 바꾼다 — contract_chat.respond 가 update_terms 를 부른다)
+    TERMS_LOCKED_FIELDS: ClassVar[tuple] = ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "move_in_date", "lease_term_months")
+
+    def terms_changes(self, updates: Dict[str, Any]) -> List[str]:
+        """update_terms 와 같은 값 정리를 거쳐, 지금 값과 달라지는 항목 이름 목록을 돌려준다(저장하지 않는다)."""
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
+        out: List[str] = []
+        for k, v in (updates or {}).items():
+            if v is None:
+                continue
+            try:
+                if k in int_fields:
+                    v = int(v)
+                elif k in bool_fields:
+                    v = bool(v)
+                elif isinstance(v, str):
+                    v = v.strip()
+            except (TypeError, ValueError):
+                out.append(k)
+                continue
+            if (self.terms or {}).get(k) != v:
+                out.append(k)
+        return out
+
+    def reopen_terms(self, role: str, app_source: str = "rent3_contract") -> "CoSignSession":
+        """서명(4단계) 이후 조건을 바꿔야 할 때의 유일한 길: 양측 서명·3단계 동의를 지우고 3단계로 돌아간다(리비전 +1)."""
+        self._ensure_ready_for_steps()
+        if self.current_step < 4:
+            raise DomainError("이미 계약 조건 단계(③)입니다.", hint="조건은 제안·수락으로 바꿀 수 있습니다.")
+        self.step3_lessor_agreed = False
+        self.step3_tenant_agreed = False
+        self.lessor_signature = ""
+        self.tenant_signature = ""
+        self.integrity_hash = ""
+        self.tenant_recheck_at = ""            # 다시 서명하면 체결 직전 등기부 재확인도 다시 한다
+        self.current_step = 3
+        self.revision += 1
+        return self.save(action=f"terms_reopened_by_{role}_rev_{self.revision}", app_source=app_source)
+
+    def update_terms(
+        self,
+        role: str,
+        updates: Dict[str, Any],
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """Step 3 계약 조건 수정 — 단 1개 필드라도 값이 달라지면 revision 증가 + 양측 동의 및 서명 즉시 초기화!"""
+        self._ensure_ready_for_steps()
+        merged = {**self.terms}
+        changed = False
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
+
+        for k, v in updates.items():
+            if v is None:
+                continue
+            if k in int_fields:
+                v = int(v)
+            elif k in bool_fields:
+                v = bool(v)
+            elif isinstance(v, str):
+                v = v.strip()
+            if merged.get(k) != v:
+                merged[k] = v
+                changed = True
+
+        merged = self._sync_cleanup_clause(merged)
+        if merged != self.terms:
+            changed = True
+
+        # 재계약(RENEWAL) 시 법정 5% 상한 실시간 검증
+        if self.mode == "RENEWAL" and self.prev_contract_id:
+            prev_ct = Contract.get(self.prev_contract_id)
+            if prev_ct:
+                prev_ct.validate_renewal_cap(
+                    new_deposit=int(merged.get("deposit", 0)),
+                    new_rent=int(merged.get("monthly_rent", 0)),
+                )
+
+        if changed:
+            self.terms = merged
+            self.revision += 1
+            self.step3_lessor_agreed = False
+            self.step3_tenant_agreed = False
+            self.lessor_signature = ""
+            self.tenant_signature = ""
+            self.integrity_hash = ""
+            if self.current_step > 3:
+                self.current_step = 3
+            return self.save(action=f"terms_edited_by_{role}_rev_{self.revision}", app_source=app_source)
+
+        return self
+
+    def agree_step3(self, role: str, expected_revision: Optional[int] = None, app_source: str = "rent3_contract") -> "CoSignSession":
+        self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
+        from .contract_chat import ensure_no_open_requests   # 답하지 않은 제안·수정 요청이 있으면 최종 동의 불가
+        ensure_no_open_requests(self.id)
+        if expected_revision is not None and expected_revision != self.revision:
+            raise Conflict(
+                f"계약 조건이 방금 수정되었습니다 (현재 리비전 v{self.revision}).",
+                hint="변경된 최신 계약 조건을 다시 확인한 뒤 동의 버튼을 눌러 주세요.",
+            )
+        if not self.terms.get("tenant_name") or not self.terms.get("tenant_phone"):
+            raise DomainError("임차인 성명과 연락처는 필수 입력 항목입니다.", hint="Step 3에서 임차인 인적사항을 먼저 입력해 주세요.")
+
+        if role == "lessor":
+            self.step3_lessor_agreed = True
+        else:
+            self.step3_tenant_agreed = True
+
+        if self.step3_lessor_agreed and self.step3_tenant_agreed and self.current_step < 4:
+            self.current_step = 4
+        return self.save(action=f"step3_agreed_by_{role}_rev_{self.revision}", app_source=app_source)
+
+    def sign_step4(
+        self,
+        role: str,
+        signature: str,
+        expected_revision: Optional[int] = None,
+        app_source: str = "rent3_contract",
+    ) -> "CoSignSession":
+        """Step 4 자필 전자서명 — 본인인증·상호 신분증 확인·등기부등본 확인·계약조건 합의가 모두 완료된 뒤에만 허용!"""
+        self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
+        if not (self.lessor_login_verified and self.tenant_login_verified):
+            raise DomainError(
+                "임대인과 임차인 모두 로그인 본인인증이 완료되어야 전자서명할 수 있습니다.",
+                hint="양측 모두 로그인 및 호출 응답을 완료해 주세요.",
+            )
+        if not (self.lessor_checked_tenant_id and self.tenant_checked_lessor_id):
+            raise DomainError(
+                "서로 상대방의 신분증을 확인하여 본인 확인 체크를 완료해야 전자서명할 수 있습니다.",
+                hint="Step 1에서 임대인·임차인 모두 상대방 신분증 대조 확인에 체크해 주세요.",
+            )
+        if not (self.step1_lessor_confirmed and self.step1_tenant_locked):
+            raise DomainError(
+                "등기부등본을 확인한 뒤에만 전자서명할 수 있습니다.",
+                hint="Step 1에서 등기부등본 권리관계 제시 및 임차인 열람 확인을 완료해 주세요.",
+            )
+        if not (self.step3_lessor_agreed and self.step3_tenant_agreed):
+            raise DomainError("양측 모두 Step 3 계약 조건 합의 잠금을 완료해야 전자서명할 수 있습니다.")
+        if expected_revision is not None and expected_revision != self.revision:
+            raise Conflict("계약 리비전이 변경되어 서명을 진행할 수 없습니다. 조건을 다시 확인해 주세요.")
+        sig = (signature or "").strip()
+        if not sig:
+            raise DomainError("전자서명 데이터가 비어 있습니다.", hint="서명 패드에 자필 서명을 입력해 주세요.")
+
+        if role == "lessor":
+            self.lessor_verified = True
+            self.lessor_signature = sig
+            self.lessor_signed_at = now_iso()
+        else:
+            self.tenant_verified = True
+            self.tenant_signature = sig
+            self.tenant_signed_at = now_iso()
+
+        if self.lessor_signature and self.tenant_signature:
+            self.integrity_hash = self.compute_integrity_hash()
+            if self.current_step < 5:
+                self.current_step = 5
+
+        return self.save(action=f"step4_signed_by_{role}", app_source=app_source)
+
+    def complete_step5_and_seal(
+        self,
+        payment_method: str = "TRANSFER",
+        app_source: str = "rent3_contract",
+    ) -> Dict[str, Any]:
+        """계약금 입금 확인 -> 공동 JSON Data Pool의 모든 연관 객체 실시간 원자적 업데이트!"""
+        if self.status == "COMPLETED" and self.created_contract_id:
+            ct = Contract.require(self.created_contract_id)
+            return {"session": self.model_dump(), "contract": ct.model_dump(), "already_completed": True}
+
+        self._ensure_ready_for_steps()
+        self._ensure_risk_ok()
+        if not (self.lessor_signature and self.tenant_signature):
+            raise DomainError("임대인과 임차인 양측 전자서명이 모두 완료되어야 최종 체결할 수 있습니다.")
+        if not self.tenant_recheck_at:
+            raise DomainError(
+                "임차인의 체결 직전 등기부 재열람 확인이 필요합니다.",
+                hint="계약 후 잔금 전에 근저당·소유자가 바뀌는 사고를 막기 위해, 임차인이 인터넷등기소에서 다시 열람한 뒤 확인해야 체결할 수 있습니다.",
+            )
+
+        room = Room.require(self.id_room)
+        t_info = self.terms
+
+        # 1) 임차인 객체 생성 또는 갱신 -> users.json 즉시 업데이트
+        tenant = (
+            (Tenant.get(self.id_tenant) if self.id_tenant else None)
+            or (Tenant.first(phone=t_info["tenant_phone"]) if t_info.get("tenant_phone") else None)
+        )
+        if not tenant:
+            tenant = Tenant(
+                name=t_info["tenant_name"],
+                phone=t_info["tenant_phone"],
+                email=t_info.get("tenant_email", ""),
+                business_number=t_info.get("tenant_business_number", ""),
+                company_name=t_info.get("tenant_company_name", ""),
+                ceo_name=t_info.get("tenant_ceo_name", ""),
+                car_number=t_info.get("tenant_car_number", ""),
+                doorlock_pwd=room.doorlock_pwd,
+                branch=self.branch,
+                id_building=self.id_building,
+                current_room_id=room.id,
+                room_no=room.room_no,
+                status="ACTIVE",
+            )
+        else:
+            tenant.name = t_info["tenant_name"]
+            tenant.email = t_info.get("tenant_email", tenant.email)
+            if t_info.get("tenant_business_number") is not None and str(t_info.get("tenant_business_number")).strip():
+                tenant.business_number = str(t_info["tenant_business_number"]).strip()
+            if t_info.get("tenant_company_name") is not None and str(t_info.get("tenant_company_name")).strip():
+                tenant.company_name = str(t_info["tenant_company_name"]).strip()
+            if t_info.get("tenant_ceo_name") is not None and str(t_info.get("tenant_ceo_name")).strip():
+                tenant.ceo_name = str(t_info["tenant_ceo_name"]).strip()
+            if t_info.get("tenant_car_number"):
+                tenant.car_number = t_info["tenant_car_number"]
+            tenant.doorlock_pwd = room.doorlock_pwd
+            tenant.branch = self.branch
+            tenant.id_building = self.id_building
+            tenant.current_room_id = room.id
+            tenant.room_no = room.room_no
+            tenant.status = "ACTIVE"
+        tenant.save(action="tenant_activated_by_cosign", app_source=app_source)
+        self.id_tenant = tenant.id
+
+        # 재계약인 경우 이전 계약 RENEWED 마감
+        if self.mode == "RENEWAL" and self.prev_contract_id:
+            old_ct = Contract.get(self.prev_contract_id)
+            if old_ct:
+                old_ct.status = "RENEWED"
+                old_ct.ended_at = date_today().isoformat()
+                old_ct.save(action="contract_renewed_replaced", app_source=app_source)
+
+        # 2) Contract 원장 객체 생성 -> contracts.json 즉시 업데이트
+        move_in = t_info.get("move_in_date") or date_today().isoformat()
+        months = int(t_info.get("lease_term_months", 12))
+        expiry = add_months_str(move_in, months)
+
+        from . import contract_chat
+        contract_chat.system_note(self, "계약이 체결되었습니다. 이 대화는 이제 읽기 전용으로 보관됩니다.", step=5)
+        chat_digest, chat_digest_count = contract_chat.compute_digest(self.id)   # 안내 글까지 포함해 체결 시점의 협상 기록을 봉인
+        ct = Contract(
+            branch=self.branch,
+            id_building=self.id_building,
+            id_room=room.id,
+            room_no=room.room_no,
+            id_lessor=self.id_lessor,
+            lessor_name=self.lessor_name,
+            id_tenant=tenant.id,
+            tenant_name=tenant.name,
+            tenant_phone=tenant.phone,
+            tax_invoice_requested=bool(t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
+            tenant_business_number=tenant.business_number,
+            tenant_company_name=tenant.company_name,
+            tenant_ceo_name=tenant.ceo_name,
+            tenant_email=tenant.email,
+            contract_date=date_today().isoformat(),
+            move_in_date=move_in,
+            expiry_date=expiry,
+            lease_term_months=months,
+            lease_type=t_info.get("lease_type", "월세"),
+            pay_timing=t_info.get("pay_timing", "후불"),
+            vat_target=bool(t_info.get("vat_target") or t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
+            vat_separate=bool(t_info.get("vat_separate", True)),
+            contract_deposit=int(t_info.get("contract_deposit", 300000)),
+            keys_released=False,  # 잔금 입금을 임대인이 확인하기 전까지 도어락·공동현관은 임차인에게 열리지 않는다
+            insurance_proof_required=bool(self.needs_insurance_refusal_clause(t_info) and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"),
+            mortgage_cleanup_required=bool(t_info.get("mortgage_cleanup_clause")),  # 잔금 시 근저당 말소 특약 — 잔금일에 말소 확인이 있어야 교부
+            deposit=int(t_info.get("deposit", room.deposit)),
+            monthly_rent=int(t_info.get("monthly_rent", room.monthly_rent)),
+            maintenance_fee=int(t_info.get("maintenance_fee", room.maintenance_fee)),
+            special_terms=t_info.get("special_terms", ""),
+            option_snapshot=self.option_checks,
+            registry_snapshot={
+                **self.registry_data,
+                "lessor_login_verified": self.lessor_login_verified,
+                "tenant_login_verified": self.tenant_login_verified,
+                "lessor_checked_tenant_id": self.lessor_checked_tenant_id,
+                "lessor_id_checked_at": self.lessor_id_checked_at,
+                "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
+                "tenant_id_checked_at": self.tenant_id_checked_at,
+                "tenant_direct_registry": self.tenant_registry,
+                "tenant_identity": self._tenant_identity_evidence(),
+                "tenant_recheck_at": self.tenant_recheck_at,
+                "registry_attachment_sha256": self.registry_attachment_sha256,
+                "facility_photos": [{"id": p["id"], "sha256": p["sha256"], "caption": p["caption"], "by_role": p["by_role"],
+                                     "uploaded_at": p["uploaded_at"]} for p in self.facility_photos],
+            },
+            lessor_signature=self.lessor_signature,
+            tenant_signature=self.tenant_signature,
+            integrity_hash=self.integrity_hash,
+            cosign_session_id=self.id,
+            chat_digest=chat_digest,
+            chat_digest_count=chat_digest_count,
+            status="ACTIVE",
+        )
+        ct.vat = ct.compute_vat()
+        ct.save(action="contract_sealed_from_cosign", app_source=app_source)
+
+        # 3) Room 호실 상태 입주 전환 (공실 광고 자동 비노출) -> rooms.json 즉시 업데이트
+        room.id_tenant = tenant.id
+        room.active_contract_id = ct.id
+        room.deposit = ct.deposit
+        room.monthly_rent = ct.monthly_rent
+        room.maintenance_fee = ct.maintenance_fee
+        room.lease_type = ct.lease_type
+        room.pay_timing = ct.pay_timing
+        room.pre_moveout_notice = False
+        room.available_from = "즉시입주"
+        room.is_published = False
+        room.save(action="room_assigned_by_cosign", app_source=app_source)
+
+        # 4) 계약금 수납 기록 생성 -> payments.json 즉시 업데이트
+        c_dep = ct.contract_deposit
+        if c_dep > 0:
+            Pay(
+                branch=self.branch,
+                id_building=self.id_building,
+                id_room=room.id,
+                room_no=room.room_no,
+                id_contract=ct.id,
+                id_tenant=tenant.id,
+                payer_name=tenant.name,
+                billing_month=move_in[:7],
+                paid_date=date_today().isoformat(),
+                rent_amount=0,
+                maintenance_amount=0,
+                vat_amount=0,
+                total_amount=c_dep,
+                payment_kind="CONTRACT_DEPOSIT",
+                method=payment_method,
+                idempotency_key=f"cosign_dep:{self.id}",
+            ).save(action="contract_deposit_paid", app_source=app_source)
+
+        # 5) 국토부 RTMS 전월세 신고 & 대법원 확정일자 즉시 부여 -> ops.json & contracts.json 업데이트
+        rtms = RtmsReport.auto_file_for_contract(ct, app_source=app_source)
+
+        # 6) 세션 완료 봉인 -> cosign_sessions.json 업데이트
+        self.deposit_paid_confirmed = True
+        self.payment_method = payment_method
+        self.created_contract_id = ct.id
+        self.fixed_date_no = rtms.fixed_date_no
+        self.status = "COMPLETED"
+        self.completed_at = now_iso()
+        self.save(action="cosign_completed_and_sealed", app_source=app_source)
+
+        DirectChat(
+            branch=self.branch,
+            id_room=room.id,
+            room_no=room.room_no,
+            sender_role="system",
+            sender_name="전자계약 체결 알림",
+            message=(
+                f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었습니다. "
+                f"계약 접수번호는 {rtms.fixed_date_no} 입니다. (법적 확정일자는 아닙니다 — 주민센터·등기소에서 별도로 받으세요)"
+            ),
+        ).save(action="chat_auto_sent", app_source=app_source)
+
+        return {
+            "session": self.model_dump(),
+            "contract": ct.model_dump(),
+            "tenant": tenant.model_dump(),
+            "room": room.model_dump(),
+            "rtms": rtms.model_dump(),
+        }
+
+    def _ensure_in_progress(self) -> None:
+        if self.status != "IN_PROGRESS":
+            raise Conflict(
+                f"이미 종료되었거나 체결 완료된 계약 세션입니다 (상태: {self.status}).",
+                hint="체결된 계약서를 인쇄하거나 새 매물을 선택해 상대를 호출해 주세요.",
+            )
+
+    def _ensure_ready_for_steps(self) -> None:
+        self._ensure_in_progress()
+        if self.call_status == "CALLING":
+            callee_ko = "임차인" if self.initiated_by_role == "lessor" else "임대인"
+            raise DomainError(
+                f"상대방({callee_ko})이 아직 공동계약 호출에 응답하지 않았습니다.",
+                hint=f"{callee_ko}이(가) 로그인 후 호출에 응답하면 계약 단계 진행이 시작됩니다.",
+            )
+
+
+def re_is_date(v: str) -> bool:
+    return bool(re.match(r"^\d{4}-\d{2}-\d{2}$", (v or "").strip()))

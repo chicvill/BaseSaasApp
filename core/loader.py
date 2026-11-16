@@ -40,6 +40,7 @@ class SaaSAppManager:
         self.failed: Dict[str, AppFailure] = {}
         self.disabled: List[str] = []
         self.load_ms: Dict[str, float] = {}
+        self._rel: Dict[str, str] = {}  # 앱 폴더명 → apps_root 기준 상대 경로
 
     # ── 공개 API ──
     def discover_and_mount(self, fastapi_app: FastAPI, apps_root: str,
@@ -94,12 +95,23 @@ class SaaSAppManager:
     # ── 내부 ──
     def _candidates(self, apps_root: str, only: Optional[List[str]]) -> List[str]:
         result = []
-        for folder in sorted(os.listdir(apps_root)):
-            path = os.path.join(apps_root, folder)
-            if folder.startswith(("_", ".")) or not os.path.isdir(path):
+        entries = []  # (앱 폴더명, apps_root 기준 상대 경로)
+        for name in sorted(os.listdir(apps_root)):
+            path = os.path.join(apps_root, name)
+            if name.startswith(("_", ".")) or not os.path.isdir(path):
                 continue
-            if not os.path.exists(os.path.join(path, "app.py")):
-                continue
+            if os.path.exists(os.path.join(path, "app.py")):
+                entries.append((name, name))
+            else:
+                # 그룹 폴더(예: apps/rent_dist/<앱>/app.py): 한 단계 아래 앱도 발견한다.
+                for sub in sorted(os.listdir(path)):
+                    sub_path = os.path.join(path, sub)
+                    if (not sub.startswith(("_", ".")) and os.path.isdir(sub_path)
+                            and os.path.exists(os.path.join(sub_path, "app.py"))):
+                        entries.append((sub, f"{name}/{sub}"))
+        for folder, rel in entries:
+            path = os.path.join(apps_root, rel)
+            self._rel[folder] = rel
             if only and folder not in only:
                 continue
             if os.path.exists(os.path.join(path, DISABLED_MARKER)):
@@ -119,10 +131,11 @@ class SaaSAppManager:
                 raise ValueError(f"폴더명 '{folder}' 은 파이썬 식별자 규칙(영문/숫자/_)을 따라야 합니다.")
 
             stage = "import"
-            module = importlib.import_module(f"{package}.{folder}.app")
+            rel = self._rel.get(folder, folder)
+            module = importlib.import_module(f"{package}.{rel.replace('/', '.')}.app")
 
             stage = "resolve"
-            app = self._resolve_instance(module, os.path.join(apps_root, folder))
+            app = self._resolve_instance(module, os.path.join(apps_root, *rel.split("/")))
             if app.app_id != folder:
                 raise ValueError(f"app_id '{app.app_id}' 가 폴더명 '{folder}' 과 다릅니다. 둘을 일치시켜 주세요.")
 

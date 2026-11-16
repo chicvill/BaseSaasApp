@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>🔑 임차인 매물·마이홈 — Rent3 Tenant</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/rent3_mobile.css">
+  <style>
+    .app-shell { max-width: 860px; margin: 0 auto; padding: 16px 14px 70px; }
+    .nav-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+    .listing-card { padding: 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 12px; }
+    .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .cert-paper { background: #fff; color: #111; padding: 24px; border-radius: 14px; margin-top: 14px; }
+    .cert-paper table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+    .cert-paper th, .cert-paper td { border: 1px solid #444; padding: 7px 9px; text-align: left; }
+    .cert-paper th { background: #f1f5f9; }
+    @media print {
+      body { background: #fff !important; color: #000 !important; }
+      .no-print { display: none !important; }
+      .app-shell { max-width: none; padding: 0; }
+      .cert-paper { padding: 0; margin: 0; }
+    }
+  </style>
+  <link rel="stylesheet" href="/shared/ui/r3_readable.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="r3-drawer" data-r3-drawer></aside>   <!-- 메뉴 항목은 app.js 의 TENANT_MENU 가 채운다 -->
+    <div id="app-alert"></div>
+
+        <header class="bass-card no-print">
+      <div class="bass-row" style="justify-content:space-between;">
+        <div>
+          <h1 id="hdrTitle" style="font-size:19px;margin:0;">🔑 내 집 · 월세 납부 확인</h1>
+        </div>
+        <div class="bass-row"><span id="poolBadge" hidden></span><button type="button" data-r3-burger>☰ 더보기</button></div>
+      </div>
+
+    </header>
+
+    <section id="viewMyhome" style="margin-top:14px;"></section>
+    <section id="viewListings" class="no-print" style="display:none;margin-top:14px;"></section>
+  </main>
+
+  <script src="/shared/ui/bass.js"></script>
+  <script src="/shared/ui/r3_modal.js"></script>
+  <script src="/shared/ui/r3_shell.js"></script>
+  <script src="/shared/ui/rent3_session_guard.js"></script>
+  <script src="/rent3/hamburger.js"></script>
+  <script src="/rent3/session-bar.js"></script>
+  <script src="app.js"></script>
+<script src="/shared/ui/phone_fmt.js"></script>
+</body>
+</html>
+

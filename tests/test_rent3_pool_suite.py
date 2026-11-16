@@ -15,7 +15,7 @@ if ROOT not in sys.path:
 
 from fastapi.testclient import TestClient
 from core.gateway import create_gateway
-from apps._rent3_core import POOL_COLLECTIONS, ensure_pool_seeded, pool, use_pool_dir
+from apps.rent_dist._rent3_core import POOL_COLLECTIONS, Contract, Pay, Room, ensure_pool_seeded, pool, use_pool_dir
 
 RENT3_SPLIT_APPS = ["rent3", "rent3_admin", "rent3_lessor", "rent3_tenant", "rent3_contract"]
 
@@ -24,16 +24,22 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         os.environ["RENT3_TODAY"] = "2026-10-29"
+        os.environ["RENT3_ADMIN_PROXY_STRICT"] = "0"   # 기존 시험은 admin 기본 토큰으로 수납·서명을 통과시킨다. 엄격 모드는 test_53
         cls.temp_pool = tempfile.mkdtemp(prefix="rent3_pool_test_")
         use_pool_dir(cls.temp_pool)
         ensure_pool_seeded(force=True)
         cls.app = create_gateway(apps_root=os.path.join(ROOT, "apps"), db_path=":memory:")
         cls.client = TestClient(cls.app)
+        # 기본은 본사 관리자 토큰(모든 API 허용). 접근 통제를 시험하는 테스트는 헤더를 바꿔 호출한다.
+        r = cls.client.post("/api/rent3/pool/auth/login", json={"login_mode": "account", "identifier": "admin", "password": "1212"})
+        cls.admin_token = r.json()["token"]
+        cls.client.headers["Authorization"] = f"Bearer {cls.admin_token}"
 
     @classmethod
     def tearDownClass(cls):
         os.environ.pop("RENT3_POOL_DIR", None)
         os.environ.pop("RENT3_TODAY", None)
+        os.environ.pop("RENT3_ADMIN_PROXY_STRICT", None)
         if os.path.exists(cls.temp_pool):
             shutil.rmtree(cls.temp_pool, ignore_errors=True)
 
@@ -42,6 +48,72 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(os.path.exists(p), f"{collection}.json 파일이 디스크에 생성되지 않았습니다.")
         with open(p, "r", encoding="utf-8") as fp:
             return json.load(fp)
+
+    def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
+        """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": room_no, "mode": "NEW",
+                                                     "tenant_name": name, "tenant_phone": phone, "id_tenant": tid}).json()["session"]["id"]
+        c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": name, "responder_phone": phone, "id_tenant": tid})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True,
+                                                     "registry_updates": {"owner_name": "김종심", "mortgage_amount": 0}})
+        self._tenant_direct_registry(sid)
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": f"{role}서명", "expected_revision": rev})
+        self._tenant_recheck_ok(sid)
+        r = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        assert r.status_code == 200, r.text
+        return sid
+
+    def _tenant_direct_registry(self, sid):
+        """임차인이 인터넷등기소에서 직접 열람한 결과를 임대인 제시값과 같게 입력 (1단계 필수)."""
+        sess = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        rd = sess.get("registry_data") or {}
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": {
+            "viewed_directly": True, "viewed_at": "2026-11-08T10:00",
+            "owner_name": rd.get("owner_name") or "김임대", "mortgage_amount": int(rd.get("mortgage_amount") or 0),
+            "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
+        }})
+
+    def _party_headers(self, sid):
+        """계약 당사자 토큰을 돌려준다: 임대인(해당 지점) + 세션의 임차인(번호가 같은 계정, 없으면 가입시키고 본인인증 처리)."""
+        from apps.rent_dist._rent3_core import Lessor, Tenant
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        s = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        lessor = Lessor.first(branch=s["branch"])
+        digits = lambda v: "".join(ch for ch in str(v or "") if ch.isdigit())
+        tenant = Tenant.get(s.get("id_tenant")) if s.get("id_tenant") else None
+        phone = (s.get("terms") or {}).get("tenant_phone", "")
+        tenant = tenant or next((t for t in Tenant.all() if digits(t.phone) == digits(phone) and phone), None)
+        if tenant is None:
+            reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
+                                   json={"role": "prospect", "name": (s.get("terms") or {}).get("tenant_name") or "당사자", "phone": phone or "010-7000-0000", "password": "Pw123456"})
+            tenant = Tenant.get(reg.json()["user"]["id"])
+        tenant.identity = {"verified": True}          # 조건을 바꾸는 수락·서명은 본인인증이 필요하다
+        tenant.save(action="test_verified")
+        return ({"Authorization": f"Bearer {lessor_token(lessor)}"}, {"Authorization": f"Bearer {tenant_token(tenant)}"})
+
+    def _propose_accept(self, sid, field, value, proposer="lessor"):
+        """한쪽이 제안하고 상대가 수락하는 흐름(6개 항목은 이 방법으로만 바뀐다). 수락 응답을 돌려준다."""
+        lh, th = self._party_headers(sid)
+        mine, other = (lh, th) if proposer == "lessor" else (th, lh)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        p = self.client.post(url, headers=mine, json={"kind": "proposal", "field": field, "new_value": value})
+        self.assertEqual(p.status_code, 200, p.text)
+        return self.client.post(f"{url}/{p.json()['item']['id']}/respond", headers=other, json={"action": "accept"})
+
+    def _tenant_recheck_ok(self, sid):
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/recheck", json={"changed": False})
+
+    def _admin_headers(self):
+        """본사 관리자 토큰 (가맹 심사·정산 API 는 토큰이 필요하다)."""
+        r = self.client.post("/api/rent3/pool/auth/login", json={"login_mode": "account", "identifier": "admin", "password": "1212"})
+        return {"Authorization": f"Bearer {r.json()['token']}"}
 
     def test_01_immutable_core_zero_changes(self):
         """1. 불변의 BaseSaasApp 코어(core/, run.py)가 단 1줄도 수정되지 않았음을 검증."""
@@ -92,7 +164,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_03_cross_app_realtime_json_pool_and_cosign_lifecycle(self):
         """3. 관리인 -> 임대인 -> 임차인 -> 공동계약 앱 간 실시간 JSON 파일 동기화 & Revision Lock 검증."""
         # [A] 관리인 앱에서 신규 임대인/건물 온보딩 -> users.json, buildings.json 실시간 업데이트 확인
-        r_admin = self.client.post("/api/rent3_admin/lessors", json={
+        r_admin = self.client.post("/api/rent3_admin/lessors", headers=self._admin_headers(), json={
             "username": "yeoksam",
             "name": "장역삼",
             "phone": "010-1111-9999",
@@ -152,23 +224,44 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         # Step 1 상호 신분증 본인 확인 체크 & 등기부등본 확인 잠금 + Step 2 옵션 점검
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True})
+        self._tenant_direct_registry(sid)
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", json={"role": "tenant"})
 
         # Step 3: v1 양측 합의 완료 후, 임대인이 월세를 55만 -> 54만으로 수정하면 양측 합의가 자동 초기화되는지 검증!
         self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={
             "role": "lessor",
-            "updates": {"move_in_date": "2026-10-15", "pay_timing": "후불"},
+            "updates": {"pay_timing": "후불"},
         })
+        cur_move_in = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]["move_in_date"]
+        new_move_in = "2026-10-15" if cur_move_in != "2026-10-15" else "2026-10-16"
+        # 입주일 같은 6개 항목은 /terms 로 직접 바꿀 수 없고(409), 제안 → 상대 수락으로만 바뀐다
+        direct = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"move_in_date": new_move_in}})
+        self.assertEqual(direct.status_code, 409, direct.text)
+        self.assertIn("제안", direct.text)
+        same = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"move_in_date": cur_move_in}})
+        self.assertEqual(same.status_code, 200)                                    # 지금 값과 같게 넘어오면 통과(변경 없음)
+        self.assertFalse(same.json()["changed"])
+        self.assertEqual(self._propose_accept(sid, "move_in_date", new_move_in).status_code, 200)
         cur_rev = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["revision"]
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": cur_rev})
         self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", json={"role": "tenant", "expected_revision": cur_rev})
 
-        # 조건 1개 수정 -> Revision Lock 발동 검증!
-        r_edit = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={
-            "role": "lessor",
-            "updates": {"monthly_rent": 540000},
-        }).json()
+        # 양측 동의 뒤(단계 ④)에는 /terms 로 바로 고칠 수 없고(409), '조건 다시 열기'를 거쳐야 한다
+        self.assertGreaterEqual(self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["current_step"], 4)
+        blocked = self.client.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"monthly_rent": 540000}})
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertIn("조건 다시 열기", blocked.text)
+        self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/reopen-terms", json={"role": "lessor"}).status_code, 400)   # 경고 확인 필요
+        reopened = self.client.post(f"/api/rent3_contract/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True})
+        self.assertEqual(reopened.status_code, 200, reopened.text)
+        rs = reopened.json()["session"]
+        self.assertEqual((rs["current_step"], rs["revision"], rs["step3_lessor_agreed"], rs["step3_tenant_agreed"], rs["lessor_signature"]), (3, cur_rev + 1, False, False, ""))
+        cur_rev = rs["revision"]
+        # 조건 1개 수정(월세 제안 → 수락) -> Revision Lock 발동 검증!
+        acc = self._propose_accept(sid, "monthly_rent", 540000)
+        self.assertEqual(acc.status_code, 200, acc.text)
+        r_edit = {"changed": True, "session": acc.json()["session"]}
         self.assertTrue(r_edit["changed"])
         self.assertGreater(r_edit["session"]["revision"], cur_rev)
         self.assertFalse(r_edit["session"]["step3_lessor_agreed"])
@@ -183,10 +276,33 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         r_sig = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", json={"role": "tenant", "signature": "박신규(전자서명)", "expected_revision": new_rev}).json()
         self.assertTrue(bool(r_sig["session"]["integrity_hash"]))
 
-        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        self._tenant_recheck_ok(sid)
+        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
         self.assertEqual(r_seal.status_code, 200)
         sealed = r_seal.json()
         self.assertTrue(sealed["contract"]["fixed_date_no"].startswith("FIX-"))
+
+        # 체결 때 협상 기록(제안·수락·시스템 안내)의 해시가 계약에 기록되고, 당사자가 읽어도 바뀌지 않는다
+        from apps.rent_dist._rent3_core import Contract as _Ct, contract_chat as _cc
+        sealed_ct = _Ct.get(sealed["contract"]["id"])
+        self.assertEqual(len(sealed_ct.chat_digest), 64)
+        self.assertEqual(sealed_ct.chat_digest_count, len(_cc.messages_of(sid)))
+        self.assertGreaterEqual(sealed_ct.chat_digest_count, 5)
+        lh_s, th_s = self._party_headers(sid)
+        base_s = f"/api/rent3_contract/sessions/{sid}"
+        v0 = self.client.get(f"{base_s}/chat-digest", headers=lh_s).json()
+        self.assertEqual((v0["match"], v0["stored"]), (True, sealed_ct.chat_digest))
+        for h in (lh_s, th_s, lh_s):                                   # 양쪽이 대화를 열람(읽음 표시 변경)해도
+            got_s = self.client.get(f"{base_s}/messages", headers=h).json()
+            self.assertTrue(got_s["read_only"])
+        v1 = self.client.get(f"{base_s}/chat-digest", headers=th_s).json()
+        self.assertEqual((v1["match"], v1["computed"]), (True, sealed_ct.chat_digest))
+        self.assertEqual(self.client.post(f"{base_s}/messages", headers=th_s, json={"kind": "question", "body": "체결 뒤 문의"}).status_code, 409)   # 읽기 전용
+        self.assertEqual(self.client.get(f"{base_s}/chat-digest", headers=lh_s).json()["computed"], sealed_ct.chat_digest)
+        # 해시 입력에서 읽음 표시·갱신시각은 제외된다
+        self.assertNotIn("read_by_lessor", _cc.DIGEST_FIELDS)
+        self.assertNotIn("read_by_tenant", _cc.DIGEST_FIELDS)
+        self.assertNotIn("updated_at", _cc.DIGEST_FIELDS)
 
         # 디스크 JSON Data Pool 4개 파일 동시 업데이트 확인
         ct_disk = self._read_disk_json("contracts")
@@ -206,14 +322,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         """4. rent2 계승 은행문자 파싱, FIFO 순차 상계, 중복입금 차단, 5% 재계약 상한, 퇴실 후 공실 자동 복귀 검증."""
         # 시크빌 202호: 2026-08 입주(후불) -> 8월 비과세, 9월(57만) + 10월(57만) = 총 114만 미납 상태
         sms_text = "[신한은행] 10/28 202호 정서연 700,000원 입금 잔액 9,500,000원"
+        r_ask = self.client.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": sms_text, "up_to_ym": "2026-10"})
+        self.assertEqual(r_ask.status_code, 200, r_ask.text)
+        self.assertTrue(r_ask.json()["needs_confirm"])                                       # 금액이 청구액과 달라 저장 전에 확인을 요청
         r_sms = self.client.post("/api/rent3_lessor/payments/sms-paste", json={
             "branch": "main",
             "sms_text": sms_text,
             "up_to_ym": "2026-10",
+            "force": True,
         })
         self.assertEqual(r_sms.status_code, 200)
         body = r_sms.json()
-        self.assertEqual(body["level"], "diff")
+        self.assertEqual(body["level"], "diff", body)
         self.assertEqual(body["ledger"]["total_unpaid"], 440000)
         # 9월은 완납(PAID), 10월은 부분납부(PARTIAL)인지 FIFO 검증
         months_by_ym = {m["ym"]: m for m in body["ledger"]["months"]}
@@ -227,17 +347,22 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "branch": "main",
             "sms_text": sms_text,
             "up_to_ym": "2026-10",
+            "force": True,
         })
         self.assertEqual(r_dup.status_code, 409)
         self.assertEqual(r_dup.json()["level"], "warning")
 
         # 임차인 앱에서 잔여 440,000원 온라인 납부 -> 완납 및 17% 세액공제 증명서 확인
-        r_tpay = self.client.post("/api/rent3_tenant/myhome/tenant_202/pay", json={
-            "amount": 440000,
-            "method": "KAKAOPAY",
-        })
-        self.assertEqual(r_tpay.status_code, 200)
+        self.assertIn(self.client.post("/api/rent3_tenant/myhome/tenant_202/pay", json={"amount": 440000, "method": "KAKAOPAY"}).status_code, (404, 405))   # 임차인이 스스로 납부 처리하는 길은 없다
+        r_note = self.client.post("/api/rent3_tenant/myhome/tenant_202/transfer-notice", json={"amount": 440000})
+        self.assertEqual(r_note.status_code, 200, r_note.text)
+        self.assertEqual(self.client.get("/api/rent3_tenant/myhome/tenant_202").json()["ledger"]["total_unpaid"], 440000)    # 알림만으로는 장부가 바뀌지 않는다
+        nid = r_note.json()["notice"]["id"]
+        self.assertEqual(self.client.get("/api/rent3_lessor/dashboard?branch=main").json()["transfer_notices"][0]["id"], nid)
+        r_tpay = self.client.post(f"/api/rent3_lessor/transfer-notices/{nid}/confirm", json={"branch": "main"})   # 임대인이 입금 확인 후 수납
+        self.assertEqual(r_tpay.status_code, 200, r_tpay.text)
         self.assertEqual(r_tpay.json()["ledger"]["total_unpaid"], 0)
+        self.assertEqual(self.client.post(f"/api/rent3_lessor/transfer-notices/{nid}/confirm", json={"branch": "main"}).status_code, 400)   # 두 번 수납 금지
 
         myhome = self.client.get("/api/rent3_tenant/myhome/tenant_202").json()
         self.assertEqual(myhome["certificate"]["total_paid"], 1140000)
@@ -249,11 +374,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "room_no": "201",
             "mode": "RENEWAL",
         }).json()["session"]
-        r_cap_fail = self.client.post(f"/api/rent3_contract/sessions/{r_ren['id']}/terms", json={
-            "role": "lessor",
-            "updates": {"monthly_rent": 550000},
-        })
-        self.assertEqual(r_cap_fail.status_code, 422)
+        direct_cap = self.client.post(f"/api/rent3_contract/sessions/{r_ren['id']}/terms", json={"role": "lessor", "updates": {"monthly_rent": 550000}})
+        self.assertEqual(direct_cap.status_code, 409)                              # 6개 항목은 직접 못 고친다
+        r_cap_fail = self._propose_accept(r_ren["id"], "monthly_rent", 550000)     # 제안은 되지만 수락 때 법정 5% 상한 검증에서 막힌다
+        self.assertEqual(r_cap_fail.status_code, 422, r_cap_fail.text)
         self.assertEqual(r_cap_fail.json()["level"], "diff")
 
         # 202호 퇴실 정산 산출 -> 임차인 동의 -> 임대인 반환 완료 -> 호실 자동 공실 복귀 검증
@@ -265,14 +389,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         }).json()["settlement"]
         self.assertEqual(r_co["refund_amount"], 5000000 - 100000)
 
-        r_ag = self.client.post(f"/api/rent3_tenant/checkout/{r_co['id']}/agree", json={
-            "bank_account": "토스 1000-22-334455",
-            "signature": "정서연(동의)",
-        })
-        self.assertEqual(r_ag.status_code, 200)
+        t202 = self._login("tenant_202")
+        ag_body = {"bank_account": "토스 1000-22-334455", "signature": "정서연(동의)", "account_holder": "정서연"}
+        self.assertEqual(self.client.post(f"/api/rent3_tenant/checkout/{r_co['id']}/agree", json=ag_body).status_code, 403)       # 임차인 본인만(관리인·임대인 불가)
+        self.assertEqual(self.client.post(f"/api/rent3_tenant/checkout/{r_co['id']}/agree", headers=t202, json={**ag_body, "account_holder": "남의이름"}).status_code, 400)   # 예금주는 계약자 본인만
+        r_ag = self.client.post(f"/api/rent3_tenant/checkout/{r_co['id']}/agree", headers=t202, json=ag_body)
+        self.assertEqual(r_ag.status_code, 200, r_ag.text)
 
-        r_done = self.client.post(f"/api/rent3_lessor/checkout/{r_co['id']}/complete")
-        self.assertEqual(r_done.status_code, 200)
+        r_paid = self.client.post(f"/api/rent3_lessor/checkout/{r_co['id']}/complete")       # 임대인 송금 완료 표시(예전 이름)
+        self.assertEqual(r_paid.status_code, 200, r_paid.text)
+        self.assertEqual(r_paid.json()["settlement"]["status"], "PAID")
+        r_done = self.client.post(f"/api/rent3_tenant/checkout/{r_co['id']}/confirm-received", headers=t202, json={})    # 임차인 수취 확인 → 퇴실 확정
+        self.assertEqual(r_done.status_code, 200, r_done.text)
 
         # 퇴실 즉시 임차인 앱 공실 쇼케이스에 202호 자동 복귀 확인!
         listings_relisted = self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]
@@ -805,6 +933,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_no_reg.status_code, 400)
 
         # [F] 등기부등본 확인 잠금 + 옵션 확인 완료 -> 이제 비로소 양측 서명 통과 및 SHA-256 무결성 해시 봉인 성공!
+        self._tenant_direct_registry(sid)
         r_reg_ok = self.client.post(f"/api/rent3_contract/sessions/{sid}/step1", json={"role": "tenant"})
         self.assertEqual(r_reg_ok.status_code, 200)
         self.assertTrue(r_reg_ok.json()["session"]["step1_tenant_locked"])
@@ -827,13 +956,5007 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(bool(r_sig2.json()["session"]["integrity_hash"]))
 
         # [G] 최종 계약 체결 봉인 -> 생성된 계약서 스냅샷에 상호 신분증 확인 증적이 영구 박제되었는지 검증
-        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        self._tenant_recheck_ok(sid)
+        r_seal = self.client.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
         self.assertEqual(r_seal.status_code, 200)
         snap = r_seal.json()["contract"]["registry_snapshot"]
         self.assertTrue(snap["lessor_login_verified"])
         self.assertTrue(snap["tenant_login_verified"])
         self.assertTrue(snap["lessor_checked_tenant_id"])
         self.assertTrue(snap["tenant_checked_lessor_id"])
+
+
+    def test_10_tenant_must_verify_registry_directly(self):
+        """10. 임차인은 등기부를 직접 열람한 결과를 입력해야 1단계를 마칠 수 있고, 불일치는 확인 체크 없이는 막힌다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "901", "is_published": True})
+        s = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "901",
+            "tenant_name": "직접열람", "tenant_phone": "010-5555-0001", "mode": "NEW"}).json()["session"]
+        sid = s["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "직접열람", "responder_phone": "010-5555-0001"})
+        self.client.post(f"{base}/sessions/{sid}/step1", json={
+            "role": "lessor", "checked_counterparty_id": True,
+            "registry_updates": {"issue_number": "1101-2026-000001", "owner_name": "김임대", "mortgage_amount": 0}})
+
+        # (a) 직접 열람 입력 없이 임차인 확인 잠금 시도 -> 400
+        r = self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        self.assertEqual(r.status_code, 400)
+
+        def reg(**kw):
+            d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+                 "mortgage_amount": 0, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+            d.update(kw)
+            return self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": d})
+
+        # (b) 직접 열람하지 않았다고 하면 거부
+        self.assertEqual(reg(viewed_directly=False).status_code, 400)
+        # (c) 근저당이 다르면 확인 체크 없이는 거부, 체크하면 통과 (보증금 500만 월세 = 소액 월세라 소액 보증금 위험 확인도 필요)
+        self.assertEqual(reg(mortgage_amount=300000000).status_code, 400)
+        self.assertEqual(reg(mortgage_amount=300000000, mismatch_ack=True).status_code, 400)
+        self.assertEqual(reg(mortgage_amount=300000000, mismatch_ack=True, low_deposit_risk_ack=True).status_code, 200)
+        # (e) 일치하는 정상 입력 -> 1단계 완료
+        self.assertEqual(reg().status_code, 200)
+        r_ok = self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        self.assertEqual(r_ok.status_code, 200)
+        self.assertTrue(r_ok.json()["session"]["step1_tenant_locked"])
+
+    def test_11_final_recheck_required_and_change_cancels(self):
+        """11. 체결 전 임차인 재열람 확인이 없으면 체결 불가, 변동이 있다고 하면 계약이 중단된다."""
+        base = "/api/rent3_contract"
+        for room, changed in (("902", False), ("903", True)):
+            self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room, "is_published": True})
+            s = self.client.post(f"{base}/sessions/call", json={
+                "caller_role": "lessor", "branch": "main", "room_no": room,
+                "tenant_name": "재열람", "tenant_phone": "010-5555-0002", "mode": "NEW"}).json()["session"]
+            sid = s["id"]
+            self.client.post(f"{base}/sessions/{sid}/respond", json={
+                "responder_role": "tenant", "responder_name": "재열람", "responder_phone": "010-5555-0002"})
+            self.client.post(f"{base}/sessions/{sid}/step1", json={
+                "role": "lessor", "checked_counterparty_id": True,
+                "registry_updates": {"owner_name": "김임대", "mortgage_amount": 0}})
+            self._tenant_direct_registry(sid)
+            self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step2", json={"role": role})
+            rev = self.client.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+            for role in ("lessor", "tenant"):
+                self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
+
+            r_no = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+            self.assertEqual(r_no.status_code, 400, "재열람 확인 없이는 체결할 수 없어야 한다")
+
+            r_rc = self.client.post(f"{base}/sessions/{sid}/recheck", json={"changed": changed})
+            self.assertEqual(r_rc.status_code, 200)
+            if changed:
+                self.assertEqual(r_rc.json()["session"]["status"], "CANCELLED")
+                r_after = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+                self.assertIn(r_after.status_code, (400, 409))  # 중단된 계약은 체결 불가
+            else:
+                r_ok = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+                self.assertEqual(r_ok.status_code, 200)
+
+
+    def test_12_contract_verify_hash(self):
+        """12. 계약서 진위 확인: 일치·변조·없는 해시·계약번호 불일치·잘못된 입력을 구분한다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "904", "is_published": True})
+        sid = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "904",
+            "tenant_name": "진위확인", "tenant_phone": "010-5555-0004", "mode": "NEW"}).json()["session"]["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "진위확인", "responder_phone": "010-5555-0004"})
+        self.client.post(f"{base}/sessions/{sid}/step1", json={
+            "role": "lessor", "checked_counterparty_id": True,
+            "registry_updates": {"owner_name": "김임대", "mortgage_amount": 0}})
+        self._tenant_direct_registry(sid)
+        self.client.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step2", json={"role": role})
+        rev = self.client.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.client.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev})
+        self._tenant_recheck_ok(sid)
+        done = self.client.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True}).json()
+        ct = done["contract"]
+        h, no = ct["integrity_hash"], ct["id"]
+        self.assertEqual(len(h), 64)
+
+        v = self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()
+        self.assertEqual(v["result"], "INTACT")
+        self.assertEqual(v["summary"]["room_no"], "904")
+        self.assertNotIn("진위확인", str(v), "응답에 임차인 성명이 들어가면 안 된다")
+        # 공백·줄바꿈·대문자로 옮겨 적어도 인식
+        spaced = " ".join(h[i:i + 8] for i in range(0, 64, 8)).upper()
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": spaced}).json()["result"], "INTACT")
+        # 없는 해시 / 계약번호 불일치 / 잘못된 입력
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": "0" * 64}).json()["result"], "NOT_FOUND")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": "ct_other"}).json()["result"], "MISMATCH")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": "abc"}).json()["result"], "INVALID_INPUT")
+
+        # 계약 원장(contracts.json)만 몰래 고치면 LEDGER_MISMATCH (해시 검사로는 걸리지 않는 변조)
+        from apps.rent_dist._rent3_core import CoSignSession, Contract
+        led = Contract.require(no)
+        orig_rent = led.monthly_rent
+        led.monthly_rent = orig_rent + 50000
+        led.save("test_tamper_ledger")
+        v2 = self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()
+        self.assertEqual(v2["result"], "LEDGER_MISMATCH")
+        self.assertIn("monthly_rent", [d["field"] for d in v2["diffs"]])
+        self.assertNotIn("진위확인", str(v2), "원장 불일치 응답에도 임차인 성명이 들어가면 안 된다")
+        led.monthly_rent = orig_rent
+        led.save("test_restore_ledger")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()["result"], "INTACT")
+
+        # 서명 뒤 계약 데이터가 바뀌면 ALTERED
+        sess = CoSignSession.require(sid)
+        sess.terms = {**sess.terms, "monthly_rent": int(sess.terms.get("monthly_rent", 0)) + 100000}
+        sess.save("test_tamper")
+        self.assertEqual(self.client.get(f"{base}/verify", params={"hash": h, "no": no}).json()["result"], "ALTERED")
+
+
+    def test_13_registry_ai_reads_and_scores_risk(self):
+        """13. Gemini 등기부 읽기: 동의 필수·호출 상한·키 없음 처리, 합계와 위험 신호는 코드가 계산한다."""
+        import base64, json
+        from datetime import date
+        from apps.rent_dist._rent3_core import registry_ai
+
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "905", "is_published": True, "deposit": 5000000})
+        sid = self.client.post(f"{base}/sessions/call", json={
+            "caller_role": "lessor", "branch": "main", "room_no": "905",
+            "tenant_name": "AI읽기", "tenant_phone": "010-5555-0005", "mode": "NEW"}).json()["session"]["id"]
+        self.client.post(f"{base}/sessions/{sid}/respond", json={
+            "responder_role": "tenant", "responder_name": "AI읽기", "responder_phone": "010-5555-0005"})
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+        url = f"{base}/sessions/{sid}/registry-ai"
+
+        class FakeGemini:
+            is_available = True
+            reply = {}
+            calls = 0
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                FakeGemini.calls += 1
+                return "```json\n" + json.dumps(FakeGemini.reply, ensure_ascii=False) + "\n```"
+
+        class NoKey:
+            is_available = False
+
+        orig = registry_ai._client
+        try:
+            # (a) 동의 없으면 거부, AI 호출도 없음
+            setattr(registry_ai, "_client", lambda: FakeGemini())
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": False})
+            self.assertEqual(r.status_code, 400)
+            self.assertEqual(FakeGemini.calls, 0)
+
+            # (b) 키가 없으면 오류가 아니라 '직접 입력' 안내
+            setattr(registry_ai, "_client", lambda: NoKey())
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 200)
+            self.assertFalse(r.json()["available"])
+            self.assertFalse(r.json()["success"])
+
+            # (c) 정상: 말소된 근저당은 빼고, AI 가 준 합계(999)는 쓰지 않고 목록에서 코드로 합산
+            setattr(registry_ai, "_client", lambda: FakeGemini())
+            FakeGemini.reply = {
+                "document_type": "registry", "readable": True, "issue_number": "1101-2026-777777",
+                "owners": [{"name": "김임대", "share": None}],
+                "mortgages": [
+                    {"creditor": "A은행", "amount": "1,000,000,000", "registered_date": "2024-01-02", "cancelled": False},
+                    {"creditor": "B은행", "amount": 300000000, "registered_date": "2020-01-02", "cancelled": True},
+                ],
+                "restrictions": [], "ownership_transfers": [{"date": "2019-05-01", "cause": "매매"}],
+                "mortgage_total": 999,
+            }
+            r = self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).json()
+            self.assertTrue(r["success"])
+            ex = r["result"]["extracted"]
+            self.assertEqual(ex["mortgage_total"], 1000000000)
+            self.assertEqual(ex["mortgage_count"], 1)
+            self.assertEqual(ex["seizure_or_trust"], "없음")
+            self.assertIn("LTV_OK", [x["code"] for x in r["result"]["risks"]])  # (10억+500만)/18.5억 ≈ 54%
+
+            # (d) AI 읽기 뒤 직접 열람 제출하면 'AI 보조' 로 기록된다
+            self.client.post(f"{base}/sessions/{sid}/step1", json={
+                "role": "lessor", "checked_counterparty_id": True,
+                "registry_updates": {"owner_name": "김임대", "mortgage_amount": 1000000000}})
+            rr = self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {
+                "viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+                "mortgage_amount": 1000000000, "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
+                "low_deposit_risk_ack": True}}).json()
+            self.assertTrue(rr["session"]["tenant_registry"]["ai_assisted"])
+
+            # (e) 호출 상한: 총 5회까지, 그 뒤는 거부
+            for _ in range(3):
+                self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 200)
+            self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 200)
+            self.assertEqual(self.client.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 400)
+        finally:
+            registry_ai._client = orig
+
+        # (f) 위험 계산은 순수 코드 — 각 신호가 올바르게 켜지는지
+        def ex(**kw):
+            base_ex = {"document_type": "registry", "readable": True, "owners": [{"name": "김임대", "share": ""}],
+                       "owner_name": "김임대", "mortgage_total": 0, "restrictions": [], "ownership_transfers": []}
+            base_ex.update(kw)
+            return base_ex
+
+        def codes(e, **kw):
+            args = {"lessor_names": ["김임대 (시크빌 대표)"], "deposit": 5000000, "property_value": 1850000000,
+                    "today": date(2026, 11, 8)}
+            args.update(kw)
+            return [x["code"] for x in registry_ai.assess_risks(e, **args)]
+
+        self.assertIn("LTV_HIGH", codes(ex(mortgage_total=1500000000)))           # (15억+500만)/18.5억 ≈ 81%
+        self.assertIn("LTV_CAUTION", codes(ex(mortgage_total=1150000000)))        # ≈ 62%
+        self.assertIn("RESTRICTION", codes(ex(restrictions=[{"type": "가압류", "detail": "", "cancelled": False}])))
+        self.assertNotIn("RESTRICTION", codes(ex(restrictions=[{"type": "가압류", "detail": "", "cancelled": True}])))
+        self.assertIn("OWNER_MISMATCH", codes(ex(owners=[{"name": "박사기", "share": ""}], owner_name="박사기")))
+        self.assertIn("MULTI_OWNER", codes(ex(owners=[{"name": "김임대", "share": "1/2"}, {"name": "이공동", "share": "1/2"}])))
+        self.assertIn("RECENT_TRANSFER", codes(ex(ownership_transfers=[{"date": "2026-09-01", "cause": "매매"}])))
+        self.assertNotIn("RECENT_TRANSFER", codes(ex(ownership_transfers=[{"date": "2020-09-01", "cause": "매매"}])))
+        self.assertEqual(codes(ex(document_type="other")), ["NOT_REGISTRY"])
+        self.assertIn("NO_FLAG", codes(ex()))
+        self.assertIn("NO_VALUE", codes(ex(mortgage_total=100000000), property_value=0))
+
+
+    def test_14_live_contract_blocks_other_tenants(self):
+        """14. 계약이 진행 중인 호실은 포털에서 '계약 진행 중'으로 표시되고, 다른 임차인은 호출할 수 없다."""
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "906", "is_published": True, "deposit": 5000000})
+
+        def flag():
+            ls = self.client.get("/api/rent3/pool/landing").json()["listings"]
+            return next(l for l in ls if l["room_no"] == "906")["contract_in_progress"]
+
+        self.assertFalse(flag())
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "906", "mode": "NEW",
+                "tenant_name": "먼저온사람", "tenant_phone": "010-6000-0001"}
+        first = self.client.post(f"{base}/sessions/call", json=call)
+        self.assertEqual(first.status_code, 200)
+        sid = first.json()["session"]["id"]
+        self.assertTrue(flag())
+
+        # 다른 임차인은 거부
+        other = dict(call, tenant_name="나중에온사람", tenant_phone="010-6000-0002")
+        self.assertIn(self.client.post(f"{base}/sessions/call", json=other).status_code, (400, 409))
+        # 당사자(같은 연락처, 형식이 달라도)는 이어서 입장
+        again = self.client.post(f"{base}/sessions/call", json=dict(call, tenant_phone="01060000001"))
+        self.assertEqual(again.status_code, 200)
+        self.assertEqual(again.json()["session"]["id"], sid)
+        # 임대인은 자기 호실 계약에 다시 들어올 수 있다
+        les = self.client.post(f"{base}/sessions/call", json=dict(call, caller_role="lessor"))
+        self.assertEqual(les.status_code, 200)
+        self.assertEqual(les.json()["session"]["id"], sid)
+
+
+    def test_15_idle_contract_auto_released_after_24h(self):
+        """15. 24시간 무응답 계약은 자동 해제되어 호실이 다시 열리고, 방금 만든 계약은 유지된다."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import cosign
+
+        base = "/api/rent3_contract"
+        self.client.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "907", "is_published": True, "deposit": 5000000})
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "907", "mode": "NEW",
+                "tenant_name": "무응답", "tenant_phone": "010-7000-0001"}
+        sid = self.client.post(f"{base}/sessions/call", json=call).json()["session"]["id"]
+
+        def flag():
+            ls = self.client.get("/api/rent3/pool/landing").json()["listings"]
+            return next(l for l in ls if l["room_no"] == "907")["contract_in_progress"]
+
+        self.assertTrue(flag())  # 방금 만든 계약은 24시간 이내 → 유지
+        orig = cosign.IDLE_EXPIRE
+        try:
+            cosign.IDLE_EXPIRE = timedelta(seconds=-1)  # 모든 진행 계약이 24시간을 넘긴 것으로 간주
+            self.assertFalse(flag())  # 자동 해제 → 버튼 다시 활성
+            got = self.client.get(f"{base}/sessions/{sid}").json()["session"]
+            self.assertEqual(got["status"], "CANCELLED")
+            self.assertIn("24시간", got["cancel_reason"])
+        finally:
+            cosign.IDLE_EXPIRE = orig
+        # 해제 뒤에는 다른 임차인이 새로 시작할 수 있다
+        other = dict(call, tenant_name="새사람", tenant_phone="010-7000-0002")
+        r = self.client.post(f"{base}/sessions/call", json=other)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotEqual(r.json()["session"]["id"], sid)
+
+
+    NOAUTH = {"Authorization": ""}
+
+    def _as(self, token):
+        return {"Authorization": f"Bearer {token}"}
+
+    def test_16_franchise_approval_gates_listing_and_contract(self):
+        """16. 신규 임대인은 가맹 심사 전에는 매물 공개·계약 불가, 승인 후 가능. 심사·정지는 본사 관리자만."""
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "lessor", "name": "신규임대", "phone": "01099990001", "username": "newlsr",
+            "password": "pw1234", "building_name": "새빌딩", "address": "인천 서해구 석남동 1", "branch": "newbld"})
+        self.assertEqual(reg.status_code, 200)
+        lid, lh = reg.json()["user"]["id"], self._as(reg.json()["token"])
+        self.assertEqual(c.get("/api/rent3_lessor/status?branch=newbld").json()["franchise"]["status"], "PENDING_APPROVAL")
+
+        # 심사 중: 호실은 준비할 수 있지만 공개로 저장해도 비공개, 공개 전환·계약 호출은 거부
+        room = c.post("/api/rent3_lessor/rooms", headers=lh, json={"branch": "newbld", "room_no": "101", "is_published": True, "deposit": 1000000}).json()["room"]
+        self.assertFalse(room["is_published"])
+        self.assertEqual(c.post(f"/api/rent3_lessor/rooms/{room['id']}/publish", headers=lh, json={"is_published": True}).status_code, 403)
+        call = {"caller_role": "lessor", "branch": "newbld", "room_no": "101", "mode": "NEW",
+                "tenant_name": "문의자", "tenant_phone": "010-9000-0001"}
+        self.assertIn(c.post("/api/rent3_contract/sessions/call", headers=lh, json=call).status_code, (400, 403))
+
+        # 심사는 본사 관리자만: 토큰 없음 401, 임대인 본인 토큰 403
+        url = f"/api/rent3_admin/lessors/{lid}/decision"
+        self.assertEqual(c.post(url, headers=self.NOAUTH, json={"decision": "approve"}).status_code, 401)
+        self.assertIn(c.post(url, headers=lh, json={"decision": "approve"}).status_code, (401, 403))  # 스스로 승인 불가
+
+        self.assertEqual(c.post(url, json={"decision": "reject"}).status_code, 400)  # 사유 필수
+        self.assertEqual(c.post(url, json={"decision": "approve"}).status_code, 400)  # 신청 서류 미비 → 거부
+        self.assertEqual(c.post(url, json={"decision": "approve", "force": True}).status_code, 400)  # 강제도 사유 필수
+        self.assertEqual(c.post(url, json={"decision": "approve", "force": True, "note": "현장 확인 완료"}).status_code, 200)
+
+        # 승인 후: 공개·포털 노출·계약 호출 가능
+        self.assertEqual(c.post(f"/api/rent3_lessor/rooms/{room['id']}/publish", headers=lh, json={"is_published": True}).status_code, 200)
+        ls = c.get("/api/rent3/pool/landing").json()["listings"]
+        self.assertTrue(any(l["branch"] == "newbld" and l["room_no"] == "101" for l in ls))
+        self.assertEqual(c.post("/api/rent3_contract/sessions/call", headers=lh, json=call).status_code, 200)
+
+        # 정지: 공개 매물이 모두 내려가고 포털에서 사라진다. 사유가 임대인에게 보인다.
+        self.assertEqual(c.post(url, json={"decision": "suspend", "note": "서류 미비"}).status_code, 200)
+        ls = c.get("/api/rent3/pool/landing").json()["listings"]
+        self.assertFalse(any(l["branch"] == "newbld" for l in ls))
+        f = c.get("/api/rent3_lessor/status?branch=newbld").json()["franchise"]
+        self.assertEqual((f["status"], f["note"]), ("SUSPENDED", "서류 미비"))
+
+    def test_17_room_limit_per_franchise(self):
+        """17. 가맹점당 호실 한도를 넘으면 새 호실 등록이 거부되고, 기존 호실 수정은 가능하다."""
+        c = self.client
+        c.post("/api/rent3_admin/lessors", json={
+            "username": "limitlsr", "name": "한도", "phone": "010-9100-0001", "branch": "limitb", "building_name": "한도빌딩"})
+        lid = next(l["id"] for l in c.get("/api/rent3_admin/overview").json()["lessors"] if l["branch"] == "limitb")
+        self.assertEqual(c.post(f"/api/rent3_admin/lessors/{lid}/room-limit", headers=self.NOAUTH, json={"room_limit": 2}).status_code, 401)
+        self.assertEqual(c.post(f"/api/rent3_admin/lessors/{lid}/room-limit", json={"room_limit": 2}).status_code, 200)
+        for no in ("101", "102"):
+            self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "limitb", "room_no": no}).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "limitb", "room_no": "103"}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "limitb", "room_no": "101", "deposit": 7000000}).status_code, 200)
+
+    def _admin_enter(self, user, view, session_id=""):
+        """관리인이 원격 지원으로 입장한 상태를 만든다(사용자 허용 ON + 지원 채팅 글 + 입장 기록). 엄격 모드에서 관리인이 읽으려면 필요."""
+        from apps.rent_dist._rent3_core import support as sup
+        old_consents, key = dict(user.consents or {}), sup.thread_key(user)
+
+        def undo():                                   # 다른 시험이 깨끗한 상태를 기대하므로 입장 준비로 남긴 것을 치운다
+            for m in sup.SupportMessage.find(thread_user=key):
+                m.delete(action="t")
+            for g in sup.SupportAccessLog.find(target_user=key):
+                g.delete(action="t")
+            u = type(user).get(user.id)
+            u.consents = old_consents
+            u.save(action="t")
+        self.addCleanup(undo)
+        user.consents = {**old_consents, "support_access": True}
+        user.save(action="t")
+        sup.post_user_message(user, "도와주세요")
+        r = self.client.post("/api/rent3_admin/support/enter", json={"user": key, "view": view, "session_id": session_id})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()
+
+    def _login(self, ident, pw="1212"):
+        r = self.client.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                             json={"login_mode": "account", "identifier": ident, "password": pw})
+        self.assertEqual(r.status_code, 200, r.text)
+        return self._as(r.json()["token"])
+
+    def test_18_access_control_by_role_and_branch(self):
+        """18. 토큰 없으면 401, 다른 지점 임대인·다른 임차인은 403, 본인 지점·본인 계정은 통과."""
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+
+        # 토큰 없음
+        for method, url in (("get", "/api/rent3_lessor/dashboard?branch=main"), ("post", "/api/rent3_lessor/rooms"),
+                            ("get", "/api/rent3_tenant/myhome/tenant_201"), ("get", "/api/rent3_contract/sessions"),
+                            ("get", "/api/rent3_tenant/tenants")):
+            extra = {"json": {"room_no": "1"}} if method == "post" else {}
+            r = getattr(c, method)(url, headers=self.NOAUTH, **extra)
+            self.assertEqual(r.status_code, 401, url)
+
+        # 임대인: 자기 지점만
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=sunho).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=sunho, json={"branch": "main", "room_no": "999"}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=sunho, json={"room_no": "999"}).status_code, 403)  # 지점 생략 = main
+        some_room = Room.first(branch="main")
+        assert some_room is not None
+        self.assertEqual(c.post(f"/api/rent3_lessor/rooms/{some_room.id}/publish", headers=sunho, json={"is_published": False}).status_code, 403)
+
+        # 임대인은 본사 관리 API 사용 불가
+        self.assertIn(c.post("/api/rent3_admin/lessors/lessor_chic/decision", headers=chic, json={"decision": "approve"}).status_code, (401, 403))
+
+        # 임차인: 본인 마이홈만, 임대인 기능·직원용 목록 불가
+        ra = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "갑임차", "phone": "01066660101", "password": "Pw123456"}).json()
+        rb = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "을임차", "phone": "01066660102", "password": "Pw123456"}).json()
+        self.assertIn("token", ra, ra)
+        self.assertIn("token", rb, rb)
+        ta, tb = self._as(ra["token"]), self._as(rb["token"])
+        ida, idb = ra["user"]["id"], rb["user"]["id"]
+        self.assertNotEqual(c.get(f"/api/rent3_tenant/myhome/{ida}", headers=ta).status_code, 403)
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{idb}", headers=ta).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=ta).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_tenant/tenants", headers=ta).status_code, 403)
+        t201 = tb
+
+        # 공동계약: 임차인 토큰으로 임대인 역할 불가, 남의 계약 세션 접근 불가
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "908", "mode": "NEW",
+                "tenant_name": "갑임차", "tenant_phone": "010-6666-0101"}
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "908", "is_published": True})
+        imcha = ta
+        # 본인인증 전에는 계약을 시작할 수 없다 → 인증 후 진행
+        self.assertEqual(c.post("/api/rent3_contract/sessions/call", headers=ta, json=call).status_code, 403)
+        base_id = {"name": "갑임차", "phone": "01066660101", "birth": "900101"}
+        c.post("/api/rent3_contract/identity/start", headers=ta, json=base_id)
+        self.assertEqual(c.post("/api/rent3_contract/identity/confirm", headers=ta, json={**base_id, "code": "000000"}).status_code, 200)
+        r = c.post("/api/rent3_contract/sessions/call", headers=imcha, json=dict(call, caller_role="lessor"))
+        self.assertEqual(r.status_code, 403)  # 임차인 토큰으로 임대인 행세 금지
+        r = c.post("/api/rent3_contract/sessions/call", headers=imcha, json=call)
+        self.assertEqual(r.status_code, 200, r.text)
+        sid = r.json()["session"]["id"]
+        self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}", headers=imcha).status_code, 200)   # 당사자 임차인
+        self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}", headers=chic).status_code, 200)    # 해당 지점 임대인
+        self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}", headers=sunho).status_code, 403)   # 다른 지점 임대인
+        self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}", headers=t201).status_code, 403)    # 다른 임차인
+        # 다른 임차인이 남의 번호로 계약 시작 금지
+        r = c.post("/api/rent3_contract/sessions/call", headers=t201, json=call)
+        self.assertEqual(r.status_code, 403)
+        # 원본 Data Pool(개인정보·계정 정보 포함)은 본사 관리자만
+        for u in ("/api/rent3/pool/files/users", "/api/rent3/pool/overview", "/api/rent3_admin/pool/users", "/api/rent3_admin/overview"):
+            self.assertEqual(c.get(u, headers=self.NOAUTH).status_code, 401, u)
+            self.assertIn(c.get(u, headers=chic).status_code, (401, 403), u)
+            self.assertEqual(c.get(u).status_code, 200, u)
+        # 진위 확인은 로그인 없이 공개
+        self.assertNotEqual(c.get("/api/rent3_contract/verify?hash=x&no=y", headers=self.NOAUTH).status_code, 401)
+
+    def test_19_demo_passwords_only_on_local(self):
+        """19. 공통 데모 비밀번호(1212)는 서버 밖 요청에서는 거부된다. 가입 비밀번호는 흔한 값 거부."""
+        import os
+        c = self.client
+        os.environ["RENT3_DEMO_LOGIN"] = "0"
+        try:
+            for ident in ("admin", "chic", "imcha"):
+                r = c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                           json={"login_mode": "account", "identifier": ident, "password": "1212"})
+                self.assertEqual(r.status_code, 401, ident)
+            weak = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "약한", "phone": "01077770001", "username": "weakpw", "password": "1212", "branch": "weakb"})
+            self.assertEqual(weak.status_code, 400)
+            ok = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "튼튼", "phone": "01077770002", "username": "strongpw", "password": "Str0ngPw9", "branch": "strongb"})
+            self.assertEqual(ok.status_code, 200)
+            r = c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                       json={"login_mode": "account", "identifier": "strongpw", "password": "Str0ngPw9"})
+            self.assertEqual(r.status_code, 200)
+        finally:
+            os.environ.pop("RENT3_DEMO_LOGIN", None)
+
+
+    def test_20_ai_monthly_limit_per_franchise(self):
+        """20. 가맹점별 월 AI 읽기 한도: 넘으면 Gemini 를 호출하지 않고 거부한다. 한도 변경은 본사 관리자만."""
+        import base64, json
+        from apps.rent_dist._rent3_core import registry_ai
+
+        c = self.client
+        c.post("/api/rent3_admin/lessors", json={
+            "username": "aicap", "name": "한도AI", "phone": "010-9200-0001", "branch": "aicap", "building_name": "AI빌딩"})
+        lid = next(l["id"] for l in c.get("/api/rent3_admin/overview").json()["lessors"] if l["branch"] == "aicap")
+        self.assertEqual(c.post(f"/api/rent3_admin/lessors/{lid}/ai-limit", headers=self.NOAUTH, json={"ai_monthly_limit": 1}).status_code, 401)
+        self.assertEqual(c.post(f"/api/rent3_admin/lessors/{lid}/ai-limit", json={"ai_monthly_limit": 1}).status_code, 200)
+
+        c.post("/api/rent3_lessor/rooms", json={"branch": "aicap", "room_no": "101", "is_published": True})
+        sid = c.post("/api/rent3_contract/sessions/call", json={
+            "caller_role": "lessor", "branch": "aicap", "room_no": "101", "tenant_name": "AI한도", "tenant_phone": "010-9200-0002", "mode": "NEW"}).json()["session"]["id"]
+        c.post(f"/api/rent3_contract/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": "AI한도", "responder_phone": "010-9200-0002"})
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+        url = f"/api/rent3_contract/sessions/{sid}/registry-ai"
+
+        class Fake:
+            is_available = True
+            calls = 0
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                Fake.calls += 1
+                return json.dumps({"document_type": "registry", "readable": True, "owners": [{"name": "누구", "share": None}],
+                                   "mortgages": [], "restrictions": [], "ownership_transfers": []}, ensure_ascii=False)
+
+        orig = registry_ai._client
+        try:
+            setattr(registry_ai, "_client", lambda: Fake())
+            self.assertEqual(c.post(url, json={"attachment_data_url": pdf, "consent": True}).status_code, 200)
+            self.assertEqual(Fake.calls, 1)
+            r = c.post(url, json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 400)       # 이번 달 한도 소진
+            self.assertEqual(Fake.calls, 1)            # Gemini 는 더 호출되지 않았다
+        finally:
+            registry_ai._client = orig
+
+
+    def test_21_franchise_application_identity_and_registry_match(self):
+        """21. 가맹 신청: 가짜 본인인증 → 건물 주소 → 등기부 대조(동명이인·공동소유·법인·주소 불일치) → 제출 → 관리자 승인."""
+        import base64, json
+        from apps.rent_dist._rent3_core import registry_ai
+
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "lessor", "name": "김종심", "phone": "01082817377", "username": "kjs", "password": "Pw123456",
+            "building_name": "석남빌", "address": "인천 서해구 석남동 507-34", "branch": "seoknam"})
+        lid, lh = reg.json()["user"]["id"], self._as(reg.json()["token"])
+        api = "/api/rent3_lessor/franchise"
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+
+        # 본인인증 없이 등기부·제출 불가
+        self.assertEqual(c.post(f"{api}/registry", headers=lh, json={"branch": "seoknam", "attachment_data_url": pdf}).status_code, 400)
+        self.assertEqual(c.post(f"{api}/submit", headers=lh, json={"branch": "seoknam"}).status_code, 400)
+
+        # 가짜 본인인증: 틀린 번호 거부, 맞으면 통과
+        who = {"branch": "seoknam", "name": "김종심", "phone": "01082817377", "birth": "19650312"}
+        self.assertEqual(c.post(f"{api}/identity/start", headers=lh, json=who).status_code, 200)
+        self.assertEqual(c.post(f"{api}/identity/confirm", headers=lh, json={**who, "code": "111111"}).status_code, 400)
+        ok = c.post(f"{api}/identity/confirm", headers=lh, json={**who, "code": "000000"}).json()
+        self.assertTrue(ok["application"]["identity"]["verified"])
+        self.assertEqual(ok["application"]["identity"]["birth6"], "65****")  # 생년월일은 가린다
+
+        class Fake:
+            is_available = True
+            reply = {}
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                return json.dumps(Fake.reply, ensure_ascii=False)
+
+        def reg_reply(owners, addr="인천광역시 서해구 석남동 507-34"):
+            return {"document_type": "registry", "readable": True, "property_address": addr, "owners": owners,
+                    "mortgages": [], "restrictions": [], "ownership_transfers": []}
+
+        def upload():
+            return c.post(f"{api}/registry", headers=lh, json={"branch": "seoknam", "attachment_data_url": pdf, "consent": True})
+
+        def code():
+            return c.get(f"{api}/application?branch=seoknam", headers=lh).json()["application"]["registry"]["check"]["code"]
+
+        import apps.rent_dist.rent3_lessor.api as lessor_api
+        orig, orig_max = registry_ai._client, lessor_api.FRANCHISE_AI_MAX_CALLS
+        try:
+            setattr(lessor_api, "FRANCHISE_AI_MAX_CALLS", 6)   # 이 테스트는 6가지 경우를 시험한다
+            setattr(registry_ai, "_client", lambda: Fake())
+            # 동명이인(생년월일 다름) → 자동 통과 안 됨
+            Fake.reply = reg_reply([{"name": "김종심", "share": None, "id_front": "700101"}])
+            self.assertEqual(upload().status_code, 200); self.assertEqual(code(), "BIRTH_MISMATCH")
+            # 공동 소유
+            Fake.reply = reg_reply([{"name": "김종심", "share": "1/2", "id_front": "650312"}, {"name": "이공동", "share": "1/2", "id_front": "700202"}])
+            upload(); self.assertEqual(code(), "SHARED_OWNER")
+            # 법인 소유
+            Fake.reply = reg_reply([{"name": "주식회사 석남", "share": None, "id_front": ""}])
+            upload(); self.assertEqual(code(), "CORPORATE")
+            # 본인이 아닌 소유자
+            Fake.reply = reg_reply([{"name": "박사기", "share": None, "id_front": "650312"}])
+            upload(); self.assertEqual(code(), "NOT_OWNER")
+            # 소재지 불일치
+            Fake.reply = reg_reply([{"name": "김종심", "share": None, "id_front": "650312"}], addr="서울특별시 관악구 신림동 1-1")
+            upload(); self.assertEqual(code(), "ADDRESS_MISMATCH")
+            # 정상: 이름·생년월일 일치, 단독 소유, 소재지 일치
+            Fake.reply = reg_reply([{"name": "김종심", "share": None, "id_front": "650312"}])
+            r = upload().json()
+            self.assertEqual(code(), "AUTO_MATCH")
+            self.assertTrue(r["application"]["registry"]["check"]["auto_pass"])
+            # 신청 중 AI 호출 상한: 한도를 넘으면 거부
+            self.assertEqual(upload().status_code, 400)
+        finally:
+            registry_ai._client, lessor_api.FRANCHISE_AI_MAX_CALLS = orig, orig_max
+
+        # 제출 → 관리자 심사 목록에 신청 완료로 보인다 (승인 전에는 여전히 비공개·계약 불가)
+        self.assertEqual(c.post(f"{api}/submit", headers=lh, json={"branch": "seoknam"}).status_code, 200)
+        row = next(l for l in c.get("/api/rent3_admin/overview").json()["lessors"] if l["id"] == lid)
+        self.assertTrue(row["application"]["steps"]["submitted"])
+        self.assertNotIn("password", row)
+        self.assertNotIn("identity", row)  # 원본 생년월일은 목록에 싣지 않는다
+
+        # 제출된 등기부 원본은 관리자만 열람
+        f = f"/api/rent3_admin/lessors/{lid}/registry-attachment"
+        self.assertEqual(c.get(f, headers=self.NOAUTH).status_code, 401)
+        self.assertIn(c.get(f, headers=lh).status_code, (401, 403))
+        self.assertEqual(c.get(f).status_code, 200)
+
+        # 서류가 갖춰져도 관리자의 원본 대조(발급확인번호) 기록이 없으면 승인되지 않는다
+        dec = f"/api/rent3_admin/lessors/{lid}/decision"
+        self.assertEqual(c.post(dec, json={"decision": "approve"}).status_code, 400)
+        ver = f"/api/rent3_admin/lessors/{lid}/registry-verify"
+        self.assertEqual(c.post(ver, headers=self.NOAUTH, json={"issue_number": "1101-2026-1", "note": "일치"}).status_code, 401)
+        self.assertIn(c.post(ver, headers=lh, json={"issue_number": "1101-2026-1", "note": "일치"}).status_code, (401, 403))
+        self.assertEqual(c.post(ver, json={"issue_number": "", "note": "일치"}).status_code, 400)       # 번호 필수
+        self.assertEqual(c.post(ver, json={"issue_number": "1101-2026-1", "note": ""}).status_code, 400)  # 메모 필수
+        rv = c.post(ver, json={"issue_number": "1101-2026-1", "note": "소유자·소재지·발급일시 일치"}).json()
+        v = rv["application"]["registry"]["verification"]
+        self.assertEqual((v["verified"], v["verified_by"]), (True, "admin"))  # 누가 확인했는지 남는다
+        self.assertTrue(v["verified_at"])
+        # 원본과 다르다고 기록하면 다시 승인 불가
+        c.post(ver, json={"verified": False, "issue_number": "1101-2026-1", "note": "소유자 다름"})
+        self.assertEqual(c.post(dec, json={"decision": "approve"}).status_code, 400)
+        c.post(ver, json={"issue_number": "1101-2026-1", "note": "재확인 일치"})
+        self.assertEqual(c.post(dec, json={"decision": "approve"}).status_code, 200)
+        self.assertEqual(c.get("/api/rent3_lessor/status?branch=seoknam").json()["franchise"]["status"], "ACTIVE")
+
+    def test_22_fake_identity_blocked_off_local(self):
+        """22. 배포 환경(비 loopback·RENT3_FAKE_IDENTITY=0)에서는 가짜 본인인증이 막힌다."""
+        import os
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "lessor", "name": "배포임대", "phone": "01082810001", "username": "prodlsr", "password": "Pw123456", "branch": "prodb"})
+        lh = self._as(reg.json()["token"])
+        who = {"branch": "prodb", "name": "배포임대", "phone": "01082810001", "birth": "700101"}
+        os.environ["RENT3_FAKE_IDENTITY"] = "0"
+        try:
+            r = c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("연동", r.json()["message"])
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "000000"}).status_code, 400)
+        finally:
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+
+
+    def test_23_tenant_identity_gate(self):
+        """23. 임차인 본인인증: 인증 전 계약 시작·응답·서명 불가, 가입 번호와 다른 번호·이미 인증된 사람의 다른 계정은 거부, 봉인 증거에 업체·시각이 남는다."""
+        c = self.client
+
+        def make(name, phone):
+            r = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "prospect", "name": name, "phone": phone, "password": "Pw123456"}).json()
+            return r["user"]["id"], self._as(r["token"])
+
+        tid, th = make("인증전", "01066660201")
+        self.assertFalse(c.get("/api/rent3_contract/identity", headers=th).json()["identity"]["verified"])
+        c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "909", "is_published": True})
+        call = {"caller_role": "tenant", "branch": "main", "room_no": "909", "mode": "NEW",
+                "tenant_name": "인증전", "tenant_phone": "010-6666-0201"}
+        self.assertEqual(c.post("/api/rent3_contract/sessions/call", headers=th, json=call).status_code, 403)  # 인증 전 불가
+
+        who = {"name": "김실명", "phone": "01066660201", "birth": "19900101"}
+        self.assertEqual(c.post("/api/rent3_contract/identity/start", headers=th, json=who).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_contract/identity/confirm", headers=th, json={**who, "code": "123456"}).status_code, 400)  # 틀린 번호
+        # 가입한 번호와 다른 휴대폰으로는 인증 불가
+        bad = c.post("/api/rent3_contract/identity/confirm", headers=th, json={**who, "phone": "01099998888", "code": "000000"})
+        self.assertEqual(bad.status_code, 400)
+        ok = c.post("/api/rent3_contract/identity/confirm", headers=th, json={**who, "code": "000000"}).json()
+        self.assertTrue(ok["identity"]["verified"])
+        self.assertEqual(ok["identity"]["birth6"], "90****")
+        self.assertTrue(ok["identity"]["fake"])
+
+        # 같은 사람(이름+생년월일)이 다른 계정으로 또 인증 불가
+        _, th2 = make("다른계정", "01066660202")
+        dup = {"name": "김실명", "phone": "01066660202", "birth": "900101"}
+        r = c.post("/api/rent3_contract/identity/confirm", headers=th2, json={**dup, "code": "000000"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("이미", r.json()["message"])
+
+        # 인증 후에는 계약을 시작할 수 있고, 임대인은 본인인증 대상이 아니다
+        self.assertEqual(c.post("/api/rent3_contract/sessions/call", headers=th, json=call).status_code, 200)
+        self.assertFalse(c.get("/api/rent3_contract/identity", headers=self.NOAUTH).status_code == 200)
+        chic = self._login("chic")
+        self.assertFalse(c.get("/api/rent3_contract/identity", headers=chic).json()["applies"])
+
+        # 배포 환경(가짜 인증 차단)에서는 인증 자체가 막힌다
+        import os
+        _, th3 = make("배포임차", "01066660203")
+        os.environ["RENT3_FAKE_IDENTITY"] = "0"
+        try:
+            r = c.post("/api/rent3_contract/identity/start", headers=th3, json={"name": "배포임차", "phone": "01066660203", "birth": "900202"})
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("연동", r.json()["message"])
+        finally:
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+
+
+    def test_24_password_hash_lockout_reset_and_admin_temp(self):
+        """24. 비밀번호 해시 저장·평문 자동 전환, 로그인 잠금, 본인인증 기반 재설정, 관리자 임시 비밀번호, 배포 환경 데모 계정 숨김."""
+        import os
+        from apps.rent_dist._rent3_core import Lessor, ratelimit
+
+        c = self.client
+        ratelimit.reset_all()
+        os.environ["RENT3_DEMO_LOGIN"] = "0"   # 배포 환경처럼 동작
+        users = lambda: open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read()
+
+        def login(ident, pw):
+            return c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                          json={"login_mode": "account", "identifier": ident, "password": pw})
+
+        try:
+            # (a) 가입한 비밀번호는 해시로만 저장된다
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "해시임대", "phone": "01044440001", "username": "hashlsr", "password": "Hash#Pass9", "branch": "hashb"})
+            self.assertEqual(reg.status_code, 200)
+            self.assertNotIn("Hash#Pass9", users())
+            self.assertIn("pbkdf2_sha256$", users())
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 200)
+            self.assertEqual(login("hashlsr", "Hash#Pass8").status_code, 401)
+
+            # (b) 예전 평문 저장분: 로그인에 성공하면 해시로 전환, 약한 평문(1212)은 배포 환경에서 거부
+            Lessor(username="legacy", name="평문임대", phone="010-4444-0002", branch="legacyb", password="Legacy#Pass9").save("test")
+            self.assertEqual(login("legacy", "Legacy#Pass9").status_code, 200)
+            self.assertNotIn("Legacy#Pass9", users())
+            Lessor(username="weaklegacy", name="약한평문", phone="010-4444-0003", branch="weakl", password="1212").save("test")
+            self.assertEqual(login("weaklegacy", "1212").status_code, 401)
+
+            # (c) 5번 틀리면 잠기고, 맞는 비밀번호도 잠금 동안은 거부된다 (429)
+            for _ in range(5):
+                self.assertEqual(login("lockme", "wrong-pass").status_code, 401)
+            locked = login("lockme", "wrong-pass")
+            self.assertEqual(locked.status_code, 429)
+            self.assertIn("분 뒤", locked.json()["message"])
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 200)  # 다른 계정은 영향 없음(접속 주소 한도 미만)
+
+            # (d) 본인인증 기반 재설정: 본인인증 이력이 있는 계정만 직접 가능
+            ratelimit.reset_all()
+            reg2 = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "재설정임대", "phone": "01044440004", "username": "rstlsr", "password": "Old#Pass99", "branch": "rstb"})
+            lh = self._as(reg2.json()["token"])
+            who = {"branch": "rstb", "name": "재설정임대", "phone": "01044440004", "birth": "19700101"}
+            os.environ["RENT3_FAKE_IDENTITY"] = "1"   # 이 구간만 가짜 본인인증 허용(본인인증 이력 만들기용)
+            c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "000000"}).status_code, 200)
+            rs = {"identifier": "rstlsr", "name": "재설정임대", "phone": "01044440004", "birth": "700101"}
+            R = "/api/rent3/pool/auth/password-reset"
+            self.assertEqual(c.post(f"{R}/start", headers=self.NOAUTH, json=rs).status_code, 200)
+            bad = c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "name": "다른사람", "code": "000000", "new_password": "New#Pass99"})
+            self.assertEqual(bad.status_code, 400)                                                # 정보가 다름
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "111111", "new_password": "New#Pass99"}).status_code, 400)  # 인증번호 틀림
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "000000", "new_password": "1212"}).status_code, 400)        # 약한 비밀번호
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**rs, "code": "000000", "new_password": "New#Pass99"}).status_code, 200)
+            os.environ["RENT3_FAKE_IDENTITY"] = "0"
+            self.assertEqual(login("rstlsr", "Old#Pass99").status_code, 401)
+            self.assertEqual(login("rstlsr", "New#Pass99").status_code, 200)
+
+            # (e) 본인인증 이력이 없는 계정은 직접 재설정 불가 — 계정 존재 여부는 알리지 않는다
+            nov = {"identifier": "hashlsr", "name": "해시임대", "phone": "01044440001", "birth": "700101"}
+            self.assertEqual(c.post(f"{R}/start", headers=self.NOAUTH, json=nov).status_code, 200)
+            self.assertEqual(c.post(f"{R}/confirm", headers=self.NOAUTH, json={**nov, "code": "000000", "new_password": "New#Pass99"}).status_code, 400)
+
+            # (f) 관리자 임시 비밀번호: 관리자만, 한 번만 보이고, 해시로 저장
+            body = {"kind": "lessor", "id": reg.json()["user"]["id"]}
+            self.assertEqual(c.post("/api/rent3_admin/accounts/reset-password", headers=self.NOAUTH, json=body).status_code, 401)
+            self.assertIn(c.post("/api/rent3_admin/accounts/reset-password", headers=lh, json=body).status_code, (401, 403))
+            tmp = c.post("/api/rent3_admin/accounts/reset-password", json=body).json()["temporary_password"]
+            self.assertNotIn(tmp, users())
+            self.assertEqual(login("hashlsr", "Hash#Pass9").status_code, 401)
+            self.assertEqual(login("hashlsr", tmp).status_code, 200)
+
+            # (g) 배포 환경에서는 데모 계정(공통 비밀번호 안내)을 내려주지 않는다
+            self.assertEqual(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["demo_accounts"], [])
+        finally:
+            os.environ.pop("RENT3_DEMO_LOGIN", None)
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+            ratelimit.reset_all()
+        self.assertTrue(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["demo_accounts"])  # 로컬 시연에서는 보인다
+
+    def test_25_password_migration_script(self):
+        """25. 평문 비밀번호 전환 스크립트: 약한 값은 비우고, 그 밖은 해시로 바꾸며, 다시 실행해도 안전하다."""
+        import subprocess
+        import tempfile
+        from apps.rent_dist._rent3_core import Lessor
+
+        tmp = tempfile.mkdtemp(prefix="rent3_mig_")
+        env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+        script = os.path.join(ROOT, "scripts", "hash_passwords.py")
+        # 임시 풀을 시드하고 평문 비밀번호 두 개를 심는다
+        code = (
+            "import sys; sys.path.insert(0, %r)\n"
+            "from apps.rent_dist._rent3_core import ensure_pool_seeded, use_pool_dir, Lessor\n"
+            "use_pool_dir(%r); ensure_pool_seeded(force=True)\n"
+            "Lessor(username='mig1', name='이전1', phone='010-4444-1001', branch='mig1', password='Plain#Pass9').save('t')\n"
+            "Lessor(username='mig2', name='이전2', phone='010-4444-1002', branch='mig2', password='1212').save('t')\n"
+        ) % (ROOT, tmp)
+        subprocess.run([sys.executable, "-c", code], check=True, env=env, capture_output=True)
+        out = subprocess.run([sys.executable, script, "--pool-dir", tmp], check=True, env=env, capture_output=True, text=True, encoding="utf-8").stdout
+        self.assertIn("약한 비밀번호 비움", out)
+        raw = open(os.path.join(tmp, "users.json"), encoding="utf-8").read()
+        self.assertNotIn("Plain#Pass9", raw)
+        self.assertIn("pbkdf2_sha256$", raw)
+        self.assertNotIn('"password": "1212"', raw)
+        again = subprocess.run([sys.executable, script, "--pool-dir", tmp], check=True, env=env, capture_output=True, text=True, encoding="utf-8").stdout
+        self.assertIn("해시로 전환 0 · 약한 비밀번호 비움 0", again)
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+    def test_27_logout_revokes_token_and_api_headers(self):
+        """27. 로그아웃하면 토큰이 즉시 무효(임대인·관리자 모두), API 응답에 보안 헤더."""
+        c = self.client
+        chic = self._login("chic")
+        r = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("no-store", r.headers.get("cache-control", ""))
+        self.assertEqual(r.headers.get("x-content-type-options"), "nosniff")
+        self.assertEqual(c.post("/api/rent3/pool/auth/logout", headers=chic).status_code, 200)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).status_code, 401)
+
+        adm = self._login("admin")
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=adm).status_code, 200)
+        c.post("/api/rent3/pool/auth/logout", headers=adm)
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=adm).status_code, 401)
+        # 다시 로그인하면 새 토큰은 정상
+        self.assertEqual(c.get("/api/rent3_admin/overview", headers=self._login("admin")).status_code, 200)
+
+
+    def test_28_tenant_fraud_guards(self):
+        """28. 임차인 사기 방어: 한 임차인의 동시 계약 2건 제한(호실 선점), 임대인 본인 계좌 입금 확인 없이는 체결 불가."""
+        c = self.client
+        r = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "선점자", "phone": "01066660401", "password": "Pw123456"}).json()
+        th = self._as(r["token"])
+        who = {"name": "선점자", "phone": "01066660401", "birth": "950101"}
+        c.post("/api/rent3_contract/identity/start", headers=th, json=who)
+        c.post("/api/rent3_contract/identity/confirm", headers=th, json={**who, "code": "000000"})
+        for no in ("911", "912", "913"):
+            c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": no, "is_published": True})
+        call = lambda no: c.post("/api/rent3_contract/sessions/call", headers=th, json={
+            "caller_role": "tenant", "branch": "main", "room_no": no, "mode": "NEW", "tenant_name": "선점자", "tenant_phone": "010-6666-0401"})
+        self.assertEqual(call("911").status_code, 200)
+        self.assertEqual(call("912").status_code, 200)
+        self.assertEqual(call("911").status_code, 200)     # 이미 진행 중인 호실 재입장은 허용
+        third = call("913")
+        self.assertEqual(third.status_code, 400)
+        self.assertIn("동시에", third.json()["message"])
+
+        # 체결: 계좌 확인 표시 없이는 거부 (다른 조건과 무관하게 먼저 걸린다)
+        sid = call("911").json()["session"]["id"]
+        no = c.post(f"/api/rent3_contract/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER"})
+        self.assertEqual(no.status_code, 400)
+        self.assertIn("입금", no.json()["message"])
+
+
+    def test_29_sms_identity_provider(self):
+        """29. 문자 인증: 해시 보관·5분 만료·5회 제한·재발송 간격, 휴대폰 소유만 확인(phone_only)이라 등기부 자동 일치를 주지 않는다."""
+        import os
+        from typing import Any
+        from apps.rent_dist._rent3_core import franchise as fr
+        c = self.client
+        prov: Any = fr.PROVIDERS["sms"]
+        sent = {}
+        prov._send = lambda phone, text: sent.update({"phone": phone, "text": text})
+        prov._pending.clear()
+        os.environ["RENT3_IDENTITY_PROVIDER"] = "sms"
+        os.environ["RENT3_FAKE_IDENTITY"] = "0"
+        try:
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+                "role": "lessor", "name": "문자임대", "phone": "01055550501", "username": "smslsr", "password": "Pw123456", "branch": "smsb"})
+            lh = self._as(reg.json()["token"])
+            who = {"branch": "smsb", "name": "문자임대", "phone": "01055550501", "birth": "19700101"}
+            st = c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(st.status_code, 200)
+            code = sent["text"].split("인증번호 ")[1][:6]
+            self.assertNotIn(code, str(prov._pending))                      # 평문 미보관
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who).status_code, 400)  # 재발송 간격
+            bad = c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "000000" if code != "000000" else "111111"})
+            self.assertEqual(bad.status_code, 400)
+            ok = c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": code})
+            self.assertEqual(ok.status_code, 200)
+            self.assertEqual(ok.json()["application"]["identity"]["assurance"], "phone_only")
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": code}).status_code, 400)  # 재사용 불가
+
+            # 휴대폰 소유만 확인된 신원은 등기부가 완벽히 일치해도 자동 일치가 아니다
+            chk = fr.check_ownership({"verified": True, "name": "문자임대", "birth6": "700101", "assurance": "phone_only"},
+                {"document_type": "registry", "readable": True, "property_address": "인천 서해구 석남동 507-34",
+                 "owners": [{"name": "문자임대", "share": "", "id_front": "700101"}]}, "인천 서해구 석남동 507-34")
+            self.assertEqual(chk["code"], "PHONE_ONLY")
+            self.assertFalse(chk["auto_pass"])
+
+            # 5회 틀리면 폐기, 만료되면 거부
+            prov._pending.clear(); prov._pending["01055550501"] = {"h": "x", "sent": 0, "tries": 0}
+            self.assertEqual(c.post("/api/rent3_lessor/franchise/identity/confirm", headers=lh, json={**who, "code": "123456"}).status_code, 400)
+            # 발송 업체 미설정이면 안내와 함께 거부
+            prov._send = fr.SmsProvider._send.__get__(prov)
+            prov._pending.clear()
+            os.environ.pop("RENT3_SMS_SENDER", None)
+            r = c.post("/api/rent3_lessor/franchise/identity/start", headers=lh, json=who)
+            self.assertEqual(r.status_code, 400)
+            self.assertIn("업체", r.json()["message"])
+        finally:
+            os.environ.pop("RENT3_IDENTITY_PROVIDER", None)
+            os.environ.pop("RENT3_FAKE_IDENTITY", None)
+            prov._pending.clear()
+            prov.__dict__.pop("_send", None)
+
+
+    def test_30_no_sensitive_fields_in_public_or_cross_party_listings(self):
+        """30. 도어락 비밀번호·등기 정보·입주자 연락처·타 계약 세션이 공개 목록이나 타인에게 내려가지 않는다."""
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "구경꾼", "phone": "01066660501", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"])
+        chic, sunho = self._login("chic"), self._login("sunho")
+        secret_keys = ("doorlock_pwd", "registry_info", "id_tenant", "active_contract_id")
+
+        for hdr in (self.NOAUTH, ten):   # 비로그인·임차인
+            for r in c.get("/api/rent3_tenant/listings", headers=hdr).json()["listings"]:
+                for k in secret_keys:
+                    self.assertNotIn(k, r, f"공개 매물 목록에 {k} 노출")
+                if r.get("active_cosign_session"):
+                    self.assertEqual(set(r["active_cosign_session"]), {"id", "session_code"})
+        for r in c.get("/api/rent3_contract/rooms", headers=ten).json()["rooms"]:
+            for k in secret_keys:
+                self.assertNotIn(k, r)
+            self.assertEqual(r["active_tenant_phone"], "")
+        self.assertEqual(c.get("/api/rent3_contract/participants", headers=ten).json()["tenants"], [])
+
+        # 임대인: 자기 지점은 전체, 다른 지점은 가려진다
+        rooms = c.get("/api/rent3_contract/rooms", headers=sunho).json()["rooms"]
+        main = [r for r in rooms if r["branch"] == "main"]
+        own = [r for r in rooms if r["branch"] == "sunho"]
+        self.assertTrue(main and all("doorlock_pwd" not in r and r["active_tenant_phone"] == "" for r in main))
+        self.assertTrue(own and any("doorlock_pwd" in r for r in own))
+        self.assertTrue(c.get("/api/rent3_contract/participants", headers=chic).json()["tenants"])
+
+
+    def test_31_sensitive_fields_encrypted_at_rest(self):
+        """31. 도어락·공동현관·계좌번호는 키가 있으면 디스크에 암호화되어 남고, 앱에서는 평문으로 보이며, 키 교체·키 없음·변조를 처리한다."""
+        import glob, os
+        from apps.rent_dist._rent3_core import Lessor, Room, fieldcrypto as fc
+
+        def disk():
+            return "".join(open(f, encoding="utf-8").read() for f in glob.glob(os.path.join(self.temp_pool, "**", "*.json"), recursive=True))
+
+        orig_master = os.environ.pop("MASTER_CRYPTO_KEY", None)   # 개발 PC·서버에 이미 설정돼 있을 수 있다 — 끝나면 되돌린다
+        os.environ["RENT3_CRYPTO_KEY"] = "test-key-A-" + "x" * 30
+        try:
+            Lessor(id="lessor_enc", username="enc1", name="암호", phone="010-4444-9001", branch="encb",
+                   account_number="신한 110-999-ENC-777").save("t")
+            room = Room(id="room_encb_1", branch="encb", room_no="1", doorlock_pwd="9876*ENC").save("t")
+            raw = disk()
+            self.assertNotIn("ENC-777", raw)
+            self.assertNotIn("9876*ENC", raw)
+            self.assertIn("enc:v1:", raw)
+            # 앱에서는 평문으로 읽힌다
+            self.assertEqual(Lessor.require("lessor_enc").account_number, "신한 110-999-ENC-777")
+            self.assertEqual(Room.require("room_encb_1").doorlock_pwd, "9876*ENC")
+
+            # 같은 값도 매번 다르게 암호화(nonce), 다른 필드로 옮겨 붙이면 복호화 실패(AAD)
+            a, b = fc.encrypt_value("doorlock_pwd", "same"), fc.encrypt_value("doorlock_pwd", "same")
+            self.assertNotEqual(a, b)
+            with self.assertRaises(Exception):
+                fc.decrypt_value("account_number", a)
+
+            # 키 교체: 새 키 + 옛 키(PREVIOUS)로 읽히고, 다시 저장하면 새 키로 바뀐다
+            os.environ["RENT3_CRYPTO_KEY_PREVIOUS"] = os.environ["RENT3_CRYPTO_KEY"]
+            os.environ["RENT3_CRYPTO_KEY"] = "test-key-B-" + "y" * 30
+            self.assertEqual(Room.require("room_encb_1").doorlock_pwd, "9876*ENC")
+            Room.require("room_encb_1").save("rekey")
+            os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS")
+            self.assertEqual(Room.require("room_encb_1").doorlock_pwd, "9876*ENC")           # 새 키만으로 읽힘
+            # 엉뚱한 키로는 명확한 오류
+            os.environ["RENT3_CRYPTO_KEY"] = "wrong-key-" + "z" * 30
+            with self.assertRaises(Exception) as cm:
+                Room.get("room_encb_1")
+            self.assertIn("복호화", str(cm.exception))
+            # 키가 없으면 평문 저장(로컬 개발)이지만 암호문을 읽으려 하면 안내 오류
+            os.environ.pop("RENT3_CRYPTO_KEY")
+            with self.assertRaises(Exception) as cm:
+                Room.get("room_encb_1")
+            self.assertIn("RENT3_CRYPTO_KEY", getattr(cm.exception, "hint", "") + str(cm.exception))
+            Room(id="room_encb_2", branch="encb", room_no="2", doorlock_pwd="plain-dev").save("t")
+            self.assertIn("plain-dev", disk())
+
+            # 서버 마스터 키(MASTER_CRYPTO_KEY, Coolify 에 이미 있는 키)만 있어도 암호화되고, 그 키로 읽힌다
+            os.environ["MASTER_CRYPTO_KEY"] = "coolify-master-" + "m" * 20
+            Room(id="room_encb_3", branch="encb", room_no="3", doorlock_pwd="MASTER-SECRET-1").save("t")
+            self.assertNotIn("MASTER-SECRET-1", disk())
+            self.assertEqual(Room.require("room_encb_3").doorlock_pwd, "MASTER-SECRET-1")
+            # 나중에 전용 키(RENT3_CRYPTO_KEY)를 추가해도 마스터 키로 쓴 값은 계속 읽힌다
+            os.environ["RENT3_CRYPTO_KEY"] = "dedicated-key-" + "d" * 20
+            self.assertEqual(Room.require("room_encb_3").doorlock_pwd, "MASTER-SECRET-1")
+            # 마스터 키로 도출한 키는 .env.encrypted 용 키(SHA-256(마스터))와 같지 않다
+            import hashlib
+            self.assertNotEqual(fc._master_derived(), hashlib.sha256(os.environ["MASTER_CRYPTO_KEY"].encode()).digest())
+        finally:
+            os.environ.pop("RENT3_CRYPTO_KEY", None)
+            os.environ.pop("RENT3_CRYPTO_KEY_PREVIOUS", None)
+            if orig_master is None:
+                os.environ.pop("MASTER_CRYPTO_KEY", None)
+            else:
+                os.environ["MASTER_CRYPTO_KEY"] = orig_master
+            # 키 없이는 읽을 수 없는 암호문 레코드가 다른 테스트에 남지 않도록 id 로 직접 지운다
+            for rid in ("room_encb_1", "room_encb_2", "room_encb_3"):
+                Room(id=rid).delete()
+            Lessor(id="lessor_enc").delete()
+
+
+    def test_32_keys_locked_until_lessor_confirms_balance(self):
+        """32. 체결 직후 도어락·공동현관은 잠금(API 마스킹) → 임대인이 잔금 입금 확인 후 교부해야 임차인에게 열린다. 예전 계약은 그대로 공개."""
+        c = self.client
+        LOCK = "입주 당일 잔금 완납 후 공개"
+        chic = self._login("chic")
+        # 예전 계약(플래그 없음)은 그대로 열려 있다
+        legacy = c.get("/api/rent3_tenant/myhome/tenant_201").json()
+        self.assertFalse(legacy["keys"]["locked"])
+        self.assertNotEqual(legacy["room"]["doorlock_pwd"], LOCK)
+
+        # 새 계약 체결
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "914", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "잔금임차", "phone": "01066660601", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        sid = self._complete_contract(chic, th, tid, "914", "잔금임차", "010-6666-0601")
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertTrue(home["keys"]["locked"])
+        self.assertEqual(home["tenant"]["doorlock_pwd"], LOCK)
+        self.assertEqual(home["room"]["doorlock_pwd"], LOCK)
+        self.assertEqual(home["building"]["common_entrance_pwd"], LOCK)
+        self.assertGreater(home["keys"]["balance_due"], 0)
+
+        room = Room.first(branch="main", room_no="914")
+        assert room is not None
+        rel = f"/api/rent3_lessor/rooms/{room.id}/release-keys"
+        self.assertEqual(c.post(rel, headers=th, json={"balance_checked": True}).status_code, 403)          # 임차인은 못 연다
+        self.assertEqual(c.post(rel, headers=self._login("sunho"), json={"balance_checked": True}).status_code, 403)  # 다른 지점도
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 잔금일 등기부 확인 전
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "issue_number": "1101-2026-555"}).status_code, 200)
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": False}).status_code, 400)        # 입금 확인 표시 필수
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 이미 교부
+
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertFalse(home["keys"]["locked"])
+        self.assertEqual(home["room"]["doorlock_pwd"], room.doorlock_pwd)
+        self.assertEqual(home["keys"]["released_at"][:4], "2026")
+
+
+    def test_34_facility_photos_and_join_qr_data(self):
+        """34. 시설 점검 사진: 점검 단계에서만·당사자만·본인 사진만 삭제, 올리면 임차인 확인 해제, 체결 시 해시가 계약에 남는다."""
+        import base64
+        c, base = self.client, "/api/rent3_contract"
+        png = "data:image/png;base64," + base64.b64encode(
+            bytes.fromhex("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000001e221bc330000000049454e44ae426082")).decode()
+        chic, sunho = self._login("chic"), self._login("sunho")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사진임차", "phone": "01066660801", "password": "Pw123456"}).json()
+        ten = self._as(reg["token"]); tid = reg["user"]["id"]
+        who = {"name": "사진임차", "phone": "01066660801", "birth": "930303"}
+        c.post(f"{base}/identity/start", headers=ten, json=who)
+        c.post(f"{base}/identity/confirm", headers=ten, json={**who, "code": "000000"})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "915", "is_published": True})
+        sid = c.post(f"{base}/sessions/call", headers=ten, json={
+            "caller_role": "tenant", "branch": "main", "room_no": "915", "mode": "NEW", "tenant_name": "사진임차", "tenant_phone": "010-6666-0801"}).json()["session"]["id"]
+
+        # 호출 대기 화면의 QR 은 계약 id 만 담는다 — 로그인 없이도, 당사자가 아니어도 내용은 열리지 않는다
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=sunho).status_code, 403)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=chic).status_code, 200)
+
+        c.post(f"{base}/sessions/{sid}/respond", headers=chic, json={"responder_role": "lessor", "responder_name": "김종심"})
+        up = lambda hdr, role, cap="욕실", data=png: c.post(f"{base}/sessions/{sid}/facility-photos", headers=hdr, json={"role": role, "photo_data_url": data, "caption": cap})
+        r = up(ten, "tenant")
+        self.assertEqual(r.status_code, 200, r.text)
+        pid = r.json()["photo"]["id"]
+        self.assertEqual(len(r.json()["photo"]["sha256"]), 64)
+        # 형식·역할 검사
+        self.assertEqual(up(ten, "tenant", data="data:application/pdf;base64,AAAA").status_code, 400)
+        self.assertEqual(up(ten, "lessor").status_code, 403)                       # 임차인 토큰으로 임대인 행세 금지
+        self.assertEqual(up(sunho, "lessor").status_code, 403)                     # 다른 지점
+        # 사진은 당사자만 본다 (Authorization 헤더 필수, ?token= 쿼리 파라미터는 보안상 거부)
+        url = f"{base}/sessions/{sid}/facility-photos/{pid}"
+        self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(url, headers=sunho).status_code, 403)
+        self.assertEqual(c.get(url, headers=chic).status_code, 200)
+        self.assertEqual(c.get(url, headers=ten).status_code, 200)
+        self.assertEqual(c.get(url, headers=self.NOAUTH, params={"token": ten["Authorization"].split()[1]}).status_code, 401)
+        # 임대인이 올리면 임차인 잠금이 풀리고, 남의 사진은 못 지운다
+        rl = up(chic, "lessor", "싱크대")
+        self.assertEqual(rl.status_code, 200)
+        self.assertFalse(rl.json()["session"]["step2_tenant_locked"])
+        self.assertFalse(rl.json()["session"]["step2_lessor_confirmed"])   # 사진이 바뀌면 양쪽 확인을 다시 받는다
+        self.assertEqual(c.post(f"{url}/delete", headers=chic, json={"role": "lessor"}).status_code, 400)
+        self.assertEqual(c.post(f"{url}/delete", headers=ten, json={"role": "tenant"}).status_code, 200)
+        self.assertEqual(c.get(url, headers=chic).status_code, 404)
+        # 12장 상한
+        for _ in range(11):
+            up(chic, "lessor")
+        self.assertEqual(up(chic, "lessor").status_code, 400)
+
+        # 점검 단계가 끝난 계약(체결 완료)에는 사진을 더 올릴 수 없다
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "916", "is_published": True})
+        reg2 = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사진임차2", "phone": "01066660802", "password": "Pw123456"}).json()
+        sid2 = self._complete_contract(chic, self._as(reg2["token"]), reg2["user"]["id"], "916", "사진임차2", "010-6666-0802")
+        late = c.post(f"{base}/sessions/{sid2}/facility-photos", json={"role": "lessor", "photo_data_url": png})
+        self.assertIn(late.status_code, (400, 409))
+
+
+    def test_35_prefill_before_meeting_and_balance_day_registry(self):
+        """35. 대면 전 사전 작성(임대인=조건, 임차인=이메일·차량번호, 상대 연결 전까지만) + 잔금일 등기부 변동 신고 시 교부 불가."""
+        c, base = self.client, "/api/rent3_contract"
+        chic = self._login("chic")
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "사전임차", "phone": "01066660901", "password": "Pw123456"}).json()
+        ten, tid = self._as(reg["token"]), reg["user"]["id"]
+        who = {"name": "사전임차", "phone": "01066660901", "birth": "940404"}
+        c.post(f"{base}/identity/start", headers=ten, json=who)
+        c.post(f"{base}/identity/confirm", headers=ten, json={**who, "code": "000000"})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "917", "is_published": True, "deposit": 7000000, "monthly_rent": 450000})
+        sid = c.post(f"{base}/sessions/call", headers=chic, json={
+            "caller_role": "lessor", "branch": "main", "room_no": "917", "mode": "NEW",
+            "tenant_name": "사전임차", "tenant_phone": "010-6666-0901", "id_tenant": tid}).json()["session"]["id"]
+        pf = f"{base}/sessions/{sid}/prefill"
+
+        # 임대인: 조건 사전 작성(매물 값이 이미 채워져 있고 입주일 등만 바꾼다)
+        cur = c.get(f"{base}/sessions/{sid}", headers=chic).json()["session"]["terms"]
+        self.assertEqual((cur["deposit"], cur["monthly_rent"]), (7000000, 450000))   # 매물 등록 값이 자동으로 채워짐
+        r = c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-11-25", "contract_deposit": 500000, "special_terms": "반려동물 불가"}})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["session"]["terms"]["move_in_date"], "2026-11-25")
+        self.assertTrue(r.json()["session"]["draft_prefilled_at"])
+        # 검증: 날짜 형식·계약금>보증금·허용 항목 밖
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "내일"}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"contract_deposit": 99999999}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"tenant_name": "바꿈"}}).status_code, 400)
+        # 임차인: 이메일·차량번호만 (금액·입주일은 못 바꾼다), 임대인 행세·타 지점 불가
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "tenant", "updates": {"tenant_email": "a@b.kr", "tenant_car_number": "12가3456"}}).status_code, 200)
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "tenant", "updates": {"deposit": 1}}).status_code, 400)
+        self.assertEqual(c.post(pf, headers=ten, json={"role": "lessor", "updates": {"deposit": 1}}).status_code, 403)
+        self.assertEqual(c.post(pf, headers=self._login("sunho"), json={"role": "lessor", "updates": {"deposit": 1}}).status_code, 403)
+
+        # 연결되면 사전 작성은 닫히고(이후 변경은 ③단계 합의), 사전 작성한 값은 그대로 이어진다
+        c.post(f"{base}/sessions/{sid}/respond", headers=ten, json={"responder_role": "tenant", "responder_name": "사전임차", "responder_phone": "010-6666-0901", "id_tenant": tid})
+        self.assertEqual(c.post(pf, headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-12-01"}}).status_code, 400)
+        t2 = c.get(f"{base}/sessions/{sid}", headers=chic).json()["session"]["terms"]
+        self.assertEqual((t2["move_in_date"], t2["tenant_email"], t2["special_terms"]), ("2026-11-25", "a@b.kr", "반려동물 불가"))
+
+        # 사전 작성한 초안은 72시간까지 보존된다(일반 호출은 24시간)
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import CoSignSession
+        sid2 = c.post(f"{base}/sessions/call", headers=chic, json={
+            "caller_role": "lessor", "branch": "main", "room_no": "918", "mode": "NEW", "tenant_name": "사전임차", "tenant_phone": "010-6666-0901", "id_tenant": tid}).json()["session"]["id"] \
+            if c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "918", "is_published": True}).status_code == 200 else ""
+        s2 = CoSignSession.require(sid2)
+        later = datetime.fromisoformat(s2.updated_at) + timedelta(hours=30)
+        self.assertTrue(s2.is_idle_expired(later))                       # 사전 작성 전: 24시간 규칙
+        c.post(f"{base}/sessions/{sid2}/prefill", headers=chic, json={"role": "lessor", "updates": {"move_in_date": "2026-12-05"}})
+        s2 = CoSignSession.require(sid2)
+        self.assertFalse(s2.is_idle_expired(datetime.fromisoformat(s2.updated_at) + timedelta(hours=30)))
+        self.assertTrue(s2.is_idle_expired(datetime.fromisoformat(s2.updated_at) + timedelta(hours=73)))
+
+    def test_36_balance_day_registry_change_blocks_key_release(self):
+        """36. 잔금일 등기부에서 변동을 신고하면 교부 불가, 다시 '변동 없음'으로 확인돼야 교부된다."""
+        c = self.client
+        chic = self._login("chic")
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "919", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "잔금등기", "phone": "01066660902", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        self._complete_contract(chic, th, tid, "919", "잔금등기", "010-6666-0902")
+        room = Room.first(branch="main", room_no="919")
+        assert room is not None
+        rel = f"/api/rent3_lessor/rooms/{room.id}/release-keys"
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        # 다른 임차인은 남의 계약에 확인을 기록할 수 없다
+        other = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "남", "phone": "01066660903", "password": "Pw123456"}).json()
+        self.assertEqual(c.post(chk, headers=self._as(other["token"]), json={"changed": False}).status_code, 403)
+        self.assertEqual(c.post(chk, headers=chic, json={"changed": False}).status_code, 403)   # 임대인이 대신 확인 불가
+
+        self.assertEqual(c.post(chk, headers=th, json={"changed": True, "issue_number": "1101-2026-777"}).status_code, 200)
+        r = c.post(rel, headers=chic, json={"balance_checked": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("변동", r.json()["message"])
+        home = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=th).json()
+        self.assertTrue(home["keys"]["locked"])                                  # 변동 신고 중에는 잠금 유지
+        self.assertTrue(home["keys"]["registry_check"]["changed"])
+        # 해소 후 임차인이 다시 변동 없음으로 확인하면 교부 가능
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False}).status_code, 200)
+        self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
+        # 교부 후에는 더 기록할 수 없다
+        self.assertEqual(c.post(chk, headers=th, json={"changed": True}).status_code, 400)
+
+
+    def test_26_legacy_api_removed_and_portal_intact(self):
+        """26. 레거시 라우터(운영·공개 앱·엔티티·세무)와 구 가입·가짜 신원확인 경로는 제거되었고, 포털(로그인·가입·매물·재설정)은 그대로 동작한다."""
+        c = self.client
+        for method, u in (("get", "/api/rent3/entities/summary/dashboard"), ("get", "/api/rent3/admin/overview"),
+                          ("get", "/api/rent3/tax/annual-statement?year=2026&branch=main"), ("get", "/api/rent3/chat/main/205"),
+                          ("get", "/api/rent3/checkout/list?branch=main"), ("get", "/api/rent3/renewals"),
+                          ("get", "/api/rent3/tenant/checkin-info/app_main_205"), ("get", "/api/rent3/public/listings"),
+                          ("get", "/api/rent3/public/application/app_main_205"), ("post", "/api/rent3/cosign/start"),
+                          ("post", "/api/rent3/auth/signup"), ("post", "/api/rent3/auth/verify-phone/send"),
+                          ("post", "/api/rent3/auth/social-verify")):
+            for hdr in (self.NOAUTH, {}):   # 로그인 여부와 무관하게 경로 자체가 없다
+                r = getattr(c, method)(u, headers=hdr)
+                self.assertIn(r.status_code, (404, 405), f"{method} {u} → {r.status_code}")
+        # 옛 화면 파일도 더는 서빙되지 않는다
+        for page in ("admin", "lessor", "tenant", "public", "home", "cosign", "login", "signup"):
+            self.assertNotEqual(c.get(f"/rent3/{page}.html", headers=self.NOAUTH).headers.get("content-type", "").split(";")[0], "text/html",
+                                f"/rent3/{page}.html 이 아직 서빙됨")
+        # 포털은 정상
+        self.assertEqual(c.get("/api/rent3/pool/landing", headers=self.NOAUTH).status_code, 200)
+        for page in ("", "index.html", "manual.html", "pool.html"):
+            self.assertEqual(c.get(f"/rent3/{page}", headers=self.NOAUTH).status_code, 200, page)
+
+
+    def test_37_proxy_headers_never_make_a_request_local(self):
+        """37. 프록시 뒤에서 X-Forwarded-For 를 127.0.0.1 로 위조해도 데모 로그인·가짜 인증이 열리지 않는다. 로그인 제한은 믿을 수 있는 프록시 단수에 따라 접속 주소를 고른다."""
+        import os
+        from apps.rent_dist._rent3_core.authz import client_ip, is_local_request
+        c = self.client
+        for env in ("RENT3_DEMO_LOGIN", "RENT3_FAKE_IDENTITY"):
+            os.environ.pop(env, None)
+        # 로컬 직접 접속: 데모 허용
+        self.assertEqual(c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                                json={"login_mode": "account", "identifier": "chic", "password": "1212"}).status_code, 200)
+        # 같은 요청에 프록시 흔적 헤더가 있으면(위조 포함) 로컬이 아니다 → 거부
+        for h in ({"X-Forwarded-For": "127.0.0.1"}, {"X-Real-IP": "127.0.0.1"}, {"Forwarded": "for=127.0.0.1"}):
+            r = c.post("/api/rent3/pool/auth/login", headers={**self.NOAUTH, **h},
+                       json={"login_mode": "account", "identifier": "admin", "password": "1212"})
+            self.assertEqual(r.status_code, 401, h)
+        self.assertEqual(c.get("/api/rent3/pool/landing", headers={**self.NOAUTH, "X-Forwarded-For": "127.0.0.1"}).json()["demo_accounts"], [])
+
+        from typing import Any
+        class Req:
+            def __init__(self, headers, host="10.0.0.5"):
+                self.headers, self.client = headers, type("C", (), {"host": host})()
+        mk_req: Any = Req
+        self.assertFalse(is_local_request(mk_req({"x-forwarded-for": "1.2.3.4"}, "127.0.0.1")))
+        self.assertTrue(is_local_request(mk_req({}, "127.0.0.1")))
+        os.environ["RENT3_TRUSTED_PROXY_HOPS"] = "1"
+        try:
+            self.assertEqual(client_ip(mk_req({"x-forwarded-for": "6.6.6.6, 203.0.113.9"})), "203.0.113.9")   # 믿을 수 있는 프록시가 덧붙인 값
+            self.assertEqual(client_ip(mk_req({})), "10.0.0.5")
+        finally:
+            os.environ.pop("RENT3_TRUSTED_PROXY_HOPS", None)
+        self.assertEqual(client_ip(mk_req({"x-forwarded-for": "6.6.6.6"})), "10.0.0.5")                       # 기본은 소켓 주소만
+
+
+    def test_38_deploy_check_script(self):
+        """38. 배포 점검 스크립트: 올바른 운영 설정이면 통과(0), 시연용 설정·평문 비밀번호·평문 민감 필드가 있으면 실패(1)."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Lessor, Room, ensure_pool_seeded, use_pool_dir
+        script = os.path.join(ROOT, "scripts", "deploy_check.py")
+        base = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "MASTER_CRYPTO", "RENT2_", "GEMINI"))}
+        base.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+
+        def run(extra, pool):
+            r = subprocess.run([sys.executable, script], env={**base, **extra, "RENT3_POOL_DIR": pool}, capture_output=True, text=True, encoding="utf-8")
+            return r.returncode, r.stdout
+
+        good = {"BASS_SECRET": "s" * 32, "BASS_SEED_PASSWORD": "Seed#Pass99", "RENT3_DEMO_LOGIN": "0", "MASTER_CRYPTO_KEY": "m" * 32,
+                "RENT3_IDENTITY_PROVIDER": "sms", "RENT3_SMS_SENDER": "solapi", "RENT3_SMS_API_KEY": "k", "RENT3_SMS_API_SECRET": "x",
+                "RENT3_SMS_FROM": "0212345678", "RENT3_TRUSTED_PROXY_HOPS": "1", "GEMINI_API_KEY": "g", "RENT3_ALLOW_POOL_IN_APP": "1"}
+        pool_dir = tempfile.mkdtemp(prefix="rent3_chk_")
+        keep = self.temp_pool
+        orig_master = os.environ.get("MASTER_CRYPTO_KEY")   # 개발 PC·서버에 이미 있을 수 있다 — 끝나면 되돌린다
+        try:
+            os.environ["MASTER_CRYPTO_KEY"] = good["MASTER_CRYPTO_KEY"]
+            use_pool_dir(pool_dir)
+            ensure_pool_seeded(force=True)           # 암호화 키가 있는 상태로 시드 → 민감 필드 암호화, 비밀번호는 평문이 없도록 비운다
+            from apps.rent_dist._rent3_core import Admin, Tenant
+            for cls in (Admin, Lessor, Tenant):
+                for o in cls.all():
+                    o.password = ""; o.save("t")
+            code, out = run(good, pool_dir)
+            self.assertEqual(code, 0, out)
+            self.assertNotIn("m" * 32, out)          # 비밀 값은 출력하지 않는다
+            # 시연용 설정·가짜 인증·날짜 고정은 실패
+            for bad in ({"RENT3_DEMO_LOGIN": "1"}, {"RENT3_FAKE_IDENTITY": "1"}, {"RENT3_TODAY": "2026-01-01"}, {"BASS_SECRET": ""}):
+                code, out = run({**good, **bad}, pool_dir)
+                self.assertEqual(code, 1, (bad, out))
+            # 평문 비밀번호가 남아 있으면 실패
+            Lessor(username="plainpw", name="평문", phone="010-4444-7001", branch="plainb", password="Plain#Pass9").save("t")
+            code, out = run(good, pool_dir)
+            self.assertEqual(code, 1)
+            self.assertIn("평문 비밀번호", out)
+        finally:
+            if orig_master is None:
+                os.environ.pop("MASTER_CRYPTO_KEY", None)
+            else:
+                os.environ["MASTER_CRYPTO_KEY"] = orig_master
+            use_pool_dir(keep)
+            shutil.rmtree(pool_dir, ignore_errors=True)
+
+
+    def test_39_e2e_pair_harness(self):
+        """39. 공동 계약 시험 도구(scripts/e2e_pair): 차례가 아니면 거부하고, 자동 통과 19단계와 공격 시험 21항목이 모두 통과한다."""
+        import socket, subprocess, tempfile, time as _t, urllib.request
+        runtime = tempfile.mkdtemp(prefix="e2e_pair_")
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "RENT2_"))}
+        env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "E2E_RUNTIME": runtime, "E2E_BASE": f"http://127.0.0.1:{port}",
+                    "E2E_STATE": os.path.join(runtime, "state.json")})
+        script = lambda n: os.path.join(ROOT, "scripts", "e2e_pair", n)
+        srv = subprocess.Popen([sys.executable, script("server.py"), "--fresh", "--port", str(port)], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(60):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2)
+                    break
+                except Exception:
+                    _t.sleep(0.5)
+            else:
+                self.fail("시험 서버가 뜨지 않았습니다")
+            run = lambda *a: subprocess.run([sys.executable, script("play.py"), *a], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(run("reset").returncode, 0)
+            out_of_turn = run("tenant", "signup")
+            self.assertEqual(out_of_turn.returncode, 2)
+            self.assertIn("차례가 아닙니다", out_of_turn.stdout)
+            self.assertEqual(run("lessor", "fly").returncode, 2)
+            first = run("lessor", "prepare")
+            self.assertEqual(first.returncode, 0, first.stdout)
+            self.assertIn("다음 차례: [tenant]", first.stdout)
+            auto = run("auto")
+            self.assertEqual(auto.returncode, 0, auto.stdout + auto.stderr)
+            self.assertIn("전체 19단계 성공", auto.stdout)
+            attack = run("attack")
+            self.assertEqual(attack.returncode, 0, attack.stdout + attack.stderr)
+            import re as _re
+            m = _re.search(r"결과: (\d+)/(\d+) 항목이 기대대로 막혔습니다", attack.stdout)
+            self.assertTrue(m and m.group(1) == m.group(2) and int(m.group(2)) >= 38, attack.stdout[-400:])   # 기존 공격 + 등기부 차단 정책 항목
+            self.assertIn("[등기부 차단 정책]", attack.stdout)
+            # 두 AI 가 각자 한 줄(run)만 실행해도 번갈아 끝까지 진행된다 (임차인이 먼저 시작해도 기다린다)
+            self.assertEqual(run("reset").returncode, 0)
+            procs = {r: subprocess.Popen([sys.executable, script("play.py"), "run", r, "--timeout", "120"], env=env,
+                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8") for r in ("tenant", "lessor")}
+            outs = {r: p.communicate(timeout=180)[0] for r, p in procs.items()}
+            for r, p in procs.items():
+                self.assertEqual(p.returncode, 0, f"{r}: {outs[r]}")
+            self.assertIn("모든 단계가 끝났습니다", outs["lessor"])
+            self.assertEqual(run("status").stdout.count("모든 단계"), 1)
+            # 상대가 오지 않으면 시간 안에 멈추고 종료 코드 3
+            self.assertEqual(run("reset").returncode, 0)
+            lonely = subprocess.run([sys.executable, script("play.py"), "run", "tenant", "--timeout", "3"], env=env, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(lonely.returncode, 3, lonely.stdout)
+        finally:
+            srv.terminate()
+            try:
+                srv.wait(timeout=10)
+            except Exception:
+                srv.kill()
+            shutil.rmtree(runtime, ignore_errors=True)
+
+
+    def test_40_e2e_failure_scenarios(self):
+        """40. 실패 시나리오 시험(scripts/e2e_pair fail): 무응답 자동 해제, 체결 직전·잔금일 등기부 변동, 당사자 취소와 사유 전파, 불일치 확인 기록."""
+        import socket, subprocess, tempfile, time as _t, urllib.request
+        runtime = tempfile.mkdtemp(prefix="e2e_fail_")
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0))
+            port = sk.getsockname()[1]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("RENT3_", "BASS_", "RENT2_"))}
+        env.update({"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "E2E_RUNTIME": runtime, "E2E_BASE": f"http://127.0.0.1:{port}",
+                    "E2E_STATE": os.path.join(runtime, "state.json")})
+        script = lambda n: os.path.join(ROOT, "scripts", "e2e_pair", n)
+        srv = subprocess.Popen([sys.executable, script("server.py"), "--fresh", "--port", str(port), "--idle-seconds", "6"], env=env,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            for _ in range(60):
+                try:
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=2)
+                    break
+                except Exception:
+                    _t.sleep(0.5)
+            else:
+                self.fail("시험 서버가 뜨지 않았습니다")
+            r = subprocess.run([sys.executable, script("play.py"), "fail"], env=env, capture_output=True, text=True, encoding="utf-8", timeout=240)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            import re as _re
+            m = _re.search(r"결과: (\d+)/(\d+) 항목 통과", r.stdout)
+            self.assertTrue(m and m.group(1) == m.group(2) and int(m.group(2)) >= 30, r.stdout[-400:])
+            self.assertNotIn("건너뜀", r.stdout)
+        finally:
+            srv.terminate()
+            try:
+                srv.wait(timeout=10)
+            except Exception:
+                srv.kill()
+            shutil.rmtree(runtime, ignore_errors=True)
+
+
+    def _policy_session(self, room_no, deposit, rent, lessor_mortgage=0):
+        """정책 시험용: 호실을 만들고 계약을 연결해 임대인 등기부 제시까지 마친 세션 id 를 돌려준다."""
+        c, base = self.client, "/api/rent3_contract"
+        c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})   # 시험 호실이 쌓여 가맹점당 한도(30실)에 걸리지 않게
+        mk = c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room_no, "is_published": True, "deposit": deposit, "monthly_rent": rent})
+        self.assertEqual(mk.status_code, 200, mk.text)
+        made = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": room_no, "mode": "NEW",
+                                                    "tenant_name": "정책시험", "tenant_phone": "010-5555-9" + room_no[-3:]})
+        self.assertEqual(made.status_code, 200, made.text)
+        sid = made.json()["session"]["id"]
+        c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": "정책시험", "responder_phone": "010-5555-9" + room_no[-3:]})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True,
+                                                    "registry_updates": {"owner_name": "김종심", "mortgage_amount": lessor_mortgage}})
+        return sid
+
+    def _reg(self, sid, **kw):
+        d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김종심", "mortgage_amount": 0,
+             "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
+        d.update(kw)
+        return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": d})
+
+    def test_41_registry_block_policy(self):
+        """41. 등기부 차단 정책: 소유자 불일치·압류는 절대 차단(즉시 중단), 전세·고액+근저당은 보증보험 또는 말소 특약 필요, 소액 월세+근저당은 강한 위험 확인."""
+        c, base = self.client, "/api/rent3_contract"
+
+        # (a) 소유자 불일치: 확인 체크를 해도 계약이 즉시 중단된다
+        sid = self._policy_session("931", 80000000, 450000)
+        r = self._reg(sid, owner_name="박사기", mismatch_ack=True, low_deposit_risk_ack=True)
+        self.assertEqual(r.status_code, 409)
+        ss = c.get(f"{base}/sessions/{sid}").json()["session"]
+        self.assertEqual(ss["status"], "CANCELLED")
+        self.assertIn("소유자", ss["cancel_reason"])
+        self.assertTrue(ss["tenant_registry"]["blocked"])                      # 임차인이 본 값이 근거로 남는다
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True}).status_code, 409)
+
+        # (b) 압류·신탁 등 있음: 역시 절대 차단
+        sid = self._policy_session("932", 80000000, 450000)
+        self.assertEqual(self._reg(sid, seizure_or_trust="있음", mismatch_ack=True).status_code, 409)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["status"], "CANCELLED")
+
+        # (c) 소액 월세(보증금 2천만 이하) + 선순위 근저당: 강한 위험 확인이 있어야만 진행
+        sid = self._policy_session("933", 10000000, 450000, lessor_mortgage=500000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000).status_code, 400)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000, low_deposit_risk_ack=True).status_code, 200)
+        # 2천만 원 초과 월세(보증금 3천만)는 이 확인이 필요 없다
+        sid = self._policy_session("934", 30000000, 450000, lessor_mortgage=500000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=500000000).status_code, 200)
+
+        # (d) 전세 + 선순위 근저당 + 보증보험 '가입 안 함' + 말소 특약 없음 → 합의·서명 차단
+        sid = self._policy_session("935", 100000000, 0, lessor_mortgage=300000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 안 함").status_code, 200)
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        blocked = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev})
+        self.assertEqual(blocked.status_code, 400)
+        self.assertIn("근저당", blocked.json()["message"])
+        # 고액 월세(보증금 6천만)도 같다
+        sid_hi = self._policy_session("936", 60000000, 400000, lessor_mortgage=200000000)
+        self._reg(sid_hi, mortgage_amount=200000000, guarantee_status="가입 안 함")
+        rev_hi = c.get(f"{base}/sessions/{sid_hi}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_hi}/step3/agree", json={"role": "tenant", "expected_revision": rev_hi}).status_code, 400)
+        # 고액인데 근저당이 없으면 막지 않는다
+        sid_ok = self._policy_session("937", 100000000, 0, lessor_mortgage=0)
+        self._reg(sid_ok)
+        rev_ok = c.get(f"{base}/sessions/{sid_ok}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_ok}/step3/agree", json={"role": "lessor", "expected_revision": rev_ok}).status_code, 200)
+
+        # (e) 말소 특약을 넣으면 풀리고, 특약 문구가 특약사항에 들어간다 — 해제하면 문구가 빠진다
+        on = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": True}}).json()["session"]
+        self.assertIn("전액 말소", on["terms"]["special_terms"])
+        rev = on["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev}).status_code, 200)
+        off = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": False}}).json()["session"]
+        self.assertNotIn("전액 말소", off["terms"]["special_terms"])
+        c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"mortgage_cleanup_clause": True}})
+
+        # (f) 보증보험 '가입 완료'면 말소 특약 없이도 진행된다
+        sid_ins = self._policy_session("938", 100000000, 0, lessor_mortgage=300000000)
+        self._reg(sid_ins, mortgage_amount=300000000, guarantee_status="가입 완료")
+        rev_ins = c.get(f"{base}/sessions/{sid_ins}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid_ins}/step3/agree", json={"role": "lessor", "expected_revision": rev_ins}).status_code, 200)
+
+        # (g) 말소 특약 계약은 잔금일에 근저당 말소가 확인돼야 도어락이 교부된다 (끝까지 진행)
+        sid = sid  # 말소 특약이 들어간 (d) 세션
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "lessor"})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev}).status_code, 200)
+        self._tenant_recheck_ok(sid)
+        done = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        self.assertEqual(done.status_code, 200, done.text)
+        ct = done.json()["contract"]
+        self.assertTrue(ct["mortgage_cleanup_required"])
+        tid = ct["id_tenant"]
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
+        self.assertEqual(c.post(chk, json={"changed": False}).status_code, 400)                          # 말소 확인 없이는 기록 불가
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)
+        self.assertEqual(c.post(chk, json={"changed": False, "mortgage_cleared": True}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
+
+
+    def test_42_insurance_pending_allowed_with_auto_refusal_clause(self):
+        """42. 보증보험 '가입 예정'은 허용하되, '가입 거절 시 계약 무효·계약금 전액 반환' 특약이 자동 필수 삽입되고 지워도 다시 들어간다."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("941", 100000000, 0, lessor_mortgage=300000000)
+        r = self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 예정")
+        self.assertEqual(r.status_code, 200, r.text)
+        sp = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]["special_terms"]
+        self.assertIn("가입이 거절되면 이 계약은 무효", sp)                      # 자동 삽입
+        self.assertIn("계약금 전액을 즉시 반환", sp)
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor", "expected_revision": rev}).status_code, 200)  # 근저당이 있어도 합의 가능
+
+        # 임대인이 특약사항 본문에서 지워도 다시 들어간다 (필수)
+        edited = c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": {"special_terms": "1. 반려동물 불가"}}).json()["session"]["terms"]["special_terms"]
+        self.assertIn("반려동물 불가", edited)
+        self.assertIn("가입이 거절되면 이 계약은 무효", edited)
+
+        # 임차인이 '가입 안 함'으로 바꾸면 특약이 빠지고 진행이 막힌다
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 안 함").status_code, 200)
+        t2 = c.get(f"{base}/sessions/{sid}").json()["session"]
+        self.assertNotIn("가입이 거절되면 이 계약은 무효", t2["terms"]["special_terms"])
+        blocked = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "tenant", "expected_revision": t2["revision"]})
+        self.assertEqual(blocked.status_code, 400)
+
+        # 근저당이 없거나 보증금이 작은 월세는 특약을 넣지 않는다
+        small = self._policy_session("942", 30000000, 450000, lessor_mortgage=0)
+        self._reg(small, guarantee_status="가입 예정")
+        self.assertNotIn("가입이 거절되면 이 계약은 무효", c.get(f"{base}/sessions/{small}").json()["session"]["terms"]["special_terms"])
+
+
+    def test_43_frontends_do_not_call_staff_only_apis_as_tenant(self):
+        """43. 회귀 방지: 임차인 마이홈 화면이 직원 전용 API(/tenants)를 세입자 본인 로그인으로 부르면 화면이 비어 버린다(실제로 있었던 사고). 관리자용 세입자 선택기는 관리인 앱 한 곳으로 모았으므로 임차인 앱에는 전체 세입자 목록 호출·선택기가 없다."""
+        src = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        for gone in ("loadTenants", "tenantList", "tenantSel", '"/tenants"'):
+            self.assertNotIn(gone, src, gone)
+        # 서버 쪽 약속: 임차인 토큰으로 /tenants 는 403, 본인 마이홈은 200
+        reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "prospect", "name": "마이홈본인", "phone": "01066661201", "password": "Pw123456"}).json()
+        th = self._as(reg["token"])
+        self.assertEqual(self.client.get("/api/rent3_tenant/tenants", headers=th).status_code, 403)
+        self.assertEqual(self.client.get(f"/api/rent3_tenant/myhome/{reg['user']['id']}", headers=th).status_code, 200)
+
+    def test_44_insurance_pending_requires_proof_before_keys(self):
+        """44. '보증보험 가입 예정'으로 계약하면 잔금일 전에 증빙(보증기관·증권번호)을 제출해야 도어락이 교부된다."""
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("945", 100000000, 0, lessor_mortgage=300000000)
+        self.assertEqual(self._reg(sid, mortgage_amount=300000000, guarantee_status="가입 예정").status_code, 200)
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "lessor"})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
+        c.post(f"{base}/sessions/{sid}/step2", json={"role": "tenant"})
+        rev = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        for role in ("lessor", "tenant"):
+            c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": role, "expected_revision": rev})
+        for role in ("lessor", "tenant"):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/step4/sign", json={"role": role, "signature": role, "expected_revision": rev}).status_code, 200)
+        self._tenant_recheck_ok(sid)
+        done = c.post(f"{base}/sessions/{sid}/step5/complete", json={"payment_method": "TRANSFER", "own_account_checked": True})
+        self.assertEqual(done.status_code, 200, done.text)
+        ct = done.json()["contract"]
+        self.assertTrue(ct["insurance_proof_required"])
+        tid = ct["id_tenant"]
+        chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
+        prf = f"/api/rent3_tenant/myhome/{tid}/insurance-proof"
+        rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
+        self.assertEqual(c.post(chk, json={"changed": False}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)       # 증빙 없이는 교부 불가
+        self.assertEqual(c.post(prf, json={"issuer": "H", "policy_no": "1"}).status_code, 400)  # 너무 짧은 값
+        self.assertEqual(c.post(prf, json={"issuer": "HUG", "policy_no": "2026-123456"}).status_code, 200)
+        self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
+
+        # '가입 완료'로 계약하면 증빙 절차가 없다
+        sid2 = self._policy_session("946", 100000000, 0, lessor_mortgage=300000000)
+        self._reg(sid2, mortgage_amount=300000000, guarantee_status="가입 완료")
+        self.assertFalse(c.get(f"{base}/sessions/{sid2}").json()["session"]["terms"].get("insurance_proof_required", False))
+
+    def test_45_fresh_pool_tool_builds_real_data_only(self):
+        """45. scripts/fresh_pool.py: 시험용 시드(chic/1212·샘플 계약·수납) 없이 설정한 임대인·건물·호실만 만들고, 기존 폴더는 --wipe 로 백업한다."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Building, Lessor, Pay, Room, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="fresh_pool_")
+        keep = self.temp_pool
+        try:
+            cfg = {"admin": {"username": "admin"}, "lessors": [{
+                "username": "freshlessor", "password": "Fresh#Pass99", "name": "신규임대인", "phone": "01055550001", "branch": "fresh",
+                "building": {"name": "신규빌", "address": "인천 서해구 석남동 1-1", "rooms": [{"room_no": "101", "deposit": 3000000, "monthly_rent": 300000}], "rooms_csv": "r.csv"}}]}
+            open(os.path.join(work, "r.csv"), "w", encoding="utf-8").write("room_no,deposit,monthly_rent,maintenance_fee,pay_timing\n102,5000000,290000,100000,선불\n")
+            cfgp = os.path.join(work, "c.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            pool_dir = os.path.join(work, "pool")
+            script = os.path.join(ROOT, "scripts", "fresh_pool.py")
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            run = lambda *extra: subprocess.run([sys.executable, script, "--config", cfgp, "--pool-dir", pool_dir, *extra], capture_output=True, text=True, encoding="utf-8", env=env)
+            r = run(); self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotEqual(run().returncode, 0)                 # 데이터가 있으면 --wipe 없이는 거부
+            r = run("--wipe"); self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertTrue([d for d in os.listdir(work) if d.startswith("pool.bak-")])   # 기존 폴더는 백업으로 남는다
+            use_pool_dir(pool_dir)
+            self.assertIsNone(Lessor.first(username="chic"))         # 시험용 계정 없음
+            self.assertEqual(Tenant.count(), 0); self.assertEqual(Pay.count(), 0)
+            self.assertEqual(sorted(x.room_no for x in Room.all()), ["101", "102"])
+            ls = Lessor.first(username="freshlessor")
+            assert ls is not None
+            self.assertTrue(ls.password.startswith("pbkdf2") or ls.password != "Fresh#Pass99")   # 해시 저장
+            b_fresh = Building.first(branch="fresh")
+            assert b_fresh is not None
+            self.assertEqual(b_fresh.address, "인천 서해구 석남동 1-1")
+            ok = self.client.post("/api/rent3/pool/auth/login", headers={"Authorization": ""}, json={"login_mode": "account", "identifier": "freshlessor", "password": "Fresh#Pass99"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            bad = self.client.post("/api/rent3/pool/auth/login", headers={"Authorization": ""}, json={"login_mode": "account", "identifier": "freshlessor", "password": "Wrong#Pass99"})
+            self.assertEqual(bad.status_code, 401)
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
+    def test_46_ledger_import_from_paper_ledgers(self):
+        """46. scripts/ledger_import.py: 종이 장부 CSV → 세입자·계약(만기=입주일+1년 자동연장)·월별 수납. 장부의 미수·완납 처리·정정값이 원장과 맞는다."""
+        import subprocess, tempfile
+        from apps.rent_dist._rent3_core import Contract, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="ledger_imp_")
+        keep = self.temp_pool
+        try:
+            sin = ("호실,성명,입주일,보증금(만원),월세(만원),관리비(만원),입금액,전화,타명/연락처 메모,미수,납부일,비고(키)\n"
+                   "101,가나다,2026-05-24,200,후불 25,8,,010-1111-2222,,,24,1907\n"
+                   "103,라마바,2023-12-31,200,후불 28,5,,010-3333-4444 / 부인 010-5555-6666,부인,231,,1234\n"
+                   "404,사아자,2017-04-14,300,선불 32,3,,010-7777-8888,,35,,0000\n")
+            sun = ("호실,성명,전화번호,입주일,보증금(만원),월세(만원),1월 납부,2월 납부,3월 납부,4월 납부,5월 납부,6월 납부,7월 납부,8월 납부,9월 납부,10월 납부,11월 납부\n"
+                   "201,차카타,8856-4915,2021-02-01,500,50,2/2,3/3,4/11,5/2,8/2,7/6,8/24,9/24,10/4,,\n"
+                   "404,파하갑,5349-2190,2020-05-14,500,60,3/31,////,,,,,,,,,\n")
+            open(os.path.join(work, "sin.csv"), "w", encoding="utf-8").write(sin)
+            open(os.path.join(work, "sun.csv"), "w", encoding="utf-8").write(sun)
+            cfg = {"lessors": [
+                {"username": "lsin", "password": "Sinbi#Pass99", "name": "신비", "phone": "01011110001", "branch": "ls1",
+                 "building": {"name": "가빌", "address": "a", "ledger": {"format": "sinbi", "csv": "sin.csv"}}},
+                {"username": "lsun", "password": "Sunho#Pass99", "name": "선호", "phone": "01011110002", "branch": "ls2",
+                 "building": {"name": "나빌", "address": "b", "ledger": {"format": "sunho", "csv": "sun.csv", "overrides": {"404": {"settle_through": "2026-10", "deposit": 1000}}}}}]}
+            cfgp = os.path.join(work, "c.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            pool_dir = os.path.join(work, "pool")
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "fresh_pool.py"), "--config", cfgp, "--pool-dir", pool_dir],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            use_pool_dir(pool_dir)
+            g = lambda cid: Contract.require(cid)
+            c103 = g("ct_ls1_103")
+            self.assertEqual(c103.ledger(up_to_ym="2026-10")["total_unpaid"], 2_310_000)          # 장부의 미수 231만 원 = 7개월
+            self.assertEqual(c103.ledger(up_to_ym="2026-10")["oldest_unpaid_ym"], "2026-04")
+            self.assertEqual(g("ct_ls1_404").ledger(up_to_ym="2026-10")["total_unpaid"], 350_000)  # 미수 35
+            self.assertEqual(g("ct_ls1_101").ledger(up_to_ym="2026-10")["total_unpaid"], 0)       # 10월분 납부
+            self.assertEqual(g("ct_ls1_101").expiry_date, "2027-05-24")                          # 입주일 + 1년
+            self.assertEqual(c103.expiry_date, "2026-12-31")                                      # 3년째 만기가 오늘 이후
+            self.assertEqual(g("ct_ls2_404").deposit, 10_000_000)                                  # 정정값
+            self.assertEqual(g("ct_ls2_404").ledger(up_to_ym="2026-10")["total_unpaid"], 0)       # 완납 처리
+            self.assertEqual(g("ct_ls2_201").ledger(up_to_ym="2026-09")["total_unpaid"], 0)       # 9월분을 10/4 납부(후불)
+            self.assertEqual(Tenant.require("tenant_ls2_201").phone, "010-8856-4915")                 # 8자리 번호에 010 보정
+            self.assertNotEqual(Tenant.require("tenant_ls2_201").password, "1212")                    # 기본 비밀번호 1212 로는 로그인 불가
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
+    def test_47_chic_ledger_two_year_blocks(self):
+        """47. 시크빌형 장부(2025·2026 두 덩어리): 공실·전입 표시로 새 세입자 입주일을 잡고, 이전 세입자 입금은 버리며, 날짜가 이상한 칸은 금액이 있으면 입금으로 센다."""
+        import csv as _csv, io, subprocess, tempfile
+        from apps.rent_dist._rent3_core import Contract, Tenant, use_pool_dir
+        work = tempfile.mkdtemp(prefix="chic_ledger_")
+        keep = self.temp_pool
+        try:
+            def room(no, name, move, rent, fee, cells2025, cells2026, deposit="5,000,000", kind="월세"):
+                def block(cells):
+                    row = []
+                    for c in (cells + [""] * 12)[:12]:
+                        row += [c, ("%s" % format(rent, ",")) if c and "공실" not in c else "", ("%s" % format(fee, ",")) if c and "공실" not in c else ""]
+                    return row
+                head = [no, name, "******", "010-1000-%04d" % int(no), move, "", kind, "후불", deposit]
+                return head + block(cells2025), head + block(cells2026)
+            r1a, r1b = room("101", "가나", "2025. 6. 4", 150000, 100000, ["2. 3", "공실", "공실", "공실", "공실", "전입6/3", "7. 3", "8. 3", "9. 2", "10. 3", "11. 3", "12. 3"], ["1. 3", "2. 3", "3. 3", "4. 3", "5. 3", "6. 3", "7. 2", "8. 3", "9. 2"])
+            r2a, r2b = room("201", "다라", "2022. 3. 19", 290000, 150000, ["1. 15", "2. 19", "3. 27", "4. 23", "5. 26", "6. 25", "7. 27", "8. 29", "9. 15", "10. 23", "11. 21", "11.25"], ["1. 22", "2. 23", "3. 13", "4. 19", "5. 15", "6. 17", "7. 20", "8. 21", "9. 18", "10. 21"])
+            buf = io.StringIO(); w = _csv.writer(buf)
+            for yr, (x, y) in ((2025, (r1a, r2a)), (2026, (r1b, r2b))):
+                w.writerow(["%d년도" % yr]); w.writerow(["호실", "세입자명"]); w.writerow([""])
+                w.writerow(x); w.writerow(y); w.writerow(["701", "주인세대"])
+            open(os.path.join(work, "c.csv"), "w", encoding="utf-8").write(buf.getvalue())
+            cfg = {"lessors": [{"username": "lchic", "password": "Chic#Pass999", "name": "시크", "phone": "01011110003", "branch": "ch",
+                                "building": {"name": "시크빌", "address": "c", "ledger": {"format": "chic", "csv": "c.csv"}}}]}
+            cfgp = os.path.join(work, "c.json"); json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "fresh_pool.py"), "--config", cfgp, "--pool-dir", os.path.join(work, "pool")],
+                               capture_output=True, text=True, encoding="utf-8", env=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            use_pool_dir(os.path.join(work, "pool"))
+            c1, c2 = Contract.require("ct_ch_101"), Contract.require("ct_ch_201")
+            self.assertEqual(c1.move_in_date, "2025-06-04")                  # '전입6/3' 표시 달의 전입일 칸 날짜
+            self.assertEqual(c1.expiry_date, "2027-06-04")                   # 계약일 + 1년 자동 연장
+            self.assertEqual(c1.ledger(up_to_ym="2026-09")["total_unpaid"], 0)   # 이전 세입자의 1·2월 입금은 버리고 6월 이후 낸 것만 센다
+            self.assertEqual(c1.ledger(up_to_ym="2026-10")["total_unpaid"], 250_000)  # 10월칸 비어 있음 = 미납
+            self.assertEqual(c2.ledger(up_to_ym="2026-10")["total_unpaid"], 0)    # 2025-12 칸 '11.25'(이상한 날짜)도 금액이 있어 입금으로 센다
+            self.assertIsNone(Tenant.get("tenant_ch_701"))                       # 주인세대는 임대 대상이 아님
+        finally:
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+
+    def test_48_bootstrap_from_config_only_when_empty(self):
+        """48. RENT3_DEMO_SEED=0 + RENT3_BOOTSTRAP_CONFIG: 비어 있는 Data Pool 은 설정 파일로 한 번 채워지고, 이미 데이터가 있으면 덮어쓰지 않는다."""
+        import tempfile
+        from apps.rent_dist._rent3_core import Building, Lessor, ensure_pool_seeded, use_pool_dir
+        work = tempfile.mkdtemp(prefix="bootstrap_")
+        keep = self.temp_pool
+        saved = {k: os.environ.get(k) for k in ("RENT3_DEMO_SEED", "RENT3_BOOTSTRAP_CONFIG")}
+        try:
+            cfg = {"lessors": [{"username": "bootlessor", "password": "Boot#Pass999", "name": "부트", "phone": "01055550009", "branch": "bt",
+                                "building": {"name": "부트빌", "address": "x", "rooms": [{"room_no": "101", "deposit": 1000000, "monthly_rent": 100000}]}}]}
+            cfgp = os.path.join(work, "boot.json")
+            json.dump(cfg, open(cfgp, "w", encoding="utf-8"), ensure_ascii=False)
+            os.environ["RENT3_DEMO_SEED"] = "0"
+            os.environ["RENT3_BOOTSTRAP_CONFIG"] = cfgp
+            use_pool_dir(os.path.join(work, "pool"))
+            ensure_pool_seeded()
+            b_bt = Building.first(branch="bt")
+            assert b_bt is not None
+            self.assertEqual(b_bt.building_name, "부트빌")
+            self.assertIsNotNone(Lessor.first(username="bootlessor"))
+            self.assertIsNone(Lessor.first(username="chic"))                  # 시험용 시드는 만들지 않는다
+            lessor = Lessor.first(username="bootlessor")
+            assert lessor is not None
+            lessor.name = "수정됨"; lessor.save("t")
+            ensure_pool_seeded()                                              # 두 번째 기동: 이미 있으므로 덮어쓰지 않는다
+            lessor2 = Lessor.first(username="bootlessor")
+            assert lessor2 is not None
+            self.assertEqual(lessor2.name, "수정됨")
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            use_pool_dir(keep)
+            shutil.rmtree(work, ignore_errors=True)
+
+    def test_49_edit_payment_and_contract(self):
+        """49. 수납 내역(납부일·월세·관리비)과 계약 내용(금액·만기·연락처·메모)을 고칠 수 있고, 다른 지점은 403."""
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        dash = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        card = next(r for r in dash["rooms"] if r.get("pays"))
+        self.assertTrue({"id", "paid_date", "billing_month", "rent", "fee", "total"} <= set(card["pays"][0]))
+        pay = card["pays"][0]
+        body = {"branch": "main", "pay_id": pay["id"], "paid_date": "2026-03-07", "rent_amount": 300000, "maintenance_amount": 20000}
+        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=sunho, json=body).status_code, 403)
+        r = c.post("/api/rent3_lessor/payments/edit", headers=chic, json=body)
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(Pay.require(pay["id"]).total_amount, 320000 + Pay.require(pay["id"]).vat_amount)
+        self.assertEqual(Pay.require(pay["id"]).paid_date, "2026-03-07")
+        self.assertEqual(c.post("/api/rent3_lessor/payments/edit", headers=chic, json={**body, "paid_date": "2026-13-45"}).status_code, 400)
+        ct = card["contract"]
+        cbody = {"branch": "main", "contract_id": ct["id"], "deposit": 6000000, "monthly_rent": 310000, "maintenance_fee": 55000,
+                 "move_in_date": ct["move_in_date"], "expiry_date": "2027-03-01", "tenant_phone": "010-1234-5678", "memo": "연락은 문자로"}
+        self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", headers=sunho, json=cbody).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", headers=chic, json=cbody).status_code, 200)
+        ct2 = Contract.require(ct["id"])
+        self.assertEqual((ct2.deposit, ct2.monthly_rent, ct2.expiry_date, ct2.lessor_memo), (6000000, 310000, "2027-03-01", "연락은 문자로"))
+        self.assertEqual(Room.require(ct2.id_room).monthly_rent, 310000)
+        bb = {"branch": "main", "building_name": "시크빌2", "address": "인천 새주소 1"}
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=sunho, json=bb).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json=bb).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_lessor/building/edit", headers=chic, json={**bb, "building_name": " "}).status_code, 400)
+        self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["building"]["address"], "인천 새주소 1")
+        # 부가세·종소세 자료 + 경비 등록·수정·삭제
+        yr = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()["today"][:4]
+        o = c.post("/api/rent3_lessor/outlays", headers=chic, json={"branch": "main", "category": "cleaning", "title": "202호 보일러 수리", "amount": 120000, "expense_date": f"{yr}-03-05"}).json()["outlay"]
+        ts = c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()
+        self.assertEqual(len(ts["vat_periods"]), 2)
+        self.assertTrue(any(x["id"] == o["id"] for x in ts["outlays"]))
+        eb = {"branch": "main", "outlay_id": o["id"], "category": "cleaning", "title": "202호 보일러 교체", "amount": 150000, "vendor": "한빛설비", "expense_date": f"{yr}-03-06"}
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=sunho, json=eb).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=chic, json=eb).status_code, 200)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/edit", headers=chic, json={**eb, "amount": 0}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/delete", headers=sunho, json={"branch": "main", "outlay_id": o["id"]}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/outlays/delete", headers=chic, json={"branch": "main", "outlay_id": o["id"]}).status_code, 200)
+        self.assertFalse(any(x["id"] == o["id"] for x in c.get(f"/api/rent3_lessor/tax/summary?branch=main&year={yr}", headers=chic).json()["outlays"]))
+
+    def test_50_vat_and_income_tax_rooms_tenant_biz_and_hometax_invoice_csv(self):
+        """50. 시크빌 부가세(201~303호)·종소세(201~703호) 대상 호실 리스트 저장·편집, 과세 호실 임차인 사업자 정보 입력, 매입세액 공제(수리비 vs 경조사비 불공제), 세금계산서 발행 대장 및 홈택스 일괄발급 CSV 검증."""
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+
+        # 1) 시크빌 기본 과세·종소세 대상 호실 리스트 확인
+        ts0 = c.get("/api/rent3_lessor/tax/summary?branch=main&year=2026", headers=chic).json()
+        b_cfg = ts0["building_tax_config"]
+        self.assertEqual(b_cfg["vat_rooms"], ["201", "202", "203", "301", "302", "303"])
+        self.assertEqual(
+            b_cfg["income_tax_rooms"],
+            [
+                "201", "202", "203",
+                "301", "302", "303",
+                "401", "402", "403",
+                "501", "502", "503",
+                "601", "602", "603",
+                "701", "702", "703",
+            ],
+        )
+
+        # 2) 다른 지점 임대인(sunho)은 시크빌 과세 호실 리스트나 사업자 정보를 수정할 수 없음 (403)
+        self.assertEqual(
+            c.post("/api/rent3_lessor/building/tax-rooms", headers=sunho, json={"branch": "main", "vat_rooms": ["201"]}).status_code,
+            403,
+        )
+        self.assertEqual(
+            c.post("/api/rent3_lessor/tax/tenant-biz", headers=sunho, json={"branch": "main", "room_no": "201", "business_number": "111-11-11111"}).status_code,
+            403,
+        )
+
+        # 3) 건물 과세·종소세 호실 리스트 편집 및 저장 검증 (따옴표가 섞여 들어와도 자동 제거)
+        r_upd = c.post(
+            "/api/rent3_lessor/building/tax-rooms",
+            headers=chic,
+            json={
+                "branch": "main",
+                "vat_rooms": '"201", "202", "203", "301", "302", "303"',
+                "income_tax_rooms": "201, 202, 203, 301, 302, 303, 401, 402, 403, 501, 502, 503, 601, 602, 603, 701, 702, 703",
+                "biz_company_name": "시크빌",
+                "sync_contracts": False,
+            },
+        )
+        self.assertEqual(r_upd.status_code, 200, r_upd.text)
+        bldg_disk = self._read_disk_json("buildings")
+        b_main = next(b for b in bldg_disk["items"] if b["branch"] == "main")
+        self.assertEqual(b_main["vat_rooms"], ["201", "202", "203", "301", "302", "303"])
+        self.assertEqual(len(b_main["income_tax_rooms"]), 18)
+
+        # 4) 계약 시(또는 계약 수정 시) 세입자가 세금계산서 발행을 요구한 호실만 사업자 정보 입력 (주거용 호실 기숙사 사용 포함)
+        r_tbiz = c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "201",
+                "business_number": "214-86-99887",
+                "company_name": "(주)시크디자인연구소",
+                "ceo_name": "이지훈",
+                "email": "tax@chicdesign.co.kr",
+                "vat_target": True,
+                "tax_invoice_requested": True,
+            },
+        )
+        self.assertEqual(r_tbiz.status_code, 200, r_tbiz.text)
+        self.assertEqual(r_tbiz.json()["contract"]["tenant_business_number"], "214-86-99887")
+        self.assertEqual(r_tbiz.json()["contract"]["tenant_company_name"], "(주)시크디자인연구소")
+        self.assertTrue(r_tbiz.json()["contract"]["tax_invoice_requested"])
+        self.assertEqual(r_tbiz.json()["tenant"]["business_number"], "214-86-99887")
+
+        # 주거용 호실(401호)을 등록하고 법인 기숙사로 계약할 때 세입자가 세금계산서 발행을 요청한 경우
+        c.post(
+            "/api/rent3_lessor/rooms",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "floor": 4,
+                "room_category": "주거용 원룸",
+                "vat_applicable": False,
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+            },
+        )
+        r_dorm = c.post(
+            "/api/rent3_lessor/contracts/broker-photo",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "photo_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                "photo_filename": "dorm_401.png",
+                "tenant_name": "김민지",
+                "tenant_phone": "010-5555-7777",
+                "lease_type": "월세",
+                "pay_timing": "후불",
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+                "contract_deposit": 500000,
+                "deposit_received": True,
+                "contract_date": "2026-10-01",
+                "move_in_date": "2026-10-01",
+                "lease_term_months": 12,
+                "tax_invoice_requested": True,
+                "tenant_business_number": "120-81-55555",
+                "tenant_company_name": "(주)한빛기숙사",
+                "tenant_ceo_name": "김민지",
+                "tenant_email": "dorm@hanbit.co.kr",
+            },
+        )
+        self.assertEqual(r_dorm.status_code, 200, r_dorm.text)
+        self.assertTrue(r_dorm.json()["contract"]["tax_invoice_requested"])
+
+        # 5) 경비 지출: 수리비(110,000원 -> 매입세액 10,000원 공제) vs 경조사비(100,000원 -> 매입세액 0원 불공제, 종소세만 반영)
+        r_rep = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "repair_maint",
+                "title": "301호 도어락 및 수전 교체",
+                "amount": 110000,
+                "vendor": "관악설비",
+                "expense_date": "2026-10-15",
+            },
+        ).json()["outlay"]
+        self.assertTrue(r_rep["is_vat_deductible"])
+        self.assertEqual(r_rep["input_vat"], 10000)
+
+        r_cong = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "congrat_condol",
+                "title": "입주사 대표 경조사 화환",
+                "amount": 100000,
+                "vendor": "사랑플라워",
+                "expense_date": "2026-10-16",
+            },
+        ).json()["outlay"]
+        self.assertFalse(r_cong["is_vat_deductible"])
+        self.assertEqual(r_cong["input_vat"], 0)
+
+        # 6) 세금계산서 발행 대장 조회(공실/미요청 호실은 제외되고 요청한 호실만 포함) 및 홈택스 일괄발급 CSV 다운로드 검증
+        reg = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
+        self.assertTrue(reg["success"])
+        vc_rooms = [v["room_no"] for v in reg["vat_room_contracts"]]
+        self.assertIn("201", vc_rooms)
+        self.assertIn("401", vc_rooms)
+        self.assertNotIn("202", vc_rooms)  # 세금계산서 발행을 요청하지 않은 호실은 제외
+        self.assertNotIn("203", vc_rooms)  # 공실 호실도 제외
+        vc_201 = next(v for v in reg["vat_room_contracts"] if v["room_no"] == "201")
+        self.assertTrue(vc_201["ready_for_invoice"])
+        self.assertEqual(vc_201["company_name"], "(주)시크디자인연구소")
+        self.assertGreaterEqual(reg["totals"]["count"], 1)
+        inv_201 = next(i for i in reg["invoices"] if i["room_no"] == "201")
+        self.assertTrue(inv_201["ready_for_hometax"])
+        self.assertEqual(inv_201["buyer_business_number_digits"], "2148699887")
+        self.assertEqual(inv_201["buyer_email"], "tax@chicdesign.co.kr")
+
+        r_csv = c.get("/api/rent3_lessor/tax/export-hometax-csv?branch=main&year=2026&month=10", headers=chic)
+        self.assertEqual(r_csv.status_code, 200)
+        self.assertIn("text/csv", r_csv.headers["content-type"])
+        csv_text = r_csv.content.decode("utf-8-sig")
+        self.assertIn("전자세금계산서종류(01:일반)", csv_text)
+        self.assertIn("2148699887", csv_text)
+        self.assertIn("(주)시크디자인연구소", csv_text)
+        self.assertIn("tax@chicdesign.co.kr", csv_text)
+
+        # 7) 부가세·종소세 호실별 산출내역 및 납부 상세내역 검증
+        ts_after = c.get("/api/rent3_lessor/tax/summary?branch=main&year=2026", headers=chic).json()["summary"]
+        self.assertTrue(len(ts_after["vat_room_breakdown"]) >= 1)
+        self.assertTrue(len(ts_after["income_tax_room_breakdown"]) >= 1)
+        self.assertTrue(len(ts_after["vat_payment_rows"]) >= 1)
+        self.assertTrue(len(ts_after["income_tax_payment_rows"]) >= 1)
+        r_tax_csv = c.get("/api/rent3_lessor/tax/export-csv?branch=main&year=2026", headers=chic)
+        self.assertEqual(r_tax_csv.status_code, 200)
+        self.assertIn("[호실별 임대수입 산출내역 (종합소득세 신고대상)]", r_tax_csv.content.decode("utf-8-sig"))
+
+    def test_51_claude_audit_tax_certificate_and_invoice_fixes(self):
+        """51. 세무·회계 감사 권고사항 종합 검증:
+        - 매입세액 과다공제 방지(간이과세자·간이영수증·주거전용 불공제 및 공통매입세액 과세공급비율 안분)
+        - 임차인 납부확인서 가짜 현금영수증 번호(CASH-...)·가짜 사업자번호(101-86-00000) 제거 및 관리비 제외 순수 월세 15%·17% 산출
+        - 세금계산서 청구월(약정 지급일) 기준 월 1건 집계, 대표자명 임차인명 자동대체 금지, 미비 건·기발행(ISSUED) 건 CSV 제외, 국세청 승인번호·이력 저장
+        - 장부이관 누적 이월 수납(:carry) 연간 수입 제외, 부가세 0원 건 임의 10% 추정 금지, 주택임대(분리과세 필요경비율) vs 상가임대(종합과세) 분리, 면세 사업장현황신고 CSV.
+        """
+        c = self.client
+        chic = self._login("chic")
+
+        # (1) 간이과세자 거래처 또는 주거전용 수리비는 부가세 매입세액 불공제(0원) 처리됨을 검증
+        o_simp = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "repair_maint",
+                "title": "간이과세 설비업체 수리",
+                "amount": 110000,
+                "vendor": "동네설비",
+                "vendor_tax_type": "SIMPLIFIED",
+                "evidence_type": "SIMPLE_RECEIPT",
+                "expense_date": "2026-10-18",
+            },
+        ).json()["outlay"]
+        self.assertFalse(o_simp["is_vat_deductible"])
+        self.assertEqual(o_simp["input_vat"], 0)
+
+        o_exempt_room = c.post(
+            "/api/rent3_lessor/outlays",
+            headers=chic,
+            json={
+                "branch": "main",
+                "category": "repair_maint",
+                "title": "주거용 501호 도배 수리",
+                "amount": 220000,
+                "vendor": "인테리어업체",
+                "vendor_tax_type": "GENERAL",
+                "evidence_type": "TAX_INVOICE",
+                "usage_scope": "EXEMPT_ONLY",
+                "expense_date": "2026-10-19",
+            },
+        ).json()["outlay"]
+        self.assertFalse(o_exempt_room["is_vat_deductible"])
+        self.assertEqual(o_exempt_room["input_vat"], 0)
+
+        # (2) 분할 입금(한 달에 2번 입금)이 들어와도 청구월(2026-10) 기준 월 1건으로 합산되고, 작성일자는 입금일이 아닌 약정 지급일(20261001)임
+        #     또한 대표자명을 비워둔 사업자 호실(401호)은 임차인 이름으로 자동 채우지 않고 미입력(ready_for_hometax=False)으로 분류해 CSV에서 제외
+        c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "201",
+                "business_number": "214-86-99887",
+                "company_name": "(주)시크디자인연구소",
+                "ceo_name": "이지훈",
+                "email": "tax@chicdesign.co.kr",
+                "vat_target": True,
+                "tax_invoice_requested": True,
+            },
+        )
+        c.post(
+            "/api/rent3_lessor/rooms",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "floor": 4,
+                "room_category": "주거용 원룸",
+                "vat_applicable": False,
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+            },
+        )
+        c.post(
+            "/api/rent3_lessor/contracts/broker-photo",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "photo_data_url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+                "photo_filename": "dorm_401.png",
+                "tenant_name": "김민지",
+                "tenant_phone": "010-5555-7777",
+                "lease_type": "월세",
+                "pay_timing": "후불",
+                "deposit": 5000000,
+                "monthly_rent": 450000,
+                "maintenance_fee": 50000,
+                "contract_deposit": 500000,
+                "deposit_received": True,
+                "contract_date": "2026-10-01",
+                "move_in_date": "2026-10-01",
+                "lease_term_months": 12,
+                "tax_invoice_requested": True,
+                "tenant_business_number": "120-81-55555",
+                "tenant_company_name": "(주)한빛기숙사",
+                "tenant_ceo_name": "김민지",
+                "tenant_email": "dorm@hanbit.co.kr",
+            },
+        )
+        Pay(
+            branch="main",
+            room_no="401",
+            payer_name="(주)한빛기숙사",
+            billing_month="2026-10",
+            paid_date="2026-10-05",
+            rent_amount=225000,
+            maintenance_amount=25000,
+            vat_amount=25000,
+            total_amount=275000,
+            payment_kind="MONTHLY_RENT",
+            idempotency_key="test51:401:split1",
+        ).save(action="test_split_1", app_source="test")
+        Pay(
+            branch="main",
+            room_no="401",
+            payer_name="(주)한빛기숙사",
+            billing_month="2026-10",
+            paid_date="2026-10-18",
+            rent_amount=225000,
+            maintenance_amount=25000,
+            vat_amount=25000,
+            total_amount=275000,
+            payment_kind="MONTHLY_RENT",
+            idempotency_key="test51:401:split2",
+        ).save(action="test_split_2", app_source="test")
+
+        c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "business_number": "120-81-55555",
+                "company_name": "(주)한빛기숙사",
+                "ceo_name": "",  # 대표자명 누락
+                "email": "dorm@hanbit.co.kr",
+                "vat_target": True,
+                "tax_invoice_requested": True,
+            },
+        )
+        reg = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
+        inv_401_list = [i for i in reg["invoices"] if i["room_no"] == "401"]
+        self.assertEqual(len(inv_401_list), 1)  # 2번 분할 입금되었어도 월 1장으로 집계
+        inv_401 = inv_401_list[0]
+        self.assertEqual(inv_401["payment_count"], 2)
+        self.assertEqual(inv_401["write_date"], "20261001")  # 입금일(10/05, 10/18)이 아닌 계약 약정 지급일(10/01)
+        self.assertEqual(inv_401["buyer_ceo_name"], "")
+        self.assertFalse(inv_401["ready_for_hometax"])
+        self.assertIn("대표자명", inv_401["missing_fields"])
+        self.assertIn("기숙사", inv_401["item_name"])  # 호실 용도에 맞춘 품목 문구
+
+        # CSV 내보내기 시 정보가 빠진 401호는 제외되고 정상인 201호만 포함됨
+        csv_before = c.get("/api/rent3_lessor/tax/export-hometax-csv?branch=main&year=2026&month=10", headers=chic).content.decode("utf-8-sig")
+        self.assertIn("2148699887", csv_before)
+        self.assertNotIn("1208155555", csv_before)
+
+        # (3) 201호 2026-10 귀속분을 발행완료(ISSUED) + 국세청 승인번호 기록 시 이후 CSV 다운로드에서 자동 제외(이중 발행 방지)
+        inv_201 = next(i for i in reg["invoices"] if i["room_no"] == "201")
+        r_st = c.post(
+            "/api/rent3_lessor/tax/invoices/status",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "201",
+                "billing_month": inv_201["billing_month"],
+                "status": "ISSUED",
+                "nts_confirm_no": "20261015-41000000-99887766",
+                "memo": "홈택스 발급 완료",
+                "write_date": inv_201["write_date"],
+                "supply_amount": inv_201["supply_amount"],
+                "tax_amount": inv_201["tax_amount"],
+            },
+        )
+        self.assertEqual(r_st.status_code, 200, r_st.text)
+        self.assertEqual(r_st.json()["record"]["status"], "ISSUED")
+        self.assertEqual(r_st.json()["record"]["nts_confirm_no"], "20261015-41000000-99887766")
+
+        csv_after_issue = c.get("/api/rent3_lessor/tax/export-hometax-csv?branch=main&year=2026&month=10", headers=chic).content.decode("utf-8-sig")
+        self.assertNotIn("2148699887", csv_after_issue)
+
+        # (4) 장부이관 이월 수납(:carry)은 당해 연도 총수입에서 제외되고 carryover_excluded_amount로 별도 집계됨
+        Pay(
+            branch="main",
+            room_no="202",
+            payer_name="김하늘",
+            billing_month="2024-05",
+            paid_date="2026-01-01",
+            rent_amount=50_000_000,
+            maintenance_amount=0,
+            vat_amount=0,
+            total_amount=50_000_000,
+            payment_kind="MONTHLY_RENT",
+            is_carryover=True,
+            idempotency_key="import:main:202:carry:test51",
+            raw_sms="장부 이전 입금 합산",
+        ).save(action="test_carryover", app_source="test")
+
+        ts_summary = c.get("/api/rent3_lessor/tax/summary?branch=main&year=2026", headers=chic).json()
+        fin = ts_summary["summary"]
+        self.assertGreaterEqual(fin["carryover_excluded_amount"], 50_000_000)
+        self.assertLess(fin["gross_revenue"], 50_000_000)
+        self.assertIn("참고용 추정치", ts_summary["tax_disclaimer"])
+        # 부가세 요약(vat_collected)과 과세 호실별 표의 부가세 합계가 정확히 일치함 (0원 건 10% 임의 추정 없음)
+        table_vat_sum = sum(r["vat_amount"] for r in fin["vat_room_breakdown"])
+        self.assertEqual(fin["vat_collected"], table_vat_sum)
+
+        # (5) 면세 주거용 임대 사업장현황신고 자료 및 CSV 다운로드 검증
+        self.assertIn("exempt_housing_report", ts_summary)
+        r_ex_csv = c.get("/api/rent3_lessor/tax/export-exempt-csv?branch=main&year=2026", headers=chic)
+        self.assertEqual(r_ex_csv.status_code, 200)
+        self.assertIn("사업장현황신고용 호실별 수입금액 검토표", r_ex_csv.content.decode("utf-8-sig"))
+
+        # (6) 임차인 납부확인서: 가짜 승인번호(CASH-...) 및 가짜 사업자번호(101-86-00000)가 없고, 관리비를 제외한 순수 월세 기준으로 17%·15% 세액공제 산출
+        myhome = c.get("/api/rent3_tenant/myhome/tenant_201").json()
+        cert = myhome["certificate"]
+        self.assertNotEqual(cert["lessor"]["business_number"], "101-86-00000")
+        for p_row in cert["payments"]:
+            self.assertFalse(str(p_row["cash_receipt_no"]).startswith("CASH-"))
+        self.assertLess(cert["rent_only_paid"], cert["total_paid"])
+        self.assertEqual(cert["rent_only_paid"] + cert["maintenance_paid"], cert["total_paid"])
+        self.assertEqual(cert["estimated_tax_credit_17pct"], round(cert["deductible_rent_base"] * 0.17))
+        self.assertEqual(cert["estimated_tax_credit_15pct"], round(cert["deductible_rent_base"] * 0.15))
+        self.assertIn("계좌이체", cert["guidance_notice"])
+
+        # (7) Claude 2차 검토 반영 검증:
+        # 7-1. 서버가 ?token= 쿼리 파라미터 인증을 전면 거부하는지 확인
+        raw_tok = chic["Authorization"].split()[1]
+        self.assertEqual(
+            c.get(f"/api/rent3_lessor/tax/export-csv?branch=main&year=2026&token={raw_tok}", headers=self.NOAUTH).status_code,
+            401,
+        )
+        # 7-2. 공급가액만 입금되고 부가세가 미납된 경우 영수("01")가 아닌 청구("02")로 분류되는지 확인
+        # (본 테스트에서 직접 계약을 설정한 401호: 월세 450,000 + 관리비 50,000 = 공급가액 500,000, 세액 50,000)
+        Pay(
+            branch="main",
+            room_no="401",
+            payer_name="(주)한빛기숙사",
+            billing_month="2026-11",
+            paid_date="2026-11-05",
+            rent_amount=450000,
+            maintenance_amount=50000,
+            vat_amount=0,  # 계약 공급가액(500,000)만 입금되고 부가세(50,000) 미입금
+            total_amount=500000,
+            payment_kind="MONTHLY_RENT",
+            idempotency_key="test51:401:nov_supply_only",
+        ).save(action="test_supply_only", app_source="test")
+        reg_nov = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=11", headers=chic).json()
+        inv_401_nov = next(i for i in reg_nov["invoices"] if i["room_no"] == "401")
+        self.assertEqual(inv_401_nov["supply_amount"], 500000)
+        self.assertEqual(inv_401_nov["tax_amount"], 50000)
+        self.assertEqual(inv_401_nov["paid_amount"], 500000)
+        self.assertEqual(inv_401_nov["charge_type"], "02")  # 세액 미납 상태이므로 청구(02)
+
+        # 7-3. 기숙사 임차 법인의 별도 사업장 주소(business_address) 저장 시 세금계산서 공급받는자 주소에 반영되는지 확인
+        c.post(
+            "/api/rent3_lessor/tax/tenant-biz",
+            headers=chic,
+            json={
+                "branch": "main",
+                "room_no": "401",
+                "business_number": "120-81-55555",
+                "company_name": "(주)한빛기숙사",
+                "ceo_name": "정대표",
+                "email": "dorm@hanbit.co.kr",
+                "business_address": "서울시 강남구 테헤란로 999 한빛타워 10층",
+                "vat_target": True,
+                "tax_invoice_requested": True,
+            },
+        )
+        reg_oct2 = c.get("/api/rent3_lessor/tax/invoice-register?branch=main&year=2026&month=10", headers=chic).json()
+        inv_401_updated = next(i for i in reg_oct2["invoices"] if i["room_no"] == "401")
+        self.assertEqual(inv_401_updated["buyer_address"], "서울시 강남구 테헤란로 999 한빛타워 10층")
+        self.assertTrue(inv_401_updated["ready_for_hometax"])
+
+        # 7-4. 종합과세 누진세율(6%~45%) 추정치가 summary에 포함되고 구간 계산이 정확한지 확인
+        from apps.rent_dist._rent3_core.billing import TaxAndCertificateService
+        self.assertIn("comprehensive_combined_estimate", fin)
+        self.assertIn("rate_pct", fin["comprehensive_combined_estimate"])
+        prog_est = TaxAndCertificateService.estimate_progressive_income_tax(60_000_000)
+        self.assertEqual(prog_est["rate_pct"], 24)
+        self.assertEqual(prog_est["progressive_deduction"], 5_760_000)
+        self.assertGreater(prog_est["total_tax_inc_local"], 0)
+
+    def test_52_lessor_menu_reaches_every_screen(self):
+        """52. 임대인 첫 화면은 수납 현황 하나뿐이고, 나머지 기능은 모두 ☰ 메뉴에서 닿는다(빠진 기능 0개). 공통 틀 파일이 서빙된다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        # 공통 틀(r3_modal / r3_shell)이 /shared/ui 로 서빙되고 화면이 불러온다
+        for name in ("r3_modal.js", "r3_shell.js"):
+            self.assertEqual(self.client.get(f"/shared/ui/{name}", headers=self.NOAUTH).status_code, 200, name)
+            self.assertIn(f"/shared/ui/{name}", idx)
+        # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
+        menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
+        tabs = set(re.findall(r'tab: "(\w+)"', menu))
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "expiry", "notice", "bldgtax", "messages"})
+        for t in tabs - {"ledger"}:
+            self.assertIn(f'currentTab === "{t}"', app, t)
+            self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
+        self.assertIn("renderExpiryTab", app)
+        # 이동 링크와 단추
+        for needle in ('href: "/rent3_contract/?role=lessor"', 'href: "manual.html"', 'href: "/rent3_tenant/"',
+                       'href: "/rent3_admin/"', 'href: "/rent3/pool.html"', 'id: "btnEditBuilding"', 'id: "btnSupportSetting"', 'id: "btnSupportChat"'):
+            self.assertIn(needle, menu, needle)
+        # 첫 화면에는 상단 탭 줄이 없다 (메뉴 서랍만)
+        self.assertNotIn('data-tab="rooms"', idx)
+        self.assertNotIn('data-tab="ledger"', idx)
+        self.assertIn("data-r3-drawer", idx)
+        # 퇴실정산은 호실 카드 '전출' 창이 맡는다 — 운영 화면에는 따로 두지 않는다
+        self.assertNotIn("btnCalcCo", app)
+        self.assertIn("showMoveOutModal", app)
+        # 대상 호실 설정은 건물 메뉴 한 곳에만 입력칸이 있다 (세무 화면에는 바로가기만)
+        self.assertEqual(app.count('id="txVatRooms"'), 1)
+        self.assertIn('id="btnGoBldgTax"', app)
+
+    def test_53_admin_proxy_is_read_only_in_strict_mode(self):
+        """53. 엄격 모드(운영 기본): 관리인 토큰은 읽기만 되고, 당사자의 법적 행위·금전·계약 기록은 403. 허용 목록(A/S)은 통과. 호환 모드에선 예전처럼 동작."""
+        from unittest import mock
+        c = self.client                       # 기본 헤더 = admin 토큰
+        chic = self._login("chic")
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            # 입장 없이 주소를 직접 쳐서 읽는 것은 막힌다(66 에서 자세히). 대상이 없는 목록은 그대로
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_tenant/myhome/tenant_201").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
+            from apps.rent_dist._rent3_core import Lessor, Tenant
+            self._admin_enter(Tenant.get("tenant_201"), "tenant")             # 입장하면 읽기는 된다
+            self._admin_enter(Lessor.first(branch="main"), "lessor")
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_tenant/myhome/tenant_201").status_code, 200)
+            # 금전·계약 기록은 403 (임대인 앱)
+            money = [
+                ("/api/rent3_lessor/payments/collect", {"branch": "main", "room_no": "201", "amount": 1000}),
+                ("/api/rent3_lessor/payments/sms-paste", {"branch": "main", "sms_text": "x"}),
+                ("/api/rent3_lessor/payments/edit", {"branch": "main", "pay_id": "x", "paid_date": "2026-01-01"}),
+                ("/api/rent3_lessor/outlays", {"branch": "main", "title": "x", "amount": 1000}),
+                ("/api/rent3_lessor/contracts/edit", {"branch": "main", "contract_id": "x", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}),
+                ("/api/rent3_lessor/checkout/calculate", {"branch": "main", "room_no": "201"}),
+                ("/api/rent3_lessor/building/tax-rooms", {"branch": "main", "vat_rooms": "201"}),
+            ]
+            for url, body in money:
+                r = c.post(url, json=body)
+                self.assertEqual(r.status_code, 403, url)
+                self.assertIn("보기 전용", r.text)
+            # 당사자의 법적 행위는 403 (계약 앱) — 역할 값과 무관
+            for suffix in ("step1", "step2", "step3/agree", "step4/sign", "step5/complete", "verify-id", "tenant-registry"):
+                for role in ("lessor", "tenant"):
+                    r = c.post(f"/api/rent3_contract/sessions/ghost/{suffix}", json={"role": role})
+                    self.assertEqual(r.status_code, 403, (suffix, role))
+                    self.assertIn("대신할 수 없습니다", r.text)
+            # 임차인 앱: 납부·정산 동의도 대신할 수 없다
+            self.assertEqual(c.post("/api/rent3_tenant/myhome/tenant_201/transfer-notice", json={"amount": 1}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3_tenant/checkout/ghost/agree", json={}).status_code, 403)
+            # 허용 목록(A/S 배정·접수)은 가드를 통과한다 (대상이 없어 다른 오류가 나도 403 은 아니다)
+            self.assertNotEqual(c.post("/api/rent3_lessor/tickets/ghost/assign", json={}).status_code, 403)
+            self.assertNotEqual(c.post("/api/rent3_tenant/myhome/tenant_201/tickets", json={}).status_code, 403)
+            # 임대인 본인 토큰은 영향이 없다
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).status_code, 200)
+            self.assertNotEqual(c.post("/api/rent3_lessor/contracts/edit", headers=chic,
+                                       json={"branch": "main", "contract_id": "ghost", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}).status_code, 403)
+        # 호환 모드(기존 시험 묶음): 관리인 쓰기가 가드에서 막히지 않는다
+        self.assertNotEqual(c.post("/api/rent3_lessor/contracts/edit",
+                                   json={"branch": "main", "contract_id": "ghost", "deposit": 1, "monthly_rent": 1, "maintenance_fee": 1}).status_code, 403)
+
+    def test_54_signup_consent_and_support_toggle(self):
+        """54. 운영 모드: 가입은 개인정보 동의 필수(원격 지원은 선택), 동의 기록 없는 기존 사용자는 로그인 때 동의 화면을 거친다. 원격 지원 허용은 언제든 ON/OFF. 관리인은 해당 없음."""
+        from unittest import mock
+        c = self.client
+        login = lambda ident, pw="1212": c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
+                                                json={"login_mode": "account", "identifier": ident, "password": pw})
+        reg = lambda **kw: c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
+                                  json={"role": "prospect", "name": "동의테스트", "phone": "010-5555-0054", "password": "Reg#Pass12345", **kw})
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
+            # 가입: 개인정보 동의가 없으면 거부
+            r = reg()
+            self.assertEqual(r.status_code, 400, r.text)
+            self.assertIn("개인정보 수집·이용 동의는 필수", r.text)
+            # 동의하면 가입되고, 선택 항목(원격 지원)은 꺼진 채로 기록
+            r = reg(agree_privacy=True)
+            self.assertEqual(r.status_code, 200, r.text)
+            tok = r.json()["token"]
+            hdr = {"Authorization": f"Bearer {tok}"}
+            st = c.get("/api/rent3/pool/auth/consents", headers=hdr).json()
+            self.assertTrue(st["privacy_agreed"])
+            self.assertFalse(st["support_access"])
+            # 원격 지원 허용 ON → OFF 를 언제든 바꿀 수 있다
+            on = c.post("/api/rent3/pool/auth/consents/support", headers=hdr, json={"allow": True}).json()
+            self.assertTrue(on["support_access"])
+            off = c.post("/api/rent3/pool/auth/consents/support", headers=hdr, json={"allow": False}).json()
+            self.assertFalse(off["support_access"])
+            self.assertTrue(off["privacy_agreed"])
+            # 기존 사용자(시드 임대인, 동의 기록 없음): 로그인하면 토큰 없이 '동의 필요'
+            r = login("chic")
+            self.assertEqual(r.status_code, 200, r.text)
+            held = r.json()
+            self.assertTrue(held.get("needs_consent"))
+            self.assertNotIn("token", held)
+            self.assertTrue(held["consent_ticket"])
+            # 필수 동의 없이는 진행할 수 없고, 잘못된 확인표도 거부
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": held["consent_ticket"], "agree_privacy": False}).status_code, 400)
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": "ghost", "agree_privacy": True}).status_code, 401)
+            # 동의하면 보류했던 로그인 결과(토큰)를 받고, 동의 기록이 남는다
+            done = c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                          json={"ticket": held["consent_ticket"], "agree_privacy": True, "agree_support": True}).json()
+            self.assertTrue(done["token"])
+            self.assertEqual(done["user"]["role"], "lessor")
+            self.assertTrue(c.get("/api/rent3/pool/auth/consents", headers={"Authorization": f"Bearer {done['token']}"}).json()["support_access"])
+            # 확인표는 한 번만 쓸 수 있다
+            self.assertEqual(c.post("/api/rent3/pool/auth/consent", headers=self.NOAUTH,
+                                    json={"ticket": held["consent_ticket"], "agree_privacy": True}).status_code, 401)
+            # 다시 로그인하면 바로 토큰
+            again = login("chic").json()
+            self.assertTrue(again.get("token"))
+            self.assertFalse(again.get("needs_consent"))
+            # 관리인은 동의 화면 대상이 아니다
+            adm = login("admin").json()
+            self.assertTrue(adm.get("token"))
+            self.assertFalse(c.get("/api/rent3/pool/auth/consents", headers={"Authorization": f"Bearer {adm['token']}"}).json()["applicable"])
+        # 호환 모드(시연·기존 시험): 동의 없이도 가입·로그인된다
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "0"}):
+            self.assertTrue(login("sunho").json().get("token"))
+
+    def test_55_support_chat_access_log_and_phone_intake(self):
+        """55. 지원 채팅·접속 기록: 원격 지원 허용 + 채팅(또는 전화 접수)이 있어야 입장, 입장하면 기록·안내, 10일 뒤 채팅 삭제(접속 기록은 1년), 이벤트 로그에 본문 없음."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import Lessor, Tenant, consent as cs, support as sup
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        from apps.rent_dist._rent3_core.models import date_today
+        c = self.client                       # 기본 헤더 = admin
+        lessor = Lessor.first(username="chic")
+        tenant = Tenant.first(room_no="201", branch="main")
+        lh = {"Authorization": f"Bearer {lessor_token(lessor)}"}
+        th = {"Authorization": f"Bearer {tenant_token(tenant)}"}
+        lkey, tkey = sup.thread_key(lessor), sup.thread_key(tenant)
+        for u in (lessor, tenant):            # 개인정보 동의는 했고 원격 지원은 아직 허용 안 함
+            cs.record_consent(u, True, False)
+        secret = "비밀문장-보일러가-안켜져요-9981"
+
+        # 사용자: 지원 채팅 글쓰기·읽기 (관리인 계정은 사용자용 API 대상이 아니다)
+        self.assertEqual(c.post("/api/rent3/pool/support/messages", headers=th, json={"body": secret}).status_code, 200)
+        self.assertEqual(c.post("/api/rent3/pool/support/messages", headers=th, json={"body": "  "}).status_code, 400)
+        self.assertEqual(c.get("/api/rent3/pool/support/thread").status_code, 400)       # admin 토큰
+        mine = c.get("/api/rent3/pool/support/thread", headers=th).json()
+        self.assertEqual([m["body"] for m in mine["messages"]], [secret])
+        self.assertEqual(c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"], [])   # 임대인은 임차인의 대화를 못 본다
+        # 풀 이벤트 로그(덧붙이기 전용)에는 본문이 남지 않는다
+        ev = open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read()
+        self.assertNotIn(secret, ev)
+
+        # 관리인: 대화 읽기, 원격 지원 허용 전에는 입장·전화 접수 모두 거부
+        thr = c.get("/api/rent3_admin/support/thread", params={"user": tkey}).json()
+        self.assertEqual(thr["messages"][0]["body"], secret)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "x"}).status_code, 403)
+
+        # 허용하면 입장: 접속 기록 + 지원 채팅에 안내, 이동 주소는 보기 전용 표시(proxy) 포함
+        cs.set_support_access(tenant, True)
+        r = c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "사용법 문의"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["redirect_url"], f"/rent3_tenant/?tenant={tenant.id}&proxy=tenant")
+        logs = sup.SupportAccessLog.find(target_user=tkey)
+        self.assertEqual((len(logs), logs[0].category, logs[0].view), (1, "사용법 문의", "tenant"))
+        self.assertTrue(logs[0].retain_until >= (date_today() + timedelta(days=364)).isoformat())
+        kinds = [m["kind"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]]
+        self.assertIn("access_start", kinds)
+        self.assertTrue(c.get("/api/rent3/pool/support/summary", headers=th).json()["admin_viewing"])      # 사용자에게 '접속 중' 알림
+        # 입장 종류가 사용자 역할과 다르면 거부, 계약방은 세션이 있어야 한다
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "lessor"}).status_code, 400)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "contract", "session_id": "ghost"}).status_code, 404)
+
+        # 전화 접수: 채팅이 없던 임대인도 '[전화 요청 접수]' 글이 생기며 입장 가능
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 403)   # 허용 전
+        cs.set_support_access(lessor, True)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 400)    # 채팅 없음
+        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "없는분류", "memo": "x"}).status_code, 400)
+        r = c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "사용법 문의", "memo": "수납 입력 방법을 모르심"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["item"]["body"].startswith("[전화 요청 접수]"))
+        self.assertIn("수납 입력 방법", [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"]][0])
+        r = c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor", "room_no": "201", "category": "사용법 문의"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(r.json()["redirect_url"], f"/rent3_lessor/?branch={lessor.branch}&proxy=lessor&room=201")
+
+        # 원격 지원을 다시 끄면 즉시 입장 불가
+        cs.set_support_access(tenant, False)
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant"}).status_code, 403)
+
+        # 원격 지원 카드용 목록: 건물·호실·임차인·허용 여부
+        d = c.get("/api/rent3_admin/support/directory", params={"branch": "main"}).json()
+        room201 = next(x for x in d["rooms"] if x["room_no"] == "201")
+        self.assertEqual((room201["tenant"]["user"], room201["tenant"]["support_allowed"]), (tkey, False))
+        self.assertEqual(d["lessor"]["support_allowed"], True)
+        self.assertTrue(any(b["branch"] == "main" for b in c.get("/api/rent3_admin/support/directory").json()["branches"]))
+        # 일반 사용자는 관리인용 API를 쓸 수 없다
+        self.assertIn(c.get("/api/rent3_admin/support/directory", headers=th).status_code, (401, 403))
+        self.assertIn(c.post("/api/rent3_admin/support/enter", headers=lh, json={"user": tkey, "view": "tenant"}).status_code, (401, 403))
+
+        # 10일이 지난 채팅은 지워지고, 접속 기록은 1년이 지나야 지워진다
+        old = sup.SupportMessage.first(thread_user=tkey)
+        old.expires_at = (date_today() - timedelta(days=1)).isoformat()
+        old.save(action="test_expire")
+        sup.SupportAccessLog.first(target_user=tkey).delete(action="test_cleanup")
+        keep = sup.SupportAccessLog(admin_user="admin", target_user=tkey, retain_until=(date_today() + timedelta(days=5)).isoformat()).save(action="t")
+        gone = sup.SupportAccessLog(admin_user="admin", target_user=tkey, retain_until=(date_today() - timedelta(days=1)).isoformat()).save(action="t")
+        self.assertEqual(sup.purge_expired()["messages"] >= 1, True)
+        self.assertNotIn(secret, [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]])
+        self.assertIsNone(sup.SupportAccessLog.get(gone.id))
+        self.assertIsNotNone(sup.SupportAccessLog.get(keep.id))
+
+    def test_56_tenant_menu_reaches_every_service(self):
+        """56. 임차인 첫 화면은 '내 집(납부 확인)' 하나뿐이고, 나머지 서비스는 모두 ☰ 메뉴에서 닿는다(빠진 기능 0개). 헤더 모드 단추·관리자용 선택기는 없다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
+        ids = set(re.findall(r'id: "(\w+)"', menu))
+        self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo"})
+        for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
+                       'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
+            self.assertIn(needle, menu, needle)
+        # 메뉴의 서비스 화면 = 마이홈에 실제로 있는 구역
+        views = set(re.findall(r'btnSvc\w+: "(\w+)"', app[app.index("const MENU_VIEWS"):]))
+        sections = set(re.findall(r'<section class="svc" data-svc="(\w+)">', app))
+        self.assertTrue(views <= sections, (views, sections))
+        self.assertIn("home", sections)
+        # 첫 화면 구성: 할 일 배너(미납>퇴실 정산>만기 확인, 최대 2줄)와 납부 현황(오래된 완납 달은 접힘)
+        self.assertIn("todos.slice(0, 2)", app)
+        self.assertIn("이전 완납", app)
+        # 옛 헤더 모드 단추와 관리자용 세입자 선택기는 없다
+        for gone in ("btnModeMyhome", "btnModeListings", "mode-switch", "tenantSel", "loadTenants"):
+            self.assertNotIn(gone, app + idx, gone)
+        self.assertIn("data-r3-drawer", idx)
+
+    def test_57_tax_hub_keeps_every_tax_feature(self):
+        """57. 세무 허브(종합소득세 / 부가세 / 세금계산서 / 경비·면세 신고)로 나눈 뒤에도 세무 기능이 하나도 빠지지 않는다."""
+        import re
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+        app = open(fe, encoding="utf-8").read()
+        tax = app[app.index("async function renderTaxTab"):app.index("// 건물 ▸ 부가세 · 소득세 대상 호실 설정")]
+        # 허브와 하위 화면 4개
+        for v in ('"income"', '"vat"', '"invoice"', '"expense"'):
+            self.assertIn(v, tax)
+        self.assertIn("tax-hub-btn", tax)
+        self.assertIn('id="btnTaxHub"', tax)
+        # 화면별로 있어야 할 기능 (사용자가 확정한 유지 목록)
+        keep = {
+            "income": ("btnDlTaxCsv", "housing_separate_tax_general", "housing_separate_tax_registered", "comprehensive_combined_estimate",
+                       "commercial_comprehensive_estimate", "carryover_excluded_amount", "필요경비율 50%", "누진세율"),
+            "vat": ("btnGoBldgTax", "vat_periods", "output_vat", "input_vat", "net_vat_payable", "공통경비"),
+            "invoice": ("btnDlHometaxCsv", "btnDlHometaxCsv2", "btn-inv-status", "taxMonthSel", "ready_for_hometax", "ISSUED", "nts_confirm_no", "5줄 스크롤"),
+            "expense": ("btnDlExemptCsv", "btnDlExemptCsv2", "btnAddOutlay", "outEvid", "outScope", "outVendorTax", "is_vat_deductible", "exempt_housing_report",
+                        "exemptTotals", "outlay-row"),
+        }
+        for view, needles in keep.items():
+            for n in needles:
+                self.assertIn(n, tax, (view, n))
+        # 세금계산서 발행 기록·사업장 주소 입력은 모달(전 호실 대상)로 유지
+        self.assertIn("tenant_business_address", app)      # 계약내용 창에서 모든 호실의 사업자 정보·사업장 주소를 입력·수정
+        self.assertIn("cmBizAddr", app)
+        self.assertIn("showInvoiceStatusModal", app)
+        self.assertIn("charge_type_label", tax)       # 영수(01)/청구(02) 구분이 화면에 보인다
+        # 서버가 네 화면에 필요한 값을 모두 준다
+        d = self.client.get("/api/rent3_lessor/tax/summary?branch=main&year=2026").json()
+        for k in ("summary", "vat_periods", "tax_invoice_register", "exempt_housing_report", "outlays", "expense_categories", "building_tax_config"):
+            self.assertIn(k, d, k)
+        fin = d["summary"]
+        for k in ("comprehensive_combined_estimate", "housing_separate_tax_general", "carryover_excluded_amount", "vat_room_breakdown",
+                  "income_tax_room_breakdown", "expenses_by_category"):
+            self.assertIn(k, fin, k)
+        for path in ("export-csv", "export-hometax-csv", "export-exempt-csv"):
+            self.assertEqual(self.client.get(f"/api/rent3_lessor/tax/{path}?branch=main&year=2026").status_code, 200, path)
+        # 메뉴에는 세무 허브 한 곳으로 들어간다
+        menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
+        self.assertIn('tab: "tax"', menu)
+        self.assertIn("switchTab", app)
+
+    def test_58_contract_room_chat_proposals_and_agree_block(self):
+        """58. 계약방 대화(5단계): 문의·제안·수정 요청, 제안 수락 시 update_terms(리비전·동의 초기화), 열린 제안이 있으면 Step 3 동의 차단, 단계 ④ 이후엔 문의만, 당사자만 접근."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import DirectChat, Lessor, Tenant
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("961", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,        # 계약 상대(예비 임차인)가 같은 번호로 가입한 계정
+                     json={"role": "prospect", "name": "정책시험", "phone": "010-5555-9961", "password": "Pw123456"})
+        self.assertEqual(reg.status_code, 200, reg.text)
+        tenant = Tenant.get(reg.json()["user"]["id"])
+        tenant.identity = {"verified": True}          # 본인인증을 마친 임차인(수락·서명 같은 행위는 본인인증이 필요하다)
+        tenant.save(action="test_verified")
+        lh = {"Authorization": f"Bearer {lessor_token(Lessor.first(username='chic'))}"}
+        th = {"Authorization": f"Bearer {tenant_token(tenant)}"}
+        url = f"{base}/sessions/{sid}/messages"
+        secret = "비밀-문의-내용-4417"
+        t0 = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+
+        # ── 문의: 양쪽 모두 가능, 읽음 처리 ──
+        r = c.post(url, headers=th, json={"kind": "question", "body": secret})
+        self.assertEqual(r.status_code, 200, r.text)
+        # 주기적 확인(폴링)은 읽음 처리하지 않는다: 세션 조회의 요약과 mark_read=false 목록은 몇 번을 불러도 배지가 유지된다
+        for _ in range(3):
+            self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=lh).json()["chat"], {"unread": 1, "open_count": 0})
+            self.assertEqual(c.get(url + "?mark_read=false", headers=lh).json()["unread"], 1)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=th).json()["chat"]["unread"], 0)   # 보낸 사람 쪽은 안 읽은 글 없음
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["chat"]["unread"], 0)                  # 관리인(읽기 전용)은 읽음 처리도 배지도 없음
+        got = c.get(url, headers=lh).json()                                      # 대화창을 열면 그때 읽음 처리
+        self.assertEqual([m["body"] for m in got["messages"]], [secret])
+        self.assertEqual(got["unread"], 1)
+        self.assertEqual(c.get(url, headers=lh).json()["unread"], 0)             # 읽으면 줄어든다
+        self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=lh).json()["chat"]["unread"], 0)
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": " "}).status_code, 400)
+        self.assertEqual(c.post(url, headers=th, json={"kind": "gossip", "body": "x"}).status_code, 400)
+        # 풀 이벤트 로그에 본문이 남지 않는다
+        self.assertNotIn(secret, open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read())
+
+        # ── 접근 통제: 타 지점 임대인·다른 임차인·비로그인은 거부, 관리인은 읽기만 ──
+        sunho = self._login("sunho")
+        other_t = self._as(tenant_token(Tenant.first(room_no="201", branch="main")))
+        for h in (sunho, other_t):
+            self.assertEqual(c.get(url, headers=h).status_code, 403)
+            self.assertEqual(c.post(url, headers=h, json={"kind": "question", "body": "x"}).status_code, 403)
+        self.assertEqual(c.get(url, headers=self.NOAUTH).status_code, 401)
+        self.assertEqual(c.get(url).status_code, 200)                              # admin 기본 토큰: 읽기
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.get(url).status_code, 403)                              # 입장 없이는 못 읽는다
+            self._admin_enter(tenant, "contract", session_id=sid)
+            self.assertEqual(c.get(url).status_code, 200)
+            self.assertEqual(c.post(url, json={"kind": "question", "body": "관리인이 끼어듦"}).status_code, 403)
+        from apps.rent_dist._rent3_core import support as _sup
+        for m in _sup.SupportMessage.find(thread_user=_sup.thread_key(tenant)):      # 입장 준비로 남긴 지원 채팅 글은 치운다(아래에서 지원 채팅이 비어 있어야 한다)
+            m.delete(action="t")
+
+        # ── 제안: 6개 항목만, 값 검증 ──
+        prop = lambda h, field, val, **kw: c.post(url, headers=h, json={"kind": "proposal", "field": field, "new_value": val, **kw})
+        self.assertEqual(prop(th, "special_terms", "x").status_code, 400)            # 특약은 제안이 아니라 수정 요청
+        self.assertEqual(prop(th, "deposit", 5000000).status_code, 400)              # 현재 값과 같음
+        self.assertEqual(prop(th, "deposit", "abc").status_code, 400)
+        self.assertEqual(prop(th, "contract_deposit", 99000000).status_code, 400)    # 계약금 > 보증금
+        self.assertEqual(prop(th, "move_in_date", "2026-13-45").status_code, 400)
+        self.assertEqual(prop(th, "lease_term_months", 0).status_code, 400)
+        for field, val in (("contract_deposit", 400000), ("monthly_rent", 280000), ("maintenance_fee", 40000),
+                           ("move_in_date", "2026-12-20"), ("lease_term_months", 24)):
+            self.assertEqual(prop(th, field, val).status_code, 200, field)
+        r = prop(th, "deposit", 4500000)
+        self.assertEqual(r.status_code, 200, r.text)
+        dep_id = r.json()["item"]["id"]
+        self.assertEqual(r.json()["item"]["proposal"]["old"], 5000000)
+        self.assertEqual(r.json()["open_count"], 6)
+        # 같은 사람이 같은 항목을 다시 제안하면 이전 제안은 대체된다
+        r2 = prop(th, "deposit", 4600000)
+        dep_id2 = r2.json()["item"]["id"]
+        self.assertEqual(r2.json()["open_count"], 6)
+        self.assertEqual(c.post(f"{url}/{dep_id}/respond", headers=lh, json={"action": "accept"}).status_code, 409)   # 이미 처리됨(대체)
+
+        # ── 수정 요청(특약): 자동 반영 없음 ──
+        cr = c.post(url, headers=lh, json={"kind": "change_request", "field": "special_terms", "body": "반려동물 관련 특약 문구 수정 요청"})
+        self.assertEqual(cr.status_code, 200, cr.text)
+        cr_id = cr.json()["item"]["id"]
+        self.assertEqual(c.post(url, headers=lh, json={"kind": "change_request", "field": "deposit", "body": "x"}).status_code, 400)
+
+        # ── 열린 요청이 있으면 Step 3 최종 동의 불가 ──
+        r = c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"})
+        self.assertEqual(r.status_code, 409, r.text)
+        self.assertIn("답하지 않은 제안", r.text)
+
+        # ── 응답 규칙: 내 글은 수락·거절 불가(철회만), 상대 글은 철회 불가 ──
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=th, json={"action": "accept"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "withdraw"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=sunho, json={"action": "accept"}).status_code, 403)
+        self.assertEqual(c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "maybe"}).status_code, 400)
+        self.assertEqual(c.post(f"{url}/nope/respond", headers=lh, json={"action": "accept"}).status_code, 404)
+
+        # ── 수락 = 기존 update_terms: 값이 바뀌고 리비전이 오르며 양측 동의가 초기화된다 ──
+        rev0 = c.get(f"{base}/sessions/{sid}").json()["session"]["revision"]
+        r = c.post(f"{url}/{dep_id2}/respond", headers=lh, json={"action": "accept"})
+        self.assertEqual(r.status_code, 200, r.text)
+        ss = r.json()["session"]
+        self.assertEqual(ss["terms"]["deposit"], 4600000)
+        self.assertEqual(ss["revision"], rev0 + 1)
+        self.assertFalse(ss["step3_lessor_agreed"] or ss["step3_tenant_agreed"])
+        self.assertTrue(any(m["kind"] == "system" and "수락했습니다" in m["body"] for m in c.get(url, headers=th).json()["messages"]))
+        # 나머지 제안: 임대인이 하나는 거절, 나머지는 수락
+        items = [m for m in c.get(url, headers=lh).json()["messages"] if m["kind"] == "proposal" and m["status"] == "open"]
+        self.assertEqual(len(items), 5)
+        for m in items:
+            action = "decline" if m["field"] == "maintenance_fee" else "accept"
+            self.assertEqual(c.post(f"{url}/{m['id']}/respond", headers=lh, json={"action": action}).status_code, 200, m["field"])
+        terms = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+        self.assertEqual((terms["contract_deposit"], terms["monthly_rent"], terms["move_in_date"], terms["lease_term_months"]),
+                         (400000, 280000, "2026-12-20", 24))
+        self.assertEqual(terms["maintenance_fee"], t0["maintenance_fee"])          # 거절한 제안은 반영되지 않는다
+        # 수정 요청이 남아 있는 동안은 여전히 동의 불가 → 요청자가 철회하면 동의 가능
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"}).status_code, 409)
+        self.assertEqual(c.post(f"{url}/{cr_id}/respond", headers=th, json={"action": "withdraw"}).status_code, 403)   # 요청자(임대인)만 철회
+        self.assertEqual(c.post(f"{url}/{cr_id}/respond", headers=lh, json={"action": "withdraw"}).status_code, 200)
+        self.assertEqual(c.get(url, headers=lh).json()["open_count"], 0)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "lessor"}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/step3/agree", json={"role": "tenant"}).status_code, 200)
+
+        # ── 단계 ④ 이후: 제안·수정 요청 불가, 문의만 가능 ──
+        self.assertGreaterEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["current_step"], 4)
+        r = prop(th, "monthly_rent", 270000)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("단계 ④", r.text)
+        self.assertEqual(c.post(url, headers=lh, json={"kind": "change_request", "body": "x"}).status_code, 400)
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": "서명 전에 하나만 더 여쭙니다"}).status_code, 200)
+
+        # ── 기존 1:1 대화 목록에는 계약방 대화가 섞이지 않는다 ──
+        self.assertFalse(any(x.get("session_id") for x in c.get("/api/rent3_lessor/dashboard?branch=main").json()["chats"]))
+        self.assertTrue(DirectChat.find(session_id=sid))
+
+        # ── 관리인 지원 채팅(SupportMessage)과 섞이지 않는다: 같은 사람이어도 서로의 글이 보이지 않는다 ──
+        from apps.rent_dist._rent3_core import support as sup
+        self.assertEqual(c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"], [])
+        self.assertEqual(sup.SupportMessage.find(thread_user=sup.thread_key(tenant)), [])
+        sup.post_user_message(tenant, "지원 채팅 글")
+        self.assertNotIn("지원 채팅 글", [m["body"] for m in c.get(url, headers=th).json()["messages"]])
+
+        # ── 체결·취소된 계약방은 읽기 전용 ──
+        from apps.rent_dist._rent3_core import CoSignSession
+        ses = CoSignSession.get(sid)
+        ses.status = "CANCELLED"
+        ses.save(action="test_cancel")
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": "취소 후 문의"}).status_code, 409)
+        self.assertTrue(c.get(url, headers=th).json()["read_only"])
+
+    def test_59_terms_lock_and_reopen(self):
+        """59. 6개 항목은 /terms 로 직접 못 바꾸고(같은 값은 통과) 제안·수락으로만 바뀐다. 다른 조건은 직접 수정 가능. 3단계에서는 다시 열 필요 없음. 잠금 스위치·당사자 권한."""
+        from unittest import mock
+        c, base = self.client, "/api/rent3_contract"
+        sid = self._policy_session("962", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        t0 = c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]
+        post = lambda updates, **kw: c.post(f"{base}/sessions/{sid}/terms", json={"role": "lessor", "updates": updates}, **kw)
+        # 6개 항목: 바꾸면 409(이름을 알려 준다), 같은 값이면 통과
+        for field, val in (("deposit", 4000000), ("contract_deposit", 100000), ("monthly_rent", 250000), ("maintenance_fee", 1000),
+                           ("move_in_date", "2030-01-01"), ("lease_term_months", 6)):
+            r = post({field: val})
+            self.assertEqual(r.status_code, 409, field)
+            self.assertIn("제안", r.text)
+        self.assertEqual(post({"deposit": t0["deposit"], "monthly_rent": str(t0["monthly_rent"])}).status_code, 200)   # 같은 값(문자열 숫자 포함)
+        # 인적사항·납부 시점·세금계산서·특약은 직접 수정 가능
+        r = post({"tenant_car_number": "12가3456", "special_terms": "1. 반려동물 불가", "pay_timing": "선불"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(r.json()["changed"])
+        # 6개 항목과 다른 항목을 함께 보내도 6개 항목이 달라지면 통째로 거부된다
+        self.assertEqual(post({"special_terms": "다른 특약", "deposit": 1}).status_code, 409)
+        self.assertEqual(c.get(f"{base}/sessions/{sid}").json()["session"]["terms"]["special_terms"], "1. 반려동물 불가")
+        # 3단계에서는 '다시 열기'가 필요 없다
+        r = c.post(f"{base}/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("이미 계약 조건 단계", r.text)
+        # 제안 → 수락은 잠금과 무관하게 조건을 바꾼다
+        acc = self._propose_accept(sid, "maintenance_fee", 40000, proposer="tenant")
+        self.assertEqual(acc.status_code, 200, acc.text)
+        self.assertEqual(acc.json()["session"]["terms"]["maintenance_fee"], 40000)
+        # 잠금 스위치를 끄면 예전처럼 직접 수정(비상용)
+        with mock.patch.dict(os.environ, {"RENT3_TERMS_LOCK": "0"}):
+            r = post({"maintenance_fee": 45000})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["changed"])
+        # 당사자만: 타 지점 임대인·비로그인·(엄격 모드) 관리인은 조건 다시 열기를 못 한다
+        sunho = self._login("sunho")
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", headers=sunho, json={"role": "lessor", "confirm": True}).status_code, 403)
+        self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", headers=self.NOAUTH, json={"role": "lessor", "confirm": True}).status_code, 401)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/reopen-terms", json={"role": "lessor", "confirm": True}).status_code, 403)
+
+    def test_60_contract_screen_pieces(self):
+        """60. 계약 화면(6단계): 지금 내 차례 한 줄, 💬 대화창, 3단계 제안·수정 요청·전체 동의, 조건 다시 열기, 호출 단계 초대 문자 복사가 있고 옛 직접 입력칸은 없다."""
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend")
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
+        self.assertIn('id="turnLine"', idx)
+        self.assertIn("/shared/ui/r3_modal.js", idx)
+        for needle in ("function turnInfo", "chatFab", "function openChatDrawer", "mark_read=true", "function openProposeDialog",
+                       "function openRequestDialog", "function decoratePanel", "/reopen-terms", "btnCopyInvite",
+                       "계약 조건 전체 동의", "btn-propose", "btnReqSpecial", "dotline", "chatSummary.open_count"):
+            self.assertIn(needle, app, needle)
+        # 열린 제안 수가 바뀌면 단계 화면을 다시 그린다(동의 단추 상태가 낡지 않게)
+        self.assertIn("${chatSummary.open_count}`;", app[app.index("function switchModal"):])
+        # 6개 항목은 직접 입력칸이 없다 (보기 + 제안)
+        for gone in ('id="tDeposit"', 'id="tRent"', 'id="tMaint"', 'id="tConDep"', 'id="tMoveIn"', 'id="tMonths"'):
+            self.assertNotIn(gone, app, gone)
+        for field in ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "move_in_date", "lease_term_months"):
+            self.assertIn(f'["{field}", "', app, field)
+        # 서버 약속과 맞는 호출: 대화·제안·응답·다시 열기 주소가 모두 서버에 있다
+        routes = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "api.py"), encoding="utf-8").read()
+        for r in ('"/sessions/{session_id}/messages"', '"/sessions/{session_id}/messages/{msg_id}/respond"', '"/sessions/{session_id}/reopen-terms"'):
+            self.assertIn(r, routes, r)
+
+    def test_61_messages_menu_room_threads(self):
+        """61. 메시지(7단계): 호실별 1:1 대화(임대인↔임차인). 계약방 협상 기록·관리인 지원 채팅과 섞이지 않고, 새 입주자에게 옛 문의가 보이지 않으며, 당사자만 열람."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import DirectChat, Lessor, Tenant, Room, support as sup
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        c = self.client
+        lessor = Lessor.first(username="chic")
+        t201 = Tenant.first(room_no="201", branch="main")
+        t202 = Tenant.first(room_no="202", branch="main")
+        lh = {"Authorization": f"Bearer {lessor_token(lessor)}"}
+        th = {"Authorization": f"Bearer {tenant_token(t201)}"}
+        th2 = {"Authorization": f"Bearer {tenant_token(t202)}"}
+        # 세 가지가 섞이지 않는지 보려고 다른 종류의 글을 미리 만들어 둔다
+        sup.post_user_message(t201, "지원 채팅 글-섞이면 안 됨")
+        DirectChat(branch="main", room_no="201", session_id="cs_other", kind="question", sender_role="tenant", sender_name="계약방", message="계약방 글-섞이면 안 됨").save(action="t")
+        old = DirectChat(branch="main", room_no="201", sender_role="tenant", sender_name="예전 문의자", message="입주 전에 문의했던 사람의 글").save(action="t")
+        old.created_at = "2000-01-01T00:00:00"                         # 현재 계약보다 훨씬 이전
+        old.save(action="t_old")
+        # 임대인이 보내면 임차인에게 보이고 안 읽은 수가 하나 늘어난다 (앞선 시험이 남긴 안내 글이 있을 수 있어 기준값을 먼저 잰다)
+        unread0 = c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"]
+        r = c.post("/api/rent3_lessor/chats", headers=lh, json={"branch": "main", "room_no": "201", "message": "관리비 고지서 확인 부탁드려요"})
+        self.assertEqual(r.status_code, 200, r.text)
+        rooms = c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"]
+        r201 = next(x for x in rooms if x["room_no"] == "201")
+        self.assertEqual(r201["last_body"], "관리비 고지서 확인 부탁드려요")
+        mine0 = c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()
+        self.assertEqual(mine0["messages_unread"], unread0 + 1)
+        got = c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages?mark_read=false", headers=th).json()
+        bodies = [m["body"] for m in got["messages"]]
+        self.assertIn("관리비 고지서 확인 부탁드려요", bodies)
+        for hidden in ("지원 채팅 글-섞이면 안 됨", "계약방 글-섞이면 안 됨", "입주 전에 문의했던 사람의 글"):
+            self.assertNotIn(hidden, bodies)                               # 지원 채팅·계약방 대화·이전 문의자의 글은 안 보인다
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"], unread0 + 1)   # mark_read=false 는 읽음 처리 안 함
+        c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th)                                           # 열면 읽음 처리
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}", headers=th).json()["messages_unread"], 0)
+        # 임차인이 답하면 임대인에게 안 읽은 글로 보이고, 임대인이 열면 읽음 처리
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th, json={"body": "네 확인했습니다"}).status_code, 200)
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th, json={"body": " "}).status_code, 400)
+        r201 = next(x for x in c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"] if x["room_no"] == "201")
+        self.assertGreaterEqual(r201["unread"], 1)
+        thread = c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=lh).json()
+        self.assertIn("네 확인했습니다", [m["body"] for m in thread["messages"]])
+        self.assertIn("입주 전에 문의했던 사람의 글", [m["body"] for m in thread["messages"]])   # 임대인은 호실 전체 기록을 본다
+        self.assertEqual(next(x for x in c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=lh).json()["rooms"] if x["room_no"] == "201")["unread"], 0)
+        self.assertIn("negotiation", thread)
+        # 당사자만: 다른 호실 임차인·타 지점 임대인·비로그인은 거부, 관리인은 읽기만(엄격 모드에서 쓰기 403)
+        sunho = self._login("sunho")
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th2).status_code, 403)
+        self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=th2, json={"body": "x"}).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_lessor/messages/rooms?branch=main", headers=sunho).status_code, 403)
+        self.assertEqual(c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=sunho).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_lessor/chats", headers=sunho, json={"branch": "main", "room_no": "201", "message": "x"}).status_code, 403)
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages", headers=self.NOAUTH).status_code, 401)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self._admin_enter(t201, "tenant")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}/messages").status_code, 200)
+            self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t201.id}/messages", json={"body": "관리인이 끼어듦"}).status_code, 403)
+        # 관리인 지원 채팅은 그대로 따로 있다
+        sup_bodies = [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]]   # (앞선 시험이 남긴 접속 안내가 있을 수 있다)
+        self.assertIn("지원 채팅 글-섞이면 안 됨", sup_bodies)
+        for room_chat in ("관리비 고지서 확인 부탁드려요", "네 확인했습니다"):
+            self.assertNotIn(room_chat, sup_bodies)                        # 호실 대화는 지원 채팅에 나오지 않는다
+
+    def test_62_messages_screens_and_digest_display(self):
+        """62. 메시지 화면(7단계): 임대인 ▸ 메시지(호실 목록·대화·접힌 협상 기록), 임차인 ▸ 임대인과 메시지, 옛 메신저 제거, 체결 계약서에 대화 해시 표시."""
+        rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
+        lessor, tenant, contract = rd("rent3_lessor", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js"), rd("rent3_contract", "frontend", "app.js")
+        for needle in ("function renderMessagesTab", "function renderMessageThread", "btnMsgSend", "msg-room", "계약 협상 기록", "digest_ok", "/messages/rooms"):
+            self.assertIn(needle, lessor, needle)
+        self.assertNotIn("btnSendChat", lessor)                       # A/S 화면 안의 옛 메신저는 없어졌다
+        self.assertIn("A/S 접수", lessor)
+        for needle in ("loadTenantMessages", "btnTnMsgSend", 'data-svc="messages"', "tnMsgNeg", "digest_ok", "messages_unread", "/messages`"):
+            self.assertIn(needle, tenant, needle)
+        self.assertIn("chat_digest", contract)                         # 체결된 계약서에 협상 대화 기록 해시 표시
+        # 서버 약속: 임대인·임차인 메시지 주소와 계약 앱 해시 확인 주소
+        for fname, route in (("rent3_lessor", '"/messages/rooms"'), ("rent3_lessor", '"/messages/rooms/{room_no}"'),
+                             ("rent3_tenant", '"/myhome/{tenant_id}/messages"'), ("rent3_contract", '"/sessions/{session_id}/chat-digest"')):
+            self.assertIn(route, rd(fname, "api.py"), route)
+        # 메시지 화면의 대화는 호실 대화(session_id 없음)만 쓰고, 계약방 협상 기록은 접어서 따로 준다
+        rm = rd("_rent3_core", "room_messages.py")
+        self.assertIn("not m.session_id", rm)
+        self.assertIn("negotiation_history", rm)
+        import re
+        self.assertIsNone(re.search(r"import[^\n]*\bsupport\b|SupportMessage[.(]", rm))   # 관리인 지원 채팅 모델을 가져다 쓰지 않는다
+
+    def test_63_contract_chat_retention_purge(self):
+        """63. 계약방 대화 보관: 취소 후 90일, 체결 계약은 ACTIVE 동안 보존·종료 후 5년. 기간 만료 삭제는 해시 변조와 구분(purged)."""
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import CoSignSession, Contract, DirectChat, Lessor, contract_chat as cc
+        from apps.rent_dist._rent3_core.authz import lessor_token
+        from apps.rent_dist._rent3_core.models import date_today
+        c = self.client
+        today = date_today()
+        days_ago = lambda n: (today - timedelta(days=n)).isoformat() + "T09:00:00"
+
+        def make_session(room, status="IN_PROGRESS"):
+            sid = self._policy_session(room, 5000000, 300000)
+            ses = CoSignSession.get(sid)
+            ses.status = status
+            ses.save(action="t")
+            for body in ("문의 하나", "문의 둘"):
+                DirectChat(branch="main", room_no=room, session_id=sid, kind="question", sender_role="tenant", sender_name="t", message=body, step=2).save(action="t")
+            return ses
+
+        # ── 취소된 계약방: 90일 ──
+        young, old, live = make_session("971", "CANCELLED"), make_session("972", "CANCELLED"), make_session("973", "IN_PROGRESS")
+        young.cancelled_at = days_ago(89)
+        young.save(action="t")
+        old.cancelled_at = days_ago(91)
+        old.save(action="t")
+        live_old = live.created_at
+        r = cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(young.id)), 2)              # 89일: 보존
+        self.assertEqual(len(cc.messages_of(old.id)), 0)                # 91일: 삭제
+        self.assertEqual(len(cc.messages_of(live.id)), 2)               # 진행 중인 계약방은 삭제하지 않는다
+        self.assertTrue(CoSignSession.get(old.id).chat_purged_at)
+        self.assertFalse(CoSignSession.get(young.id).chat_purged_at)
+        self.assertGreaterEqual(r["cancelled_sessions"], 1)
+        # 90일 경계: 정확히 90일째는 아직 보존(90일을 넘겨야 삭제)
+        edge = make_session("974", "CANCELLED")
+        edge.cancelled_at = days_ago(90)
+        edge.save(action="t")
+        cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(edge.id)), 2)
+        # 삭제 로그(풀 이벤트)에는 본문이 없다
+        self.assertNotIn("문의 하나", open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read())
+
+        # ── 체결된 계약: ACTIVE 면 오래돼도 보존, 종료 후 5년(1,825일) 지나야 삭제 ──
+        def make_contract(room, status, ended_days_ago, msg_days_ago=2500):
+            ses = make_session(room, "COMPLETED")
+            for m in cc.messages_of(ses.id):                              # 대화 자체는 아주 오래된 것으로(ACTIVE 보존 확인용)
+                m.created_at = days_ago(msg_days_ago)
+                m.save(action="t")
+            digest, n = cc.compute_digest(ses.id)
+            ct = Contract(branch="main", room_no=room, cosign_session_id=ses.id, chat_digest=digest, chat_digest_count=n,
+                          status=status, ended_at=(days_ago(ended_days_ago)[:10] if ended_days_ago is not None else ""))
+            ct.save(action="t")
+            ses.created_contract_id = ct.id
+            ses.save(action="t")
+            return ses, ct
+
+        s_active, ct_active = make_contract("975", "ACTIVE", None)
+        s_recent, ct_recent = make_contract("976", "TERMINATED", 1824)       # 종료 후 5년 미만
+        s_over, ct_over = make_contract("977", "TERMINATED", 1826)           # 5년 경과
+        s_ren, ct_ren = make_contract("978", "RENEWED", 1900)                # 재계약으로 마감된 오래된 계약도 같은 기준
+        cc.purge_expired(force=True)
+        self.assertEqual(len(cc.messages_of(s_active.id)), 2)                # ACTIVE: 절대 삭제하지 않는다
+        self.assertEqual(len(cc.messages_of(s_recent.id)), 2)                # 종료 후 5년 미만: 보존
+        self.assertEqual(len(cc.messages_of(s_over.id)), 0)                  # 종료 후 5년 경과: 삭제
+        self.assertEqual(len(cc.messages_of(s_ren.id)), 0)
+        self.assertEqual(Contract.get(ct_active.id).chat_purged_at, "")
+        self.assertEqual(Contract.get(ct_recent.id).chat_purged_at, "")
+        self.assertTrue(Contract.get(ct_over.id).chat_purged_at)
+
+        # ── 삭제 표시: 해시 변조(⚠️)와 구분 ──
+        from apps.rent_dist._rent3_core import room_messages as rm
+        hist = rm.negotiation_history(Contract.get(ct_over.id))
+        self.assertTrue(hist["purged"])
+        self.assertIsNone(hist["digest_ok"])                                 # 변조(False)로 오해하지 않는다
+        self.assertEqual((hist["count"], hist["original_count"], hist["digest"]), (0, 2, ct_over.chat_digest))
+        self.assertIn("보관 기간", hist["purged_note"])
+        keep = rm.negotiation_history(Contract.get(ct_recent.id))
+        self.assertFalse(keep["purged"])
+        self.assertIs(keep["digest_ok"], True)                               # 남아 있는 대화는 해시가 그대로 일치
+        lh = {"Authorization": f"Bearer {lessor_token(Lessor.first(branch='main'))}"}
+        v = c.get(f"/api/rent3_contract/sessions/{s_over.id}/chat-digest", headers=lh).json()
+        self.assertEqual((v["purged"], v["match"], v["original_count"]), (True, None, 2))
+        self.assertIn("보관 기간", v["note"])
+        v2 = c.get(f"/api/rent3_contract/sessions/{s_recent.id}/chat-digest", headers=lh).json()
+        self.assertEqual((v2["purged"], v2["match"]), (False, True))
+        lst = c.get(f"/api/rent3_contract/sessions/{s_over.id}/messages", headers=lh).json()
+        self.assertTrue(lst["purged"])
+        self.assertEqual(lst["messages"], [])
+        # 보관 중에 누군가 대화를 지우면(기간 만료 표시 없이) 변조로 보인다
+        for m in cc.messages_of(s_recent.id):
+            m.delete(action="t")
+        tampered = rm.negotiation_history(Contract.get(ct_recent.id))
+        self.assertFalse(tampered["purged"])
+        self.assertIs(tampered["digest_ok"], False)
+        # 같은 로그인 정리 경로: 이미 지운 것은 다시 지우지 않고, 던져 둔 호출은 오류 없이 끝난다
+        self.assertEqual(cc.purge_expired(force=True)["messages"], 0)
+        self.assertEqual(cc.purge_expired()["messages"], 0)                  # 10분 안 재호출은 훑지 않는다
+
+    def test_64_quick_shortcut_pin_login(self):
+        """64. 스마트폰 바로가기 + 간편 비밀번호(PIN): 4자리·약한 번호 거부, 키·PIN 해시만 저장, 5회 실패 영구 잠금(일반 로그인으로 해제),
+        PIN 토큰(m=pin)은 열람·일상 업무만(계약 동의·서명, 퇴실 정산 동의, 설정 변경 차단), 퇴실·미동의·타 역할은 거부."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant, quicklogin as ql, passwords as pwd
+        from apps.rent_dist._rent3_core import authz
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        t = Tenant.first(room_no="202", branch="main")
+        self.assertIsNotNone(t)
+        old = (t.password, t.phone, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices))
+        t.password, t.phone, t.status, t.pin_hash, t.quick_devices = pwd.hash_password("Pw123456"), "010-4444-6173", "ACTIVE", "", []
+        t.save(action="t")
+        tid = t.id
+        PL = "/api/rent3/pool"
+
+        def login():
+            r = c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"})
+            self.assertEqual(r.status_code, 200, r.text)
+            return {"Authorization": f"Bearer {r.json()['token']}"}
+
+        full = login()
+        # ── 설정: 4자리 숫자, 약한 번호 거부(반복·연속·흔한 번호·휴대폰 끝 4자리) ──
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=full).json()["has_pin"], False)
+        for bad in ("1111", "0000", "1234", "4321", "6789", "2580", "6173", "123", "12345", "12a4", ""):
+            r = c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": bad})
+            self.assertEqual(r.status_code, 400, (bad, r.text))
+        self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "x"}).status_code, 400)   # PIN 먼저
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": "2846"}).status_code, 200)
+        t = Tenant.get(tid)
+        self.assertTrue(t.pin_hash and "2846" not in t.pin_hash)
+        dv = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "내 폰"}).json()
+        qk = dv["qk"]
+        self.assertGreaterEqual(len(qk), 32)
+        self.assertIn(f"qk={qk}", dv["start_url"])
+        self.assertNotIn(qk, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 키 원문은 저장하지 않는다
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=full).json()["devices"][0]["label"], "내 폰")
+        for h in (full, NA):                                                                                # 응답에 해시가 실리지 않는다
+            body = c.get(f"/api/rent3_tenant/myhome/{tid}", headers=full).text
+            self.assertNotIn(t.pin_hash, body)
+            self.assertNotIn("quick_devices", body)
+
+        # ── 공개: 이름 가림, 매니페스트(이름·시작 주소·아이콘) ──
+        idn = c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()
+        self.assertEqual((idn["room_no"], idn["eligible"], idn["locked"]), ("202", True, False))
+        self.assertEqual(idn["masked_name"], ql.mask_name(t.name))
+        self.assertNotEqual(idn["masked_name"], t.name)
+        self.assertEqual((ql.mask_name("홍길동"), ql.mask_name("남궁민수"), ql.mask_name("이몽")), ("홍*동", "남**수", "이*"))
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk=nope-not-a-key-0000000000", headers=NA).status_code, 404)
+        mf = c.get(f"{PL}/shortcut/manifest.json?qk={qk}", headers=NA)
+        self.assertEqual(mf.status_code, 200)
+        self.assertIn("manifest+json", mf.headers["content-type"])
+        m = mf.json()
+        self.assertEqual((m["display"], m["scope"]), ("standalone", "/rent3_tenant/"))
+        self.assertEqual(m["start_url"], f"/rent3_tenant/?tenant={tid}&qk={qk}")
+        for ic in m["icons"]:
+            self.assertEqual(c.get(ic["src"].split("?")[0], headers=NA).status_code, 200, ic["src"])
+        self.assertEqual(c.get(f"/rent3_tenant/icons/apple-touch-icon.png", headers=NA).status_code, 200)
+
+        # ── PIN 로그인: 틀리면 남은 횟수, 5번째에 영구 잠금(맞는 PIN 도 거부), 일반 로그인이 풀어 준다 ──
+        pl = lambda pin, key=qk: c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": key, "pin": pin})
+        r = pl("9999")
+        self.assertEqual(r.status_code, 401)
+        self.assertIn("남은 시도 4회", r.json()["message"])
+        for _ in range(3):
+            self.assertEqual(pl("9999").status_code, 401)
+        r = pl("9999")                                                    # 5번째
+        self.assertIn("잠겼", r.json()["message"])
+        self.assertEqual(pl("2846").status_code, 401)                    # 잠긴 뒤엔 맞는 PIN 도 거부
+        self.assertTrue(c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()["locked"])
+        full = login()                                                    # 아이디·비밀번호 로그인 → 잠금 해제
+        self.assertFalse(c.get(f"{PL}/shortcut/status", headers=full).json()["devices"][0]["locked"])
+        self.assertEqual(pl("1111").status_code, 401)                    # 실패 횟수는 다시 처음부터
+        ok = pl("2846")
+        self.assertEqual(ok.status_code, 200, ok.text)
+        pinh = {"Authorization": f"Bearer {ok.json()['token']}"}
+        claims = verify_token(ok.json()["token"])
+        self.assertEqual((claims["m"], claims["r"], claims["u"]), ("pin", "tenant", f"tenant:{tid}"))
+        self.assertNotIn("m", verify_token(full["Authorization"].split()[1]))   # 일반 로그인 토큰에는 m 이 없다
+        self.assertEqual(ok.json()["user"]["room_no"], "202")
+
+        # ── PIN 토큰 권한: 열람·일상 업무 OK, 법적·민감 행위 차단(허용 목록 방식) ──
+        base = f"/api/rent3_tenant/myhome/{tid}"
+        self.assertEqual(c.get(base, headers=pinh).status_code, 200)
+        self.assertEqual(c.get(f"{base}/messages", headers=pinh).status_code, 200)
+        self.assertEqual(c.post(f"{base}/messages", headers=pinh, json={"body": "PIN 으로 보낸 메시지"}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/vehicle", headers=pinh, json={"car_number": "12가3456", "car_model": "소나타"}).status_code, 200)
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=pinh).json()["via_pin"], True)
+        blocked = [
+            ("post", f"{base}/expiry-plan", {"plan": "RENEW"}), ("post", f"{base}/acknowledge-renewal", {}),
+            ("post", "/api/rent3_tenant/checkout/x/agree", {"agreed": True}),
+            ("post", "/api/rent3_contract/sessions/x/respond", {"responder_role": "tenant"}),
+            ("post", "/api/rent3_contract/sessions/x/step4/sign", {"role": "tenant", "signature": "s"}),
+            ("post", "/api/rent3_contract/sessions/x/step3/agree", {"role": "tenant"}),
+            ("post", "/api/rent3_contract/sessions/x/messages/y/respond", {"action": "accept"}),
+            ("post", f"{PL}/auth/consents/support", {"allow": True}),
+            ("post", f"{PL}/shortcut/pin", {"pin": "2846"}), ("post", f"{PL}/shortcut/devices", {"label": "y"}),
+        ]
+        for _m, url, js in blocked:
+            r = getattr(c, _m)(url, headers=pinh, json=js)
+            self.assertEqual(r.status_code, 403, (url, r.status_code, r.text))
+            self.assertIn("아이디·비밀번호", r.json().get("message", "") + r.json().get("hint", ""))
+            # 같은 요청이 일반 로그인 토큰에서는 이 가드로 막히지 않는다(다른 이유로 실패할 수는 있다)
+            self.assertNotEqual(getattr(c, _m)(url, headers=full, json=js).json().get("message", ""), authz.PIN_BLOCK_MESSAGE)
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv['device']['id']}/revoke", headers=pinh, json={}).status_code, 403)   # 기기 해제도 비밀번호 로그인 필요
+        self.assertFalse(any(rx.search("/api/rent3_contract/sessions/ab12/messages") for rx in authz.PIN_WRITE_ALLOW))   # 계약방 글쓰기(제안·수정 요청 포함)도 비밀번호 로그인
+        for tail in ("balance-registry-check", "insurance-proof"):                                                        # 도어락 교부와 이어지는 확인도 마찬가지
+            self.assertFalse(any(rx.search(f"/api/rent3_tenant/myhome/t/{tail}") for rx in authz.PIN_WRITE_ALLOW), tail)
+        self.assertFalse(any(rx.search("/api/rent3_contract/sessions/ab12/messages/m1/respond") for rx in authz.PIN_WRITE_ALLOW))
+
+        # ── 해제·퇴실·동의·다른 역할 ──
+        dv2 = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "태블릿"}).json()
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv['device']['id']}/revoke", headers=full, json={}).status_code, 200)
+        r = pl("2846")
+        self.assertEqual(r.status_code, 401)                             # 해제한 기기의 키는 더 못 쓴다
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).status_code, 404)
+        qk2 = dv2["qk"]
+        self.assertEqual(pl("2846", qk2).status_code, 200)
+        t = Tenant.get(tid)
+        t.status = "MOVED_OUT"
+        t.save(action="t")
+        r = pl("2846", qk2)
+        self.assertEqual(r.status_code, 401)                             # 퇴실하면 바로가기는 즉시 거부
+        self.assertIn("입주 중", r.json()["message"])
+        self.assertEqual(c.get(f"{PL}/shortcut/identify?qk={qk2}", headers=NA).json()["eligible"], False)
+        t.status = "ACTIVE"
+        t.save(action="t")
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):   # 개인정보 동의 전에는 PIN 으로 못 들어온다
+            t = Tenant.get(tid)
+            t.consents = {}
+            t.save(action="t")
+            r = pl("2846", qk2)
+            self.assertEqual(r.status_code, 401)
+            self.assertIn("동의", r.json()["message"])
+        self.assertEqual(pl("2846", qk2).status_code, 200)
+        # 임대인·관리인은 쓸 수 없다
+        lh = self._login("chic")
+        for h in (lh, self._as(self.admin_token)):
+            self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=h, json={"pin": "2846"}).status_code, 400)
+        self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": "x" * 40, "pin": "2846"}).status_code, 401)
+        # 기기 수 한도
+        for i in range(ql.MAX_DEVICES):
+            c.post(f"{PL}/shortcut/devices", headers=full, json={"label": f"d{i}"})
+        self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=full, json={"label": "초과"}).status_code, 400)
+
+        t = Tenant.get(tid)
+        t.password, t.phone, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices = old
+        t.save(action="t")
+
+    def test_65_quick_shortcut_static_ui(self):
+        """65. 바로가기 화면: PIN 입력 오버레이·메뉴·세션 가드(qk 면 포털로 안 보냄)·아이콘 파일."""
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        guard = open(os.path.join(ROOT, "shared_ui", "rent3_session_guard.js"), encoding="utf-8").read()
+        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        for needle in ("pinPending", "showPinGate", "/auth/pin-login", "/identify?qk=", "openShortcutSettings", "공유(□↑) → 홈 화면에 추가",
+                       "beforeinstallprompt", "apple-mobile-web-app-title", "manifest"):
+            self.assertIn(needle, shell, needle)
+        self.assertIn("qk=", guard)
+        self.assertIn("pinPending()) return", app)
+        self.assertIn("openShortcutSettings", app)
+        for name in ("icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"):
+            data = open(os.path.join(fe, "icons", name), "rb").read()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n", name)
+
+    def test_66_admin_direct_read_needs_support_entry(self):
+        """66. 관리인 직접 읽기 제한(엄격 모드): 원격 지원 입장(허용+채팅+기록) 없이 임대인·임차인·계약 앱 자료를 읽을 수 없고,
+        입장하면 그 대상만 일정 시간 읽을 수 있다. 사용자가 허용을 끄거나 기록이 오래되면 다시 닫힌다. 관리인 전용 API 는 영향 없음."""
+        from datetime import datetime, timedelta
+        from unittest import mock
+        from apps.rent_dist._rent3_core import CoSignSession, Lessor, Tenant, authz, support as sup
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        c = self.client
+        t202, t201 = Tenant.get("tenant_202"), Tenant.get("tenant_201")
+        lessor_main = Lessor.first(branch="main")
+        sid = self._policy_session("981", 5000000, 300000)
+        ses_other = self._policy_session("982", 5000000, 300000)
+        for g in sup.SupportAccessLog.all():                       # 앞선 시험이 남긴 입장 기록은 치운다
+            g.delete(action="t")
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            direct = ["/api/rent3_lessor/dashboard?branch=main", f"/api/rent3_tenant/myhome/{t202.id}", f"/api/rent3_tenant/myhome/{t202.id}/messages",
+                      f"/api/rent3_contract/sessions/{sid}", f"/api/rent3_contract/sessions/{sid}/messages"]
+            for u in direct:                                        # 주소를 직접 쳐서 읽기: 모두 막힘
+                r = c.get(u)
+                self.assertEqual(r.status_code, 403, u)
+                self.assertIn("원격 지원", r.json()["message"])
+            # 관리인 전용 API·대상이 없는 목록은 그대로
+            self.assertEqual(c.get("/api/rent3_admin/support/directory").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_contract/sessions").status_code, 200)
+
+            # 임차인 입장: 그 임차인만 열린다(다른 임차인·임대인 앱은 여전히 막힘)
+            self._admin_enter(t202, "tenant")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 200)
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}").status_code, 403)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 403)
+            # 임대인 입장: 그 건물만(다른 건물은 막힘)
+            self._admin_enter(lessor_main, "lessor")
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main").status_code, 200)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=sinbi").status_code, 403)
+            # 계약 입장: 그 계약방만
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}").status_code, 403)
+            s_obj = CoSignSession.get(sid)
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,        # 계약 상대(예비 임차인): 계약방에 적은 번호로 가입한 계정
+                         json={"role": "prospect", "name": "입장시험", "phone": (s_obj.terms or {}).get("tenant_phone", ""), "password": "Pw123456"})
+            self.assertEqual(reg.status_code, 200, reg.text)
+            self._admin_enter(Tenant.get(reg.json()["user"]["id"]), "contract", session_id=sid)
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}").status_code, 200)
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{ses_other}").status_code, 403)
+
+            # 사용자가 원격 지원 허용을 끄면 곧바로 닫힌다
+            t202 = Tenant.get(t202.id)
+            t202.consents = {**t202.consents, "support_access": False}
+            t202.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 403)
+            t202.consents = {**t202.consents, "support_access": True}
+            t202.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 200)
+            # 입장 기록이 허용 시간보다 오래되면 닫힌다
+            for g in sup.SupportAccessLog.find(target_user=f"tenant:{t202.id}"):
+                g.entered_at = (datetime.now() - timedelta(minutes=authz.GRANT_MINUTES + 5)).isoformat(timespec="seconds")
+                g.save(action="t")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}").status_code, 403)
+            # 임차인 본인은 영향 없음
+            th = {"Authorization": f"Bearer {tenant_token(t202)}"}
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t202.id}", headers=th).status_code, 200)
+        # 호환 모드(기존 시험 묶음)에서는 관리인이 입장 없이도 읽는다
+        self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t201.id}").status_code, 200)
+
+    def test_67_contract_step12_dots_and_docs_wording(self):
+        """67. 계약 앱 ①② 단계 진행 표시는 점 두 개로 통일(옛 '미체크·미확인' 배지 없음), 계약 앱 매뉴얼·QA 체크리스트는 새 3단계(제안→수락, 전체 동의 한 버튼)를 설명한다."""
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        app = rd("apps", "rent_dist", "rent3_contract", "frontend", "app.js")
+        self.assertIn("function pairDots(", app)
+        self.assertEqual(app.count("pairDots("), 4)                       # 정의 1 + ① 두 줄 + ② 한 줄
+        for gone in ("미체크", "미확인", "임차인 확인 잠금", "임대인 확인: "):
+            self.assertNotIn(gone, app, gone)
+        manual = rd("apps", "rent_dist", "rent3_contract", "frontend", "manual.html")
+        for needle in ("제안", "수락", "[계약 조건 전체 동의]", "조건 다시 열기", "계약방 대화", "90일", "5년"):
+            self.assertIn(needle, manual, needle)
+        self.assertNotIn("공동 편집", manual)
+        qa = rd("scripts", "generate_rent3_qa_pdf.py")
+        for needle in ("CON-F10", "CON-F11", "CON-F12", "제안 → 상대 수락", "[계약 조건 전체 동의]"):
+            self.assertIn(needle, qa, needle)
+        self.assertNotIn("최종 합의 잠금", qa)
+        self.assertIn('"apps", "rent_dist", "rent3", "frontend", "Rent3_QA_Test_Checklist.pdf"', qa)   # 사본이 추적되는 위치로 만든다
+
+    def test_68_backup_invite_and_drawer_footer(self):
+        """68. Phase 1: Data Pool 백업·검증·복구(관리인 내려받기), 입주 안내 카드(1회용 링크 → 비밀번호·PIN 설정), ☰ 서랍 하단 포털 홈·로그아웃."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant, backup as bk, invite as inv, passwords as pwd, quicklogin as ql
+        from apps.rent_dist._rent3_core.authz import lessor_token
+        c, NA = self.client, self.NOAUTH
+        # ── 백업: 만들기 → 검사 → 새 폴더에 복구, 백업 폴더 자체는 담지 않는다 ──
+        bdir = tempfile.mkdtemp(prefix="rent3_bk_")
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir, "RENT3_BACKUP_KEEP": "2"}):
+            r = c.post("/api/rent3_admin/backups/run", json={})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["verify"]["ok"])
+            name = r.json()["backup"]["name"]
+            self.assertEqual(c.get("/api/rent3_admin/backups").json()["backups"][0]["name"], name)
+            dl = c.get(f"/api/rent3_admin/backups/{name}/download")
+            self.assertEqual(dl.status_code, 200)
+            self.assertEqual(dl.content[:2], b"\x1f\x8b")                                        # gzip
+            self.assertIn(c.get("/api/rent3_admin/backups/..%2Fusers.json/download").status_code, (400, 404))
+            self.assertEqual(c.get("/api/rent3_admin/backups/rent3_pool_20000101_000000.tar.gz/download").status_code, 400)
+            t0 = Tenant.get("tenant_202")
+            self.assertIn(c.get("/api/rent3_admin/backups", headers=self._login("chic")).status_code, (401, 403))   # 임대인은 못 본다
+            target = os.path.join(tempfile.mkdtemp(prefix="rent3_rs_"), "restored")
+            out = bk.restore(bk.path_for(name), target)
+            self.assertGreater(out["files"], 3)
+            self.assertTrue(os.path.exists(os.path.join(target, "users.json")))
+            self.assertFalse(any(x.startswith("rent3_pool_") for x in os.listdir(target)))              # 백업 파일이 백업 안에 들어가지 않는다
+            with self.assertRaises(ValueError):
+                bk.restore(bk.path_for(name), target)                                                    # 비어 있지 않은 폴더에는 복구하지 않는다
+            # 보관 개수: 3번째를 만들면 가장 오래된 것이 지워진다
+            import time as _t
+            for fake in ("rent3_pool_20200101_000001.tar.gz", "rent3_pool_20200101_000002.tar.gz"):
+                open(os.path.join(bdir, fake), "wb").write(b"x")
+            bk.create()
+            self.assertLessEqual(len(bk.list_backups()), 2)
+            bad = os.path.join(bdir, "rent3_pool_20990101_000000.tar.gz")
+            open(bad, "wb").write(b"not a tar")
+            self.assertFalse(bk.verify(bad)["ok"])
+            # 하루 한 번 자동: 최근 백업이 있으면 시작하지 않는다
+            os.remove(bad)
+            bk._last_check = 0
+            self.assertIsNone(bk.daily())
+
+        # ── 입주 안내 카드: 임대인이 발급 → 링크로 비밀번호·PIN → 로그인, 1회용 ──
+        t = Tenant.get("tenant_201")
+        old = (t.password, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices), t.invite_hash)
+        t.password, t.pin_hash, t.quick_devices = "", "", []
+        t.save(action="t")
+        chic = self._login("chic")
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-invite", headers=chic, json={"branch": "main", "room_no": "999"}).status_code, 400)
+        r = c.post("/api/rent3_lessor/tenant-invite", headers=chic, json={"branch": "main", "room_no": "201"})
+        self.assertEqual(r.status_code, 200, r.text)
+        link = r.json()["url"]
+        tok = link.split("invite=")[1]
+        self.assertNotIn(tok, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())      # 원문은 저장하지 않는다
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-invite", headers=self._login("sunho"), json={"branch": "main", "room_no": "201"}).status_code, 403)   # 남의 건물
+        self.assertNotIn(Tenant.get("tenant_201").invite_hash, c.get("/api/rent3_tenant/myhome/tenant_201").text)
+        idn = c.get(f"/api/rent3/pool/invite/identify?token={tok}", headers=NA).json()
+        self.assertEqual((idn["room_no"], idn["masked_name"]), ("201", ql.mask_name(t.name)))
+        self.assertEqual(c.get("/api/rent3/pool/invite/identify?token=wrong-token-0000000000", headers=NA).status_code, 404)
+        from apps.rent_dist._rent3_core import connect as cn_id
+        who = {"room_no": t.room_no, "name": t.name, "phone": t.phone, "lessor_name": cn_id.public_info(t.branch)["lessor_name"]}
+        acc = lambda **kw: c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, **who, **kw})
+        # 본인 확인: 호실·이름·전화번호·임대인 이름이 모두 맞아야 한다(틀리면 비밀번호도 못 정한다)
+        vf = lambda **kw: c.post("/api/rent3/pool/invite/verify", headers=NA, json={"token": tok, **who, **kw})
+        self.assertEqual(vf().status_code, 200)
+        from apps.rent_dist._rent3_core import ratelimit as rl_id
+        for bad in ({"room_no": "999"}, {"name": "엉뚱한이"}, {"phone": "010-0000-0000"}, {"lessor_name": "남의임대인"}, {"lessor_name": ""}):
+            rl_id.reset_all()
+            self.assertEqual(vf(**bad).status_code, 400, bad)
+            self.assertEqual(acc(password="Invite2026x", agree_privacy=True, **bad).status_code, 400, bad)      # 확인 단계를 건너뛰고 바로 가입해도 막힌다
+        self.assertEqual(c.post("/api/rent3/pool/auth/invite-accept", headers=NA, json={"token": tok, "password": "Invite2026x", "agree_privacy": True}).status_code, 400)   # 4칸 없이는 불가
+        rl_id.reset_all()
+        self.assertEqual(vf().status_code, 200)
+        for _ in range(5):
+            vf(name="엉뚱한이")
+        self.assertEqual(vf().status_code, 429)       # 5번 틀리면 맞는 입력도 잠시 거절
+        rl_id.reset_all()
+        self.assertEqual(acc(password="short", agree_privacy=True).status_code, 400)                          # 비밀번호 규칙
+        self.assertEqual(acc(password="Invite2026x", pin="1234", agree_privacy=True).status_code, 400)       # 약한 PIN
+        with mock.patch.dict(os.environ, {"RENT3_CONSENT_REQUIRED": "1"}):
+            self.assertEqual(acc(password="Invite2026x", agree_privacy=False).status_code, 400)             # 동의 필수(운영 모드)
+        t201 = Tenant.get("tenant_201"); keep_idn = t201.identity; t201.identity = {}; t201.save(action="t")     # 가입 전엔 본인 확인 기록이 없다
+        ok = acc(password="Invite2026x", pin="2846", agree_privacy=True)
+        self.assertEqual(ok.status_code, 200, ok.text)
+        d = ok.json()
+        self.assertTrue(d["token"] and "qk=" in d["start_url"] and "welcome=1" in d["start_url"])
+        from core.auth import verify_token
+        self.assertNotIn("m", verify_token(d["token"]))                                                     # 비밀번호를 정한 정식 로그인
+        self.assertEqual(acc(password="Another2026x").status_code, 404)                                    # 1회용
+        # 1단계: 링크+4칸으로 가입하면 본인 확인 기록이 생기되 '실명 확인'이 아닌 invite_link 수준으로 구분된다
+        idn_rec = Tenant.get("tenant_201").identity
+        self.assertEqual((idn_rec["verified"], idn_rec["assurance"], idn_rec["provider"], idn_rec["birth6"]), (True, "invite_link", "invite", ""))
+        hd = {"Authorization": f"Bearer {d['token']}"}
+        call = lambda: c.post("/api/rent3_contract/sessions/call", headers=hd, json={"caller_role": "tenant", "branch": "main", "room_no": "201"})
+        self.assertNotIn("휴대폰 본인인증이 필요합니다", call().text)                                                       # 기본: 계약 화면의 인증 막힘이 없다
+        with mock.patch.dict(os.environ, {"RENT3_INVITE_IDENTITY_OK": "0"}):
+            blocked = call()
+            self.assertEqual(blocked.status_code, 403)                                                 # 스위치를 끄면 실명 인증이 필요
+            self.assertIn("실명 본인인증", blocked.text)
+        # 등록된 기기에서만 비밀번호 로그인(RENT3_DEVICE_BIND=1): 처음 로그인한 기기가 등록되고, 다른 기기는 비밀번호가 맞아도 거절
+        devA, devB = "A" * 30, "B" * 30
+        lg = lambda dev: c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x", "device_id": dev})
+        with mock.patch.dict(os.environ, {"RENT3_DEMO_LOGIN": "0", "RENT3_DEVICE_BIND": "1"}):
+            self.assertEqual(lg(devA).status_code, 200)                  # 등록 기기가 없으면 첫 기기를 등록
+            self.assertEqual(lg(devA).status_code, 200)
+            nb = lg(devB)
+            self.assertEqual(nb.status_code, 401)
+            self.assertIn("새 기기", nb.json()["message"])
+            self.assertEqual(lg("").status_code, 401)                    # 기기 값이 없으면 거절
+            self.assertNotIn("B" * 30, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 원문은 저장하지 않는다
+            self.assertEqual(len(Tenant.get("tenant_201").login_devices), 1)
+        t201 = Tenant.get("tenant_201"); t201.login_devices = []; t201.save(action="t")   # (재등록 때는 등록 취소가 비운다 — test_83 에서 확인)
+        login = c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": "tenant_201", "password": "Invite2026x"})
+        self.assertEqual(login.status_code, 200, login.text)                                                 # 새 비밀번호로 정상 로그인
+        pl = c.post("/api/rent3/pool/auth/pin-login", headers=NA, json={"qk": d["start_url"].split("qk=")[1].split("&")[0], "pin": "2846"})
+        self.assertEqual(pl.status_code, 200, pl.text)                                                       # 정한 PIN·기기로 바로가기 로그인
+        self.assertTrue(Tenant.get("tenant_201").consents)
+        # 관리인 발급: 목록·링크, 퇴실자는 불가
+        lst = c.get("/api/rent3_admin/accounts/tenants").json()["tenants"]
+        self.assertTrue(any(x["id"] == "tenant_201" for x in lst))
+        self.assertEqual(c.post("/api/rent3_admin/accounts/invite", json={"id": "tenant_201"}).status_code, 200)
+        self.assertIn(c.post("/api/rent3_admin/accounts/invite", headers=chic, json={"id": "tenant_201"}).status_code, (401, 403))
+        t = Tenant.get("tenant_201")
+        t.status = "MOVED_OUT"
+        t.save(action="t")
+        self.assertEqual(c.post("/api/rent3_admin/accounts/invite", json={"id": "tenant_201"}).status_code, 400)
+        t = Tenant.get("tenant_201")
+        t.password, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices, t.invite_hash = old
+        t.save(action="t")
+
+        # ── 화면: 서랍 하단 포털 홈·로그아웃, 가입 화면, 관리인 운영 탭, PIN 차단 안내 ──
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        shell = rd("shared_ui", "r3_shell.js")
+        for needle in ("🌐 포털 홈", "🚪 로그아웃", "/rent3/?logout=1", "showInviteSetup", "/auth/invite-accept", "/invite/verify", "r3IdLessor", "본인 확인", "installHelp"):
+            self.assertIn(needle, shell, needle)
+        admin_idx = rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html")
+        self.assertIn("/rent3/?logout=1", admin_idx)
+        self.assertIn('data-tab="ops"', admin_idx)
+        self.assertIn("renderOpsTab", rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"))
+        self.assertIn("showInviteModal", rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"))
+        self.assertIn("qrcode.min.js", rd("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"))
+        self.assertIn("아이디·비밀번호로 다시 로그인", rd("shared_ui", "rent3_session_guard.js"))
+        self.assertIn("showInviteSetup", rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js") + shell)
+
+    def test_69_phase2_pay_notice_lost_phone_pin_ttl_name_login(self):
+        """69. Phase 2: 임차인 스스로 납부 처리 불가(이체 알림→임대인 확인), PIN 토큰 3시간·기기 해제 즉시 반영, 분실 폰 전체 해제(임대인·관리인), 운영 환경 성명 로그인 차단."""
+        import time as _t
+        from apps.rent_dist._rent3_core import Tenant, passwords as pwd, authz
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        t = Tenant.first(room_no="202", branch="main")
+        old = (t.password, t.status, t.room_no, dict(t.consents), t.pin_hash, list(t.quick_devices))
+        t.password, t.pin_hash, t.quick_devices, t.status = pwd.hash_password("Pw123456"), "", [], "ACTIVE"
+        t.save(action="t")
+        from apps.rent_dist._rent3_core import Room
+        room202 = Room.first(branch="main", room_no="202")
+        old_room_tenant = room202.id_tenant
+        room202.id_tenant = t.id                                   # 앞선 시험이 호실 연결을 풀었을 수 있다
+        room202.save(action="t")
+        tid, PL = t.id, "/api/rent3/pool"
+        login = lambda: {"Authorization": "Bearer " + c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"}).json()["token"]}
+        full = login()
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=full, json={"pin": "2846"}).status_code, 200)
+
+        def new_device(label):
+            dv = c.post(f"{PL}/shortcut/devices", headers=full, json={"label": label}).json()
+            r = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": dv["qk"], "pin": "2846"})
+            self.assertEqual(r.status_code, 200, r.text)
+            return dv, {"Authorization": f"Bearer {r.json()['token']}"}, r.json()["token"]
+
+        dv1, pin1, tok1 = new_device("폰1")
+        cl = verify_token(tok1)
+        self.assertEqual(cl["d"], dv1["device"]["id"])
+        self.assertLessEqual(cl["exp"] - int(_t.time()), 3 * 3600 + 5)                                       # PIN 토큰은 3시간
+        self.assertGreater(cl["exp"] - int(_t.time()), 3 * 3600 - 60)
+        self.assertGreater(verify_token(full["Authorization"].split()[1])["exp"] - int(_t.time()), 6 * 3600)  # 정식 로그인은 그대로(12시간)
+        # 이체 알림은 PIN 으로도 되지만 장부는 안 바뀐다. 납부 처리 API 는 없다
+        base = f"/api/rent3_tenant/myhome/{tid}"
+        before = (c.get(base, headers=pin1).json().get("ledger") or {}).get("total_unpaid")
+        self.assertEqual(c.post(f"{base}/transfer-notice", headers=pin1, json={"amount": 12345}).status_code, 200)
+        self.assertEqual((c.get(base, headers=pin1).json().get("ledger") or {}).get("total_unpaid"), before)
+        self.assertEqual(c.get(base, headers=pin1).json()["transfer_notice"]["status"], "PENDING")
+        self.assertIn(c.post(f"{base}/pay", headers=pin1, json={"amount": 1}).status_code, (403, 404, 405))
+        self.assertEqual(c.post(f"{base}/transfer-notice", headers=pin1, json={"amount": 0}).status_code, 400)
+        nid = c.get(base, headers=pin1).json()["transfer_notice"]["id"]
+        self.assertEqual(c.post(f"/api/rent3_lessor/transfer-notices/{nid}/reject", headers=self._login("chic"), json={"branch": "main", "reason": "확인 안 됨"}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin1).json()["transfer_notice"]["status"], "REJECTED")
+        # 기기를 해제하면 이미 받은 PIN 토큰도 바로 무효
+        self.assertEqual(c.post(f"{PL}/shortcut/devices/{dv1['device']['id']}/revoke", headers=full, json={}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin1).status_code, 401)
+        # 분실 폰 전체 해제: 임대인(자기 건물만)·관리인
+        dv2, pin2, _ = new_device("폰2")
+        chic, sunho = self._login("chic"), self._login("sunho")
+        self.assertEqual(c.post("/api/rent3_lessor/tenant-shortcuts/revoke-all", headers=sunho, json={"branch": "main", "room_no": "202"}).status_code, 403)
+        self.assertEqual(c.get(base, headers=pin2).status_code, 200)
+        r = c.post("/api/rent3_lessor/tenant-shortcuts/revoke-all", headers=chic, json={"branch": "main", "room_no": "202"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(c.get(base, headers=pin2).status_code, 401)                                         # 열려 있던 화면도 막힘
+        self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": dv2["qk"], "pin": "2846"}).status_code, 401)
+        self.assertEqual(c.get(f"{PL}/shortcut/status", headers=login()).json()["has_pin"], False)           # 비밀번호 로그인은 그대로, PIN 은 없어짐
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=login(), json={"pin": "2846"}).status_code, 200)
+        dv3, pin3, _ = new_device("폰3")
+        self.assertEqual(c.post("/api/rent3_admin/accounts/revoke-shortcuts", json={"id": tid}).status_code, 200)
+        self.assertEqual(c.get(base, headers=pin3).status_code, 401)
+        self.assertIn(c.post("/api/rent3_admin/accounts/revoke-shortcuts", headers=chic, json={"id": tid}).status_code, (401, 403))
+        # 퇴실하면 이미 받은 PIN 토큰도 무효
+        self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=login(), json={"pin": "2846"}).status_code, 200)
+        dv4, pin4, _ = new_device("폰4")
+        tt = Tenant.get(tid)
+        tt.status = "MOVED_OUT"
+        tt.save(action="t")
+        self.assertEqual(c.get(base, headers=pin4).status_code, 401)
+        tt = Tenant.get(tid)
+        tt.status = "ACTIVE"
+        tt.save(action="t")
+
+        # ── 운영 환경(프록시 헤더가 붙은 접속): 성명 로그인 차단, 아이디는 가능. 로컬 시연에서는 예전처럼 ──
+        remote = {**NA, "X-Forwarded-For": "203.0.113.9"}
+        by_name = c.post(f"{PL}/auth/login", headers=remote, json={"login_mode": "account", "identifier": Tenant.get(tid).name, "password": "Pw123456"})
+        self.assertEqual(by_name.status_code, 401)
+        by_id = c.post(f"{PL}/auth/login", headers=remote, json={"login_mode": "account", "identifier": tid, "password": "Pw123456"})
+        self.assertEqual(by_id.status_code, 200, by_id.text)
+        self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": Tenant.get(tid).name, "password": "Pw123456"}).status_code, 200)
+
+        # ── 화면: 사전 비활성·안내, 운영 입력칸 안내문, 납부 카드 문구 ──
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        tapp = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
+        for needle in ("isViaPin", "btnAgreeCo", "이체했어요", "/transfer-notice"):
+            self.assertIn(needle, tapp, needle)
+        self.assertNotIn("월세 즉시 납부", tapp)
+        self.assertNotIn("/pay`", tapp)
+        self.assertIn("아이디, 이메일 또는 휴대폰 번호", rd("apps", "rent_dist", "rent3", "frontend", "app.js"))
+        self.assertIn("nt-ok", rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"))
+        t = Tenant.get(tid)
+        t.password, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices = old
+        t.save(action="t")
+        room202 = Room.get(room202.id)
+        room202.id_tenant = old_room_tenant
+        room202.save(action="t")
+
+    def test_70_phase3_terms_overwrite_guard_first_screen_admin_links(self):
+        """70. Phase 3: 계약 조건은 내가 고친 항목만, 화면이 근거로 삼은 리비전이 낡았으면 덮어쓰지 않고 거절. 임대인 첫 화면에 이체 확인 요청·미납 호실 바로가기. 관리인 타 앱 링크는 입장 중에만."""
+        c = self.client
+        sid = self._policy_session("983", 5000000, 300000)
+        base = f"/api/rent3_contract/sessions/{sid}"
+        rev0 = c.get(base).json()["session"]["revision"]
+        r1 = c.post(f"{base}/terms", json={"role": "lessor", "updates": {"special_terms": "특약 A"}, "expected_revision": rev0})
+        self.assertEqual(r1.status_code, 200, r1.text)
+        rev1 = r1.json()["session"]["revision"]
+        self.assertGreater(rev1, rev0)
+        # 낡은 화면(rev0)에서 다른 값을 보내면 상대(앞선 변경)를 덮어쓰지 않고 거절한다
+        r2 = c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 B"}, "expected_revision": rev0})
+        self.assertEqual(r2.status_code, 409, r2.text)
+        self.assertIn("상대방이 계약 조건을 바꿨", r2.json()["message"])
+        self.assertEqual(c.get(base).json()["session"]["terms"]["special_terms"], "특약 A")
+        # 같은 값이거나 리비전이 맞으면 통과, 리비전을 안 보내는 옛 호출도 그대로(호환)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 A"}, "expected_revision": rev0}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 C"}, "expected_revision": rev1}).status_code, 200)
+        self.assertEqual(c.post(f"{base}/terms", json={"role": "tenant", "updates": {"special_terms": "특약 D"}}).status_code, 200)
+
+        rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
+        capp = rd("rent3_contract", "frontend", "app.js")
+        for needle in ("changedUpdates", "postTerms", "expected_revision: s.revision", "상대방이 계약 조건을 바꿨"):
+            self.assertIn(needle, capp, needle)
+        self.assertEqual(capp.count("collectUpdates()"), 1)                # changedUpdates 안에서만 부른다 — 저장·동의 단추가 폼 전체를 직접 보내지 않는다
+        lapp = rd("rent3_lessor", "frontend", "app.js")
+        for needle in ("todo-row", "이체 확인 요청", "미납 호실", "adminLinkOk"):
+            self.assertIn(needle, lapp, needle)
+        self.assertIn("adminLinkOk", rd("rent3_tenant", "frontend", "app.js"))
+
+    def test_71_phase4_mobile_ui_polish(self):
+        """71. Phase 4: 메뉴 이름 축약, 체크박스 누름 영역·긴 입력칸, 본문 글자 12px 이상(인쇄 표 제외), 공동계약 호출 띠(토큰을 실어 부른다)."""
+        import re
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        lapp = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+        self.assertIn('"🧾 세무 허브"', lapp)
+        self.assertNotIn("세무 허브 (종소세", lapp)
+        self.assertIn("flex:1 1 180px;min-width:180px", lapp)
+        shell = rd("shared_ui", "r3_shell.js")
+        self.assertIn("display:block;min-height:44px;padding:10px 0", shell)
+        small = re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+        for parts in (("shared_ui", "r3_shell.js"), ("shared_ui", "r3_modal.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"),
+                      ("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")):
+            self.assertFalse(small.search(rd(*parts)), "/".join(parts))
+        bar = rd("apps", "rent_dist", "rent3", "frontend", "session-bar.js")
+        self.assertIn("mountCallBarOnly", bar)
+        self.assertIn("Authorization: `Bearer ${tok}`", bar)               # 토큰 없이 부르면 401 → 세션 가드가 로그인을 풀어 버린다
+        self.assertIn("if (!tok) return;", bar)
+
+    def test_72_lessor_dashboard_monthly_target_kpi(self):
+        """72. 임대인 대시보드 헤더 KPI: 당월 목표액·수납액(수납률%)·미납액 반환 및 일관성 검증."""
+        c = self.client
+        hdrs = self._login("chic")
+        res = c.get("/api/rent3_lessor/dashboard?branch=main", headers=hdrs)
+        self.assertEqual(res.status_code, 200, res.text)
+        d = res.json()
+        self.assertRegex(d["target_ym"], r"^\d{4}-\d{2}$")
+        self.assertGreater(d["monthly_target"], 0)
+        self.assertEqual(d["monthly_collected"] + d["monthly_unpaid"], d["monthly_target"])
+        expected_rate = round(d["monthly_collected"] * 100 / d["monthly_target"])
+        self.assertEqual(d["monthly_collection_rate"], expected_rate)
+        self.assertGreaterEqual(d["total_unpaid_branch"], d["monthly_unpaid"])
+        with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+            lapp = fp.read()
+        for needle in ("월 목표액", "수납액", "미납액", "monthly_collection_rate"):
+            self.assertIn(needle, lapp, needle)
+
+    def test_73_payment_delete_recalculates_fifo_and_guards(self):
+        """73. 수납 내역 삭제(/payments/delete): 권한 경계(타 지점·엄격 관리인 403), 삭제 후 FIFO 원장·대시보드 즉시 재계산."""
+        from unittest import mock
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        d0 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        target = next(
+            (rc for rc in d0["rooms"] if rc.get("is_occupied") and (rc.get("ledger") or {}).get("total_unpaid", 0) >= 100000),
+            None,
+        )
+        fallback = target or next((rc for rc in d0["rooms"] if rc.get("is_occupied") and rc.get("contract")), None)
+        self.assertIsNotNone(fallback, "활성 임차 호실이 필요합니다.")
+        room_no = fallback["room_no"]
+        amt = min(250000, int(target["ledger"]["total_unpaid"])) if target else 250000
+        r_col = c.post("/api/rent3_lessor/payments/collect", headers=chic,
+                       json={"branch": "main", "room_no": room_no, "amount": amt})
+        self.assertEqual(r_col.status_code, 200, r_col.text)
+        pid = r_col.json()["payment"]["id"]
+        self.assertIsNotNone(Pay.get(pid))
+        d1 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        if target:
+            self.assertEqual(d1["total_unpaid_branch"], d0["total_unpaid_branch"] - amt)
+
+        # 다른 지점 임대인·엄격 관리인은 삭제 불가
+        self.assertEqual(c.post("/api/rent3_lessor/payments/delete", headers=sunho,
+                                json={"branch": "main", "pay_id": pid}).status_code, 403)
+        with mock.patch.dict(os.environ, {"RENT3_ADMIN_PROXY_STRICT": "1"}):
+            self.assertEqual(c.post("/api/rent3_lessor/payments/delete",
+                                    json={"branch": "main", "pay_id": pid}).status_code, 403)
+
+        # 본인 임대인이 삭제하면 Pay 에서 사라지고 미납 합계가 원상 복구된다
+        r_del = c.post("/api/rent3_lessor/payments/delete", headers=chic,
+                       json={"branch": "main", "pay_id": pid})
+        self.assertEqual(r_del.status_code, 200, r_del.text)
+        self.assertIsNone(Pay.get(pid))
+        d2 = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).json()
+        self.assertEqual(d2["total_unpaid_branch"], d0["total_unpaid_branch"])
+        with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+            lapp = fp.read()
+        self.assertIn("/payments/delete", lapp)
+        self.assertIn("pr-del", lapp)
+
+    def test_72_mobile_big_text_narrow_margins(self):
+        """72. 스마트폰 화면: 바깥·카드 여백을 줄이고 글자를 키우며 자간을 좁힌다(모든 앱이 쓰는 rent3_mobile.css), 목록 한 줄은 줄바꿈 금지."""
+        css = open(os.path.join(ROOT, "shared_ui", "rent3_mobile.css"), encoding="utf-8").read()
+        for needle in ("font-size: 17px", "letter-spacing: -0.03em", ".app-shell, body .app-shell", "padding-left: 6px !important",
+                       ".bass-card { padding: 12px !important", ".todo-row, .todo-row span { white-space: nowrap", "min-width: 44px"):
+            self.assertIn(needle, css, needle)
+        for app in ("rent3", "rent3_admin", "rent3_contract", "rent3_lessor", "rent3_tenant"):
+            html = open(os.path.join(ROOT, "apps", "rent_dist", app, "frontend", "index.html"), encoding="utf-8").read()
+            self.assertIn("/shared/ui/rent3_mobile.css", html, app)
+
+    def test_72_portal_auto_enter_when_logged_in(self):
+        """72. 이미 로그인한 임대인·임차인·관리인은 포털 첫 화면 대신 내 업무 화면으로 바로 들어간다(만료 토큰·?login=1·?logout=1·?home=1 은 제외). 전환 안내는 없고 ☰ 포털 홈은 ?home=1."""
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        app = rd("apps", "rent_dist", "rent3", "frontend", "app.js")
+        for needle in ("autoEnter", 'urlParams.get("home") === "1"', "window.location.replace(u.redirect_url)", 'strip.style.display = "none"', "p.exp * 1000"):
+            self.assertIn(needle, app, needle)
+        self.assertNotIn('strip.style.display = "block"', app)
+        self.assertIn("/rent3/?home=1", rd("shared_ui", "r3_shell.js"))
+        self.assertIn("/rent3/?home=1", rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html"))
+
+    def test_73_ledger_csv_export_import(self):
+        """73. 납부현황 엑셀(CSV): 내려받기 → 그대로 올리면 변화 없음, 빠진 달은 '새로 기록', 값이 다르면 '다름'(기본 유지·선택 시 교체), 중복 없음, 반영 전 자동 백업, 남의 건물 불가."""
+        import tempfile
+        from unittest import mock
+        from datetime import date as _d
+        from apps.rent_dist._rent3_core import Pay, ledger_csv as lc
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        r = c.get("/api/rent3_lessor/ledger/export-csv?branch=main&year=2026", headers=chic)
+        self.assertEqual(r.status_code, 200)
+        text = r.content.decode("utf-8")
+        self.assertTrue(text.startswith("\ufeff"))
+        self.assertIn("호실,성명,선/후,1월", text)
+        post = lambda path, **kw: c.post(f"/api/rent3_lessor/ledger/import/{path}", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text, **kw})
+        base = post("preview").json()
+        self.assertEqual((base["counts"]["new"], base["counts"]["diff"]), (0, 0))             # 내려받은 그대로 올리면 바뀔 것이 없다
+        self.assertGreaterEqual(base["counts"]["same"], 1)
+        # 읽기 규칙: 점이 빠진 칸은 월·일로 풀어 읽고 표시, 이상한 칸은 날짜가 아님
+        self.assertEqual(lc._cell_date("1025", "2026-10"), (_d(2026, 10, 25), True))
+        self.assertEqual(lc._cell_date("115", "2026-01"), (_d(2026, 1, 15), True))
+        self.assertEqual(lc._cell_date("2. 3", "2026-02"), (_d(2026, 2, 3), False))
+        self.assertEqual(lc._cell_date("전출6/4", "2026-06")[0], None)
+        self.assertEqual(lc._cell_date("1. 5", "2026-12"), (_d(2027, 1, 5), False))           # 12월 칸에 적힌 1월 날짜
+        # 빠진 달: 한 건 지우고 같은 파일을 올리면 '새로 기록' 1건 → 반영하면 복구, 다시 올려도 중복 없음
+        victim = next(p for p in Pay.all() if p.branch == "main" and p.room_no == "201" and p.billing_month == "2026-08" and p.payment_kind == "MONTHLY_RENT")
+        total, when = victim.total_amount, victim.paid_date
+        victim.delete(action="t")
+        pv = post("preview").json()
+        self.assertEqual(pv["counts"]["new"], 1)
+        item = next(i for i in pv["items"] if i["status"] == "new")
+        self.assertEqual((item["room_no"], item["ym"], item["amount"], item["date"]), ("201", "2026-08", total, when))
+        bdir = tempfile.mkdtemp(prefix="rent3_bk_csv_")
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir}):
+            ap = post("apply")
+            self.assertEqual(ap.status_code, 200, ap.text)
+            self.assertEqual(ap.json()["added"], 1)
+            self.assertTrue(ap.json()["backup"])                                              # 반영 전 자동 백업
+            self.assertTrue(any(n.endswith(".tar.gz") for n in os.listdir(bdir)))
+            self.assertEqual(post("apply").json()["added"], 0)                                # 같은 파일을 또 올려도 중복 없음
+        back = [p for p in Pay.all() if p.branch == "main" and p.room_no == "201" and p.billing_month == "2026-08"]
+        self.assertEqual((len(back), back[0].total_amount, back[0].paid_date), (1, total, when))
+        # 값이 다른 칸: 기본은 '다름'으로 알리기만, 체크하면 파일 값으로 교체
+        self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=sunho, json={"branch": "main", "year": 2026, "csv_text": text}).status_code, 403)   # 남의 건물
+        self.assertEqual(c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json={"branch": "main", "year": 2026, "csv_text": "아무 표\n1,2,3"}).status_code, 400)
+        # 다름: 8월 칸 날짜를 파일에서 바꿔 올린다
+        import csv as _csv, io as _io
+        rows = list(_csv.reader(_io.StringIO(text.lstrip("\ufeff"))))
+        hi = next(k for k, r_ in enumerate(rows) if "1월" in r_)
+        col8 = rows[hi].index("8월")
+        for r_ in rows:
+            if r_ and r_[0] == "201":
+                r_[col8] = "8. 29"
+        buf = _io.StringIO()
+        _csv.writer(buf, lineterminator="\r\n").writerows(rows)
+        text2 = buf.getvalue()
+        pd = c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2}).json()
+        self.assertEqual(pd["counts"]["diff"], 1)
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": bdir}):
+            keep = c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2}).json()
+            self.assertEqual((keep["added"], keep["replaced"]), (0, 0))
+            self.assertEqual(next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08").paid_date, when)       # 기본: 건드리지 않는다
+            rep = c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json={"branch": "main", "year": 2026, "csv_text": text2, "replace_diffs": True}).json()
+            self.assertEqual(rep["replaced"], 1)
+        self.assertEqual(next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08").paid_date, "2026-08-29")
+        fixed = next(p for p in Pay.all() if p.room_no == "201" and p.billing_month == "2026-08")
+        fixed.paid_date = when
+        fixed.save(action="t")
+        # 화면
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnLedgerCsv", "showLedgerCsvModal", "/ledger/import/preview", "/ledger/import/apply", "확인했습니다 — 반영하기", "euc-kr"):
+            self.assertIn(needle, lapp, needle)
+
+    def test_74_ledger_csv_former_tenant_payments_kept_for_tax(self):
+        """74. 이전 입주자 시기(지금 입주자 입주 전 달)의 납부도 버리지 않고 'former:' 기록으로 보관한다 — 사람·계약 객체를 새로 만들지 않고, 세무 집계에는 들어가며 지금 입주자의 납부·미납에는 나타나지 않는다."""
+        import csv as _csv, io as _io, tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Contract, Pay, Tenant, ledger_csv as lc
+        c = self.client
+        chic = self._login("chic")
+        ct = next(x for x in Contract.all() if x.branch == "main" and x.room_no == "201" and x.status == "ACTIVE")
+        old_move = ct.move_in_date
+        ct.move_in_date = "2026-06-01"                                  # 201호 지금 입주자는 6월부터
+        ct.save(action="t")
+        tenants_before = len(Tenant.all())
+        before_unpaid = c.get("/api/rent3_tenant/myhome/tenant_201", headers=chic).status_code
+        text = lc.export_csv("main", 2026)
+        rows = list(_csv.reader(_io.StringIO(text.lstrip("﻿"))))
+        hi = next(k for k, r in enumerate(rows) if "1월" in r)
+        col3 = rows[hi].index("3월")
+        for r in rows:
+            if r and r[0] == "201":
+                r[col3], r[col3 + 1] = "3. 5", "550,000"
+        buf = _io.StringIO()
+        _csv.writer(buf, lineterminator="\r\n").writerows(rows)
+        text2 = buf.getvalue()
+        body = {"branch": "main", "year": 2026, "csv_text": text2}
+        pv = c.post("/api/rent3_lessor/ledger/import/preview", headers=chic, json=body).json()
+        it = next(i for i in pv["items"] if i["room_no"] == "201" and i["ym"] == "2026-03")
+        self.assertEqual((it["status"], it["former"]), ("new", True))
+        self.assertGreaterEqual(pv["counts"]["former"], 1)
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_f_")}):
+            self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json=body).json()["added"], 1)
+            self.assertEqual(c.post("/api/rent3_lessor/ledger/import/apply", headers=chic, json=body).json()["added"], 0)      # 중복 없음
+        p = next(x for x in Pay.all() if x.room_no == "201" and x.billing_month == "2026-03")
+        self.assertEqual((p.id_contract, p.id_tenant, p.payer_name, p.total_amount, p.paid_date), ("former:main:201", "", "이전 입주자", 550000, "2026-03-05"))
+        self.assertEqual(len(Tenant.all()), tenants_before)                                                                   # 임시 임차인 객체를 만들지 않는다
+        self.assertNotIn(p.id, [x["id"] for x in c.get("/api/rent3_tenant/myhome/tenant_201").json()["payments"]])           # 지금 입주자 화면에는 안 나온다
+        self.assertEqual(Contract.get(ct.id).due_for_month("2026-03")["due"], 0)                                               # 지금 계약의 청구·미납에는 영향 없다(입주 전 달)
+        from apps.rent_dist._rent3_core import TaxAndCertificateService as T
+        rep = T.export_annual_tax_csv(branch="main", year=2026)
+        self.assertIn("201", rep)                                                                                              # 세무 집계는 호실·청구월 기준이라 그대로 읽는다
+        p.delete(action="t")
+        ct = Contract.get(ct.id)
+        ct.move_in_date = old_move
+        ct.save(action="t")
+
+    def test_75_lessor_first_screen_bank_sms_flow(self):
+        """75. 임대인 첫 화면: 은행 문자 입력창이 호실 선택 밖에 있고(호실·이름으로 자동 매칭), 선택한 호실의 수납 내용이 펼쳐진 채로 열리며, 미납 호실은 접혀 있다가 눌러서 펼친다."""
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        i_sms, i_pick = app.index('id="bankSms"'), app.index('id="roomPick"')
+        self.assertLess(i_sms, i_pick)                                          # 문자 입력이 호실 선택보다 위
+        self.assertLess(app.index('<div id="roomPanel">'), app.index('${lateHtml}'))              # 미납 목록은 맨 아래
+        for needle in ("bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금 등", "수납확인 메시지 복사"):
+            self.assertIn(needle, app, needle)
+        for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
+            self.assertNotIn(gone, app, gone)
+        # 서버는 호실 번호가 없는 문자도 입금자 이름으로 호실을 찾는다
+        from apps.rent_dist._rent3_core.billing import SmsDepositParser as P
+        for text, room, name in (("[신한] 11/13 440,000원 입금 안동기", "", "안동기"),                      # 금액 앞자리(440)를 호실로 읽지 않는다
+                                 ("[Web발신] 신한 11/13 13:20 입금 440,000원 안동기 202호", "202", "안동기"),
+                                 ("안동기202 440,000원", "202", "안동기"),
+                                 ("[KB] 11/13 홍길동 301 입금 290,000원 잔액 1,200,000원", "301", "홍길동")):
+            got = P.parse(text)
+            self.assertEqual((got["room_no"], got["payer_name"]), (room, name), text)
+        c = self.client
+        r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
+        self.assertIn(r.status_code, (400, 404))
+        self.assertIn("호실", r.json()["message"])
+
+    def test_76_sms_mismatch_confirm_then_apply_by_payer_name(self):
+        """76. 문자의 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고(원본 수정 안내), 그대로 진행하면 입금자명 기준으로 반영."""
+        from apps.rent_dist._rent3_core import Pay, Contract
+        c = self.client
+        url = "/api/rent3_lessor/payments/sms-paste"
+        cts = [x for x in Contract.all() if x.branch == "main" and x.status == "ACTIVE"]
+        a = next(x for x in cts if x.room_no == "201")
+        b = next(x for x in cts if x.room_no != "201" and x.tenant_name != a.tenant_name)
+        monthly = a.monthly_rent + a.maintenance_fee + a.compute_vat()
+        n0 = len(Pay.all())
+        # 1) 호실은 a, 입금자명은 b → 이름 불일치 경고(저장 안 됨), 입금자명 기준이면 b의 호실
+        t1 = f"[신한] 11/13 {a.room_no}호 {b.tenant_name} {monthly:,}원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t1}).json()
+        self.assertTrue(r["needs_confirm"])
+
+        self.assertTrue(any(i["field"] == "name" for i in r["issues"]))
+        self.assertEqual((r["by_name"]["room_no"], r["by_name"]["tenant_name"]), (b.room_no, b.tenant_name))
+        self.assertEqual(len(Pay.all()), n0)
+        r2 = c.post(url, json={"branch": "main", "sms_text": t1, "force": True}).json()
+        self.assertEqual(r2["payment"]["room_no"], b.room_no)                                  # 입금자명 기준
+        self.assertTrue(r2["forced_by_name"])
+        # 2) 금액만 다름 → 금액 경고, 이름 기준(=같은 호실)으로 반영
+        t2 = f"[신한] 11/14 {a.room_no}호 {a.tenant_name} 123,457원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t2}).json()
+        self.assertEqual([i["field"] for i in r["issues"]], ["amount"])
+        self.assertEqual(c.post(url, json={"branch": "main", "sms_text": t2, "force": True}).json()["payment"]["room_no"], a.room_no)
+        # 3) 호실·이름 모두 맞고 금액이 월 청구액이면 경고 없이 바로 수납
+        t3 = f"[신한] 11/15 {a.room_no}호 {a.tenant_name} {monthly:,}원 입금"
+        r = c.post(url, json={"branch": "main", "sms_text": t3}).json()
+        self.assertTrue(r.get("success") and not r.get("needs_confirm"))
+        # 4) 입금자명으로 계약을 못 찾으면 진행할 수 없고 오류로 원본 수정 안내
+        r = c.post(url, json={"branch": "main", "sms_text": f"[신한] 11/16 {a.room_no}호 없는사람 {monthly:,}원 입금", "force": True})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("원본", r.json().get("hint", ""))
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("smsWarn", "needs_confirm", "원본 문자 고치기", "그대로 진행", "force: !!force"):
+            self.assertIn(needle, lapp, needle)
+        for p in [x for x in Pay.all() if x.raw_sms.startswith("[신한] 11/1")][:]:
+            p.delete(action="t")
+
+    def test_77_lessor_pin_backend_foundation(self):
+        """77. 임대인 간편 비밀번호 1단계(백엔드): 스위치(RENT3_LESSOR_PIN) 꺼짐=사용 불가, 켜면 PIN·기기 2대 상한·1시간 토큰,
+        PIN 토큰은 허용 목록(조회·메시지·시설 처리)만 — 수납·세무·내보내기는 읽기도 403, 해시는 응답에 안 실림, 기기 해제·스위치 끔은 즉시 무효."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor
+        from core.auth import verify_token
+        c, NA = self.client, self.NOAUTH
+        PL = "/api/rent3/pool"
+        chic = self._login("chic")
+        lsr = Lessor.first(branch="main")
+        self.assertIsNotNone(lsr)
+        lid = lsr.id
+        try:
+            # 스위치 꺼짐: 설정·바로가기 모두 사용 불가
+            st = c.get(f"{PL}/shortcut/status", headers=chic).json()
+            self.assertFalse(st["applicable"])
+            self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 400)
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                st = c.get(f"{PL}/shortcut/status", headers=chic).json()
+                self.assertEqual((st["kind"], st["applicable"], st["max_devices"]), ("lessor", True, 2))
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "1111"}).status_code, 400)
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d1 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "폰"}).json()
+                d2 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "태블릿"}).json()
+                qk = d1["qk"]
+                self.assertTrue(d1["start_url"].startswith("/rent3_lessor/?qk="))
+                self.assertEqual(c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "셋째"}).status_code, 400)   # 2대 상한
+                lsr = Lessor.get(lid)
+                self.assertTrue(lsr.pin_hash and "2846" not in lsr.pin_hash)
+                self.assertNotIn(qk, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())
+                body = c.get("/api/rent3_lessor/dashboard?branch=main", headers=chic).text
+                self.assertNotIn(lsr.pin_hash, body)
+                self.assertNotIn("quick_devices", body)
+                # 공개 정보: 이름은 가리고 건물·호실은 숨긴다. 매니페스트는 임대인 앱 범위
+                idn = c.get(f"{PL}/shortcut/identify?qk={qk}", headers=NA).json()
+                self.assertEqual((idn["kind"], idn["building_name"], idn["room_no"]), ("lessor", "", ""))
+                m = c.get(f"{PL}/shortcut/manifest.json?qk={qk}", headers=NA).json()
+                self.assertEqual((m["scope"], m["start_url"]), ("/rent3_lessor/", d1["start_url"]))
+                # PIN 로그인: 틀리면 남은 횟수, 맞으면 임대인 PIN 토큰(1시간, m=pin)
+                bad = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": qk, "pin": "9999"})
+                self.assertEqual(bad.status_code, 401)
+                self.assertIn("남은 시도 4회", bad.json()["message"])
+                ok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": qk, "pin": "2846"}).json()
+                self.assertEqual((ok["role"], ok["via_pin"]), ("lessor", True))
+                claims = verify_token(ok["token"])
+                self.assertEqual((claims["r"], claims["m"]), ("lessor", "pin"))
+                self.assertLessEqual(claims["exp"] - __import__("time").time(), 3600)
+                pin = {"Authorization": f"Bearer {ok['token']}"}
+                # 허용 목록: 조회·메시지·시설 처리만
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin).status_code, 200)
+                self.assertEqual(c.get("/api/rent3_lessor/status?branch=main", headers=pin).status_code, 200)
+                self.assertEqual(c.get(f"{PL}/shortcut/status", headers=pin).json()["via_pin"], True)
+                for path in ("/tickets/x/assign", "/tickets/x/complete", "/chats"):
+                    self.assertNotIn(c.post(f"/api/rent3_lessor{path}", headers=pin, json={"branch": "main"}).status_code, (401, 403), path)
+                # 허용 밖: 읽기도 막힌다(입주자 명단 CSV·세무·계약서 사진), 쓰기(수납·수정·설정)도 막힌다
+                for method, path in (("get", "/ledger/export-csv?branch=main&year=2026"), ("get", "/tax/summary?branch=main"),
+                                     ("get", "/tax/export-csv?branch=main"), ("get", "/contracts/x/photo?branch=main"),
+                                     ("post", "/payments/collect"), ("post", "/payments/sms-paste"), ("post", "/payments/delete"),
+                                     ("post", "/contracts/edit"), ("post", "/building/edit"), ("post", "/billing-notices/send"),
+                                     ("post", "/tenant-invite"), ("post", "/tenant-shortcuts/revoke-all")):
+                    r = getattr(c, method)(f"/api/rent3_lessor{path}", headers=pin, **({"json": {"branch": "main"}} if method == "post" else {}))
+                    self.assertEqual(r.status_code, 403, (path, r.status_code))
+                # PIN 토큰으로는 PIN·기기 설정을 바꿀 수 없다
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=pin, json={"pin": "7391"}).status_code, 403)
+                # 5회 실패 잠금 → 일반 로그인이 푼다
+                for _ in range(5):
+                    c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "9999"})
+                self.assertTrue(c.get(f"{PL}/shortcut/status", headers=chic).json()["devices"][1]["locked"])
+                self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 401)
+                self._login("chic")
+                self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 200)
+                # 기기 해제 → 이미 받은 PIN 토큰도 즉시 401
+                dev_id = d1["device"]["id"]
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev_id}/revoke", headers=chic).status_code, 200)
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin).status_code, 401)
+                # 스위치를 끄면 남은 기기의 토큰도 바로 무효
+                ok2 = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).json()
+                pin2 = {"Authorization": f"Bearer {ok2['token']}"}
+                self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin2).status_code, 200)
+            self.assertEqual(c.get("/api/rent3_lessor/dashboard?branch=main", headers=pin2).status_code, 401)
+            self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d2["qk"], "pin": "2846"}).status_code, 401)
+        finally:
+            l = Lessor.get(lid)
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
+
+    def test_78_lessor_pin_pay_toggle_cap_and_screens(self):
+        """78. 임대인 PIN 2~3단계: 기기별 '수납 허용'(비밀번호 재확인), 허용 기기만 수납(추가만·수정/삭제 불가), 하루 25건·1,000만 원 한도,
+        대시보드 pin 정보, 바로가기 PIN 우선(임대인 페이지는 비밀번호 로그인이 남아 있어도 PIN 먼저), 화면 제한 코드."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Pay, Contract, quicklogin as ql
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic = self._login("chic")
+        lid = Lessor.first(branch="main").id
+        ct = next(x for x in Contract.all() if x.branch == "main" and x.status == "ACTIVE" and x.room_no == "201")
+        monthly = ct.monthly_rent + ct.maintenance_fee + ct.compute_vat()
+        try:
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d1 = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "폰"}).json()
+                dev = d1["device"]["id"]
+                ok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d1["qk"], "pin": "2846"}).json()
+                pin = {"Authorization": f"Bearer {ok['token']}"}
+                dash = c.get(f"{LS}/dashboard?branch=main", headers=pin).json()
+                self.assertEqual((dash["pin"]["via_pin"], dash["pin"]["pay_ok"]), (True, False))
+                self.assertFalse(c.get(f"{LS}/dashboard?branch=main", headers=chic).json()["pin"]["via_pin"])
+                n0 = len(Pay.all())
+                # 수납 허용 전: 문자·직접·이체 확인 모두 403
+                sms = f"[신한] 11/13 201호 {ct.tenant_name} {monthly:,}원 입금"
+                for path, body in (("/payments/sms-paste", {"branch": "main", "sms_text": sms}),
+                                   ("/payments/collect", {"branch": "main", "room_no": "201", "amount": monthly}),
+                                   ("/transfer-notices/x/confirm", {"branch": "main"})):
+                    self.assertEqual(c.post(f"{LS}{path}", headers=pin, json=body).status_code, 403, path)
+                self.assertEqual(len(Pay.all()), n0)
+                # 켜기: PIN 토큰으로는 못 바꾼다 · 비밀번호가 틀리면 거부 · 맞으면 켜진다
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=pin, json={"allow": True, "password": "1212"}).status_code, 403)
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": True, "password": "틀린비번99"}).status_code, 401)
+                r = c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": True, "password": "1212"})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertTrue(r.json()["devices"][0]["pay_ok"])
+                self.assertTrue(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["pay_ok"])
+                # 허용 기기: 문자 수납 가능 + 한도 기록, 수정·삭제는 여전히 403
+                r = c.post(f"{LS}/payments/sms-paste", headers=pin, json={"branch": "main", "sms_text": sms})
+                self.assertEqual(r.status_code, 200, r.text)
+                self.assertEqual(c.get(f"{LS}/dashboard?branch=main", headers=pin).json()["pin"]["left_n"], 24)
+                paid = Pay.get(r.json()["payment"]["id"])
+                self.assertEqual(paid.total_amount, monthly)
+                for path in ("/payments/delete", "/payments/edit", "/contracts/edit"):
+                    self.assertEqual(c.post(f"{LS}{path}", headers=pin, json={"branch": "main", "pay_id": paid.id}).status_code, 403, path)
+                # 한도: 금액(1,000만 원 초과)·건수(25건) 초과는 403, 한도 안내 문구
+                big = c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 10_000_001})
+                self.assertEqual(big.status_code, 403)
+                self.assertIn("한도", big.json()["message"])
+                l = Lessor.get(lid)
+                for d in l.quick_devices:
+                    d["pay_n"] = ql.PIN_PAY_MAX_COUNT
+                l.save(action="t")
+                full = c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 1000})
+                self.assertEqual(full.status_code, 403)
+                self.assertIn("한도", full.json()["message"])
+                # 비밀번호 로그인(일반 토큰)은 한도와 무관
+                self.assertEqual(c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 200)
+                # 끄면 즉시 다시 403
+                self.assertEqual(c.post(f"{PL}/shortcut/devices/{dev}/pay-allow", headers=chic, json={"allow": False}).status_code, 200)
+                self.assertEqual(c.post(f"{LS}/payments/collect", headers=pin, json={"branch": "main", "room_no": "201", "amount": 1000}).status_code, 403)
+        finally:
+            for x in Pay.all():
+                if x.branch == "main" and x.room_no == "201" and (x.raw_sms or "").startswith("[신한] 11/13 201호"):
+                    x.delete(action="t")
+            for x in [x for x in Pay.all() if x.branch == "main" and x.room_no == "201" and x.total_amount == 1000 and x.paid_date >= "2026-11-01"]:
+                x.delete(action="t")
+            l = Lessor.get(lid)
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
+        # 화면: PIN 우선 정책·임대인 설정·수납 허용·제한 코드
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        for needle in ("LESSOR_PAGE", "skipPinOnce", "r3_pin_skip", "pay-allow", "수납 허용 켜기", "집주인 바로가기"):
+            self.assertIn(needle, shell, needle)
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("VIA_PIN", "pinLimit", "applyPinBar", "btnShortcut", "btnFullLogin", "pinOnly", "PIN_TABS"):
+            self.assertIn(needle, lapp, needle)
+
+    def test_79_forgot_password_find_my_page_for_migrated_accounts(self):
+        """79. 비밀번호를 잊은 기존(이관) 임차인·임대인의 '내 페이지 찾기': 본인인증 이력이 없어도 장부의 실명·휴대폰 + 문자 인증으로 새 비밀번호를 정한다.
+        임대인은 사업자번호·계좌번호 끝자리까지, 퇴실·정지·번호 불일치는 거부, 바뀐 뒤 이전 바로가기는 해제, 번호별 시도 제한, 메인 화면 링크."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Tenant, passwords as pwd, quicklogin as ql, ratelimit
+        c, NA = self.client, self.NOAUTH
+        R = "/api/rent3/pool/auth/password-reset"
+        login = lambda ident, pw: c.post("/api/rent3/pool/auth/login", headers=NA, json={"login_mode": "account", "identifier": ident, "password": pw})
+        t = Tenant.first(room_no="202", branch="main")
+        lsr = Lessor.first(branch="main")
+        old_t = (t.name, t.phone, t.status, t.room_no, dict(t.identity), t.password, t.pin_hash, list(t.quick_devices))
+        old_l = (lsr.name, lsr.phone, lsr.status, dict(lsr.identity), lsr.password, lsr.business_number, lsr.account_number)
+        try:
+            ratelimit.reset_all()
+            with mock.patch.dict(os.environ, {"RENT3_FAKE_IDENTITY": "1"}):
+                # ── 임차인 ──
+                t.phone, t.identity, t.password, t.status, t.room_no = "010-5555-0202", {}, pwd.hash_password("Old#Pass99"), "ACTIVE", "202"
+                t.save(action="t")
+                ql.set_pin(t, "2846")
+                ql.new_device(Tenant.get(t.id), "폰")
+                base = {"identifier": t.id, "name": t.name, "phone": "01055550202", "new_password": "New#Pass99", "code": "000000"}
+                for bad in ({"name": "다른사람"}, {"phone": "01099990000"}, {"code": "111111"}, {"new_password": "1212"}):
+                    self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**base, **bad}).status_code, 400, bad)
+                self.assertEqual(login(t.id, "Old#Pass99").status_code, 200)                 # 거부된 시도는 아무것도 바꾸지 않았다
+                ratelimit.reset_all()
+                self.assertEqual(c.post(f"{R}/start", headers=NA, json=base).status_code, 200)
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json=base).status_code, 200)
+                self.assertEqual(login(t.id, "Old#Pass99").status_code, 401)
+                self.assertEqual(login(t.id, "New#Pass99").status_code, 200)
+                after = Tenant.get(t.id)
+                self.assertEqual((after.pin_hash, after.quick_devices), ("", []))             # 이전 바로가기·간편 비밀번호는 해제
+                # 퇴실한 임차인은 거부
+                ratelimit.reset_all()
+                after.status = "MOVED_OUT"
+                after.save(action="t")
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**base, "new_password": "Third#Pass9"}).status_code, 400)
+                # 번호별 시도 제한: 아이디를 바꿔 가며 같은 번호로 인증번호를 계속 요청해도 막힌다
+                ratelimit.reset_all()
+                codes = [c.post(f"{R}/start", headers=NA, json={**base, "identifier": f"nobody{i}"}).status_code for i in range(8)]
+                self.assertIn(429, codes)
+                # ── 임대인: 사업자번호·계좌번호 끝자리 필수 ──
+                ratelimit.reset_all()
+                lsr.phone, lsr.identity, lsr.status = "010-6666-0001", {}, "ACTIVE"
+                lsr.password, lsr.business_number, lsr.account_number = pwd.hash_password("Old#Pass99"), "123-45-67890", "110-123-456789"
+                lsr.save(action="t")
+                lb = {"identifier": lsr.username or lsr.id, "name": lsr.name, "phone": "01066660001", "new_password": "New#Pass99", "code": "000000"}
+                for proof in ("", "12", "0000", "9999"):
+                    self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": proof}).status_code, 400, proof)
+                self.assertEqual(login(lb["identifier"], "Old#Pass99").status_code, 200)
+                ratelimit.reset_all()
+                self.assertEqual(c.post(f"{R}/start", headers=NA, json={**lb, "proof": "7890"}).status_code, 200)
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": "7890"}).status_code, 200)
+                self.assertEqual(login(lb["identifier"], "New#Pass99").status_code, 200)
+                # 정지된 임대인은 거부
+                ratelimit.reset_all()
+                l2 = Lessor.get(lsr.id)
+                l2.status = "SUSPENDED"
+                l2.save(action="t")
+                self.assertEqual(c.post(f"{R}/confirm", headers=NA, json={**lb, "proof": "6789", "new_password": "Third#Pass9"}).status_code, 400)
+        finally:
+            ratelimit.reset_all()
+            t = Tenant.get(t.id)
+            (t.name, t.phone, t.status, t.room_no, t.identity, t.password, t.pin_hash, t.quick_devices) = old_t
+            t.save(action="t")
+            lsr = Lessor.get(lsr.id)
+            (lsr.name, lsr.phone, lsr.status, lsr.identity, lsr.password, lsr.business_number, lsr.account_number) = old_l
+            lsr.save(action="t")
+        html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "index.html"), encoding="utf-8").read()
+        js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertEqual(html.count("js-forgot"), 4)                                          # 임차인·임대인 로그인 카드 2 + 소개 구역 2
+        for needle in ("rsProof", "내 페이지 찾기"):
+            self.assertIn(needle, html, needle)
+        for needle in (".js-forgot", "proof:"):
+            self.assertIn(needle, js, needle)
+
+    def test_80_portal_forgot_links_and_auto_enter(self):
+        """80. 메인 홈: 임차인·임대인 로그인 옆과 소개 구역에 '비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기' 링크, 재설정 직후 새 비밀번호로 자동 입장."""
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
+        html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        self.assertGreaterEqual(html.count("js-forgot"), 4)                  # 역할 카드 2 + 소개 구역 2
+        self.assertIn("본인 확인으로 내 페이지 찾기", html)
+        i = app.index('"/pool/auth/password-reset/confirm"')
+        self.assertIn("/pool/auth/login", app[i:i + 1600])                    # 재설정 직후 새 비밀번호로 곧바로 로그인
+        self.assertIn("resolveConsent", app[i:i + 1600])                      # 동의 화면이 필요하면 그대로 거친다
+
+    def test_81_existing_tenant_connect_request_with_lessor_approval(self):
+        """81. 기존 임차인 '내 페이지 연결'(문자 인증 없이): 4가지(건물·호실·성명·휴대폰) 대조 → 확인번호 → 임대인이 통화로 확인번호 입력해 승인
+        → 요청한 브라우저에만 1회용 입주 안내 링크 → 비밀번호·PIN 설정. 남의 건물 임대인·틀린 번호·이미 가입한 호실·남의 secret 은 거부."""
+        from apps.rent_dist._rent3_core import Tenant, Building, connect as cn
+        from apps.rent_dist._rent3_core.ops import ConnectRequest
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic, sunho = self._login("chic"), self._login("sunho")
+        t = next(x for x in Tenant.all() if x.branch == "main" and x.status == "ACTIVE" and x.room_no and not cn.activated(x))
+        old = (t.phone, t.password, t.pin_hash, list(t.quick_devices), dict(t.consents), t.invite_hash, t.invite_expires)
+        t.phone = "010-7777-1234"
+        t.save(action="t")
+        bname = Building.get(t.id_building).building_name if t.id_building else "시크빌"
+        body = {"building_name": bname, "room_no": f"{t.room_no}호", "name": t.name, "phone": "01077771234"}
+        try:
+            # 틀린 정보는 어느 항목이 틀렸는지 알려 주지 않는다
+            bad = c.post(f"{PL}/connect/request", headers=NA, json={**body, "phone": "01099990000"})
+            self.assertEqual(bad.status_code, 400)
+            self.assertNotIn("휴대폰", bad.json()["message"])
+            info = c.get(f"{PL}/connect/info?branch=main", headers=NA).json()                           # 링크의 지점 코드 → 건물명·임대인 전화번호
+            self.assertTrue(info["building_name"] and info["lessor_phone"])
+            self.assertEqual(c.get(f"{PL}/connect/info?branch=nope", headers=NA).status_code, 404)
+            by_branch = {"branch": "main", "room_no": t.room_no, "name": t.name, "phone": "01077771234"}   # 건물명 없이 지점 코드로
+            self.assertEqual(c.post(f"{PL}/connect/request", headers=NA, json={**by_branch, "branch": "sunho"}).status_code, 400)   # 다른 지점 코드는 일치하지 않는다
+            ok = c.post(f"{PL}/connect/request", headers=NA, json=by_branch)
+            self.assertEqual(ok.status_code, 200, ok.text)
+            rid, secret, code = ok.json()["request_id"], ok.json()["secret"], ok.json()["code"]
+            self.assertTrue(code.isdigit() and len(code) == 4)
+            self.assertNotIn(secret, open(os.path.join(self.temp_pool, "ops.json"), encoding="utf-8").read())   # 비밀값 원문은 저장하지 않는다
+            # 승인 전: 대기 중, 남의 secret 은 거부, 임대인 첫 화면에 요청이 보인다(장부의 휴대폰 포함)
+            st = lambda sec=secret: c.post(f"{PL}/connect/status", headers=NA, json={"request_id": rid, "secret": sec})
+            self.assertEqual(st().json()["status"], "PENDING")
+            self.assertEqual(st("x" * 32).status_code, 400)
+            lst = c.get(f"{LS}/dashboard?branch=main", headers=chic).json()["connect_requests"]
+            self.assertEqual([(x["room_no"], x["tenant_phone"]) for x in lst if x["id"] == rid], [(t.room_no, "010-7777-1234")])
+            # 남의 건물 임대인은 승인할 수 없다 · 틀린 확인번호는 남은 횟수 안내, 5번이면 폐기
+            self.assertEqual(c.post(f"{LS}/connect-requests/{rid}/approve", headers=sunho, json={"branch": "main", "code": code}).status_code, 403)
+            wrong = "0000" if code != "0000" else "1111"
+            w = c.post(f"{LS}/connect-requests/{rid}/approve", headers=chic, json={"branch": "main", "code": wrong})
+            self.assertEqual(w.status_code, 400)
+            self.assertIn("남은 시도 4회", w.json()["message"])
+            self.assertEqual(st().json()["status"], "PENDING")                                                    # 틀려도 승인되지 않는다
+            ap = c.post(f"{LS}/connect-requests/{rid}/approve", headers=chic, json={"branch": "main", "code": code})
+            self.assertEqual(ap.status_code, 200, ap.text)
+            # 승인 뒤: 요청한 쪽만 링크를 받고, 링크는 한 번만 나온다
+            polled = c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()               # 승인 후: 대기에서 빠지고 진행 상태 띠에 오른다
+            self.assertEqual([x["id"] for x in polled["pending"] if x["id"] == rid], [])
+            self.assertEqual([x["state"] for x in polled["recent"] if x["id"] == rid], ["APPROVED"])
+            got = st().json()
+            self.assertEqual(got["status"], "APPROVED")
+            url = got["invite_url"]
+            self.assertTrue(url.startswith("/rent3_tenant/?invite="))
+            self.assertNotIn("invite_url", st().json())
+            tok = url.split("invite=")[1]
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={tok}", headers=NA).status_code, 200)
+            self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["SETTING"])   # 비밀번호 설정 중
+            from apps.rent_dist._rent3_core import connect as cn_id
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": tok, "password": "Conn#Pass99", "pin": "2846", "agree_privacy": True,
+                                                                       "room_no": t.room_no, "name": t.name, "phone": t.phone, "lessor_name": cn_id.public_info(t.branch)["lessor_name"]})
+            self.assertEqual(acc.status_code, 200, acc.text)
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 200)
+            self.assertEqual([x["state"] for x in c.get(f"{LS}/connect-requests?branch=main", headers=chic).json()["recent"] if x["id"] == rid], ["DONE"])         # 연결 완료
+            # 가입이 끝난 호실은 연결 요청으로 덮어쓸 수 없다
+            again = c.post(f"{PL}/connect/request", headers=NA, json=body)
+            self.assertEqual(again.status_code, 400)
+            self.assertIn("이미 가입", again.json()["message"])
+            # 관리인이 가입 상태를 초기화하면 처음 상태로 돌아가 다시 시험할 수 있다(호실·계약은 그대로)
+            admin = self._login("admin")
+            self.assertIn(c.post("/api/rent3_admin/accounts/reset-activation", headers=chic, json={"id": t.id}).status_code, (401, 403))
+            rs = c.post("/api/rent3_admin/accounts/reset-activation", headers=admin, json={"id": t.id})
+            self.assertEqual(rs.status_code, 200, rs.text)
+            self.assertFalse(cn.activated(Tenant.get(t.id)))
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Conn#Pass99"}).status_code, 401)
+            self.assertEqual(Tenant.get(t.id).room_no, t.room_no)
+            self.assertEqual(c.post(f"{PL}/connect/request", headers=NA, json=body).status_code, 200)       # 다시 연결 요청 가능
+        finally:
+            for r_ in ConnectRequest.all():
+                r_.delete(action="t")
+            t = Tenant.get(t.id)
+            t.phone, t.password, t.pin_hash, t.quick_devices, t.consents, t.invite_hash, t.invite_expires = old
+            t.save(action="t")
+        lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect=", "showInviteSender"):
+            self.assertIn(needle, lapp, needle)
+        for needle in ("/pool/connect/request", "/pool/connect/status", "/pool/connect/info", "rent3_connect_req", "find=1", "r3Connect", "__rent3ConnectOpen"):
+            self.assertIn(needle, pj, needle)
+
+    def test_82_admin_test_tenant_registration(self):
+        """82. 관리인 앱 '시험 임차인 등록': 점검은 아무것도 안 바꾸고, 등록은 백업 후 0원 계약(미납 0, 비공개)을 만들며, 재실행은 그대로·다른 임차인이 있는 호실은 멈춤·호실 한도 초과는 확인 후에만·임대인은 403."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, Lessor
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        url = "/api/rent3_admin/accounts/test-tenant"
+        body = {"branch": "main", "room_no": "799", "name": "시험김", "phone": "010-1234-0799"}
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            self.assertIn(c.post(url, headers=chic, json=body).status_code, (401, 403))                 # 임대인은 못 한다
+            n_rooms = len(Room.find(branch="main"))
+            dry = c.post(url, headers=admin, json=body).json()
+            self.assertEqual(dry["status"], "DRY")
+            self.assertEqual(len(Room.find(branch="main")), n_rooms)                                    # 점검은 바꾸지 않는다
+            # 한도 초과: 확인(한도 올리기) 없이는 멈춘다
+            lsr.room_limit = n_rooms
+            lsr.save(action="t")
+            blocked = c.post(url, headers=admin, json={**body, "apply": True}).json()
+            self.assertEqual((blocked["status"], blocked.get("need_raise_limit")), ("BLOCKED", True))
+            self.assertEqual(len(Room.find(branch="main")), n_rooms)
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_tt_")}):
+                done = c.post(url, headers=admin, json={**body, "apply": True, "raise_limit": True}).json()
+                self.assertEqual(done["status"], "DONE", done)
+                self.assertTrue(done["backup"].endswith(".tar.gz"))                                     # 등록 전 자동 백업
+                self.assertEqual(done["unpaid"], 0)
+                r = Room.first(branch="main", room_no="799")
+                self.assertFalse(r.is_published)                                                        # 공개 매물에 안 나온다
+                self.assertEqual((r.deposit, r.monthly_rent, r.maintenance_fee), (0, 0, 0))
+                self.assertEqual(Lessor.get(lsr.id).room_limit, n_rooms + 1)
+                again = c.post(url, headers=admin, json={**body, "apply": True}).json()
+                self.assertEqual(again["status"], "EXISTS")                                             # 재실행은 그대로
+                self.assertEqual(len(Room.find(branch="main")), n_rooms + 1)
+                other = c.post(url, headers=admin, json={**body, "phone": "010-9999-0000", "apply": True}).json()
+                self.assertEqual(other["status"], "BLOCKED")                                            # 다른 임차인이 있는 호실은 건드리지 않는다
+            # 만든 임차인이 연결 요청 흐름에 그대로 들어간다
+            q = c.post("/api/rent3/pool/connect/request", headers=self.NOAUTH, json={"building_name": "시크빌", "room_no": "799", "name": "시험김", "phone": "01012340799"})
+            self.assertEqual(q.status_code, 200, q.text)
+        finally:
+            from apps.rent_dist._rent3_core.ops import ConnectRequest
+            for x in ConnectRequest.all():
+                x.delete(action="t")
+            for cls, oid in ((Contract, "ct_main_799"), (Tenant, "tenant_main_799"), (Room, "room_main_799")):
+                o = cls.get(oid)
+                if o:
+                    o.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnTtCheck", "btnTtApply", "/accounts/test-tenant", "시험 임차인 등록"):
+            self.assertIn(needle, adm, needle)
+
+    def test_83_per_tenant_invite_links_bulk(self):
+        """83. 입주자별 개별 안내 링크 일괄 발급: 가입 전 입주자마다 본인 전용 링크(해시만 저장·7일·1회), 가입 완료 호실은 건너뜀, 현황 조회엔 링크 원문 없음,
+        링크로 가입하면 현황이 '가입 완료'로 바뀜, 남의 건물 임대인·PIN 접속은 불가."""
+        from apps.rent_dist._rent3_core import Tenant, connect as cn
+        c, NA = self.client, self.NOAUTH
+        PL, LS = "/api/rent3/pool", "/api/rent3_lessor"
+        chic, sunho = self._login("chic"), self._login("sunho")
+        before = {t.id: (t.password, t.pin_hash, list(t.quick_devices), dict(t.consents), t.invite_hash, t.invite_expires, t.invite_issued_by) for t in Tenant.all()}
+        try:
+            st = c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]
+            self.assertTrue(st and all(set(x) == {"room_no", "tenant_name", "phone", "activated", "invite_pending"} for x in st))
+            act0 = sum(1 for x in st if x["activated"])   # 링크 원문 없음
+            self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=sunho).status_code, 403)                          # 남의 건물
+            r = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"})
+            self.assertEqual(r.status_code, 200, r.text)
+            links = r.json()["links"]
+            self.assertEqual(len(links) + r.json()["skipped_activated"], len(st))
+            self.assertEqual(len({x["path"] for x in links}), len(links))                                                       # 사람마다 다른 링크
+            for x in links[:3]:
+                tok = x["path"].split("invite=")[1]
+                idn = c.get(f"{PL}/invite/identify?token={tok}", headers=NA).json()
+                self.assertEqual(idn["room_no"], x["room_no"])
+            self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=sunho, json={"branch": "main"}).status_code, 403)
+            self.assertNotIn(links[0]["path"].split("invite=")[1], open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())   # 원문은 저장하지 않는다
+            # 한 사람이 링크로 가입 → 현황이 가입 완료, 다시 발급하면 그 호실은 건너뜀
+            first = links[0]
+            from apps.rent_dist._rent3_core import connect as cn_id
+            t1 = Tenant.first(room_no=first["room_no"], branch="main")
+            acc = c.post(f"{PL}/auth/invite-accept", headers=NA, json={"token": first["path"].split("invite=")[1], "password": "Bulk#Pass99", "agree_privacy": True,
+                                                                       "room_no": t1.room_no, "name": t1.name, "phone": t1.phone, "lessor_name": cn_id.public_info("main")["lessor_name"]})
+            self.assertEqual(acc.status_code, 200, acc.text)
+            st2 = {x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}
+            self.assertTrue(st2[first["room_no"]]["activated"])
+            again = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main"}).json()
+            self.assertNotIn(first["room_no"], [x["room_no"] for x in again["links"]])
+            self.assertGreaterEqual(again["skipped_activated"], 1)
+            # 가져온 임차인(무작위 해시 비밀번호)은 가입한 것으로 보지 않는다: 위에서 가입한 한 호실만 가입 완료
+            self.assertEqual(sum(1 for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"] if x["activated"]), act0 + 1)   # 해시 비밀번호만으로는 가입으로 보지 않는다(방금 가입한 한 호실만 늘었다)
+            # 취소: 링크 취소(가입 전) · 가입 취소(가입 후) · 남의 건물 불가
+            other = again["links"][0]
+            cn1 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": other["room_no"]}).json()
+            self.assertEqual(cn1["kind"], "link")
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={other['path'].split('invite=')[1]}", headers=NA).status_code, 404)   # 취소한 링크는 못 쓴다
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=sunho, json={"branch": "main", "room_no": first["room_no"]}).status_code, 403)
+            cn2 = c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
+            self.assertEqual(cn2["kind"], "reset")
+            from apps.rent_dist._rent3_core import devicebind as dv_t
+            tf = Tenant.first(room_no=first["room_no"], branch="main")
+            dv_t.register(tf, "C" * 30)
+            self.assertEqual(len(Tenant.get(tf.id).login_devices), 1)
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).status_code, 200)
+            self.assertEqual(Tenant.get(tf.id).login_devices, [])         # 등록 취소하면 등록된 로그인 기기도 모두 끊긴다
+            self.assertNotIn("login_devices", c.get(f"{LS}/tenant-invites?branch=main", headers=chic).text)
+            # 한 호실만 새 링크: 그 호실 것만 만들어지고 다른 사람이 받은 링크는 그대로 쓸 수 있다
+            third = next((x for x in again["links"] if x["room_no"] not in (other["room_no"], first["room_no"])), None)
+            one = c.post(f"{LS}/tenant-invites/bulk", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()
+            self.assertEqual([x["room_no"] for x in one["links"]], [first["room_no"]])
+            if third:
+                self.assertEqual(c.get(f"{PL}/invite/identify?token={third['path'].split('invite=')[1]}", headers=NA).status_code, 200)
+            # 링크 취소 응답이 없던 호실도 초기화 가능(찌꺼기 정리)
+            self.assertEqual(c.post(f"{LS}/tenant-invites/cancel", headers=chic, json={"branch": "main", "room_no": first["room_no"]}).json()["kind"], "link")
+            self.assertFalse({x["room_no"]: x for x in c.get(f"{LS}/tenant-invites?branch=main", headers=chic).json()["tenants"]}[first["room_no"]]["activated"])
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": first["room_no"] and Tenant.first(room_no=first["room_no"], branch="main").id, "password": "Bulk#Pass99"}).status_code, 401)
+            # 간편 비밀번호 접속으로는 못 한다(허용 목록 밖)
+            from unittest import mock
+            from apps.rent_dist._rent3_core import Lessor
+            with mock.patch.dict(os.environ, {"RENT3_LESSOR_PIN": "1"}):
+                self.assertEqual(c.post(f"{PL}/shortcut/pin", headers=chic, json={"pin": "2846"}).status_code, 200)
+                d = c.post(f"{PL}/shortcut/devices", headers=chic, json={"label": "t"}).json()
+                tok = c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": d["qk"], "pin": "2846"}).json()["token"]
+                ph = {"Authorization": f"Bearer {tok}"}
+                self.assertEqual(c.get(f"{LS}/tenant-invites?branch=main", headers=ph).status_code, 403)
+                self.assertEqual(c.post(f"{LS}/tenant-invites/bulk", headers=ph, json={"branch": "main"}).status_code, 403)
+            lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("showInviteSender", "/tenant-invites/bulk", "/tenant-invites/cancel", "iv-cancel", "iv-rereg", "🔁 재등록 문자", "↩ 가입 취소", "✖ 링크 취소", "ivNext", "다음 사람에게 문자 보내기", "본인 전용 링크", "rent3_inv_"):
+                self.assertIn(needle, lapp, needle)
+        finally:
+            for tid, (pw, pin, dev, cons, ih, ie, ib) in before.items():
+                t = Tenant.get(tid)
+                if t:
+                    t.password, t.pin_hash, t.quick_devices, t.consents, t.invite_hash, t.invite_expires, t.invite_issued_by = pw, pin, dev, cons, ih, ie, ib
+                    t.save(action="t")
+            l = Lessor.first(branch="main")
+            l.pin_hash, l.quick_devices = "", []
+            l.save(action="t")
+
+    def test_86_password_lifecycle_moveout_lessor_invite_6m_and_renewal_remind(self):
+        """86. 계정·암호 생애주기 통합 검증:
+        ① 전출(퇴실 정산 완료) 시 기존 암호·PIN·바로가기·등록기기·초대링크·연결요청 즉시 삭제(A안) 및 재로그인 차단
+        ② 관리인 → 임대인 암호 상태 조회 및 6개월(180일) 경과 권유 메시지·링크 발송(기존 암호 유지)
+        ③ 관리인 발급 임대인 1회용 암호설정 링크 + 4칸 본인확인(건물명·이름·전화·사업자/계좌 끝4자리) + 기기 유지
+        ④ 재계약 때 임차인 새 암호 설정 안내 메시지·링크 발송(기존 암호·등록기기 유지)."""
+        from datetime import date, timedelta
+        from apps.rent_dist._rent3_core import (
+            Building, CheckOutSettlement, Contract, DirectChat, Lessor, Room, Tenant,
+            connect as cn, devicebind as dbind, invite as inv, passwords as pwd, quicklogin as ql, ratelimit as rl,
+        )
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c, NA = self.client, self.NOAUTH
+        PL, LS, AD = "/api/rent3/pool", "/api/rent3_lessor", "/api/rent3_admin"
+        admin, chic, sunho = self._login("admin"), self._login("chic"), self._login("sunho")
+
+        # ── ① 전출(퇴실) 시 기존 암호·PIN·바로가기·등록기기·초대링크 자동 삭제 (A안) ──
+        room = Room.first(branch="main", room_no="201")
+        ct = Contract.get(room.active_contract_id)
+        t = Tenant.get(room.id_tenant)
+        old_room = (room.is_published, room.id_tenant, room.active_contract_id, room.available_from, room.pre_moveout_notice)
+        old_ct = (ct.status, ct.move_out_date, ct.ended_at)
+        old_t = (t.status, t.current_room_id, t.room_no, t.password, t.pin_hash, list(t.quick_devices), list(t.login_devices),
+                 t.invite_hash, t.invite_expires, t.invite_issued_by, t.activated_at, t.password_changed_at, dict(t.consents))
+        lsr = Lessor.first(branch="main")
+        old_lsr = (lsr.password, lsr.pin_hash, list(lsr.quick_devices), list(lsr.login_devices),
+                   lsr.invite_hash, lsr.invite_expires, lsr.invite_issued_by, lsr.activated_at, lsr.password_changed_at, lsr.password_remind_sent_at, dict(lsr.consents))
+        co_id = None
+        try:
+            t.password = pwd.hash_password("MoveOut#Pass1")
+            t.activated_at = "2025-10-01T10:00:00"
+            t.password_changed_at = "2025-10-01T10:00:00"
+            ql.set_pin(t, "2580")
+            _dev, qk = ql.new_device(t, "퇴실전폰")
+            dbind.register(t, "D" * 30)
+            inv_tok = inv.issue(t, "chic")
+            t.save(action="t")
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "MoveOut#Pass1"}).status_code, 200)
+
+            co = c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": "201", "utility_settlement": 10000, "cleaning_fee": 70000}).json()["settlement"]
+            co_id = co["id"]
+            tk = self._login(t.id, "MoveOut#Pass1")
+            agr = {"bank_account": "국민 111-22-3333", "signature": "서명", "account_holder": t.name}
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{co_id}/agree", headers=tk, json={**agr, "account_holder": "타인"}).status_code, 400)
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{co_id}/agree", headers=tk, json=agr).status_code, 200)
+            self.assertEqual(c.post(f"{LS}/checkout/{co_id}/mark-paid", headers=chic, json={"branch": "main"}).status_code, 200)
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{co_id}/confirm-received", headers=tk, json={}).status_code, 200)
+
+            t_after = Tenant.get(t.id)
+            self.assertEqual(t_after.status, "MOVED_OUT")
+            # 로그인 수단만 정리: 바로가기·간편 비밀번호·등록 기기·초대 링크. 비밀번호·동의·가입 기록은 남는다(다음 해 2월 말까지 조회)
+            self.assertEqual((t_after.pin_hash, t_after.quick_devices, t_after.login_devices, t_after.invite_hash), ("", [], [], ""))
+            self.assertTrue(pwd.verify(t_after.password, "MoveOut#Pass1"))
+            self.assertTrue(t_after.activated_at)
+            self.assertRegex(t_after.readonly_until, rf"^{date.today().year + 1}-02-(28|29)$")
+            self.assertEqual(c.post(f"{PL}/auth/pin-login", headers=NA, json={"qk": qk, "pin": "2580"}).status_code, 401)
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={inv_tok}", headers=NA).status_code, 404)
+            # 퇴실 후: 로그인·조회는 되고 쓰기는 막힌다
+            mo = self._login(t.id, "MoveOut#Pass1")
+            self.assertEqual(c.get(f"/api/rent3_tenant/myhome/{t.id}/archive", headers=mo).status_code, 200)
+            self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t.id}/tickets", headers=mo, json={"title": "x", "description": "y"}).status_code, 403)
+            # 조회 기간이 지나면 로그인 불가
+            t_after.readonly_until = "2000-01-01"; t_after.save(action="t")
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "MoveOut#Pass1"}).status_code, 401)
+
+            # 복구해 ④번 재계약 시험에 사용
+            room = Room.get(room.id)
+            room.is_published, room.id_tenant, room.active_contract_id, room.available_from, room.pre_moveout_notice = old_room
+            room.save(action="t")
+            ct.status, ct.move_out_date, ct.ended_at = old_ct
+            ct.save(action="t")
+            t.status, t.current_room_id, t.room_no = "ACTIVE", room.id, "201"
+            t.save(action="t")
+
+            # ── ② 관리인 → 임대인 암호 상태 조회 및 6개월(180일) 권유 ──
+            self.assertIn(c.get(f"{AD}/accounts/lessors", headers=chic).status_code, (401, 403))
+            lsr = Lessor.get(lsr.id)
+            lsr.password = pwd.hash_password("Lessor#Old1")
+            lsr.activated_at = (date.today() - timedelta(days=185)).isoformat() + "T09:00:00"
+            lsr.password_changed_at = lsr.activated_at
+            dbind.register(lsr, "L" * 30)
+            lsr.save(action="t")
+
+            ls_list = c.get(f"{AD}/accounts/lessors", headers=admin).json()["lessors"]
+            chic_row = next(x for x in ls_list if x["id"] == lsr.id)
+            self.assertTrue(chic_row["due_6m"])
+            self.assertGreaterEqual(chic_row["days_since_change"], 180)
+
+            rem = c.post(f"{AD}/accounts/lessors/{lsr.id}/remind-password", headers=admin)
+            self.assertEqual(rem.status_code, 200, rem.text)
+            rem_tok = rem.json()["url"].split("invite=")[1]
+            self.assertNotIn(rem_tok, open(os.path.join(self.temp_pool, "users.json"), encoding="utf-8").read())
+            self.assertNotIn("invite_hash", Lessor.get(lsr.id).safe_dump())
+            # 새 비밀번호를 정하기 전까지 기존 비밀번호는 그대로 유지된다
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": lsr.username, "password": "Lessor#Old1"}).status_code, 200)
+
+            # ── ③ 관리인 발급 임대인 1회용 링크 + 4칸 본인확인 + 등록기기 유지 ──
+            inv_res = c.post(f"{AD}/accounts/lessor-invite", headers=admin, json={"id": lsr.id})
+            self.assertEqual(inv_res.status_code, 200, inv_res.text)
+            ltok = inv_res.json()["url"].split("invite=")[1]
+            idn = c.get(f"{PL}/invite/identify?token={ltok}", headers=NA).json()
+            self.assertEqual(idn["kind"], "lessor")
+            bname = Building.first(branch="main").building_name
+            proof4 = "".join(ch for ch in lsr.business_number if ch.isdigit())[-4:]
+            lwho = {"building_name": bname, "name": lsr.name, "phone": lsr.phone, "proof": proof4}
+            for bad in ({"building_name": "엉뚱빌딩"}, {"name": "홍길동"}, {"phone": "010-0000-0000"}, {"proof": "0000"}):
+                rl.reset_all()
+                self.assertEqual(c.post(f"{PL}/invite/verify", headers=NA, json={"token": ltok, **lwho, **bad}).status_code, 400)
+            rl.reset_all()
+            self.assertEqual(c.post(f"{PL}/invite/verify", headers=NA, json={"token": ltok, **lwho}).status_code, 200)
+            acc_l = c.post(f"{PL}/auth/invite-accept", headers=NA, json={
+                "token": ltok, "password": "Lessor#New2", "agree_privacy": True, "device_id": "M" * 30, **lwho,
+            })
+            self.assertEqual(acc_l.status_code, 200, acc_l.text)
+            self.assertEqual(acc_l.json()["role"], "lessor")
+            lsr_after = Lessor.get(lsr.id)
+            self.assertEqual(len(lsr_after.login_devices), 2)   # 기존 기기(L*30) 유지 + 새 기기(M*30) 추가
+            self.assertEqual(c.get(f"{PL}/invite/identify?token={ltok}", headers=NA).status_code, 404)   # 1회용 소진
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": lsr.username, "password": "Lessor#New2"}).status_code, 200)
+            chic_row2 = next(x for x in c.get(f"{AD}/accounts/lessors", headers=admin).json()["lessors"] if x["id"] == lsr.id)
+            self.assertFalse(chic_row2["due_6m"])
+            self.assertEqual(chic_row2["days_since_change"], 0)
+
+            # ── ④ 재계약 때 임차인 새 비밀번호 설정 안내 메시지·링크 발송(기존 암호·기기 유지) ──
+            t = Tenant.get(t.id)
+            t.password = pwd.hash_password("Tenant#Old1")
+            t.activated_at = "2025-11-01T10:00:00"
+            t.login_devices = []
+            dbind.register(t, "T" * 30)
+            t.save(action="t")
+            self.assertEqual(c.post(f"{LS}/expiry/remind-password", headers=sunho, json={"branch": "main", "room_no": "201"}).status_code, 403)
+            tr = c.post(f"{LS}/expiry/remind-password", headers=chic, json={"branch": "main", "room_no": "201"})
+            self.assertEqual(tr.status_code, 200, tr.text)
+            ttok = tr.json()["url"].split("invite=")[1]
+            # 설정 전까지 기존 비밀번호는 그대로 작동한다
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Tenant#Old1"}).status_code, 200)
+            twho = {"room_no": "201", "name": t.name, "phone": t.phone, "lessor_name": cn.public_info("main")["lessor_name"]}
+            acc_t = c.post(f"{PL}/auth/invite-accept", headers=NA, json={
+                "token": ttok, "password": "Tenant#New2", "agree_privacy": True, "device_id": "U" * 30, **twho,
+            })
+            self.assertEqual(acc_t.status_code, 200, acc_t.text)
+            t_renewed = Tenant.get(t.id)
+            self.assertEqual(len(t_renewed.login_devices), 2)   # 기존 기기(T*30) 유지 + 새 기기(U*30) 추가
+            self.assertTrue(t_renewed.password_changed_at)
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "Tenant#New2"}).status_code, 200)
+        finally:
+            if co_id and CheckOutSettlement.get(co_id):
+                CheckOutSettlement.get(co_id).delete(action="t")
+            for chat in list(DirectChat.all()):
+                if "재계약 새 비밀번호 설정 안내" in (chat.message or ""):
+                    chat.delete(action="t")
+            for sm in list(SupportMessage.all()):
+                if "6개월 정기 비밀번호 변경 권유" in (sm.body or ""):
+                    sm.delete(action="t")
+            room = Room.get(room.id)
+            room.is_published, room.id_tenant, room.active_contract_id, room.available_from, room.pre_moveout_notice = old_room
+            room.save(action="t")
+            ct = Contract.get(ct.id)
+            ct.status, ct.move_out_date, ct.ended_at = old_ct
+            ct.save(action="t")
+            t = Tenant.get(t.id)
+            (t.status, t.current_room_id, t.room_no, t.password, t.pin_hash, t.quick_devices, t.login_devices,
+             t.invite_hash, t.invite_expires, t.invite_issued_by, t.activated_at, t.password_changed_at, t.consents) = old_t
+            t.password_remind_sent_at = ""
+            t.save(action="t")
+            lsr = Lessor.get(lsr.id)
+            (lsr.password, lsr.pin_hash, lsr.quick_devices, lsr.login_devices,
+             lsr.invite_hash, lsr.invite_expires, lsr.invite_issued_by, lsr.activated_at, lsr.password_changed_at, lsr.password_remind_sent_at, lsr.consents) = old_lsr
+            lsr.save(action="t")
+
+    def test_87_checkout_request_chat_flow_dispute_autoconfirm_and_renewal_default(self):
+        """87. 퇴실 정산 채팅 흐름: 임차인 신청(연말정산 안내) → 임대인 정산서(신청 건 재사용) → 이의 → 재작성 → 동의(예금주=계약자) → 송금 표시 → 7일 자동 확정,
+        채팅엔 계좌 끝 4자리만, 남의 정산서 불가. 재계약 화면은 월세 5% 인상이 기본값."""
+        from apps.rent_dist._rent3_core import DirectChat, Room, Tenant
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        c = self.client
+        chic = self._login("chic")
+        from apps.rent_dist._rent3_core import Contract
+        room = next(r for r in Room.find(branch="main") if r.active_contract_id and r.id_tenant
+                    and Tenant.get(r.id_tenant) and Tenant.get(r.id_tenant).status == "ACTIVE")
+        t = Tenant.get(room.id_tenant)
+        snaps = [(o, o.model_dump()) for o in (room, Contract.get(room.active_contract_id), t)]    # 단독 실행해도 다른 시험에 영향이 없게 끝나면 되돌린다
+        try:
+            self._run_87(c, chic, room, t)
+        finally:
+            for o, d in snaps:
+                for k, v in d.items():
+                    setattr(o, k, v)
+                o.save(action="t")
+
+    def _run_87(self, c, chic, room, t):
+        from apps.rent_dist._rent3_core import DirectChat, Tenant
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        tk = self._login(t.id)
+        TN, LS = "/api/rent3_tenant", "/api/rent3_lessor"
+        ROOT_ = ROOT
+        # 보강: 가입 전 임차인에게 재계약 비밀번호 권유를 보내면 기존 가입 링크를 덮어쓰므로 거절
+        t.activated_at, t.pin_hash, t.quick_devices = "", "", []; t.save(action="t")
+        self.assertEqual(c.post(f"{LS}/expiry/remind-password", headers=chic, json={"branch": "main", "room_no": room.room_no}).status_code, 400)
+        # 임대인 링크: 장부에 사업자번호·계좌번호가 없으면 관리인도 발급 불가
+        from apps.rent_dist._rent3_core import Lessor
+        lsr = Lessor.first(branch="main"); keep = (lsr.business_number, lsr.account_number)
+        lsr.business_number, lsr.account_number = "", ""; lsr.save(action="t")
+        try:
+            self.assertEqual(c.post("/api/rent3_admin/accounts/lessor-invite", headers=self._login("admin"), json={"id": lsr.id}).status_code, 400)
+        finally:
+            lsr.business_number, lsr.account_number = keep; lsr.save(action="t")
+        # 임차인 신청 + 연말정산 미리 받기 안내
+        rq = c.post(f"{TN}/myhome/{t.id}/checkout/request", headers=tk, json={"desired_date": "2027-01-31", "memo": "이사"})
+        self.assertEqual(rq.status_code, 200, rq.text)
+        co_id = rq.json()["settlement"]["id"]
+        self.assertEqual(rq.json()["settlement"]["status"], "REQUESTED")
+        self.assertEqual(c.post(f"{TN}/myhome/{t.id}/checkout/request", headers=tk, json={}).status_code, 400)       # 중복 신청 불가
+        texts = " ".join(x.message for x in DirectChat.find(branch="main", room_no=room.room_no))
+        self.assertIn("연말정산 납부확인서", texts)
+        # 임대인이 정산서 작성 → 신청 건을 이어서 쓴다(새 건이 생기지 않음)
+        calc = lambda: c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": room.room_no, "utility_settlement": 5000, "cleaning_fee": 70000}).json()["settlement"]
+        self.assertEqual(calc()["id"], co_id)
+        # 이의 제기 → 임대인이 고쳐 다시 보냄(같은 건, 동의는 다시)
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/dispute", headers=tk, json={"note": ""}).status_code, 400)
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/dispute", headers=tk, json={"note": "청소비가 과합니다"}).status_code, 200)
+        self.assertEqual(CheckOutSettlement.get(co_id).status, "DISPUTED")
+        again = calc()
+        self.assertEqual((again["id"], again["status"], again["dispute_note"]), (co_id, "CALCULATED", ""))
+        # 동의(예금주=계약자만) → 송금 표시 전에는 완료 불가
+        ag = {"bank_account": "국민 111-22-3333", "signature": "서명", "account_holder": t.name}
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/agree", headers=tk, json={**ag, "account_holder": "다른사람"}).status_code, 400)
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/confirm-received", headers=tk, json={}).status_code, 400)
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/agree", headers=tk, json=ag).status_code, 200)
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/agree", headers=tk, json=ag).status_code, 400)               # 동의 뒤 계좌 변경 불가
+        self.assertEqual(c.post(f"{TN}/checkout/{co_id}/confirm-received", headers=chic, json={}).status_code, 403)  # 임대인이 임차인 대신 확인 불가
+        self.assertEqual(c.post(f"{LS}/checkout/{co_id}/mark-paid", headers=chic, json={"branch": "main"}).status_code, 200)
+        paid = CheckOutSettlement.get(co_id)
+        self.assertEqual(paid.status, "PAID")
+        self.assertTrue(paid.confirm_due)
+        self.assertEqual(c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": room.room_no}).status_code, 400)   # 송금 표시 뒤엔 임의 수정 불가
+        # 채팅 본문에는 계좌 전체가 없다(끝 4자리만)
+        texts = " ".join(x.message for x in DirectChat.find(branch="main", room_no=room.room_no))
+        self.assertNotIn("111-22-3333", texts)
+        self.assertIn("3333", texts)
+        # 7일 동안 이의가 없으면 조회할 때 자동 확정
+        paid.confirm_due = "2000-01-01T00:00:00"; paid.save(action="t")
+        self.assertEqual(c.get(f"{LS}/dashboard?branch=main", headers=chic).status_code, 200)
+        done = CheckOutSettlement.get(co_id)
+        self.assertEqual((done.status, done.auto_confirmed), ("COMPLETED", True))
+        self.assertEqual(Tenant.get(t.id).status, "MOVED_OUT")
+        # 화면: 신청·예금주·수취 확인·송금 표시, 재계약 기본 5% 인상
+        rd = lambda *parts: open(os.path.join(ROOT_, *parts), encoding="utf-8").read()
+        tj = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
+        for needle in ("btnRequestCo", "coHolder", "btnReceivedCo", "btnDisputeCo", "view\") === \"moved", "/archive"):
+            self.assertIn(needle, tj, needle)
+        lj = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+        for needle in ("moPaid", "/mark-paid", "rent5", "기본 월세 5% 인상", "co-open", "정산 이의/미수취 확인 필요"):
+            self.assertIn(needle, lj, needle)
+
+    def test_88_lessor_bizreg_photo_upload_hometax_verify_and_approve(self):
+        """88. 임대인 사업자등록증 촬영·제출 → 10자리 체크섬·대표자 자동 대조 → 관리인 국세청 홈택스 확인 후 승인(장부 사업자번호 확정)."""
+        from apps.rent_dist._rent3_core import Lessor
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic, sunho = self._login("admin"), self._login("chic"), self._login("sunho")
+        LS, AD = "/api/rent3_lessor", "/api/rent3_admin"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.business_number, lsr.account_number, dict(lsr.franchise_docs or {}), lsr.franchise_ai_calls)
+        png_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        try:
+            lsr.business_number = ""
+            lsr.account_number = ""
+            lsr.save(action="t")
+            # 남의 지점 업로드 불가
+            self.assertEqual(c.post(f"{LS}/franchise/bizreg", headers=sunho, json={"branch": "main", "attachment_data_url": png_url}).status_code, 403)
+            # 체크섬 틀린 사업자번호: 업로드는 되지만 INVALID_BIZ_NO 경고
+            r_bad = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": "123-45-67899", "representative_name": lsr.name,
+            })
+            self.assertEqual(r_bad.status_code, 200, r_bad.text)
+            self.assertEqual(r_bad.json()["application"]["bizreg"]["check"]["code"], "INVALID_BIZ_NO")
+            # 유효한 10자리 사업자번호(214-86-12349 -> 체크섬 검증): 214861234? 계산해보자: validate_kr_business_number 통과 값 사용
+            from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+            valid_biz = next(f"107-81-5332{d}" for d in range(10) if validate_kr_business_number(f"107-81-5332{d}", strict_checksum=True)["valid"])
+            # 대표자 불일치 시 REP_MISMATCH
+            r_rep = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": valid_biz, "representative_name": "엉뚱대표",
+            })
+            self.assertEqual(r_rep.json()["application"]["bizreg"]["check"]["code"], "REP_MISMATCH")
+            # 정상 제출 (10자리 유효 + 대표자 일치 -> AUTO_MATCH), 단 관리자 승인 전까지는 lsr.business_number 가 비어 있다
+            r_ok = c.post(f"{LS}/franchise/bizreg", headers=chic, json={
+                "branch": "main", "attachment_data_url": png_url, "business_number": valid_biz,
+                "representative_name": lsr.name, "company_name": "시크빌임대",
+            })
+            self.assertEqual(r_ok.status_code, 200, r_ok.text)
+            self.assertEqual(r_ok.json()["application"]["bizreg"]["check"]["code"], "BIZ_NO_ONLY")     # 직접 입력한 대표자는 자동 일치 근거가 아니다
+            # 문서(AI)에서 읽은 대표자가 장부 성명과 같을 때만 AUTO_MATCH
+            from unittest import mock
+            ext = {"document_type": "business_registration", "readable": True, "business_number": valid_biz, "company_name": "시크빌임대",
+                   "representative_name": lsr.name, "opening_date": "", "business_address": "", "tax_type": "면세사업자", "issue_number": ""}
+            with mock.patch("apps.rent_dist._rent3_core.registry_ai.analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext}):
+                r_ai = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png_url, "consent": True})
+            self.assertEqual(r_ai.json()["application"]["bizreg"]["check"]["code"], "AUTO_MATCH")
+            self.assertEqual(Lessor.get(lsr.id).business_number, "")
+
+            # 첨부 원본은 관리인만 볼 수 있다
+            self.assertIn(c.get(f"{AD}/lessors/{lsr.id}/bizreg-attachment", headers=chic).status_code, (401, 403))
+            self.assertEqual(c.get(f"{AD}/lessors/{lsr.id}/bizreg-attachment", headers=admin).status_code, 200)
+
+            # 관리인 홈택스 확인·승인: 메모 없음·유효하지 않은 번호·휴폐업 상태는 승인 거절
+            vf_url = f"{AD}/lessors/{lsr.id}/bizreg-verify"
+            self.assertIn(c.post(vf_url, headers=chic, json={"verified": True, "business_number": valid_biz, "note": "확인"}).status_code, (401, 403))
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "note": ""}).status_code, 400)
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": "123-45-67899", "note": "확인"}).status_code, 400)
+            self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "hometax_status": "폐업자", "note": "확인"}).status_code, 400)
+
+            # 반려 기록 시 장부 번호는 반영되지 않음
+            rej = c.post(vf_url, headers=admin, json={"verified": False, "business_number": valid_biz, "hometax_status": "반려", "note": "사진 흐림"})
+            self.assertEqual(rej.status_code, 200)
+            self.assertFalse(rej.json()["application"]["bizreg"]["verification"]["verified"])
+            self.assertEqual(Lessor.get(lsr.id).business_number, "")
+
+            # 같은 사업자번호를 다른 임대인이 이미 승인받았다면 승인 불가(남의 등록증 도용 방지)
+            other_l = next(o for o in Lessor.all() if o.id != lsr.id)
+            keep_other = other_l.business_number
+            other_l.business_number = valid_biz; other_l.save(action="t")
+            try:
+                self.assertEqual(c.post(vf_url, headers=admin, json={"verified": True, "business_number": valid_biz, "note": "확인"}).status_code, 400)
+            finally:
+                other_l.business_number = keep_other; other_l.save(action="t")
+
+            # 정상 홈택스 확인·승인 -> 장부 business_number 확정 + 이제 관리인이 임대인 암호 설정 링크도 발급 가능!
+            app_res = c.post(vf_url, headers=admin, json={
+                "verified": True, "business_number": valid_biz.replace("-", ""), "hometax_status": "계속사업자(면세)", "note": "홈택스 계속사업자·대표자 일치 확인",
+            })
+            self.assertEqual(app_res.status_code, 200, app_res.text)
+            self.assertTrue(app_res.json()["application"]["bizreg"]["verification"]["verified"])
+            self.assertEqual(Lessor.get(lsr.id).business_number, valid_biz)
+            self.assertEqual(c.post(f"{AD}/accounts/lessor-invite", headers=admin, json={"id": lsr.id}).status_code, 200)
+
+            # 화면 문자열 점검
+            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8") as fp:
+                lj = fp.read()
+            for needle in ("btnBizRegModal", "showBizRegModal", "/franchise/bizreg", "capture=\"environment\"", "bizPickerHtml", "📷 촬영하기", "🖼 사진·PDF 선택", "bizDataUrl"):
+                self.assertIn(needle, lj, needle)
+            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8") as fp:
+                aj = fp.read()
+            for needle in ("hometaxBizHtml", "btn-biz-verify", "/bizreg-verify", "/bizreg-attachment", "www.hometax.go.kr"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for sm in list(SupportMessage.all()):
+                if sm.category in ("사업자등록증 확인 요청", "사업자등록증 확인 결과"):
+                    sm.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.business_number, lsr.account_number, lsr.franchise_docs, lsr.franchise_ai_calls = keep
+            lsr.invite_hash, lsr.invite_expires, lsr.invite_issued_by = "", "", ""
+            lsr.save(action="t")
+
+    def test_89_franchise_fee_notice_payment_taxinvoice_and_lessor_evidence(self):
+        """89. 가맹비: 자동 청구·통보(중복 없음) → 관리인 납부 등록(청구액과 같아야 함) → 세금계산서 승인번호 기록(24자리·중복 불가) → 임대인 장부 경비 자동 등록 → 임대인 연도별 증빙(CSV), 남의 자료·관리인 기능 접근 불가."""
+        from apps.rent_dist._rent3_core import Lessor, Outlay, feebilling as fb
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic, sunho = self._login("admin"), self._login("chic"), self._login("sunho")
+        AD, LS = "/api/rent3_admin", "/api/rent3_lessor"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number)
+        lsr.app_fee = 33000; lsr.save(action="t")
+        for f0 in list(fb.FranchiseFee.all()):            # 다른 시험에서 대시보드를 열 때 자동 청구가 생겼을 수 있어 처음 상태로
+            f0.delete(action="t")
+        for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+            if m0.category.startswith("가맹비"):
+                m0.delete(action="t")
+        nts = "20261116-41000000-12345678"
+        from unittest import mock
+        env_auto = mock.patch.dict(os.environ, {"RENT3_FEE_AUTO": "1"})
+        try:
+            # 기본(자동 꺼짐): 조회만으로는 청구가 생기지 않고, 관리인의 직접 생성만 된다
+            self.assertEqual([f for f in c.get(f"{AD}/fees", headers=admin).json()["fees"] if f["id_lessor"] == lsr.id], [])
+            self.assertEqual(c.get(f"{AD}/fees", headers=admin).json()["auto"], False)
+            env_auto.start()
+            self.assertIn(c.get(f"{AD}/fees", headers=chic).status_code, (401, 403))                        # 임대인은 관리인 기능 불가
+            lst = c.get(f"{AD}/fees", headers=admin)
+            self.assertEqual(lst.status_code, 200, lst.text)
+            mine = [f for f in lst.json()["fees"] if f["id_lessor"] == lsr.id]
+            self.assertEqual(len(mine), 1)
+            fee = mine[0]
+            self.assertEqual((fee["supply_amount"], fee["vat_amount"], fee["total_amount"], fee["status"]), (30000, 3000, 33000, "NOTICED"))
+            self.assertEqual(len([f for f in c.get(f"{AD}/fees", headers=admin).json()["fees"] if f["id_lessor"] == lsr.id]), 1)   # 다시 조회해도 중복 청구 없음
+            self.assertEqual(c.post(f"{AD}/fees/generate", headers=admin, json={}).json()["created"], 0)
+            notices = [m for m in SupportMessage.find(thread_user=f"lessor:{lsr.id}") if m.category == "가맹비 징수 통보"]
+            self.assertEqual(len(notices), 1)                                                                 # 통보는 한 번만
+            fid = fee["id"]
+            # 임대인: 내 내역만, 남의 지점은 403
+            mf = c.get(f"{LS}/franchise-fees?branch=main", headers=chic)
+            self.assertEqual(mf.status_code, 200, mf.text)
+            self.assertEqual([f["id"] for f in mf.json()["fees"]], [fid])
+            self.assertEqual(c.get(f"{LS}/franchise-fees?branch=main", headers=sunho).status_code, 403)
+            # 납부 등록: 금액 불일치·권한·중복
+            pay = lambda **kw: c.post(f"{AD}/fees/{fid}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16", **kw})
+            self.assertEqual(pay(amount=30000).status_code, 400)
+            self.assertIn(c.post(f"{AD}/fees/{fid}/paid", headers=chic, json={"amount": 33000}).status_code, (401, 403))
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": nts}).status_code, 400)   # 입금 전엔 세금계산서 기록 불가
+            self.assertEqual(pay().status_code, 200)
+            self.assertEqual(pay().status_code, 400)
+            self.assertEqual(Lessor.get(lsr.id).app_fee_status, "PAID")
+            # 세금계산서: 승인번호 24자리·중복 불가 → 장부 경비 자동 등록
+            inv = lambda no, **kw: c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": no, "issue_date": "2026-11-16", **kw})
+            self.assertEqual(inv("12345").status_code, 400)
+            ok = inv(nts)
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(ok.json()["fee"]["invoice_nts_no"], nts)
+            out = Outlay.get(ok.json()["fee"]["outlay_id"])
+            self.assertEqual((out.amount, out.category, out.evidence_type, out.is_vat_deductible), (33000, "platform_fee", "TAX_INVOICE", True))
+            self.assertEqual(inv(nts).status_code, 400)                                                       # 이미 기록됨
+            # 임대인 증빙: 발행분은 증빙, 합계·CSV 에 승인번호
+            ev = c.get(f"{LS}/franchise-fees?branch=main&year=2026", headers=chic).json()["evidence"]
+            self.assertEqual((ev["totals"]["count_issued"], ev["totals"]["issued_total"], ev["totals"]["issued_vat"]), (1, 33000, 3000))
+            csv = c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic)
+            self.assertEqual(csv.status_code, 200)
+            self.assertIn(nts, csv.text)
+            self.assertEqual(c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=sunho).status_code, 403)
+            # 발행 취소: 사유 필요, 장부 경비도 지움 → 증빙에서 빠지고 '발행 대기'로
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-cancel", headers=admin, json={"memo": ""}).status_code, 400)
+            self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-cancel", headers=admin, json={"memo": "공급가액 오기재"}).status_code, 200)
+            self.assertIsNone(Outlay.get(out.id))
+            ev2 = c.get(f"{LS}/franchise-fees?branch=main&year=2026", headers=chic).json()["evidence"]
+            self.assertEqual((ev2["totals"]["count_issued"], ev2["totals"]["count_pending"]), (0, 1))
+            self.assertIn("발행 대기", c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic).text)
+            # 홈택스 발행용 목록(관리인만)
+            self.assertIn(c.get(f"{AD}/fees/export-hometax-csv", headers=chic).status_code, (401, 403))
+            self.assertEqual(c.get(f"{AD}/fees/export-hometax-csv", headers=admin).status_code, 200)
+            # 월 가맹비 변경(관리인만)
+            self.assertEqual(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=admin, json={"app_fee": 44000}).status_code, 200)
+            self.assertEqual(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=admin, json={"app_fee": -1}).status_code, 400)
+            self.assertIn(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=chic, json={"app_fee": 1}).status_code, (401, 403))
+            # 화면 문자열
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            aj = rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js")
+            for needle in ("loadFeeBox", "/fees/", "fee-paid", "fee-inv", "승인번호", "/fees/export-hometax-csv", "feePlan"):
+                self.assertIn(needle, aj, needle)
+            lj = rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js")
+            for needle in ("btnFeeEvidence", "showFeeEvidenceModal", "/franchise-fees", "종합소득세 증빙", "feeCsvDl"):
+                self.assertIn(needle, lj, needle)
+        finally:
+            try:
+                env_auto.stop()
+            except RuntimeError:
+                pass
+            for f in list(fb.FranchiseFee.all()):
+                f.delete(action="t")
+            for o in list(Outlay.find(category="platform_fee")):
+                o.delete(action="t")
+            for m in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m.category.startswith("가맹비"):
+                    m.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number = keep
+            lsr.save(action="t")
+
+    def test_90_etax_invoice_api_bolta_issue_poll_webhook_and_failures(self):
+        """90. 전자세금계산서 API(볼타) 연계: 필수 정보 점검 → 정발행 접수(요청 본문·헤더) → 발행 중 → 조회로 승인번호 확정(경비 등록) / 서명 검증된 웹훅(중복·실패) / 거절·네트워크 불확실(재전송 금지)·자동 발행."""
+        import base64, hashlib, hmac, json, time
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Lessor, Outlay, etaxinvoice as et, feebilling as fb
+        from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin = self._login("admin")
+        AD = "/api/rent3_admin"
+        ok_no = lambda pre: next(f"{pre}{d}" for d in range(10) if validate_kr_business_number(f"{pre}{d}", strict_checksum=True)["valid"])
+        sup_no, buy_no = ok_no("2208162600"[:9]).replace("-", ""), ok_no("107815332").replace("-", "")
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number, lsr.email)
+        secret_raw = b"unit-test-secret-key-0123456789ab"
+        secret = "whsec_" + base64.b64encode(secret_raw).decode()
+        env = {"RENT3_ETAX_PROVIDER": "bolta", "RENT3_BOLTA_API_KEY": "test_abc", "RENT3_BOLTA_WEBHOOK_SECRET": secret, "RENT3_FEE_AUTO": "1",
+               "RENT3_PLATFORM_NAME": "렌트쓰리", "RENT3_PLATFORM_BIZ_NO": sup_no, "RENT3_PLATFORM_CEO": "홍길동", "RENT3_PLATFORM_EMAIL": "tax@rent3.example"}
+        calls = []
+        state = {"issue": (200, {"issuanceKey": "KEY1"}), "retrieve": (404, {})}
+
+        def fake_http(method, url, headers, body=None):
+            calls.append((method, url, headers, body))
+            if url.endswith("/v1/taxInvoices/issue"):
+                r = state["issue"]
+                if isinstance(r, Exception):
+                    raise r
+                return r
+            return state["retrieve"]
+
+        def hook(event, wid, ts=None, secret_key=secret_raw):
+            raw = json.dumps(event).encode()
+            ts = str(int(ts or time.time()))
+            sig = base64.b64encode(hmac.new(secret_key, f"{wid}.{ts}.".encode() + raw, hashlib.sha256).digest()).decode()
+            return c.post(f"{AD}/webhooks/etax", content=raw, headers={"webhook-id": wid, "webhook-timestamp": ts, "webhook-signature": f"v1,{sig}", "content-type": "application/json", **self.NOAUTH})
+
+        def fresh_fee():
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            f = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            return f.id
+
+        with mock.patch.dict(os.environ, env), mock.patch.object(et, "_http", side_effect=fake_http):
+            try:
+                lsr.app_fee, lsr.business_number, lsr.email = 33000, "", ""
+                lsr.save(action="t")
+                fid = fresh_fee()
+                pay = lambda fid_: c.post(f"{AD}/fees/{fid_}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16"})
+                self.assertEqual(c.get(f"{AD}/fees", headers=admin).json()["etax"]["enabled"], True)
+                # 납부 등록은 되지만(자동 발행 시도 실패) 필수 정보가 없으면 발행되지 않고 이유를 알려 준다
+                with mock.patch.dict(os.environ, {"RENT3_ETAX_AUTO": "1"}):
+                    r0 = pay(fid)
+                self.assertEqual(r0.status_code, 200, r0.text)
+                self.assertIn("사업자번호", r0.json()["message"])
+                self.assertEqual(fb.FranchiseFee.get(fid).status, "PAID")
+                self.assertEqual(calls, [])                                                               # 정보가 부족하면 API 를 부르지 않는다
+                lsr = Lessor.get(lsr.id); lsr.business_number, lsr.email = buy_no, "lessor@example.com"; lsr.save(action="t")
+                # 접수: 요청 본문·헤더 확인 → 발행 중
+                self.assertIn(c.post(f"{AD}/fees/{fid}/invoice-auto", headers=self._login("chic")).status_code, (401, 403))
+                r1 = c.post(f"{AD}/fees/{fid}/invoice-auto", headers=admin)
+                self.assertEqual(r1.status_code, 200, r1.text)
+                m, url, hd, body = calls[-1]
+                self.assertEqual((m, url), ("POST", "https://xapi.bolta.io/v1/taxInvoices/issue"))
+                self.assertTrue(hd["Authorization"].startswith("Basic ") and hd["Bolta-Client-Reference-Id"] == f"{fid}-1")
+                self.assertEqual(base64.b64decode(hd["Authorization"][6:]).decode(), "test_abc:")
+                self.assertEqual((body["taxType"], body["purpose"], body["date"]), ("TAXABLE", "RECEIPT", "2026-11-16"))
+                self.assertEqual((body["supplier"]["identificationNumber"], body["supplied"]["identificationNumber"]), (sup_no, buy_no))
+                self.assertEqual((body["items"][0]["supplyCost"], body["items"][0]["tax"]), (30000, 3000))
+                self.assertEqual(body["supplied"]["managers"][0]["email"], "lessor@example.com")
+                fee = fb.FranchiseFee.get(fid)
+                self.assertEqual((fee.invoice_status, fee.invoice_key), ("PENDING", "KEY1"))
+                # 발행 중에는 중복 접수·수동 기록 불가, 발행 대기 목록에서도 빠진다
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-auto", headers=admin).status_code, 400)
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice", headers=admin, json={"nts_confirm_no": "20261116-41000000-12345678"}).status_code, 400)
+                # 아직 결과 없음 → 그대로 발행 중
+                self.assertEqual(c.post(f"{AD}/fees/{fid}/invoice-refresh", headers=admin).json()["fee"]["invoice_status"], "PENDING")
+                # 조회로 승인번호 확정 → 발행 완료·장부 경비 등록
+                state["retrieve"] = (200, {"issuanceKey": "KEY1", "ntsTransactionId": "202611164100000012345678", "issuedAt": "2026-11-16T10:00:00+09:00"})
+                r2 = c.post(f"{AD}/fees/{fid}/invoice-refresh", headers=admin).json()["fee"]
+                self.assertEqual((r2["invoice_status"], r2["invoice_nts_no"], r2["invoice_via"]), ("ISSUED", "20261116-41000000-12345678", "bolta"))
+                self.assertEqual(Outlay.get(r2["outlay_id"]).amount, 33000)
+                # 웹훅: 서명 검증·중복·실패 이벤트
+                fid2 = fresh_fee(); pay(fid2)
+                state["issue"] = (200, {"issuanceKey": "KEY2"})
+                c.post(f"{AD}/fees/{fid2}/invoice-auto", headers=admin)
+                ev = {"eventType": "TAX_INVOICE_ISSUANCE_SUCCESS", "data": {"issuanceKey": "KEY2", "taxInvoiceUrl": "https://x"}}
+                self.assertEqual(hook(ev, "wh1", secret_key=b"wrong-key-xxxxxxxxxxxxxxxxxxxxxxxxxxx").status_code, 400)      # 서명 불일치
+                self.assertEqual(hook(ev, "wh1", ts=time.time() - 3600).status_code, 400)                              # 오래된 시각
+                self.assertEqual(c.post(f"{AD}/webhooks/etax", content=b"{}", headers={**self.NOAUTH}).status_code, 400)     # 헤더 없음
+                self.assertEqual(fb.FranchiseFee.get(fid2).invoice_status, "PENDING")                                   # 검증 실패는 아무것도 바꾸지 않는다
+                state["retrieve"] = (200, {"issuanceKey": "KEY2", "ntsTransactionId": "202611164100000099999999", "issuedAt": "2026-11-16T11:00:00+09:00"})
+                good = hook(ev, "wh2")
+                self.assertEqual((good.status_code, good.json()["result"]), (200, "issued"))
+                self.assertEqual(fb.FranchiseFee.get(fid2).invoice_nts_no, "20261116-41000000-99999999")
+                self.assertEqual(hook(ev, "wh2").json()["result"], "duplicate")
+                # 실패 웹훅 → 실패 기록 → 같은 청구를 다시 접수(요청 관리번호는 -2)
+                fid3 = fresh_fee(); pay(fid3)
+                state["issue"] = (200, {"issuanceKey": "KEY3"}); state["retrieve"] = (404, {})
+                c.post(f"{AD}/fees/{fid3}/invoice-auto", headers=admin)
+                bad = hook({"eventType": "TAX_INVOICE_ISSUANCE_FAILURE", "data": {"issuanceKey": "KEY3", "cause": {"code": "INVALID_SUPPLIED_BUSINESS", "message": "휴업"}}}, "wh3")
+                self.assertEqual(bad.json()["result"], "failed")
+                f3 = fb.FranchiseFee.get(fid3)
+                self.assertEqual(f3.invoice_status, "FAILED")
+                self.assertIn("INVALID_SUPPLIED_BUSINESS", f3.invoice_error)
+                state["issue"] = (200, {"issuanceKey": "KEY3B"})
+                self.assertEqual(c.post(f"{AD}/fees/{fid3}/invoice-auto", headers=admin).status_code, 200)
+                self.assertEqual(calls[-1][2]["Bolta-Client-Reference-Id"], f"{fid3}-2")
+                # 거절(400)은 실패, 네트워크 오류·5xx 는 '접수 불확실'(재전송 금지)
+                fid4 = fresh_fee(); pay(fid4)
+                state["issue"] = (400, {"code": "INVALID_REQUEST", "message": "사업자번호 오류"})
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)
+                self.assertEqual(fb.FranchiseFee.get(fid4).invoice_status, "FAILED")
+                state["issue"] = ConnectionError("down")
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)
+                u = fb.FranchiseFee.get(fid4)
+                self.assertEqual((u.invoice_status, u.invoice_client_ref), ("PENDING", f"{fid4}-2"))
+                n_calls = len(calls)
+                self.assertEqual(c.post(f"{AD}/fees/{fid4}/invoice-auto", headers=admin).status_code, 400)           # 불확실 상태에서 다시 접수하지 않는다
+                self.assertEqual(len(calls), n_calls)
+                # 자동 발행: 납부 등록 직후 접수
+                fid5 = fresh_fee()
+                state["issue"] = (200, {"issuanceKey": "KEY5"})
+                with mock.patch.dict(os.environ, {"RENT3_ETAX_AUTO": "1"}):
+                    r5 = pay(fid5)
+                self.assertEqual(fb.FranchiseFee.get(fid5).invoice_status, "PENDING")
+                self.assertIn("접수", r5.json()["message"])
+                # 서명 키 없으면 웹훅 거절
+                with mock.patch.dict(os.environ, {"RENT3_BOLTA_WEBHOOK_SECRET": ""}):
+                    self.assertEqual(hook(ev, "wh9").status_code, 400)
+                # 화면 문자열
+                aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+                for needle in ("fee-api", "/invoice-auto", "fee-refresh", "/invoice-refresh", "API로 발행", "발행 상태 확인"):
+                    self.assertIn(needle, aj, needle)
+            finally:
+                for f0 in list(fb.FranchiseFee.all()):
+                    f0.delete(action="t")
+                for o in list(Outlay.find(category="platform_fee")):
+                    o.delete(action="t")
+                for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                    if m0.category.startswith("가맹비"):
+                        m0.delete(action="t")
+                lsr = Lessor.get(lsr.id)
+                lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number, lsr.email = keep
+                lsr.save(action="t")
+
+    def test_91_tax_invoice_info_card_for_manual_hometax_issue(self):
+        """91. 홈택스 수동 발급용 '발급 정보 카드': 가맹비(공급자=플랫폼→공급받는자=임대인) 값·합계·비어 있는 필수 정보 표시, 관리인 전용, 두 화면에 복사/홈택스 열기 카드 연결."""
+        from apps.rent_dist._rent3_core import Lessor, feebilling as fb
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.business_number, lsr.email)
+        lsr.app_fee, lsr.business_number, lsr.email = 33000, "", ""
+        lsr.save(action="t")
+        try:
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            fee = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            self.assertIn(c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=chic).status_code, (401, 403))
+            card = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertEqual((card["items"][0]["supply"], card["items"][0]["tax"], card["total"]), (30000, 3000, 33000))
+            self.assertEqual((card["purpose"], card["tax_type"]), ("영수", "과세"))
+            self.assertTrue(any("공급받는자 사업자번호" in m for m in card["missing"]))          # 임대인 사업자번호 미승인이면 안내
+            self.assertTrue(any("이메일" in m for m in card["missing"]))
+            self.assertEqual(c.get(f"{AD}/fees/nope/invoice-card", headers=admin).status_code, 404)
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            js = rd("shared_ui", "r3_taxinvoice.js")
+            for needle in ("R3Tax", "https://www.hometax.go.kr/", "전체 복사", "data-copy", "승인번호", "비어 있는 필수 정보"):
+                self.assertIn(needle, js, needle)
+            for rel in (("rent3_admin",), ("rent3_lessor",)):
+                self.assertIn("/shared/ui/r3_taxinvoice.js", rd("apps", "rent_dist", rel[0], "frontend", "index.html"))
+            for needle in ("fee-card", "R3Tax.openCard", "/invoice-card"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+            for needle in ("btn-inv-card", "R3Tax.openCard", "홈택스"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), needle)
+        finally:
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m0.category.startswith("가맹비"):
+                    m0.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.business_number, lsr.email = keep
+            lsr.save(action="t")
+
+    def test_92_cash_receipt_bizreg_email_and_tenant_business_submission(self):
+        """92. 현금영수증(가맹비·월세 기록, 사업자번호 없는 임대인은 현금영수증 카드)·사업자등록증 제출 시 이메일/업태/종목 반영·임차인 사업자 정보 제출(AI 읽기 모의, 체크섬, 본인만)."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Building, Contract, DirectChat, Lessor, Outlay, Pay, Tenant, feebilling as fb, registry_ai
+        from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD, LS, TN = "/api/rent3_admin", "/api/rent3_lessor", "/api/rent3_tenant"
+        valid = next(f"214-81-2345{d}" for d in range(10) if validate_kr_business_number(f"214-81-2345{d}", strict_checksum=True)["valid"])
+        png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        lsr = Lessor.first(branch="main")
+        bld = Building.first(branch="main")
+        keep = (lsr.app_fee, lsr.business_number, lsr.email, lsr.account_number, dict(lsr.franchise_docs or {}), bld.biz_type, bld.biz_item)
+        t = Tenant.get("tenant_201")
+        keept = (t.business_number, t.company_name, t.ceo_name, t.business_address, t.email, t.biz_submitted_at, t.biz_ai_calls)
+        made_pay = None
+        try:
+            # ── 임대인 사업자등록증 제출: 이메일·업태·종목 입력 반영(이메일 형식 오류는 거절)
+            bad = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "business_number": valid, "email": "nope"})
+            self.assertEqual(bad.status_code, 400)
+            ok = c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "business_number": valid, "email": "lessor@example.com",
+                                                                      "business_type": "부동산업", "business_item": "비주거용 건물 임대업"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual((Lessor.get(lsr.id).email, Building.first(branch="main").biz_type, Building.first(branch="main").biz_item), ("lessor@example.com", "부동산업", "비주거용 건물 임대업"))
+            self.assertEqual(ok.json()["application"]["bizreg"]["email"], "lessor@example.com")
+            # AI 읽기가 업태·종목을 주면 직접 입력이 없을 때 채운다
+            ext = {"document_type": "business_registration", "readable": True, "business_number": valid, "company_name": "상호", "representative_name": lsr.name, "opening_date": "",
+                   "business_address": "", "business_type": "서비스업", "business_item": "공유오피스", "tax_type": "일반과세자", "issue_number": ""}
+            with mock.patch.object(registry_ai, "analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext}):
+                c.post(f"{LS}/franchise/bizreg", headers=chic, json={"branch": "main", "attachment_data_url": png, "consent": True})
+            self.assertEqual(Building.first(branch="main").biz_type, "서비스업")
+
+            # ── 가맹비 현금영수증: 사업자번호 없는 임대인 → 세금계산서 불가·현금영수증(휴대폰) 카드, 기록·장부 경비·증빙 CSV·취소
+            lsr = Lessor.get(lsr.id); lsr.app_fee, lsr.business_number, lsr.phone = 33000, "", "010-1234-5678"; lsr.save(action="t")
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            fee = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            c.post(f"{AD}/fees/{fee.id}/paid", headers=admin, json={"amount": 33000, "paid_date": "2026-11-16"})
+            card = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertFalse(card["tax_available"])
+            self.assertEqual((card["cash"]["kind"], card["cash"]["identifier"], card["cash"]["amount"]), ("소득공제용", "01012345678", 33000))
+            cr = lambda no, **kw: c.post(f"{AD}/fees/{fee.id}/cash-receipt", headers=admin, json={"approval_no": no, "issue_date": "2026-11-16", **kw})
+            self.assertIn(c.post(f"{AD}/fees/{fee.id}/cash-receipt", headers=chic, json={"approval_no": "123456789"}).status_code, (401, 403))
+            self.assertEqual(cr("12").status_code, 400)
+            done = cr("123456789")
+            self.assertEqual(done.status_code, 200, done.text)
+            f1 = done.json()["fee"]
+            self.assertEqual((f1["receipt_type"], f1["invoice_status"], f1["invoice_nts_no"]), ("CASH_RECEIPT", "ISSUED", "123456789"))
+            out = Outlay.get(f1["outlay_id"])
+            self.assertEqual((out.evidence_type, out.is_vat_deductible), ("CASH_RECEIPT", False))        # 현금영수증은 매입세액 공제 아님
+            self.assertEqual(cr("987654321").status_code, 400)                                           # 이미 기록됨
+            self.assertIn("현금영수증 발행", c.get(f"{LS}/franchise-fees/export-csv?branch=main&year=2026", headers=chic).text)
+            self.assertEqual(c.post(f"{AD}/fees/{fee.id}/invoice-cancel", headers=admin, json={"memo": "오기재"}).status_code, 200)
+            self.assertIsNone(Outlay.get(out.id))
+            self.assertEqual(fb.FranchiseFee.get(fee.id).receipt_type, "TAX_INVOICE")
+            # 사업자번호가 있으면 카드는 세금계산서+현금영수증(지출증빙용)
+            lsr = Lessor.get(lsr.id); lsr.business_number, lsr.email = valid, "lessor@example.com"; lsr.save(action="t")
+            card2 = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertTrue(card2["tax_available"])
+            self.assertEqual(card2["cash"]["kind"], "지출증빙용")
+
+            # ── 임차인 사업자등록증 제출
+            t = Tenant.get("tenant_201")
+            tk = self._login("tenant_201")
+            sub = lambda **kw: c.post(f"{TN}/myhome/tenant_201/business-registration", headers=tk, json=kw)
+            self.assertEqual(sub(attachment_data_url=png, business_number="123-45-67899", email="t@example.com").status_code, 400)      # 체크섬 오류
+            t = Tenant.get("tenant_201"); t.email = ""; t.save(action="t")
+            self.assertEqual(sub(attachment_data_url=png, business_number=valid).status_code, 400)                                      # 이메일 없음
+            self.assertEqual(sub(attachment_data_url=png).status_code, 400)                                                             # 번호 없음(AI 동의 없음)
+            ext2 = {**ext, "business_number": valid, "company_name": "임차상사", "representative_name": "임차대표", "business_address": "서울 중구 1"}
+            with mock.patch.object(registry_ai, "analyze_bizreg", return_value={"status": "ok", "message": "", "extracted": ext2}):
+                good = sub(attachment_data_url=png, consent=True, email="t@example.com")
+            self.assertEqual(good.status_code, 200, good.text)
+            t = Tenant.get("tenant_201")
+            self.assertEqual((t.business_number, t.company_name, t.ceo_name, t.email), (valid, "임차상사", "임차대표", "t@example.com"))
+            self.assertTrue(any("사업자 정보 제출" in m.message for m in DirectChat.find(branch="main", room_no=t.room_no)))      # 임대인에게 알림
+            self.assertEqual(c.get(f"{TN}/myhome/tenant_201/business-registration", headers=tk).json()["business"]["business_number"], valid)
+            self.assertEqual(c.post(f"{TN}/myhome/tenant_202/business-registration", headers=tk, json={"business_number": valid, "email": "x@e.com"}).status_code, 403)   # 남의 계정 불가
+
+            # ── 월세 현금영수증 승인번호 기록(납부 건이 있어야, 임대인만)
+            pay = next((p for p in Pay.find(branch="main") if p.payment_kind == "MONTHLY_RENT"), None)
+            if pay is None:                      # 시드에 월세 납부가 없으면 한 건 만든다(끝나면 지운다)
+                ct0 = Contract.first(branch="main", status="ACTIVE")
+                pay = made_pay = Pay(branch="main", id_contract=ct0.id, room_no=ct0.room_no, id_tenant=ct0.id_tenant, payment_kind="MONTHLY_RENT", total_amount=ct0.monthly_rent,
+                                     paid_date="2026-11-10", billing_month="2026-11").save(action="t")
+            rno = pay.room_no
+            ym = Pay.__mro__ and __import__("apps.rent_dist._rent3_core.billing", fromlist=["TaxAndCertificateService"]).TaxAndCertificateService.payment_tax_ym(pay)
+            rc = c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": ym, "approval_no": "55443322"})
+            self.assertEqual(rc.status_code, 200, rc.text)
+            self.assertEqual(Pay.get(pay.id).cash_receipt_no, "55443322")
+            self.assertEqual(c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": "1999-01", "approval_no": "55443322"}).status_code, 400)
+            self.assertEqual(c.post(f"{LS}/tax/cash-receipt", headers=chic, json={"branch": "main", "room_no": rno, "billing_month": ym, "approval_no": "1"}).status_code, 400)
+
+            # ── 화면 문자열
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            for needle in ("data-mode", "💵 현금영수증", "사업자등록번호가 없어 세금계산서는 발급할 수 없습니다"):
+                self.assertIn(needle, rd("shared_ui", "r3_taxinvoice.js"), needle)
+            for needle in ("fbizEmail", "mbizEmail", "mbizType", "/tax/cash-receipt", "💵 현금영수증 정보·홈택스"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), needle)
+            for needle in ("recordCash", "/cash-receipt"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+            for needle in ("btnBizInfo", "/business-registration", "tbCam", "tbEmail"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), needle)
+        finally:
+            if made_pay is not None:
+                made_pay.delete(action="t")
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            for o in list(Outlay.find(category="platform_fee")):
+                o.delete(action="t")
+            for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m0.category.startswith("가맹비") or m0.category.startswith("사업자"):
+                    m0.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.business_number, lsr.email, lsr.account_number, lsr.franchise_docs, bt, bi = keep
+            lsr.save(action="t")
+            b2 = Building.first(branch="main"); b2.biz_type, b2.biz_item = bt, bi; b2.save(action="t")
+            t2 = Tenant.get("tenant_201")
+            t2.business_number, t2.company_name, t2.ceo_name, t2.business_address, t2.email, t2.biz_submitted_at, t2.biz_ai_calls = keept
+            t2.save(action="t")
 
 
 if __name__ == "__main__":

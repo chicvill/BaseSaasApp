@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>📘 공식 운영 매뉴얼 — 임차인 매물·마이홈 (Rent3 Tenant)</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/manual.css">
+  <link rel="stylesheet" href="/shared/ui/r3_readable.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="manual-header">
+      <div>
+        <span class="bass-badge bass-badge--info">Rent3 Tenant v3.1</span>
+        <h1 class="bass-gradient-text" style="margin-top:6px;">🔑 임차인 매물·마이홈 공식 이용 매뉴얼</h1>
+      </div>
+      <div class="bass-row no-print">
+        <a class="bass-btn" href="./">← 임차인 앱으로 돌아가기</a>
+        <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </header>
+
+    <div class="callout">
+      <strong>핵심 기능:</strong> 예비 세입자는 복비 0원 직거래 매물을 검색·투어 신청하고 공동 임대계약방으로 합류하며, 입주 후에는 마이홈에서 실시간 납부 현황 조회·결제, 도어락·주차 등록, A/S 접수, 연말정산 17% 세액공제 증명서 인쇄를 원스톱으로 이용합니다.
+    </div>
+
+    <h2>1. 주요 화면 및 Data Pool 연동</h2>
+    <table>
+      <thead>
+        <tr><th>구분</th><th>이용 기능</th><th>연동 JSON 파일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>공실 쇼케이스</td><td>실시간 공개 공실 및 <code>만기퇴실 예정 사전공개</code> 매물 조회, 1:1 방문투어 문의, 공동 계약방 입장</td><td><code>rooms.json</code>, <code>ops.json</code>, <code>cosign_sessions.json</code></td></tr>
+        <tr><td>출입 · 주차</td><td>계약 체결자 전용 세대 도어락 비번 열람, 내 차량 주차 등록</td><td><code>users.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>만기 전출계획 회신 · 연장예고 동의</td><td>만기 6~2개월 전 <strong>[🏠 전출의사 없음]</strong> 또는 <strong>[📦 만기 전출 예정]</strong> 회신, 임대인의 연장 재계약 예고 조건(종전 동일 / 5% 이내) 확인·동의 및 공동 재계약방 원클릭 입장</td><td><code>ops.json</code>, <code>rooms.json</code>, <code>cosign_sessions.json</code></td></tr>
+        <tr><td>중개 지면계약서 열람</td><td>공인중개사 입회로 체결되어 임대인이 등록한 종이 임대차계약서 원본 사본 열람·다운로드</td><td><code>contracts.json</code>, <code>uploads/contracts/*</code></td></tr>
+        <tr><td>월세 납부 · 세액공제</td><td>월별 FIFO 원장 확인, 납입일 3일 전 안내 · 납입일 1일 후 미납 통보 확인 및 즉시 납부(납부 즉시 미납통보 자동 해소), 17% 세액공제 공식 증명서 A4 인쇄</td><td><code>payments.json</code>, <code>ops.json</code>, <code>contracts.json</code></td></tr>
+        <tr><td>채팅형 퇴실 정산 · 퇴실 후 조회</td><td>퇴실 신청, 정산서 확인 및 본인 명의 계좌 동의(또는 이의 제기), 보증금 수취 확인(<code>[✅ 받았습니다]</code>), 퇴실 후 다음 해 2월 말까지 연말정산 납부확인서·정산서 조회 전용 접속</td><td><code>ops.json</code>, <code>users.json</code></td></tr>
+        <tr><td>사업자 정보 · 세금계산서 요청</td><td>사업자등록증 촬영·제출(AI 자동 읽기, 10자리 체크섬·이메일 검증)로 임대인에게 세금계산서 발급 정보 전달, 사업자번호 없는 경우 현금영수증 발급 안내</td><td><code>users.json</code>, <code>contracts.json</code>, <code>ops.json</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>2. 내 호실 연결(본인 확인) 및 비밀번호 설정 방법</h2>
+    <ol>
+      <li><strong>임대인이 보낸 전용 문자 링크로 가입 (권장):</strong> 문자로 받은 1회용 안내 링크(7일 유효)를 열고 <strong>내 호실 번호 · 본인 이름 · 본인 전화번호 · 임대인 성함</strong> 4칸을 입력해 장부와 일치하면 새 비밀번호와 4자리 간편번호(PIN)·홈 화면 바로가기를 설정합니다.</li>
+      <li><strong>전화 확인번호로 연결 요청 (문자를 못 받은 경우):</strong> 공통 연결 주소에서 호실·성함·휴대폰을 입력하면 화면에 <strong>4자리 확인번호</strong>가 나타납니다. 상단 전화 버튼으로 임대인에게 전화해 확인번호를 불러주면 임대인 화면에서 즉시 승인되어 비밀번호를 설정할 수 있습니다.</li>
+      <li><strong>재계약 시 새 비밀번호 설정:</strong> 만기 연장(재계약) 때 임대인이 보내주는 새 비밀번호 설정 링크를 통해 기존 등록 기기를 유지한 채 안전하게 비밀번호를 변경할 수 있습니다.</li>
+    </ol>
+
+    <h2>3. 채팅 기반 퇴실(전출) 정산 및 퇴실 후 연말정산 서류 발급</h2>
+    <ol>
+      <li><strong>STEP 1 (퇴실 신청 & 연말정산 자료 미리 받기):</strong> <strong>☰ 더보기 ▸ 🚪 퇴실 정산</strong>에서 퇴실 희망일과 메모를 적어 <strong>[🚪 퇴실 신청]</strong>을 누릅니다. 채팅창에 안내되는 <strong>[연말정산 납부확인서 내려받기]</strong> 카드로 미리 확인서를 받아 둘 수 있습니다.</li>
+      <li><strong>STEP 2 (정산서 확인 · 본인 계좌 입력 또는 이의 제기):</strong> 임대인이 시설 점검 후 정산 명세서를 보내면 공제 내역과 반환 예정액을 확인합니다.
+        <ul>
+          <li>내역에 동의하면 <strong>계약자 본인 명의 계좌(예금주명이 계약자와 일치해야 함)</strong>와 서명을 입력하고 <strong>[✍️ 정산 내역 확인 및 동의 서명]</strong>을 누릅니다(채팅에는 보안상 계좌 끝 4자리만 표시됩니다).</li>
+          <li>공제 금액에 이의가 있으면 <strong>[⚠️ 이의 제기]</strong>를 눌러 사유를 남기고 채팅·통화로 협의합니다(임대인이 수정해 다시 보내면 재동의).</li>
+        </ul>
+      </li>
+      <li><strong>STEP 3 (송금 확인 및 퇴실 완료):</strong> 임대인이 보증금을 이체하고 송금 완료를 표시하면 입금을 확인한 뒤 <strong>[✅ 받았습니다]</strong>를 누릅니다(미입금 시 <strong>[❌ 못 받았습니다]</strong> 클릭, 별도 이의 없이 7일이 지나면 자동 확정).</li>
+      <li><strong>STEP 4 (퇴실 후 다음 해 2월 말까지 읽기 전용 접속):</strong> 퇴실이 확정되면 바로가기·간편번호·등록 기기는 자동 정리되지만, <strong>퇴실한 다음 해 2월 말까지는 기존 아이디·비밀번호로 로그인하여 연말정산 납부확인서와 퇴실 정산서를 조회·인쇄</strong>할 수 있습니다.</li>
+    </ol>
+
+    <h2>4. 사업자등록증 제출(세금계산서 요청) 및 현금영수증 확인</h2>
+    <ol>
+      <li><strong>사업자 임차인 (세금계산서 요청):</strong> <strong>☰ 더보기 ▸ 🏢 사업자 정보 · 세금계산서 요청</strong>에서 <strong>[📷 촬영하기]</strong> 또는 <strong>[🖼 사진·PDF 선택]</strong>으로 사업자등록증을 올리고(AI 동의 시 자동 입력) <strong>사업자등록번호(10자리 체크섬 필수) · 상호 · 대표자 · 수신 이메일(필수) · 사업장 주소</strong>를 제출하면 임대인에게 채팅 알림이 전달되고 세금계산서 발급 대장에 즉시 반영됩니다.</li>
+      <li><strong>비사업자 임차인 (현금영수증 및 연말정산 납부확인서):</strong> 사업자등록번호가 없는 경우 <strong>☰ 임대인과 메시지</strong>로 현금영수증 발급을 요청하면 임대인이 휴대폰 번호 기준으로 홈택스 현금영수증을 발급·기록하며, 승인번호는 <strong>🧾 연말정산 납부확인서</strong>에 함께 표시됩니다.</li>
+    </ol>
+  </main>
+<script src="/shared/ui/phone_fmt.js"></script>
+</body>
+</html>
+

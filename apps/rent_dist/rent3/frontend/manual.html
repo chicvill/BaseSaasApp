@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenRent · Rent3 공식 운영 매뉴얼 (Direct Rent & Role Routing)</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Pretendard', sans-serif; }
+    body { background: #f8fafc; color: #1e293b; line-height: 1.6; padding: 32px 20px; }
+    .paper {
+      max-width: 880px; margin: 0 auto; background: #fff; padding: 48px; border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.06); border: 1px solid #e2e8f0;
+    }
+    .header-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 32px; border-bottom: 2px solid #0f172a; padding-bottom: 16px; }
+    .title { font-size: 25px; font-weight: 800; color: #0f172a; }
+    .print-btn {
+      background: #0f172a; color: #fff; border: none; padding: 10px 18px; border-radius: 8px;
+      font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none;
+    }
+    h2 { font-size: 18px; font-weight: 700; color: #0f172a; margin: 28px 0 12px; border-left: 4px solid #3276b1; padding-left: 10px; }
+    p, li { font-size: 14.5px; color: #334155; margin-bottom: 8px; }
+    ul, ol { padding-left: 20px; margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13.5px; }
+    th, td { border: 1px solid #cbd5e1; padding: 9px 10px; text-align: left; }
+    th { background: #f1f5f9; font-weight: 700; }
+    .box { background: #f1f5f9; padding: 16px; border-radius: 8px; margin: 14px 0; border: 1px solid #e2e8f0; font-size: 14px; }
+    .badge { display: inline-block; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 700; background: #dcfce7; color: #166534; }
+
+    @media print {
+      body { background: #fff; padding: 0; }
+      .paper { box-shadow: none; border: none; padding: 0; max-width: 100%; }
+      .no-print { display: none !important; }
+      h2 { border-left-color: #000; }
+      th, td, .box { border-color: #000; }
+    }
+  </style>
+<script src="/shared/ui/auth_fetch.js"></script>
+  <link rel="stylesheet" href="/shared/ui/r3_readable.css">
+</head>
+<body>
+  <div class="paper">
+    <div class="header-actions">
+      <div>
+        <div class="title">🏡 OpenRent · Rent3 직거래 포털 & 역할별 라우팅 매뉴얼</div>
+        <div style="font-size:13px; color:#64748b; margin-top:4px;">버전 3.1.0 | OpenRent 벤치마킹 포털 · 공동 JSON Data Pool 거버넌스</div>
+      </div>
+      <div class="no-print" style="display:flex; gap:8px;">
+        <a href="/rent3/" class="print-btn" style="background:#3276b1;">🏡 포털 홈으로</a>
+        <button class="print-btn" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </div>
+
+    <h2>1. 🏡 OpenRent 벤치마킹 직거래 포털 개요 (<code>/rent3/index.html</code>)</h2>
+    <div class="box">
+      <span class="badge">핵심 구조</span> 영국 직거래 표준 플랫폼 <strong>OpenRent(openrent.co.uk)</strong>의 사용자 경험을 한국 임대차 및 공동 실시간 Data Pool(<code>data/rent3_pool/*.json</code>)에 최적화하여 구성했습니다.
+      <ul style="margin-top:8px; margin-bottom:0;">
+        <li><strong>통합 매물 검색 & 퀵 필터</strong>: 지역·건물명·옵션 검색, 즉시입주, 만기전출 예정 사전공개, 등기 근저당 0원 클린 필터 제공.</li>
+        <li><strong>월세 부담능력 계산기 (Affordability Calculator)</strong>: 월 세후 소득 30% 기준 권장 주거비 및 보유 보증금 이내 매물 자동 필터링.</li>
+        <li><strong>No Dead Listings 실시간 연동</strong>: <code>rooms.json</code>과 직결되어 계약 체결 즉시 매물이 마감되고, 퇴실·만기전출 시 자동 게시됩니다.</li>
+      </ul>
+    </div>
+
+    <h2>2. 🔐 로그인 후 역할별 자동 페이지 분기 규칙</h2>
+    <p>상단 <strong>[🔐 로그인 / 회원가입 (Sign In)]</strong> 모달에서 로그인하면 서버(<code>POST /api/rent3/pool/auth/login</code>)가 계정 역할을 판별해 알맞은 전용 워크스페이스로 즉시 이동시킵니다.</p>
+    <table>
+      <thead>
+        <tr>
+          <th>사용자 역할</th>
+          <th>로그인 식별자 예시</th>
+          <th>자동 이동 페이지 (Redirect URL)</th>
+          <th>주요 수행 기능</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>👑 총괄 관리인</strong></td>
+          <td><code>admin</code> (PW: <code>0202</code>)</td>
+          <td><code>/rent3_admin/</code><br><small>(옵션 선택 시 <code>/rent3/pool.html</code>)</small></td>
+          <td>관리인 전용 앱에서 임대인 가맹 승인, 월 SaaS 이용료 정산, 전 지점 NOI 수익률, RTMS 감시</td>
+        </tr>
+        <tr>
+          <td><strong>🏢 임대인 (건물주)</strong></td>
+          <td><code>chic</code>, <code>sunho</code>, <code>sinbi</code> 또는 연락처</td>
+          <td><code>/rent3_lessor/?branch={지점코드}</code><br><small>(매물등록 클릭 시 <code>&amp;tab=rooms</code>)</small></td>
+          <td>은행문자 FIFO 수납, 납입일 D-3/D+1 통보, 중개 계약서 사진 등록, 세무결산</td>
+        </tr>
+        <tr>
+          <td><strong>🔑 입주 임차인</strong></td>
+          <td><code>010-8888-2010</code> 또는 <code>이민수</code></td>
+          <td><code>/rent3_tenant/?tenant={임차인ID}</code></td>
+          <td>내 호실 납부원장, D-3/D+1 통보 확인, 도어락·주차, 17% 세액공제 증명서</td>
+        </tr>
+        <tr>
+          <td><strong>📢 예비임차인</strong></td>
+          <td>신규 가입 또는 미배정 계정</td>
+          <td><code>/rent3_tenant/?view=listings</code></td>
+          <td>중개수수료 0원 즉시입주 공실 탐색, 1:1 방문투어 문의</td>
+        </tr>
+        <tr>
+          <td><strong>🤝 공동계약 당사자</strong></td>
+          <td>임대인·임차인 각자 본인인증 계정 로그인</td>
+          <td><code>/rent3_contract/?role={역할}</code></td>
+          <td>먼저 입장한 측의 매물 선택 호출 → 상대방 응답 연결 → 서로 신분증 확인 체크 &amp; 등기부등본 확인 → Revision Lock 전자서명</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3. 🔄 실시간 공동 JSON Data Pool 무결성 원칙</h2>
+    <ul>
+      <li><strong>원자적 동기화</strong>: 5개 분리 앱(<code>rent3</code>, <code>rent3_admin</code>, <code>rent3_lessor</code>, <code>rent3_tenant</code>, <code>rent3_contract</code>)이 하나의 <code>data/rent3_pool/*.json</code>을 실시간으로 공유합니다.</li>
+      <li><strong>법적 안전 불변식</strong>: 거래 건당 중개수수료(복비) 0원 원칙, 주택임대차보호법 제6·7조(만기 6~2개월 전출확인 및 5% 증액 상한), 후불 입주월 가짜체납 방지 원칙을 준수합니다.</li>
+    </ul>
+
+    <h2>4. 📋 정확성이 요구되는 4대 핵심 업무 요약</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>업무 구분</th>
+          <th>당사자</th>
+          <th>핵심 절차 및 검증 규칙</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>① 본인 확인 · 암호 설정 및 퇴실 정산 채팅</strong></td>
+          <td>관리인 ↔ 임대인<br>임대인 ↔ 임차인</td>
+          <td>• <strong>1회용 링크 + 4칸 대조</strong>: 임차인(호실·이름·전화·임대인명), 임대인(건물명·이름·전화·사업자/계좌 끝 4자리) 대조 통과 후 암호 설정<br>• <strong>퇴실 정산 채팅</strong>: 퇴실 신청(연말정산 자료 사전 안내) → 정산서 전달 → 본인 명의 계좌(예금주=계약자) 동의/이의 → 송금 표시 → <code>[받았습니다]</code> 확인(7일 자동 확정) → 퇴실 후 <strong>다음 해 2월 말까지 조회 전용 접속</strong></td>
+        </tr>
+        <tr>
+          <td><strong>② 부가세 · 종소세 · 면세 현황신고 산출</strong></td>
+          <td>임대인</td>
+          <td>• <strong>부가세(1·7월)</strong>: 과세 호실 실수납 매출세액 − 적격증빙 매입세액(과세·면세 혼합 건물은 과세공급비율로 자동 안분)<br>• <strong>면세 사업장현황신고(2월 10일)</strong>: 주거용 면세 호실별 보증금·연간 월세수입 CSV 출력<br>• <strong>종합소득세(5월)</strong>: 부가세 제외 공급가액 기준 주택 분리과세(2,000만 원 이하 15.4%) vs 종합과세 누진세율 산출 및 CSV 출력</td>
+        </tr>
+        <tr>
+          <td><strong>③ 건물 비용(경비) 등록</strong></td>
+          <td>임대인</td>
+          <td>• <strong>증빙 3요소 구분</strong>: 적격증빙(전자세금계산서·사업용카드·현금영수증) + 일반과세자 거래처 지출만 부가세 매입공제 인정<br>• 간이과세자 영수증·화재보험·주거전용 수리비는 부가세 불공제 처리 후 <strong>종소세 필요경비</strong>로만 반영</td>
+        </tr>
+        <tr>
+          <td><strong>④ 세금계산서 &amp; 현금영수증 발급 (관리인→임대인 / 임대인→임차인)</strong></td>
+          <td>관리인 → 임대인<br>임대인 → 임차인</td>
+          <td>• <strong>공용 [📋 발급 정보 · 홈택스] 카드 (<code>R3Tax</code>)</strong>: 항목별 복사·전체 복사·홈택스 열기·승인번호 기록을 한 창에서 수행하며, 상대방에게 사업자번호가 없으면 <strong>💵 현금영수증(소득공제용) 탭</strong>으로 자동 전환<br>• <strong>관리인 → 임대인(가맹비)</strong>: 사업자등록증 홈택스 승인 임대인은 <strong>세금계산서</strong>(볼타 API 또는 홈택스 24자리 승인번호 기록 → 부가세 매입공제+종소세 경비 자동 등재), 미등록 임대인은 <strong>현금영수증</strong>(6~12자리 승인번호 기록 → 부가세 불공제·종소세 경비만 자동 등재)<br>• <strong>임대인 → 임차인(과세 월세)</strong>: 임차인이 앱(<code>🏢 사업자 정보 · 세금계산서 요청</code>)에서 등록증을 촬영 제출하거나 임대인이 입력 → 청구월 기준 호실당 월 1장 집계 → <strong>[📋 발급 정보·홈택스]</strong> 건별 발급(또는 <strong>홈택스 일괄발급 CSV</strong> 업로드) 및 비사업자 <strong>💵 현금영수증</strong> 승인번호 기록(연말정산 납부확인서 반영)</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+<script src="/shared/ui/phone_fmt.js"></script>
+</body>
+</html>

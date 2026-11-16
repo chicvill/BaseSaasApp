@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>📘 공식 운영 매뉴얼 — 임대인 관제 (Rent3 Lessor)</title>
+  <link rel="stylesheet" href="/shared/ui/base.css">
+  <link rel="stylesheet" href="/shared/ui/manual.css">
+  <link rel="stylesheet" href="/shared/ui/r3_readable.css">
+</head>
+<body>
+  <main class="manual">
+    <header class="manual-header">
+      <div>
+        <span class="bass-badge bass-badge--info">Rent3 Lessor v3.1</span>
+        <h1 class="bass-gradient-text" style="margin-top:6px;">🏢 임대인 자산·수납 관제 공식 운영 매뉴얼</h1>
+      </div>
+      <div class="bass-row no-print">
+        <a class="bass-btn" href="./">← 임대인 앱으로 돌아가기</a>
+        <button class="bass-btn bass-btn--primary" onclick="window.print()">🖨️ 매뉴얼 인쇄 / PDF 저장</button>
+      </div>
+    </header>
+
+    <div class="callout">
+      <strong>핵심 불변식:</strong> 객체지향 <code>rent2</code> 수납 엔진을 100% 계승하여 <strong>후불 입주월 비과세(가짜 체납 원천 차단)</strong>와 <strong>가장 오래된 미납월부터의 FIFO 순차 상계</strong>를 보장하며, 모든 변경은 즉시 <code>data/rent3_pool/*.json</code>에 반영됩니다.
+    </div>
+
+    <h2>0. 호실 화면 사용법 (월세 수납 현황)</h2>
+    <ol>
+      <li>맨 위 <strong>호실 선택</strong> 목록에서 호실을 고르면 그 호실의 기본 정보(보증금·월세·관리비·만기일)와 버튼 네 개가 나옵니다. 미납이 있는 호실은 목록에 <strong>미납 N</strong>으로 표시되고, 카드 오른쪽에 붉은 글씨로 <strong>미납:N</strong>이 보입니다. 미납 횟수는 매월 납부일(전입일의 날짜)이 이미 지났는데 아직 못 낸 달의 수입니다.</li>
+      <li><strong>수납내역</strong> — 은행 입금 문자를 붙여넣고 <strong>[문자 읽고 수납]</strong>을 누르면 미납이 오래된 달부터 채워집니다. 문자가 없으면 금액을 적고 <strong>[직접수납]</strong>을 누릅니다. 아래 목록(전입일 또는 작년 1월부터, 최근 달이 위)에서 납부일·월세·관리비를 고치면 바로 저장됩니다. 임차인에게 보낼 영수·미납 안내 문자가 자동으로 만들어지고, <strong>[복사]</strong> 후 임차인 문자창에 붙여넣어 보냅니다.</li>
+      <li><strong>계약내용</strong> — 전입일·만기일·보증금·월세·관리비·전화번호·메모를 보고 고칩니다. 계약서 사진 등록과(잔금 확인 전이면) 도어락 교부 버튼도 여기에 있습니다.</li>
+      <li><strong>만기통보</strong> — 만기 6~2개월 전 통지 구간인데 통보한 적이 없으면 버튼이 <strong>노란색</strong>입니다. ① 전출계획 확인 문자를 복사해 보내고 ② 임차인 답변(전출 의사 없음 / 전출 예정)을 기록하면 ③ 법정 5% 이내 갱신 안내 문자가 만들어집니다.</li>
+      <li><strong>전출</strong> — 전출일, 체납액(자동), 청소비, 체납 공과금, 파손 복구비를 넣으면 환불 예정액이 문자로 요약됩니다. 복사해 보낸 뒤 <strong>[정산 확정 · 임대 매물 등록]</strong>을 누르면 호실이 공실이 되고 홈페이지 임대 매물로 공개됩니다.</li>
+    </ol>
+
+    <h2>1. 핵심 업무 가이드</h2>
+    <table>
+      <thead>
+        <tr><th>메뉴</th><th>주요 기능</th><th>업데이트되는 공동 JSON 파일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>호실장부 & 문자 수납</td><td>은행 입금문자 붙여넣기 자동 파싱, FIFO 순차 상계, 공실 공개 토글, 첨부 계약서 사진 열람</td><td><code>payments.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>납입일 D-3 사전통보 · D+1 미납통보</td><td>입주일 기준 매월 납입일 3일 전 사전 안내 발송, 납입일 1일 후 실제 미납 호실에만 미납 통보 발송(완납 오발송 차단 · 수납 시 자동 해소)</td><td><code>ops.json</code>, <code>payments.json</code></td></tr>
+        <tr><td>만기 6~2개월 전 전출확인 · 연장예고</td><td>법정 통지구간(D-180~D-60) 자동 감지, 임차인 전출계획 확인 요청, 만기전출 시 사전공실 노출, 전출의사 없을 때 5% 상한 검증 연장 재계약 예고 및 공동 재계약방 개설</td><td><code>ops.json</code>, <code>rooms.json</code>, <code>cosign_sessions.json</code></td></tr>
+        <tr><td>중개 계약서 사진 등록</td><td>공인중개사 개입 지면계약서 촬영본/PDF 첨부(<code>uploads/contracts/</code> 보관), 카메라 OCR 텍스트 자동 채우기, 호실·임차인·계약금·전월세신고(RTMS) 일괄 적용</td><td><code>contracts.json</code>, <code>rooms.json</code>, <code>users.json</code>, <code>payments.json</code>, <code>ops.json</code></td></tr>
+        <tr><td>공용운영비 · 종소세</td><td>8대 표준 경비 등재, NOI 순수익 계산, 5월 종소세 UTF-8 BOM CSV 출력</td><td><code>outlays.json</code></td></tr>
+        <tr><td>A/S · 채팅 · 퇴실정산</td><td>기사 배정(수리비 자동 경비화), 퇴실 공제 명세 산출 및 원클릭 공실 복귀</td><td><code>ops.json</code>, <code>contracts.json</code>, <code>rooms.json</code></td></tr>
+        <tr><td>호실 등록 · 도어락</td><td>신규 호실 객체 생성, 도어락 비밀번호 원격 변경(입주자 자동 동기화)</td><td><code>rooms.json</code>, <code>users.json</code></td></tr>
+      </tbody>
+    </table>
+
+    <h2>2. 부동산중개사 개입 계약서 사진 등록 절차</h2>
+    <ol>
+      <li>상단 탭 <strong>[📸 중개 계약서 사진 등록]</strong>(또는 각 호실 카드의 <strong>[📸 중개계약 사진등록]</strong>)을 클릭합니다.</li>
+      <li>촬영한 종이 계약서 사진(JPG/PNG/WEBP) 또는 PDF 스캔본을 첨부합니다. 스마트폰 카메라에서 복사한 문구를 붙여넣고 <strong>[✨ 문구에서 계약조건 자동 채우기]</strong>를 누르면 보증금·월세·관리비·임차인·중개사무소명이 자동 입력됩니다.</li>
+      <li>중개사의 주택임대차(전월세) 신고 대행 여부를 체크하고 <strong>[📸 계약서 사진 보관 및 계약내용 즉시 적용]</strong>을 누르면, 이미지 원본은 <code>data/rent3_pool/uploads/contracts/</code>에 SHA-256 해시와 함께 보관되고 공실 마감·세입자 마이홈 개통·후불 입주월 비과세 원장이 즉시 적용됩니다.</li>
+    </ol>
+
+    <h2>3. 만기 6~2개월 전 전출계획 확인 및 연장 재계약 예고</h2>
+    <ol>
+      <li>주택임대차보호법 제6조에 따라 만기 <strong>6개월 ~ 2개월 전(D-180 ~ D-60)</strong> 구간에 진입한 호실은 상단 요약 배너와 호실 카드에 <strong>⚖️ 법정 통지구간</strong> 경보로 자동 표시됩니다.</li>
+      <li><strong>STEP 1 (전출계획 확인):</strong> <strong>[📩 임차인에게 전출계획 확인 요청]</strong>을 보내거나 유선 확인 후 <strong>[🏠 전출의사 없음 기록]</strong> / <strong>[📦 만기전출(사전공실) 기록]</strong>을 선택합니다. 만기전출 확정 시 퇴실 전이라도 임차인 공실 쇼케이스에 <code>만기퇴실 예정 사전공개</code> 매물로 선제 노출되어 공실 기간을 0일로 줄입니다.</li>
+      <li><strong>STEP 2 (연장 재계약 예고):</strong> 임차인이 <strong>전출의사 없음(거주 연장 희망)</strong>인 경우, 종전 동일조건 또는 <strong>법정 5% 상한 이내</strong>로 조정한 보증금·월세·연장개월을 입력해 <strong>[📝 연장 재계약 예고 발송]</strong>을 클릭하면, 5% 초과 시 즉시 차단(422)되며 적법한 조건은 임차인 마이홈 예고장 및 실시간 공동 재계약방(<code>RENEWAL</code>)으로 동시에 전달됩니다.</li>
+    </ol>
+
+    <h2>4. 매월 임대료 납입일(=입주일) 3일 전 통보 및 납입일 1일 후 미납 통보</h2>
+    <ol>
+      <li>각 호실의 계약 입주일(<code>move_in_date</code>) 일자(1~31일, 단월 말일 자동 보정)가 매월 약정 납입일로 자동 산정됩니다.</li>
+      <li>상단 <strong>[⚡ D-3 납입통보 · D+1 미납통보 일괄 실행]</strong> 클릭 시(또는 호실별 <strong>[🔔 납입일 사전통보]</strong> / <strong>[🚨 납입+1일 미납통보]</strong> 버튼 클릭 시), 차기 납입일 <strong>3일 전(D-3)</strong> 호실에는 납입 예정 안내가, 납입일 <strong>1일 후(D+1)</strong>가 지났음에도 FIFO 원장상 미납액이 남아 있는 호실에는 미납 독촉 통보가 <code>ops.json</code> 및 1:1 인앱 메시지로 발송됩니다.</li>
+      <li>납입일 당일 또는 통보 전 입금이 완료된 완납 호실에는 미납 통보 발송이 원천 차단(400)되며, 미납 통보 발송 후 세입자가 월세를 납부하면 통보 상태가 즉시 <code>RESOLVED_PAID(완납해소)</code>로 자동 전환됩니다.</li>
+    </ol>
+
+    <h2>5. 임차인 본인 확인 · 앱 가입 안내 및 채팅 기반 퇴실 정산</h2>
+    <ol>
+      <li><strong>입주자별 1회용 안내 링크 + 4칸 본인확인:</strong> <strong>☰ 더보기 ▸ 📨 임차인 앱 가입 안내 문자</strong>에서 <strong>[🔗 입주자별 링크 만들기]</strong> 후 <strong>[📩 다음 사람에게 문자 보내기]</strong>를 누르면 호실별 전용 링크(7일·1회용)가 발송됩니다. 임차인은 링크를 열어 <strong>호실 · 본인 이름 · 전화번호 · 임대인 이름</strong> 4칸을 통과해야 비밀번호를 설정할 수 있습니다(폰 분실·교체 시 <strong>[🔁 재등록 문자]</strong>로 기존 기기를 끊고 재발급).</li>
+      <li><strong>전화로 4자리 확인번호 승인 (예비 경로):</strong> 문자를 못 받은 임차인이 공통 연결 주소로 요청하면 임대인 화면에 <strong>승인 창이 자동으로</strong> 뜹니다. 임차인과 통화하며 화면의 <strong>4자리 확인번호</strong>를 입력해 승인하면 즉시 비밀번호 설정으로 넘어갑니다.</li>
+      <li><strong>채팅 기반 5단계 퇴실(전출) 정산:</strong>
+        <ul>
+          <li>① 임차인이 퇴실 신청(연말정산 납부확인서 사전 내려받기 안내 자동 발송) → ② 임대인이 호실 <strong>[전출]</strong> 창에서 정산서 산출·전송 → ③ 임차인이 정산 내역 확인 후 <strong>본인 명의 계좌(예금주=계약자 일치 필수)</strong> 입력 및 동의 서명(또는 <strong>⚠️ 이의 제기</strong> 시 상단 배너에 표시되어 협의 후 재작성) → ④ 임대인이 은행 이체 후 <strong>[💸 송금 완료 표시]</strong> → ⑤ 임차인이 <strong>[✅ 받았습니다]</strong>를 누르면(또는 이의 없이 7일 경과 시 자동 확정) 공실 복귀 및 퇴실이 완료됩니다.</li>
+          <li>퇴실 완료 시 임차인의 바로가기·간편번호·등록 기기는 즉시 해제되며, <strong>퇴실한 다음 해 2월 말까지는 연말정산 납부확인서·정산서 조회만 가능한 읽기 전용</strong>으로 접속이 허용됩니다.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h2>6. 부가세(VAT) · 종합소득세 · 면세 사업장현황신고 자료 산출 및 경비 등록</h2>
+    <ol>
+      <li><strong>사업자등록증 촬영 · 홈택스 승인:</strong> <strong>☰ 더보기 ▸ 📷 사업자등록증 촬영 · 홈택스 승인</strong>에서 <strong>[📷 촬영하기]</strong> 또는 <strong>[🖼 사진·PDF 선택]</strong>으로 등록증을 올리고 세금계산서 수신용 <strong>이메일 · 업태 · 종목</strong>을 함께 입력(AI 동의 시 자동 추출)해 제출합니다. 10자리 국세청 체크섬·AI 추출 대표자 대조를 거쳐 관리인이 국세청 홈택스에서 확인 후 승인하면 장부의 공식 사업자번호와 건물 업태·종목이 확정됩니다.</li>
+      <li><strong>과세 · 면세 대상 호실 설정:</strong> <strong>☰ 더보기 ▸ 📑 부가세 · 소득세 대상 호실 설정</strong>에서 상가·사무실(부가세 과세) 호실과 주거용(면세·종소세 대상) 호실을 지정합니다.</li>
+      <li><strong>경비(비용) 지출 등록 및 매입세액 공제 기준 (<code>🧾 세무 허브 ▸ 🗂️ 경비 · 면세 신고</code>):</strong>
+        <ul>
+          <li>지출 등록 시 <strong>증빙유형</strong>(전자세금계산서 / 사업용 신용카드 / 지출증빙 현금영수증 / 간이영수증 / 면세), <strong>거래처 과세유형</strong>(일반과세자 / 간이과세자 / 면세), <strong>사용구분</strong>(건물 공통경비 / 과세호실 전용 / 주거전용)을 선택합니다.</li>
+          <li><strong>부가세 매입세액 공제:</strong> <code>적격증빙 3종 + 일반과세자 거래처</code> 지출만 인정되며, 상가·주거 혼합 건물의 <strong>건물 공통경비(엘리베이터·청소·공용전기 등)는 과세공급비율로 자동 안분</strong>됩니다. 간이과세자 영수증·화재보험·주거전용 수리비는 부가세 불공제 처리되고 <strong>종합소득세 필요경비</strong>로만 반영됩니다.</li>
+          <li>본사에 납부한 <strong>월 가맹비</strong>는 관리인이 세금계산서(매입세액 공제 가능) 또는 현금영수증(부가세 불공제·종소세 경비만 반영)을 발급·기록하는 즉시 임대인 경비 장부(<code>platform_fee</code>)에 자동 등재됩니다(<strong>☰ 더보기 ▸ 💳 가맹비 납부 · 세금계산서</strong>에서 연도별 증빙 CSV·인쇄 가능).</li>
+        </ul>
+      </li>
+      <li><strong>신고용 CSV 원클릭 산출 (<code>🧾 세무 허브</code>):</strong>
+        <ul>
+          <li><strong>🧮 종합소득세 (5월 신고):</strong> 부가세를 제외한 약정 귀속월 공급가액 기준으로 주택임대(연 2,000만 원 이하 15.4% 분리과세 vs 종합과세 비교)와 상가임대 순소득(NOI)을 산출하고 <strong>[📥 종소세 명세서 CSV]</strong>를 내려받습니다.</li>
+          <li><strong>🧾 부가세 (1월·7월 신고):</strong> 1기·2기 과세 호실 실수납 매출세액에서 공제 가능 매입세액(공통매입 안분 후)을 뺀 예상 납부세액과 호실별·건별 명세를 확인합니다.</li>
+          <li><strong>🏠 면세 사업장현황신고 (매년 2월 10일 마감):</strong> 주거용 면세 호실의 보증금·연간 월세수입 검토표를 <strong>[📥 면세 사업장현황신고 CSV]</strong>로 내려받습니다.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h2>7. 임대인 → 임차인 세금계산서 및 현금영수증 발급 과정 (과세 호실 월세·관리비)</h2>
+    <ol>
+      <li><strong>임차인 사업자 정보 접수 또는 직접 입력:</strong>
+        <ul>
+          <li>임차인이 임차인 앱(<strong>☰ 🏢 사업자 정보 · 세금계산서 요청</strong>)에서 사업자등록증을 촬영·제출하면(10자리 체크섬·이메일 필수) 호실 사업자 정보에 자동 저장되고 임대인에게 채팅 알림이 옵니다.</li>
+          <li>또는 임대인이 직접 <strong>수납 현황 ▸ 해당 호실 선택 ▸ [계약내용]</strong>에서 임차인의 <strong>사업자등록번호(10자리) · 상호 · 대표자명 · 이메일 · 사업장 주소</strong>를 입력할 수 있습니다.</li>
+        </ul>
+      </li>
+      <li><strong>월별 발급 대상 집계 (<code>🧾 세무 허브 ▸ 📑 세금계산서</code>):</strong> 입금 건별이 아니라 <strong>청구월(약정 지급일) 기준 호실당 월 1장</strong>으로 자동 집계되며, 완납 여부에 따라 <code>영수(01)</code> / <code>청구(02)</code>가 구분됩니다.</li>
+      <li><strong>발급 방법 ① — 건별 [📋 발급 정보 · 홈택스] 카드 (세금계산서 & 현금영수증 통합):</strong>
+        <ul>
+          <li><strong>사업자등록번호가 있는 임차인:</strong> 표의 <strong>[📋 발급 정보·홈택스]</strong>를 누르면 공급자(임대인)와 공급받는자(임차인) 항목별 <strong>[복사]</strong>·<strong>[📋 전체 복사]</strong>·<strong>[🏛️ 홈택스 열기 ↗]</strong>가 뜹니다(필요 시 상단 탭에서 <strong>[💵 현금영수증(지출증빙용)]</strong> 전환 가능). 홈택스에서 발급 후 <strong>[✍️ 발급했어요 — 승인번호 기록]</strong>을 눌러 승인번호와 <code>발행완료(ISSUED)</code>를 기록합니다.</li>
+          <li><strong>사업자등록번호가 없는 임차인 (💵 현금영수증 발급):</strong> 행 버튼이 <strong>[💵 현금영수증 정보·홈택스]</strong>로 표시되며, 세금계산서 탭은 비활성화되고 <strong>휴대폰 번호 기준 소득공제용 현금영수증</strong> 정보가 표시됩니다. 홈택스에서 발급한 뒤 <strong>현금영수증 승인번호(숫자 6~12자리)</strong>를 기록하면 해당 월 납부 원장(<code>cash_receipt_no</code>)에 저장되어 <strong>임차인의 연말정산 납부확인서에 자동 표시</strong>됩니다.</li>
+        </ul>
+      </li>
+      <li><strong>발급 방법 ② — [📥 홈택스 세금계산서 일괄발급 CSV] 업로드:</strong> 발급 대상이 여러 건일 때는 <strong>[📥 홈택스 세금계산서 일괄발급 CSV]</strong>(필수 정보 미비 건 및 이미 발행 완료된 건은 이중 발행 방지를 위해 자동 제외)를 내려받아 국세청 홈택스에 일괄 업로드해 발행한 뒤 <strong>[발행기록]</strong>으로 상태를 저장합니다.</li>
+    </ol>
+  </main>
+<script src="/shared/ui/phone_fmt.js"></script>
+</body>
+</html>
+

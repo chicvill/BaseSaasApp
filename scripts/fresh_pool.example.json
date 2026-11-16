@@ -1,0 +1,22 @@
+{
+  "admin": {"username": "admin", "name": "본사 총괄 관리인"},
+  "lessors": [
+    {
+      "username": "example_id",
+      "password": "8자이상-비밀번호",
+      "name": "홍길동",
+      "phone": "010-0000-0000",
+      "branch": "main",
+      "status": "ACTIVE",
+      "building": {
+        "name": "예시빌",
+        "address": "주소를 입력하세요",
+        "default_maintenance_fee": 100000,
+        "rooms": [
+          {"room_no": "101", "deposit": 5000000, "monthly_rent": 290000, "maintenance_fee": 100000, "pay_timing": "후불"}
+        ],
+        "rooms_csv": ""
+      }
+    }
+  ]
+}
