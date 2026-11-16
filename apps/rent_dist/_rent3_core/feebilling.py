@@ -309,6 +309,32 @@ def cancel_invoice(fee: FranchiseFee, memo: str = "", by: str = "관리인") -> 
     return fee
 
 
+def invoice_card(fee: FranchiseFee) -> Dict[str, Any]:
+    """홈택스 수동 발급용 '발급 정보 카드' 값: 공급자(플랫폼) → 공급받는자(가맹 임대인), 품목·금액·작성일. 비어 있는 필수값은 missing 에 모은다."""
+    from .billing import validate_kr_business_number
+    lsr = Lessor.get(fee.id_lessor)
+    bldg = Building.first(branch=fee.branch)
+    p = platform_info()
+    sup = {"business_number": p["business_number"], "company_name": p["name"], "ceo_name": p["ceo"], "address": os.getenv("RENT3_PLATFORM_ADDRESS", "").strip(),
+           "biz_type": os.getenv("RENT3_PLATFORM_BIZ_TYPE", "").strip(), "biz_item": os.getenv("RENT3_PLATFORM_BIZ_ITEM", "").strip(), "email": os.getenv("RENT3_PLATFORM_EMAIL", "").strip()}
+    buy = {"business_number": (lsr.business_number if lsr else ""), "company_name": ((bldg.biz_company_name or bldg.building_name) if bldg else (lsr.name if lsr else "")),
+           "ceo_name": (lsr.name if lsr else fee.lessor_name), "address": (bldg.address if bldg else ""), "biz_type": (bldg.biz_type if bldg else ""),
+           "biz_item": (bldg.biz_item if bldg else ""), "email": (lsr.email if lsr else "")}
+    missing = []
+    if not validate_kr_business_number(sup["business_number"], strict_checksum=True)["valid"]:
+        missing.append("공급자 사업자번호(서버 RENT3_PLATFORM_BIZ_NO)")
+    if not sup["company_name"] or not sup["ceo_name"]:
+        missing.append("공급자 상호·대표자")
+    if not validate_kr_business_number(buy["business_number"], strict_checksum=True)["valid"]:
+        missing.append("공급받는자 사업자번호(임대인 사업자등록증 승인 필요)")
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$", buy["email"] or ""):
+        missing.append("공급받는자 이메일(임대인 정보)")
+    wd = fee.paid_at or f"{fee.billing_month}-01"
+    return {"title": f"가맹비 {fee.billing_month} 세금계산서 ({fee.lessor_name})", "write_date": wd, "purpose": "영수", "tax_type": "과세",
+            "supplier": sup, "buyer": buy, "items": [{"name": f"{fee.billing_month} 플랫폼 가맹비", "supply": int(fee.supply_amount), "tax": int(fee.vat_amount)}],
+            "note": "", "missing": missing, "total": int(fee.total_amount)}
+
+
 def public(f: FranchiseFee) -> Dict[str, Any]:
     d = f.model_dump()
     d["overdue"] = f.overdue

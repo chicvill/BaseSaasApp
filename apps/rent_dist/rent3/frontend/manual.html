@@ -111,6 +111,39 @@
       <li><strong>원자적 동기화</strong>: 5개 분리 앱(<code>rent3</code>, <code>rent3_admin</code>, <code>rent3_lessor</code>, <code>rent3_tenant</code>, <code>rent3_contract</code>)이 하나의 <code>data/rent3_pool/*.json</code>을 실시간으로 공유합니다.</li>
       <li><strong>법적 안전 불변식</strong>: 거래 건당 중개수수료(복비) 0원 원칙, 주택임대차보호법 제6·7조(만기 6~2개월 전출확인 및 5% 증액 상한), 후불 입주월 가짜체납 방지 원칙을 준수합니다.</li>
     </ul>
+
+    <h2>4. 📋 정확성이 요구되는 4대 핵심 업무 요약</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>업무 구분</th>
+          <th>당사자</th>
+          <th>핵심 절차 및 검증 규칙</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>① 본인 확인 · 암호 설정 및 퇴실 정산 채팅</strong></td>
+          <td>관리인 ↔ 임대인<br>임대인 ↔ 임차인</td>
+          <td>• <strong>1회용 링크 + 4칸 대조</strong>: 임차인(호실·이름·전화·임대인명), 임대인(건물명·이름·전화·사업자/계좌 끝 4자리) 대조 통과 후 암호 설정<br>• <strong>퇴실 정산 채팅</strong>: 퇴실 신청(연말정산 자료 사전 안내) → 정산서 전달 → 본인 명의 계좌(예금주=계약자) 동의/이의 → 송금 표시 → <code>[받았습니다]</code> 확인(7일 자동 확정) → 퇴실 후 <strong>다음 해 2월 말까지 조회 전용 접속</strong></td>
+        </tr>
+        <tr>
+          <td><strong>② 부가세 · 종소세 · 면세 현황신고 산출</strong></td>
+          <td>임대인</td>
+          <td>• <strong>부가세(1·7월)</strong>: 과세 호실 실수납 매출세액 − 적격증빙 매입세액(과세·면세 혼합 건물은 과세공급비율로 자동 안분)<br>• <strong>면세 사업장현황신고(2월 10일)</strong>: 주거용 면세 호실별 보증금·연간 월세수입 CSV 출력<br>• <strong>종합소득세(5월)</strong>: 부가세 제외 공급가액 기준 주택 분리과세(2,000만 원 이하 15.4%) vs 종합과세 누진세율 산출 및 CSV 출력</td>
+        </tr>
+        <tr>
+          <td><strong>③ 건물 비용(경비) 등록</strong></td>
+          <td>임대인</td>
+          <td>• <strong>증빙 3요소 구분</strong>: 적격증빙(전자세금계산서·사업용카드·현금영수증) + 일반과세자 거래처 지출만 부가세 매입공제 인정<br>• 간이과세자 영수증·화재보험·주거전용 수리비는 부가세 불공제 처리 후 <strong>종소세 필요경비</strong>로만 반영</td>
+        </tr>
+        <tr>
+          <td><strong>④ 전자세금계산서 발급 (관리인→임대인 / 임대인→임차인)</strong></td>
+          <td>관리인 → 임대인<br>임대인 → 임차인</td>
+          <td>• <strong>관리인 → 임대인(가맹비)</strong>: 임대인 사업자등록증 촬영·홈택스 승인(10자리 확정) → 가맹비 입금 등록 → 볼타(Bolta) API 자동 발행(또는 홈택스 24자리 승인번호 기록) → <strong>임대인 장부 공용경비(<code>platform_fee</code>) 자동 등재</strong><br>• <strong>임대인 → 임차인(과세 월세)</strong>: 임차인 사업자정보(10자리 체크섬·상호·대표자·이메일) 입력 → 청구월 기준 호실당 월 1장 집계(미비·기발행 자동 제외) → <strong>홈택스 일괄발급 CSV</strong> 업로드 발행 후 승인번호 기록</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 <script src="/shared/ui/phone_fmt.js"></script>
 </body>

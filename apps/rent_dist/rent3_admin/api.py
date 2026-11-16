@@ -482,6 +482,13 @@ async def etax_webhook(request: Request):
     return {"success": True, "result": result}
 
 
+@router.get("/fees/{fee_id}/invoice-card", dependencies=ADMIN_ONLY)
+def fee_invoice_card(fee_id: str):
+    """홈택스에서 직접 발급할 때 입력할 값(공급자·공급받는자·품목·금액)과 비어 있는 필수 정보."""
+    from apps.rent_dist._rent3_core import feebilling as fb
+    return {"success": True, "card": fb.invoice_card(fb.FranchiseFee.require(fee_id))}
+
+
 @router.post("/fees/{fee_id}/invoice", dependencies=ADMIN_ONLY)
 def record_fee_invoice(fee_id: str, req: FeeInvoiceReq, request: Request):
     from apps.rent_dist._rent3_core import feebilling as fb

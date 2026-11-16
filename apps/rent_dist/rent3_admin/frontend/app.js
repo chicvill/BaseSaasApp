@@ -241,7 +241,8 @@
           ${chip(f)}${f.paid_at ? ` <span class="bass-muted">입금 ${E(f.paid_at)}</span>` : ""}${f.invoice_nts_no ? ` <code>${E(f.invoice_nts_no)}</code>` : ""}<br>
           ${f.status === "NOTICED" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-paid" style="min-height:44px;">💰 납부 등록</button>` : ""}
           ${f.invoice_error ? `<span style="color:var(--err);font-size:12.5px;">⚠️ ${E(f.invoice_error)}</span><br>` : ""}
-          ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) && et.enabled ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-api" style="min-height:44px;">🧾 API로 발행</button>` : ""}
+          ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-card" style="min-height:44px;">📋 발급 정보 · 홈택스</button>` : ""}
+          ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) && et.enabled ? `<button type="button" class="bass-btn bass-btn--sm fee-api" style="min-height:44px;">🧾 API로 발행</button>` : ""}
           ${f.invoice_status === "PENDING" ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary fee-refresh" style="min-height:44px;">🔄 발행 상태 확인</button>` : ""}
           ${f.status === "PAID" && ["NONE", "FAILED"].includes(f.invoice_status) ? `<button type="button" class="bass-btn bass-btn--sm fee-inv" style="min-height:44px;">✍️ 홈택스 발행분 승인번호 기록</button>` : ""}
           ${f.invoice_status === "ISSUED" ? `<button type="button" class="bass-btn bass-btn--sm fee-invcancel" style="min-height:44px;">✖ 발행 기록 취소</button>` : ""}
@@ -263,6 +264,25 @@
         const res = await Bass.api(APP_ID, `/fees/${f.id}/paid`, { method: "POST", body: { amount: amt, paid_date: date } });
         Bass.updateAppAlert("success", res.message);
         await loadFeeBox();
+      });
+    }));
+    // 📋 홈택스 수동 발급: 값을 복사해 홈택스에 입력하고, 끝나면 승인번호를 기록한다(앱은 국세청에 직접 발행하지 않음)
+    const recordFee = (f) => {
+      const no = (window.prompt("홈택스 발급 후 국세청 승인번호 24자리 (예: 20261116-41000000-12345678)") || "").trim();
+      if (!no) return;
+      const date = (window.prompt("작성일 (YYYY-MM-DD)", new Date().toISOString().slice(0, 10)) || "").trim();
+      Bass.withLock(null, async () => {
+        const res = await Bass.api(APP_ID, `/fees/${f.id}/invoice`, { method: "POST", body: { nts_confirm_no: no, issue_date: date } });
+        Bass.updateAppAlert("success", res.message);
+        await loadFeeBox();
+      });
+    };
+    box.querySelectorAll(".fee-card").forEach((b) => b.addEventListener("click", function () {
+      const f = r.fees.find((x) => x.id === fid(this));
+      Bass.withLock(this, async () => {
+        const { card } = await Bass.api(APP_ID, `/fees/${f.id}/invoice-card`);
+        R3Tax.openCard({ title: card.title, writeDate: card.write_date, purpose: card.purpose, taxType: card.tax_type, supplier: card.supplier, buyer: card.buyer,
+          items: card.items, note: card.note, missing: card.missing, onRecord: () => recordFee(f) });
       });
     }));
     box.querySelectorAll(".fee-api").forEach((b) => b.addEventListener("click", function () {

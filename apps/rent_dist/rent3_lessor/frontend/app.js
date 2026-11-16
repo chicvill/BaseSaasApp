@@ -2175,7 +2175,7 @@
                   <td>${Bass.escapeHtml(inv.buyer_email || "-")}</td>
                   <td>${fmtWon(inv.supply_amount)}<br><span class="bass-muted" style="font-size:12.5px;">세액 ${fmtWon(inv.tax_amount)}</span><br><span class="bass-badge ${inv.charge_type === "02" ? "bass-badge--warn" : "bass-badge--ok"}">${Bass.escapeHtml(inv.charge_type_label || (inv.charge_type === "02" ? "청구(02)" : "영수(01)"))}</span></td>
                   <td>${statusBadge(inv)}</td>
-                  <td><button type="button" class="bass-btn bass-btn--sm btn-inv-status" data-idx="${idx}">발행기록</button></td>
+                  <td><button type="button" class="bass-btn bass-btn--sm bass-btn--primary btn-inv-card" data-idx="${idx}" style="min-height:44px;">📋 발급 정보·홈택스</button><br><button type="button" class="bass-btn bass-btn--sm btn-inv-status" data-idx="${idx}" style="min-height:44px;margin-top:4px;">발행기록</button></td>
                 </tr>
               `).join("")}
             </tbody>
@@ -2292,6 +2292,22 @@
     }));
     on("btnTaxHub", "click", () => { taxView = "hub"; taxMonth = 0; renderTaxTab(true); window.scrollTo(0, 0); });
 
+    // 📋 홈택스 수동 발급: 임차인에게 발급할 값(공급자=나, 공급받는자=임차인 사업자)을 복사해 홈택스에 입력하고, 끝나면 승인번호를 기록한다
+    elTabContent.querySelectorAll(".btn-inv-card").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const inv = invoices[Number(btn.dataset.idx)];
+        if (!inv) return;
+        const wd = String(inv.write_date || "").replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3");
+        const miss = [...(inv.missing_fields || [])];
+        R3Tax.openCard({
+          title: `${inv.billing_month} ${inv.room_no}호 임대료 세금계산서`, writeDate: wd, purpose: inv.charge_type === "01" ? "영수" : "청구", taxType: "과세",
+          supplier: { business_number: supInfo.business_number, company_name: supInfo.company_name, ceo_name: supInfo.ceo_name, address: supInfo.address, biz_type: supInfo.biz_type, biz_item: supInfo.biz_item, email: supInfo.email },
+          buyer: { business_number: inv.buyer_business_number, company_name: inv.buyer_company_name, ceo_name: inv.buyer_ceo_name, address: inv.buyer_address, email: inv.buyer_email },
+          items: [{ name: inv.item_name, supply: inv.supply_amount, tax: inv.tax_amount }], missing: miss,
+          onRecord: () => { const rec = elTabContent.querySelectorAll(".btn-inv-status")[Number(btn.dataset.idx)]; if (rec) rec.click(); },
+        });
+      });
+    });
     elTabContent.querySelectorAll(".btn-inv-status").forEach((btn) => {
       btn.addEventListener("click", () => {
         const inv = invoices[Number(btn.dataset.idx)];

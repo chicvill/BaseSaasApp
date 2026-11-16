@@ -5792,6 +5792,49 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 lsr.app_fee, lsr.app_fee_status, lsr.last_fee_paid_at, lsr.business_number, lsr.email = keep
                 lsr.save(action="t")
 
+    def test_91_tax_invoice_info_card_for_manual_hometax_issue(self):
+        """91. 홈택스 수동 발급용 '발급 정보 카드': 가맹비(공급자=플랫폼→공급받는자=임대인) 값·합계·비어 있는 필수 정보 표시, 관리인 전용, 두 화면에 복사/홈택스 열기 카드 연결."""
+        from apps.rent_dist._rent3_core import Lessor, feebilling as fb
+        from apps.rent_dist._rent3_core.support import SupportMessage
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        lsr = Lessor.first(branch="main")
+        keep = (lsr.app_fee, lsr.business_number, lsr.email)
+        lsr.app_fee, lsr.business_number, lsr.email = 33000, "", ""
+        lsr.save(action="t")
+        try:
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            fb.ensure_notices(force=True)
+            fee = next(x for x in fb.FranchiseFee.all() if x.id_lessor == lsr.id)
+            self.assertIn(c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=chic).status_code, (401, 403))
+            card = c.get(f"{AD}/fees/{fee.id}/invoice-card", headers=admin).json()["card"]
+            self.assertEqual((card["items"][0]["supply"], card["items"][0]["tax"], card["total"]), (30000, 3000, 33000))
+            self.assertEqual((card["purpose"], card["tax_type"]), ("영수", "과세"))
+            self.assertTrue(any("공급받는자 사업자번호" in m for m in card["missing"]))          # 임대인 사업자번호 미승인이면 안내
+            self.assertTrue(any("이메일" in m for m in card["missing"]))
+            self.assertEqual(c.get(f"{AD}/fees/nope/invoice-card", headers=admin).status_code, 404)
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            js = rd("shared_ui", "r3_taxinvoice.js")
+            for needle in ("R3Tax", "https://www.hometax.go.kr/", "전체 복사", "data-copy", "승인번호", "비어 있는 필수 정보"):
+                self.assertIn(needle, js, needle)
+            for rel in (("rent3_admin",), ("rent3_lessor",)):
+                self.assertIn("/shared/ui/r3_taxinvoice.js", rd("apps", "rent_dist", rel[0], "frontend", "index.html"))
+            for needle in ("fee-card", "R3Tax.openCard", "/invoice-card"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+            for needle in ("btn-inv-card", "R3Tax.openCard", "홈택스"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), needle)
+        finally:
+            for f0 in list(fb.FranchiseFee.all()):
+                f0.delete(action="t")
+            for m0 in list(SupportMessage.find(thread_user=f"lessor:{lsr.id}")):
+                if m0.category.startswith("가맹비"):
+                    m0.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.app_fee, lsr.business_number, lsr.email = keep
+            lsr.save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()
