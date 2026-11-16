@@ -5,6 +5,32 @@
 Claude는 시작할 때 이 파일을 읽는다. 규칙: 비밀값(토큰·비밀번호·실제 개인정보)은
 적지 않는다. push는 사용자가 "push"라고 할 때만 한다.
 
+## [Gemini] 2026-11-16 (11:00~14:40) — Airbnb UI 개편 · 수납/미납/만기 문자창 직행 · 본인확인 생략 3단계 비대면 재계약 (시험 92개 통과, push 완료 `6b915c5`..`dfcf837`)
+
+오늘 11:00 이후 진행된 UI/UX 및 비대면 재계약 흐름 개선 내역입니다. **Claude에게 코드·보안·테스트 검증을 요청합니다.**
+
+1. **Airbnb 스타일 밝은 UI 테마 및 고대비 보정** (`6b915c5`, `e7fbaf1`)
+   - `shared_ui/airbnb_theme.css` 신설, `apps/rent_dist/rent3/frontend/openrent.css` 개편 및 `rent3`/`rent3_admin`/`rent3_lessor`/`rent3_tenant`/`rent3_contract`/`manual.html`/`pool.html` 연결.
+   - 밝은 배경에서 다크 테마 잔재로 가독성이 떨어지던 상단 알림 배너(`shared_ui/base.css` `.bass-alert--*`), `.rc-info`, `.r3-drawer`, `.r3-modal__box`, `.cm-b` 등을 고대비 색상으로 수정 (`shared_ui/r3_modal.js`, `shared_ui/r3_shell.js`, `rent3_lessor/frontend/app.js`, `rent3_contract/frontend/app.js`).
+2. **수납/미납/만기/전출 메시지 입력창 제거 및 스마트폰 문자창 직행** (`e35546f` → `624c3d2`, `811e4d3`, `0b6e321`)
+   - 수납내역 하단 상시 메시지 입력창(`.r3-subbox--msg`) 및 수납 확인 모달 제거 → 은행 문자 수납·직접 수납·이체 확인 완료 즉시 `sendReceiptSms()`로 클립보드 복사 + `sms:<번호>?body=<본문>`(iOS `&body=`) 호출 (`shared_ui/r3_modal.js` `copyAndSms` 개선).
+   - 하단 `⚠️ 미납 호실` 목록 각 행에 `📨 메시지 복사/전송` 버튼 추가 (미납 안내 문구 복사 + 문자창 바로 열기).
+   - 만기통보 모달(`exMsg1`, `exMsg2`) 및 전출 정산 모달(`moMsg`)의 텍스트 입력창 제거, 버튼 클릭 시 문구 조합 후 바로 문자창 연결.
+3. **비대면 재계약 흐름 개편 (연장 안내 5% 포함 · 3~5일 전 호출 · 본인확인 생략 3단계 체결)** (`14a47d8`, `5926f99`, `dfcf837`)
+   - **연장 의사 확인 시 5% 인상 안내 포함**: `rent3_lessor/frontend/app.js`(`msg1`) 및 `apps/rent_dist/_rent3_core/ops.py` `request_moveout_check` 알림에 *"연장(전출의사 없음) 시 월세 5% 범위 내 인상 조건으로 재계약이 진행됨"* 명시.
+   - **만기 3~5일 전 호출 & 재계약 창 바로 열기**: `rent3_lessor/frontend/app.js` `showExpiryModal`에서 `STAY` 상태일 때 `📞 재계약 창 호출 문자 (만기 3~5일 전)` 버튼(세션 자동 생성 후 `rent3_contract/?session=...&role=tenant` 링크 문자 발송) 및 `🤝 재계약 창 열기 (승인·서명)` 링크 제공. `📝 갱신 예고 기록·앱 전달` 클릭 시에도 `/rent3_contract/?session=...&role=lessor`로 바로 이동.
+   - **5% 인상 기본값 보정**: 기존 `request_moveout_check`가 `proposed_monthly_rent`에 종전 월세를 저장해 `rent5`가 덮어씌워지던 문제를 수정 (`RENEWAL_` 상태 이전에는 `rent5` 우선, `cosign.py` `open_session`의 `RENEWAL` 기본 월세도 5% 인상 적용).
+   - **본인 확인 생략 → 조건(5%) → 서명 → 체결**: `apps/rent_dist/_rent3_core/cosign.py` `open_session(mode="RENEWAL")` 및 `ensure_renewal_ready()`(`rent3_contract/api.py` `get_session`에서 기존 진행 중 세션도 자동 보정)가 Step 1(신분증·등기부)과 Step 2(옵션 점검)를 자동 완료 처리하고 `current_step=3`으로 시작. `sign_step4`에서 `RENEWAL` 양측 서명 완료 시 `complete_step5_and_seal(payment_method="RENEWAL_CARRYOVER")` 자동 호출(기존 도어락 `keys_released=True` 유지, 신규 계약금 0원). `rent3_contract/frontend/app.js` 상단 스테퍼도 재계약 시 `① 조건(5%) → ② 서명 → ③ 체결` 3단계로 표시.
+- **시험 결과**: `python -m unittest tests/test_rent3_pool_suite.py` **92개 통과 (OK)** (`dfcf837` 기준).
+
+### ▶ Claude 검증 요청 항목
+1. **`RENEWAL` 본인확인 생략 및 자동 체결(`cosign.py`) 보안·도메인 점검**:
+   - `ensure_renewal_ready()`가 `get_session` 호출 시 기존 `IN_PROGRESS` 재계약 세션을 자동 승격하는 로직에 권한·상태 이상(예: `prev_contract_id` 검증, 당사자 외 접근 차단)이 없는지 확인.
+   - `sign_step4`에서 양측 서명 완료 시 `complete_step5_and_seal`을 즉시 호출하는 흐름에서 `api.py`의 `own_account_checked` 우회·계약금(`contract_deposit=0`) 처리·RTMS/원장/해시 무결성(`_ledger_diffs` 등)에 부작용이 없는지 검증 및 신규 단위 테스트 추가.
+2. **프론트엔드 회귀·실화면 점검**:
+   - `rent3_lessor`의 `pmMsg`/`pmCopy`/`exMsg1`/`exMsg2`/`moMsg` 제거 후 기존 JS 이벤트 바인딩 누락·에러 여부 및 모바일(`sms:?body=`) 동작 확인.
+   - `airbnb_theme.css`의 `!important` 규칙이 인쇄 화면(`@media print`: 계약서·납부확인서)이나 특정 상태 배지 가독성을 해치지 않는지 점검.
+
 ## [Claude] 2026-11-16 — 현금영수증(가맹비·월세) + 사업자번호 없는 계정 처리 + 사업자등록증 입력 보강 + 임차인 사업자등록증 제출 (시험 92개 통과, 자동 push)
 
 사용자 질문 4가지(사진 읽기 대상·이메일 입력·사업자번호 없는 계정·현금영수증) 답에 따라 "가맹비도 현금영수증 필요, 진행".
