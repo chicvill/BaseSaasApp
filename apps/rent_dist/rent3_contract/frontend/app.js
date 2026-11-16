@@ -1206,7 +1206,7 @@
         <div style="margin-top:8px;display:grid;gap:6px;">
           ${(res.risks || []).map((r) => {
             const st = RISK_STYLE[r.level] || RISK_STYLE.info;
-            return `<div style="border-left:4px solid ${st.color};padding:6px 10px;font-size:12.5px;line-height:1.55;background:hsl(232 30% 12% / .55);border-radius:8px;">${st.icon} ${esc(r.text)}</div>`;
+            return `<div style="border-left:4px solid ${st.color};padding:6px 10px;font-size:12.5px;line-height:1.55;background:#f8fafc;color:#1e293b;border-radius:8px;">${st.icon} ${esc(r.text)}</div>`;
           }).join("")}
         </div>
         ${e.notes ? `<div class="bass-muted" style="font-size:12px;margin-top:6px;">AI 메모: ${esc(e.notes)}</div>` : ""}

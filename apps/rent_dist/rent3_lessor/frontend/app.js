@@ -205,7 +205,7 @@
           <input id="frFile" type="file" accept="image/*,application/pdf" class="bass-input" ${st.identity ? "" : "disabled"}>
           <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">등기부 내용이 Google Gemini로 전송되어 자동 대조되는 것에 동의합니다 (미동의 시 관리자가 직접 확인).</span><input type="checkbox" id="frConsent"></label>
           <button id="btnRegUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button" ${st.identity ? "" : "disabled"}>올리고 대조하기</button>
-          ${chk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[chk.level] || "var(--warn)"};padding:6px 10px;background:hsl(232 30% 12% / .55);border-radius:8px;">${esc(chk.message)}${chk.auto_pass ? "" : "<br><span class='bass-muted'>관리자가 원본을 직접 확인한 뒤 결정합니다.</span>"}</div>` : ""}
+          ${chk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[chk.level] || "var(--warn)"};padding:6px 10px;background:#f8fafc;color:#1e293b;border-radius:8px;">${esc(chk.message)}${chk.auto_pass ? "" : "<br><span class='bass-muted'>관리자가 원본을 직접 확인한 뒤 결정합니다.</span>"}</div>` : ""}
         </div>
         <div style="margin-top:8px;">
           <div><strong>${done(st.bizreg)} 3-2. 📷 사업자등록증 촬영·제출 (홈택스 확인 후 승인)</strong></div>
@@ -220,7 +220,7 @@
           ${bizPickerHtml("fbiz")}
           <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 사업자번호·대표자를 대조하는 것에 동의합니다.</span><input type="checkbox" id="fbizConsent"></label>
           <button id="btnBizUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📷 사업자등록증 올리고 홈택스 확인 요청</button>
-          ${bchk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[bchk.level] || "var(--warn)"};padding:6px 10px;background:hsl(232 30% 12% / .55);border-radius:8px;">${esc(bchk.message)}</div>` : ""}
+          ${bchk ? `<div style="margin-top:6px;border-left:4px solid ${CHECK_STYLE[bchk.level] || "var(--warn)"};padding:6px 10px;background:#f8fafc;color:#1e293b;border-radius:8px;">${esc(bchk.message)}</div>` : ""}
           ${bver ? `<div style="margin-top:4px;font-size:12.5px;">${bver.verified ? `✅ 홈택스 확인·승인 완료 (${esc(bver.business_number)} · ${esc(bver.hometax_status)})` : `⚠️ 반려됨: ${esc(bver.note || "")}`}</div>` : ""}
         </div>
         <div style="margin-top:10px;">
@@ -383,7 +383,7 @@
     .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
-    .rc-info { font-size: 13px; line-height: 1.75; padding: 10px 12px; border-radius: 10px; background: hsla(224, 34%, 12%, .42); border: 1px solid hsla(224, 35%, 62%, .18); margin-top: 8px; }
+    .rc-info { font-size: 13px; line-height: 1.75; padding: 10px 12px; border-radius: 10px; background: #f8fafc; color: #1e293b; border: 1px solid #cbd5e1; margin-top: 8px; }
     .rc-subbtns { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
     .r3-zone { transition: border-color .15s ease; }
     .r3-zone--sms { background: linear-gradient(155deg, hsla(206, 86%, 52%, .13), hsla(222, 68%, 40%, .07)) !important; border-color: hsla(206, 86%, 60%, .38) !important; border-left: 4px solid hsl(199, 92%, 56%) !important; }
@@ -1200,7 +1200,7 @@
       <div style="font-size:13px;line-height:1.6;">
         <div class="bass-muted">사업자등록증(또는 임대사업자등록증)을 촬영해 올리시면 10자리 유효성·대표자 대조 후 관리인이 <strong>국세청 홈택스</strong>에서 사업자 상태를 확인해 승인합니다.</div>
         <div style="margin-top:8px;">현재 승인된 사업자번호: <code>${esc(biz.approved_business_number || "미등록")}</code></div>
-        ${bver ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:hsl(232 30% 12% / .55);">
+        ${bver ? `<div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#f8fafc;color:#1e293b;border:1px solid #cbd5e1;">
           ${bver.verified ? `✅ <strong>홈택스 확인·승인 완료</strong> — <code>${esc(bver.business_number)}</code> (${esc(bver.hometax_status)}) · ${esc(String(bver.verified_at || "").slice(0, 16).replace("T", " "))}`
             : `⚠️ <strong>반려됨</strong> — 사유: ${esc(bver.note || "")}`}
         </div>` : biz.uploaded ? `<div style="margin-top:6px;"><span class="bass-badge bass-badge--warn">⏳ 관리자 홈택스 확인·승인 대기 중</span></div>` : ""}

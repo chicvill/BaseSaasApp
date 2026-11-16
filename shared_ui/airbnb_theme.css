@@ -19,6 +19,23 @@
   --ab-shadow-hover: 0 12px 28px rgba(0, 0, 0, 0.12);
   --ab-radius-pill: 9999px;
   --ab-radius-card: 20px;
+
+  /* ── 다크 테마 기본 변수들을 밝은 고대비 값으로 덮어쓰기 ── */
+  --bg: #FAFAFA !important;
+  --bg-2: #F2F2F2 !important;
+  --surface: #FFFFFF !important;
+  --surface-strong: #F7F7F7 !important;
+  --border: #E5E7EB !important;
+  --border-strong: #D1D5DB !important;
+  --text: #1E293B !important;
+  --muted: #64748B !important;
+  --primary: #FF385C !important;
+  --primary-2: #0284C7 !important;
+  --accent: #E61E4D !important;
+  --ok: #15803D !important;
+  --warn: #B45309 !important;
+  --diff: #C2410C !important;
+  --err: #B91C1C !important;
 }
 
 /* ── 1. 바디 및 공통 배경 ── */
@@ -229,3 +246,95 @@ td {
 tr:last-child td {
   border-bottom: none !important;
 }
+
+/* ── 10. 상단 안내 배너 (updateAppAlert) 고대비 컬러 보정 ── */
+.bass-alert {
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border-width: 1.5px !important;
+}
+.bass-alert--warning {
+  background: #FFFBEB !important;
+  color: #78350F !important;
+  border-color: #F59E0B !important;
+}
+.bass-alert--warning .bass-alert__msg,
+.bass-alert--warning .bass-alert__hint,
+.bass-alert--warning .bass-alert__close {
+  color: #78350F !important;
+}
+.bass-alert--diff {
+  background: #FFF7ED !important;
+  color: #7C2D12 !important;
+  border-color: #F97316 !important;
+}
+.bass-alert--diff .bass-alert__msg,
+.bass-alert--diff .bass-alert__hint,
+.bass-alert--diff .bass-alert__close {
+  color: #7C2D12 !important;
+}
+.bass-alert--error {
+  background: #FEF2F2 !important;
+  color: #7F1D1D !important;
+  border-color: #EF4444 !important;
+}
+.bass-alert--error .bass-alert__msg,
+.bass-alert--error .bass-alert__hint,
+.bass-alert--error .bass-alert__close {
+  color: #7F1D1D !important;
+}
+.bass-alert--success {
+  background: #F0FDF4 !important;
+  color: #14532D !important;
+  border-color: #22C55E !important;
+}
+.bass-alert--success .bass-alert__msg,
+.bass-alert--success .bass-alert__hint,
+.bass-alert--success .bass-alert__close {
+  color: #14532D !important;
+}
+
+/* ── 11. 호실 정보 박스 및 서랍/컨테이너 다크 잔재 제거 ── */
+.rc-info {
+  background: #F8FAFC !important;
+  color: #1E293B !important;
+  border: 1px solid #CBD5E1 !important;
+}
+.room-row,
+.check-row,
+.id-card-box,
+.gate-item,
+.wait-row {
+  background: #F8FAFC !important;
+  color: #1E293B !important;
+  border-color: #E2E8F0 !important;
+}
+.cv-head {
+  background: #FFFFFF !important;
+  color: #1E293B !important;
+  border-bottom: 1px solid #E2E8F0 !important;
+}
+.r3-drawer {
+  background: #FFFFFF !important;
+  color: #1E293B !important;
+  border-right: 1px solid #E2E8F0 !important;
+}
+.r3-drawer a,
+.r3-drawer button.r3-item,
+.r3-drawer .tab-btn {
+  color: #1E293B !important;
+  border-color: #E2E8F0 !important;
+}
+.r3-drawer__group {
+  color: #64748B !important;
+  opacity: 1 !important;
+}
+code {
+  background: #F1F5F9 !important;
+  color: #0F172A !important;
+}
+a {
+  color: #0284C7;
+}
+

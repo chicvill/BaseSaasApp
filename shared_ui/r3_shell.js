@@ -39,7 +39,7 @@
     styled = true;
     var st = document.createElement("style");
     // 서랍 뒤 화면이 비쳐 글이 겹쳐 보이지 않도록 바탕을 꽉 채운다
-    st.textContent = ".r3-drawer{background:#17172e!important;color:#eceaf7!important}" +
+    st.textContent = ".r3-drawer{background:#ffffff!important;color:#1e293b!important}" +
       "label:not(.check-row):has(>input[type=checkbox]),label:not(.check-row):has(>input[type=radio]){display:block;min-height:44px;padding:10px 0;line-height:1.4;cursor:pointer}" +
       "label>input[type=checkbox],label>input[type=radio]{vertical-align:middle;margin:0 8px 0 0}" +
       "input[type=checkbox],input[type=radio]{width:22px;height:22px;flex:none}";

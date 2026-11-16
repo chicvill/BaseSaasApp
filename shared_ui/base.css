@@ -119,41 +119,22 @@ code { background: hsl(230 30% 30% / .5); padding: .1em .4em; border-radius: 6px
 .bass-alert-stack { position: sticky; top: 12px; z-index: 99999; display: grid; gap: 10px; margin: 12px 0; }
 .bass-alert {
   display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: start;
-  padding: 14px 16px; border-radius: 14px; border: 1px solid;
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  padding: 14px 16px; border-radius: 14px; border: 1.5px solid;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
   animation: bass-slide-in .35s var(--ease);
 }
 .bass-alert__icon { font-size: 20px; line-height: 1.2; }
-.bass-alert__msg { font-weight: 700; }
-.bass-alert__hint { font-size: 13px; opacity: .85; margin-top: 2px; }
-.bass-alert__close { background: none; border: 0; color: inherit; cursor: pointer; font-size: 18px; opacity: .7; }
-.bass-alert--warning { color: hsl(44 100% 80%); background: hsl(44 90% 30% / .28); border-color: hsl(44 96% 58% / .45); }
-.bass-alert--diff    { color: hsl(26 100% 82%); background: hsl(26 90% 30% / .28); border-color: hsl(26 95% 60% / .5); }
-.bass-alert--error   { color: hsl(356 100% 86%); background: hsl(356 80% 30% / .3); border-color: hsl(356 85% 62% / .5); }
-/* 밝은 테마 / OpenRent 포털 전용 고대비 에러 배너 */
-body.or-body .bass-alert--error,
-.bass-alert--light.bass-alert--error {
-  color: #7f1d1d !important;
-  background: #fef2f2 !important;
-  border-color: #f87171 !important;
-}
-body.or-body .bass-alert--error .bass-alert__msg,
-.bass-alert--light.bass-alert--error .bass-alert__msg {
-  color: #7f1d1d !important;
-  font-weight: 800 !important;
-}
-body.or-body .bass-alert--error .bass-alert__hint,
-.bass-alert--light.bass-alert--error .bass-alert__hint {
-  color: #991b1b !important;
-  opacity: 1 !important;
-  font-weight: 600 !important;
-}
-body.or-body .bass-alert--error .bass-alert__close,
-.bass-alert--light.bass-alert--error .bass-alert__close {
-  color: #7f1d1d !important;
-  opacity: 0.8 !important;
-}
-.bass-alert--success { color: hsl(152 80% 82%); background: hsl(152 60% 22% / .32); border-color: hsl(152 65% 50% / .45); }
+.bass-alert__msg { font-weight: 800; line-height: 1.45; }
+.bass-alert__hint { font-size: 13px; margin-top: 3px; font-weight: 600; }
+.bass-alert__close { background: none; border: 0; color: inherit; cursor: pointer; font-size: 20px; font-weight: 700; opacity: .85; }
+.bass-alert--warning { color: #78350f !important; background: #fffbeb !important; border-color: #f59e0b !important; }
+.bass-alert--warning .bass-alert__msg, .bass-alert--warning .bass-alert__hint { color: #78350f !important; }
+.bass-alert--diff    { color: #7c2d12 !important; background: #fff7ed !important; border-color: #f97316 !important; }
+.bass-alert--diff .bass-alert__msg, .bass-alert--diff .bass-alert__hint { color: #7c2d12 !important; }
+.bass-alert--error   { color: #7f1d1d !important; background: #fef2f2 !important; border-color: #ef4444 !important; }
+.bass-alert--error .bass-alert__msg, .bass-alert--error .bass-alert__hint { color: #7f1d1d !important; }
+.bass-alert--success { color: #14532d !important; background: #f0fdf4 !important; border-color: #22c55e !important; }
+.bass-alert--success .bass-alert__msg, .bass-alert--success .bass-alert__hint { color: #14532d !important; }
 .bass-alert.is-leaving { animation: bass-fade-out .3s var(--ease) forwards; }
 
 /* ── 스켈레톤 / 애니메이션 ── */
