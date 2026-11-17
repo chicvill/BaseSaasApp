@@ -143,8 +143,12 @@ def raw_token(request: Request) -> str:
 
 def not_revoked(request: Request) -> None:
     """관리자 API 등 코어 인증(require_role)에 덧붙여, 로그아웃한 토큰을 거부한다."""
-    if is_revoked(raw_token(request)):
+    raw = raw_token(request)
+    if is_revoked(raw):
         raise Unauthorized("로그아웃된 로그인입니다. 다시 로그인해 주세요.")
+    from . import mfa
+    if mfa.blocked_without_mfa(verify_token(raw) if raw else None):
+        raise Unauthorized("2단계 인증이 필요합니다.", hint="관리인 계정은 2단계 인증을 켠 상태라, 포털에서 비밀번호 다음에 인증 코드를 입력해 로그인해 주세요.")
 
 
 def api_headers(response: Response) -> None:
@@ -159,7 +163,12 @@ def claims_from(request: Request) -> Optional[Dict[str, Any]]:
     raw = raw_token(request)
     if not raw or is_revoked(raw):
         return None
-    return verify_token(raw)
+    c = verify_token(raw)
+    if c is not None:
+        from . import mfa
+        if mfa.blocked_without_mfa(c):      # 2단계 인증을 켠 관리인의 토큰에 mfa 표시가 없으면(예: 코어 일반 로그인) 로그인하지 않은 것으로 본다
+            return None
+    return c
 
 
 # ── 간편 비밀번호(PIN)로 들어온 토큰은 '열람 + 일상 업무'만 ──

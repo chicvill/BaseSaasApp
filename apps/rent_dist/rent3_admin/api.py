@@ -719,6 +719,74 @@ def settle_lessor_fee(lessor_id: str):
     }
 
 
+class MfaCodeReq(BaseModel):
+    code: str = ""
+
+
+class MfaResetReq(BaseModel):
+    username: str
+
+
+def _me_admin(request: Request):
+    from apps.rent_dist._rent3_core.authz import claims_from
+    from apps.rent_dist._rent3_core import mfa
+    c = claims_from(request) or {}
+    a = mfa.admin_by_username(c.get("u", ""))
+    if a is None:
+        raise DomainError("이 계정은 관리인 목록에 없어 2단계 인증을 설정할 수 없습니다.", hint="관리인 계정(Data Pool 관리인)으로 로그인해 주세요.")
+    return a, c
+
+
+@router.get("/mfa/status", dependencies=ADMIN_ONLY)
+def mfa_status(request: Request):
+    from apps.rent_dist._rent3_core import mfa
+    a, c = _me_admin(request)
+    return {"success": True, "username": a.username, "this_session_verified": bool(c.get("mfa")), **mfa.status(a)}
+
+
+@router.post("/mfa/enroll/start", dependencies=ADMIN_ONLY)
+def mfa_enroll_start(request: Request):
+    """2단계 인증 설정 시작: 비밀 키와 인증 앱 등록용 주소를 한 번 보여 준다(확인 코드를 맞춰야 켜진다)."""
+    from apps.rent_dist._rent3_core import mfa
+    a, _c = _me_admin(request)
+    return {"success": True, **mfa.enroll_start(a)}
+
+
+@router.post("/mfa/enroll/confirm", dependencies=ADMIN_ONLY)
+def mfa_enroll_confirm(req: MfaCodeReq, request: Request):
+    """인증 앱의 6자리 코드를 맞추면 켜진다. 복구 코드 8개를 한 번만 보여 주고, 지금 세션이 끊기지 않게 2단계를 마친 새 토큰을 준다."""
+    from apps.rent_dist._rent3_core import mfa
+    from apps.rent_dist._rent3_core.authz import issue_claims_token
+    a, c = _me_admin(request)
+    res = mfa.enroll_confirm(a, req.code)
+    return {"success": True, "message": "2단계 인증이 켜졌습니다. 복구 코드를 안전한 곳에 보관하세요.", **res,
+            "token": issue_claims_token(c.get("u", ""), c.get("r", "admin"), c.get("b"), extra={"mfa": 1})}
+
+
+@router.post("/mfa/disable", dependencies=ADMIN_ONLY)
+def mfa_disable(req: MfaCodeReq, request: Request):
+    from apps.rent_dist._rent3_core import mfa
+    a, _c = _me_admin(request)
+    mfa.disable(a, req.code)
+    return {"success": True, "message": "2단계 인증을 껐습니다."}
+
+
+@router.post("/mfa/reset", dependencies=ADMIN_ONLY)
+def mfa_reset_other(req: MfaResetReq, request: Request):
+    """폰을 잃고 복구 코드도 없는 다른 관리인의 2단계 인증을 최고관리자가 해제한다(본인 것은 불가 — 본인은 코드로 끈다)."""
+    from apps.rent_dist._rent3_core import mfa
+    me, c = _me_admin(request)
+    if c.get("r") != "superadmin":
+        raise DomainError("최고관리자(superadmin)만 다른 관리인의 2단계 인증을 해제할 수 있습니다.")
+    target = mfa.admin_by_username(req.username)
+    if target is None:
+        raise DomainError("그 관리인을 찾을 수 없습니다.")
+    if target.id == me.id:
+        raise DomainError("본인의 2단계 인증은 코드를 입력해 직접 끄세요.")
+    mfa.reset(target, "admin_mfa_reset_by_superadmin")
+    return {"success": True, "message": f"{target.username} 관리인의 2단계 인증을 해제했습니다. 다시 로그인해 새로 설정하도록 안내하세요."}
+
+
 class CarrySplitReq(BaseModel):
     confirm: bool = False
 

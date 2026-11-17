@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 from core.errors import DomainError
 
 PREFIX = "enc:v1:"
-SENSITIVE_FIELDS = ("doorlock_pwd", "common_entrance_pwd", "account_number", "lessor_account")
+SENSITIVE_FIELDS = ("doorlock_pwd", "common_entrance_pwd", "account_number", "lessor_account", "totp_secret")
 
 
 def _to_key(raw: str) -> bytes:

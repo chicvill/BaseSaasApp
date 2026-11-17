@@ -635,6 +635,11 @@
         <button id="btnBkRun" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">지금 백업 만들기</button>
         <div style="margin-top:8px;">${rows}</div>
       </div>
+      <div class="bass-card" style="margin-bottom:14px;" id="mfaCard">
+        <h3>🔐 내 계정 2단계 인증 (인증 앱)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">비밀번호가 유출돼도 <strong>내 폰의 인증 앱 코드가 없으면 로그인할 수 없게</strong> 합니다(Google Authenticator·Microsoft Authenticator·Authy 등, 문자 요금 없음). 켜면 복구 코드 8개를 <strong>한 번만</strong> 보여 주니 안전한 곳에 보관하세요.</div>
+        <div id="mfaBody" class="bass-muted">불러오는 중...</div>
+      </div>
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>🧮 이관 '이전 입금 합산' 건 달별 분해</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">장부 이관 때 여러 달의 입금을 한 건으로 합쳐 넣은 납부를 <strong>달마다 한 건</strong>으로 풀어, 달별 옮기기·무효 처리가 가능하게 합니다. 합계는 바뀌지 않습니다. <strong>[미리보기]는 아무것도 바꾸지 않고</strong>, [백업 후 반영]은 풀 전체를 <strong>자동 백업</strong>한 뒤 진행하며 계약마다 입금·미납·선수금 합계가 다르면 그 건만 즉시 되돌립니다. 원본은 지우지 않고 보관합니다.</div>
@@ -707,6 +712,47 @@
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    async function loadMfa() {
+      const E = Bass.escapeHtml, box = document.getElementById("mfaBody");
+      if (!box) return;
+      let st;
+      try { st = await Bass.api(APP_ID, "/mfa/status"); } catch (e) { box.innerHTML = `<span class="bass-muted">${E(e.message || "")}</span>`; return; }
+      if (st.enabled) {
+        box.innerHTML = `<div style="font-size:13.5px;line-height:1.8;">🟢 <strong>켜짐</strong> (${E(String(st.enabled_at || "").slice(0, 10))}) · 남은 복구 코드 ${st.recovery_left}개${st.this_session_verified ? "" : " · ⚠️ 이 로그인은 2단계 인증을 거치지 않았습니다(다시 로그인하세요)"}</div>
+          <div class="bass-row" style="gap:8px;margin-top:8px;flex-wrap:wrap;"><input id="mfaOffCode" class="bass-input" inputmode="numeric" placeholder="인증 앱 6자리 또는 복구 코드" style="max-width:240px;min-height:44px;"><button id="mfaOff" class="bass-btn" type="button" style="min-height:44px;">끄기</button></div>`;
+        document.getElementById("mfaOff").addEventListener("click", function () {
+          if (!window.confirm("2단계 인증을 끄면 비밀번호만으로 로그인됩니다. 끌까요?")) return;
+          Bass.withLock(this, async () => {
+            const r = await Bass.api(APP_ID, "/mfa/disable", { method: "POST", body: { code: document.getElementById("mfaOffCode").value } });
+            Bass.updateAppAlert("success", r.message); await loadMfa();
+          });
+        });
+      } else {
+        box.innerHTML = `<div style="font-size:13.5px;">⚪ <strong>꺼짐</strong>${st.pending ? " (설정하던 중)" : ""}</div><button id="mfaStart" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;margin-top:8px;">🔐 설정 시작</button><div id="mfaSetup" style="margin-top:10px;"></div>`;
+        document.getElementById("mfaStart").addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const r = await Bass.api(APP_ID, "/mfa/enroll/start", { method: "POST", body: {} });
+            const sp = document.getElementById("mfaSetup");
+            sp.innerHTML = `<ol style="margin:0 0 8px 18px;padding:0;font-size:13px;line-height:1.8;"><li>폰에서 인증 앱을 열고 <strong>QR을 스캔</strong>하거나 <strong>키를 직접 입력</strong>합니다.</li><li>앱에 나온 6자리 숫자를 아래에 입력하고 [확인하고 켜기]를 누릅니다.</li></ol>
+              <div id="mfaQr" style="background:#fff;padding:8px;display:inline-block;border-radius:8px;"></div>
+              <div style="margin:6px 0;font-size:12.5px;">키: <code style="user-select:all;word-break:break-all;">${E(r.secret)}</code></div>
+              <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><input id="mfaCode" class="bass-input" inputmode="numeric" maxlength="8" placeholder="6자리 숫자" style="max-width:160px;min-height:44px;"><button id="mfaOn" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">확인하고 켜기</button></div>`;
+            try { if (window.QRCode) new window.QRCode(document.getElementById("mfaQr"), { text: r.otpauth_uri, width: 180, height: 180 }); } catch (_) { document.getElementById("mfaQr").remove(); }
+            document.getElementById("mfaOn").addEventListener("click", function () {
+              Bass.withLock(this, async () => {
+                const c = await Bass.api(APP_ID, "/mfa/enroll/confirm", { method: "POST", body: { code: document.getElementById("mfaCode").value } });
+                if (c.token) Bass.setToken(c.token);              // 지금 세션이 끊기지 않게 2단계를 마친 토큰으로 교체
+                sp.innerHTML = `<div style="border:2px solid var(--warn);border-radius:10px;padding:10px;"><strong>🔑 복구 코드 (지금 한 번만 보입니다 — 안전한 곳에 보관)</strong><div style="font-family:monospace;font-size:15px;line-height:1.9;margin:6px 0;user-select:all;">${c.recovery_codes.map(E).join("<br>")}</div>
+                  <button id="mfaCopy" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">📋 복사</button></div>`;
+                document.getElementById("mfaCopy").addEventListener("click", () => { try { navigator.clipboard.writeText(c.recovery_codes.join("\n")); Bass.updateAppAlert("success", "복구 코드를 복사했습니다."); } catch (_) { Bass.updateAppAlert("warning", "복사하지 못했습니다. 직접 선택해 복사하세요."); } });
+                Bass.updateAppAlert("success", c.message);
+              });
+            });
+          });
+        });
+      }
+    }
+    loadMfa();
     document.getElementById("btnCarryPrev").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const E = Bass.escapeHtml, out = document.getElementById("carryResult");

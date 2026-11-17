@@ -132,6 +132,11 @@ class Admin(PoolObj):
     email: str = "admin@rent3.saas.kr"
     role: str = "superadmin"
     password: str = "0202"
+    totp_secret: str = ""                    # 2단계 인증(TOTP) 비밀 키 — 디스크에서 암호화, 화면·API 로 내려가지 않는다(mfa.py)
+    totp_enabled: bool = False
+    totp_last_step: int = 0                  # 마지막으로 쓴 30초 구간(같은 코드 재사용 방지)
+    totp_enabled_at: str = ""
+    recovery_hashes: List[str] = Field(default_factory=list)   # 복구 코드(해시, 한 번씩만)
 
     def summary(self) -> str:
         return f"관리인 {self.name} ({self.username})"

@@ -6494,6 +6494,111 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for e in ps.PoolEditLog.all():
                 e.delete(action="t")
 
+    def test_100_admin_two_factor_totp_login_bypass_block_recovery_and_throttle(self):
+        """100. 관리인 2단계 인증(TOTP): RFC 6238 표준 값, 켜기(코드 확인·복구 코드 8개), 켠 뒤 비밀번호만으론 토큰을 못 받음(대기표는 API 불가), 코어 일반 로그인 토큰 거부(우회 차단),
+        같은 코드 재사용 불가, 복구 코드는 한 번만, 틀리면 잠김, 끄기엔 코드 필요, 비밀 키는 화면·뷰어에 안 나옴, 임대인·임차인 로그인은 영향 없음."""
+        from unittest import mock
+        import time as _t
+        from core.auth import User as CoreUser, issue_token, verify_token
+        from apps.rent_dist._rent3_core import Admin, mfa, ratelimit
+        c, NA = self.client, self.NOAUTH
+        AD, PL = "/api/rent3_admin", "/api/rent3/pool"
+        sec = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+        self.assertEqual(mfa.totp_at(sec, 59), "287082")                                       # RFC 6238 부록 B (SHA-1)
+        self.assertEqual(mfa.totp_at(sec, 1111111109), "081804")
+        self.assertEqual(mfa.match_step(sec, "287082", now=59 + 30), 1)                      # 앞뒤 1구간 오차 허용
+        self.assertIsNone(mfa.match_step(sec, "287082", now=59 + 90))
+        self.assertIsNone(mfa.match_step(sec, "12345", now=59))
+        T0 = int(_t.time())
+        at = lambda k: T0 + 30 * k
+        adm = Admin.first(username="admin")
+        try:
+            admin = self._login("admin")
+            self.assertEqual(c.get(f"{AD}/mfa/status", headers=admin).json()["enabled"], False)
+            st = c.post(f"{AD}/mfa/enroll/start", headers=admin, json={}).json()
+            secret = st["secret"]
+            self.assertTrue(st["otpauth_uri"].startswith("otpauth://totp/Rent3:admin?secret="))
+            self.assertEqual(c.post(f"{AD}/mfa/enroll/confirm", headers=admin, json={"code": "000000"}).status_code, 400)
+            with mock.patch.object(mfa.time, "time", return_value=at(0)):
+                ok = c.post(f"{AD}/mfa/enroll/confirm", headers=admin, json={"code": mfa.totp_at(secret, at(0))})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            codes = ok.json()["recovery_codes"]
+            self.assertEqual((len(codes), len(set(codes))), (8, 8))
+            mtok = ok.json()["token"]
+            self.assertEqual(verify_token(mtok).get("mfa"), 1)
+            H = lambda tok: {"Authorization": "Bearer " + tok}
+            self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(mtok)).status_code, 200)
+            # 켠 뒤: mfa 표시 없는 관리인 토큰(코어 일반 로그인 등)은 관리인 API 에서 모두 거절 — 우회 차단
+            core_tok = issue_token(CoreUser.by_username("admin"))
+            self.assertIsNone(verify_token(core_tok).get("mfa"))
+            self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(core_tok)).status_code, 401)
+            self.assertEqual(c.get(f"{PL}/overview", headers=H(core_tok)).status_code, 401)
+            self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=admin).status_code, 401)
+            # 로그인: 비밀번호만 맞으면 토큰이 아니라 대기표(어떤 API 도 못 연다)
+            login = lambda: c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": "admin", "password": "1212", "target_hint": "pool"})
+            r1 = login().json()
+            self.assertEqual((r1["mfa_required"], "token" in r1), (True, False))
+            self.assertIn(c.get(f"{AD}/pool-search/edits", headers=H(r1["mfa_ticket"])).status_code, (401, 403))
+            ver = lambda ticket, code: c.post(f"{PL}/auth/mfa-verify", headers=NA, json={"ticket": ticket, "code": code})
+            self.assertEqual(ver("garbage", "123456").status_code, 401)
+            self.assertEqual(ver(r1["mfa_ticket"], "111111").status_code, 400)
+            with mock.patch.object(mfa.time, "time", return_value=at(1)):
+                code1 = mfa.totp_at(secret, at(1))
+                good = ver(r1["mfa_ticket"], code1)
+                self.assertEqual(good.status_code, 200, good.text)
+                self.assertEqual((good.json()["role"], good.json()["redirect_url"], verify_token(good.json()["token"]).get("mfa")), ("admin", "/rent3/pool.html", 1))
+                self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(good.json()["token"])).status_code, 200)
+                again = ver(login().json()["mfa_ticket"], code1)
+                self.assertEqual(again.status_code, 400)
+                self.assertIn("이미 사용한 코드", again.json()["message"])
+            # 복구 코드는 한 번만
+            rc = ver(login().json()["mfa_ticket"], codes[0])
+            self.assertEqual(rc.status_code, 200, rc.text)
+            self.assertEqual(rc.json()["mfa_method"], "recovery")
+            self.assertEqual(ver(login().json()["mfa_ticket"], codes[0]).status_code, 400)
+            self.assertEqual(c.get(f"{AD}/mfa/status", headers=H(mtok)).json()["recovery_left"], 7)
+            # 5번 틀리면 잠김
+            ratelimit.reset_all()
+            tk = login().json()["mfa_ticket"]
+            for _ in range(5):
+                ver(tk, "222222")
+            self.assertEqual(ver(tk, "333333").status_code, 429)
+            ratelimit.reset_all()
+            # 비밀 키는 어디에도 나오지 않는다
+            self.assertNotIn(secret, c.get(f"{PL}/files/users", headers=H(mtok)).text)
+            self.assertNotIn(secret, c.get(f"{AD}/pool/users", headers=H(mtok)).text)
+            self.assertNotIn(secret, c.get(f"{AD}/pool-search/item?collection=users&id={adm.id}", headers=H(mtok)).text)
+            self.assertNotIn("totp_secret", {f["name"] for f in c.get(f"{AD}/pool-search/schema?collection=users", headers=H(mtok)).json()["fields"]})
+            # 다른 역할은 영향 없음, 본인 것은 reset 불가·없는 계정 거절
+            self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": "chic", "password": "1212"}).json().get("role"), "lessor")
+            self.assertEqual(c.post(f"{AD}/mfa/reset", headers=H(mtok), json={"username": "admin"}).status_code, 400)
+            self.assertEqual(c.post(f"{AD}/mfa/reset", headers=H(mtok), json={"username": "nobody"}).status_code, 400)
+            # 끄기: 코드 필요
+            self.assertEqual(c.post(f"{AD}/mfa/disable", headers=H(mtok), json={"code": "000000"}).status_code, 400)
+            with mock.patch.object(mfa.time, "time", return_value=at(2)):
+                off = c.post(f"{AD}/mfa/disable", headers=H(mtok), json={"code": mfa.totp_at(secret, at(2))})
+            self.assertEqual(off.status_code, 200, off.text)
+            self.assertIsNone(login().json().get("mfa_required"))
+            self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(core_tok)).status_code, 200)
+            # 비상구: 서버 환경변수로 2단계 인증을 건너뛴다(폰·복구 코드 분실 + 서버 터미널 없음)
+            st2 = c.post(f"{AD}/mfa/enroll/start", headers=H(core_tok), json={}).json()
+            with mock.patch.object(mfa.time, "time", return_value=at(3)):
+                c.post(f"{AD}/mfa/enroll/confirm", headers=H(core_tok), json={"code": mfa.totp_at(st2["secret"], at(3))})
+            self.assertTrue(login().json().get("mfa_required"))
+            with mock.patch.dict(os.environ, {"RENT3_ADMIN_MFA_DISABLE": "1"}):
+                self.assertIsNone(login().json().get("mfa_required"))
+                self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(core_tok)).status_code, 200)
+            self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(core_tok)).status_code, 401)        # 비상구를 지우면 다시 필요
+            rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+            for needle in ("resolveMfa", "/pool/auth/mfa-verify", "mfa_required"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3", "frontend", "app.js"), needle)
+            for needle in ("mfaCard", "/mfa/enroll/start", "/mfa/enroll/confirm", "복구 코드", "Bass.setToken"):
+                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, "scripts", "reset_admin_mfa.py")))
+        finally:
+            mfa.reset(Admin.get(adm.id))
+            ratelimit.reset_all()
+
 
 if __name__ == "__main__":
     unittest.main()

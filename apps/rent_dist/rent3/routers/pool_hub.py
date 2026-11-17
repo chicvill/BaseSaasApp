@@ -16,6 +16,7 @@ from core.auth import Unauthorized, User as CoreUser, ensure_default_admins, iss
 from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
+from apps.rent_dist._rent3_core import mfa as mfa_mod
 from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
@@ -376,6 +377,68 @@ def _client_ip(request: Request) -> str:
 
 def _is_loopback(request: Request) -> bool:
     return is_local_request(request)
+
+
+def _admin_login_response(admin: Any, core_u: Any, target_hint: str, mfa_ok: bool) -> Dict[str, Any]:
+    from apps.rent_dist._rent3_core.authz import issue_claims_token
+    if core_u is None:
+        tok = ""
+    elif mfa_ok:
+        tok = issue_claims_token(core_u.username, core_u.role, core_u.branch, extra={"mfa": 1})      # 2단계 인증을 마친 토큰(표시 mfa=1)
+    else:
+        tok = issue_token(core_u)
+    if (target_hint or "").startswith("contract"):
+        target_url = _build_contract_target_url("lessor", target_hint, branch="main")
+    elif target_hint == "pool":
+        target_url = "/rent3/pool.html"
+    else:
+        target_url = "/rent3_admin/"
+    role_lbl = "통합 Data Pool 관제" if target_hint == "pool" else "플랫폼 총괄 관리인 (rent3_admin)"
+    return {
+        "success": True,
+        "role": "admin",
+        "role_label": role_lbl,
+        "redirect_url": target_url,
+        "token": tok,
+        "user": {
+            "id": admin.id,
+            "username": admin.username,
+            "name": admin.name,
+            "phone": admin.phone,
+            "role": "admin",
+            "role_label": role_lbl,
+            "branch": "all",
+            "login_auth_verified": True,
+            "redirect_url": target_url,
+        },
+        "message": f"{admin.name}님 본인인증 로그인 완료! {role_lbl} 페이지로 이동합니다.",
+    }
+
+
+class MfaVerifyReq(BaseModel):
+    ticket: str
+    code: str
+
+
+@router.post("/auth/mfa-verify")
+def mfa_verify(req: MfaVerifyReq, request: Request) -> Dict[str, Any]:
+    """관리인 2단계 인증: 비밀번호 단계에서 받은 대기표와 인증 앱 코드(또는 복구 코드)를 맞추면 정식 토큰을 준다."""
+    keys = [f"ip:{_client_ip(request)}"]
+    ratelimit.check("mfa", keys)
+    c = mfa_mod.read_ticket(req.ticket)
+    admin = Admin.get(str(c.get("aid", "")))
+    if admin is None or not admin.totp_enabled:
+        raise Unauthorized("2단계 인증을 확인할 수 없습니다. 처음부터 다시 로그인해 주세요.")
+    try:
+        method = mfa_mod.check_code(admin, req.code)
+    except DomainError:
+        ratelimit.fail("mfa", keys)
+        raise
+    res = _admin_login_response(admin, CoreUser.by_username(admin.username), str(c.get("hint", "")), True)
+    res["mfa_method"] = method
+    if method == "recovery":
+        res["message"] += f" (복구 코드를 사용했습니다 — 남은 복구 코드 {len(admin.recovery_hashes or [])}개. 폰을 바꿨다면 2단계 인증을 다시 설정하세요.)"
+    return res
 
 
 @router.post("/auth/login")
@@ -982,33 +1045,10 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
         )
         if not valid_pw:
             raise Unauthorized("비밀번호가 올바르지 않습니다.", hint="관리인 계정 비밀번호(0202)를 확인해 주세요.")
-        tok = issue_token(core_u) if core_u else ""
-        if is_contract_hint:
-            target_url = _build_contract_target_url("lessor", req.target_hint, branch="main")
-        elif req.target_hint == "pool":
-            target_url = "/rent3/pool.html"
-        else:
-            target_url = "/rent3_admin/"
-        role_lbl = "통합 Data Pool 관제" if req.target_hint == "pool" else "플랫폼 총괄 관리인 (rent3_admin)"
-        return {
-            "success": True,
-            "role": "admin",
-            "role_label": role_lbl,
-            "redirect_url": target_url,
-            "token": tok,
-            "user": {
-                "id": matched_admin.id,
-                "username": matched_admin.username,
-                "name": matched_admin.name,
-                "phone": matched_admin.phone,
-                "role": "admin",
-                "role_label": role_lbl,
-                "branch": "all",
-                "login_auth_verified": True,
-                "redirect_url": target_url,
-            },
-            "message": f"{matched_admin.name}님 본인인증 로그인 완료! {role_lbl} 페이지로 이동합니다.",
-        }
+        if mfa_mod.active(matched_admin):      # 2단계 인증: 비밀번호만으로는 토큰을 주지 않는다
+            return {"success": True, "mfa_required": True, "mfa_ticket": mfa_mod.issue_ticket(matched_admin, req.target_hint),
+                    "message": "2단계 인증 코드를 입력해 주세요(인증 앱의 6자리 숫자 또는 복구 코드)."}
+        return _admin_login_response(matched_admin, core_u, req.target_hint, False)
 
     # (B) 임대인 / 건물주 (Lessor) 매칭
     matched_lessor = next(
