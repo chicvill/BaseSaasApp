@@ -4,7 +4,6 @@
 
   const APP_ID = "rent3_admin";
   let currentTab = "support";
-  let selectedCollection = "contracts";
   let ov = null;
 
   const FR_LABEL = { PENDING_APPROVAL: "⏳ 가맹 심사 중", ACTIVE: "✅ 가맹 승인", SUSPENDED: "⛔ 이용 정지", REJECTED: "❌ 가맹 반려" };
@@ -869,22 +868,14 @@
   }
 
   async function renderPoolTab() {
-    const res = await Bass.api(APP_ID, `/pool/${encodeURIComponent(selectedCollection)}`);
-    const cols = res.collections || [];
     const events = ov.recent_events || [];
 
+    // 원문 보기·검색·수정은 '공동 JSON Data Pool 허브' 한 화면으로 합쳤다(파일 카드 선택 → 검색 → 원문/JSON 수정)
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <div class="bass-row" style="justify-content:space-between;">
-          <div>
-            <h3>📂 공동 실시간 JSON Data Pool 원문 탐색기 (<code>data/rent3_pool/${Bass.escapeHtml(res.file)}</code>)</h3>
-            <div class="bass-muted" style="font-size:12.5px;">파일 크기: ${res.size_bytes.toLocaleString()} bytes · 리비전 v${res.revision} · 객체 ${res.count}건 · 최종 갱신: ${Bass.escapeHtml(res.updated_at)}</div>
-          </div>
-          <select id="colSelect" class="bass-select" style="width:auto;">
-            ${cols.map((c) => `<option value="${c}" ${c === selectedCollection ? "selected" : ""}>📄 ${c}.json</option>`).join("")}
-          </select>
-        </div>
-        <pre class="json-view">${Bass.escapeHtml(JSON.stringify(res.items, null, 2))}</pre>
+        <h3>📂 공동 JSON Data Pool — 원문 보기 · 검색 · 수정</h3>
+        <div class="bass-muted" style="font-size:13px;line-height:1.7;margin:6px 0 10px;">파일별 현황 카드를 눌러 원문을 보고, 글자로 검색하고, 찾은 건을 JSON 으로 고칠 수 있습니다(수정은 사유 필수·전후 기록). 다른 앱에 로그인하지 않아도 됩니다.</div>
+        <a class="bass-btn bass-btn--primary" href="/rent3/pool.html" style="min-height:46px;display:inline-flex;align-items:center;">📂 Data Pool 열기</a>
       </div>
 
       <div class="bass-card">
@@ -897,11 +888,6 @@
         `).join("")}
       </div>
     `;
-
-    document.getElementById("colSelect").addEventListener("change", (ev) => {
-      selectedCollection = ev.target.value;
-      renderPoolTab().catch(Bass.showError);
-    });
   }
 
   refresh().catch(Bass.showError);
