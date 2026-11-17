@@ -6603,6 +6603,56 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             mfa.reset(Admin.get(adm.id))
             ratelimit.reset_all()
 
+    def test_101_pool_card_text_search_and_json_edit_is_field_level_and_safe(self):
+        """101. 카드에서 글자로 검색(모든 단어 포함)하면 가려진 JSON 이 나오고, JSON 을 고쳐 저장해도 통째 덮어쓰기가 아니라 바뀐 항목만 검증을 거쳐 반영 —
+        가려진·잠긴 항목을 그대로 두면 무시, 바꾸면 거절, 없는 항목 만들기·id·시각 변경·목록 변경 거절, 사유 필수, 전후 기록, 관리인 전용."""
+        import json as _json
+        from apps.rent_dist._rent3_core import Tenant, poolsearch as ps
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        t = Tenant.get("tenant_201")
+        keep = (t.name, t.car_number)
+        try:
+            tx = lambda value, collection="users": c.post(f"{AD}/pool-search/text", headers=admin, json={"collection": collection, "value": value})
+            for url, body in ((f"{AD}/pool-search/text", {"collection": "users", "value": "a"}), (f"{AD}/pool-search/update-json", {"collection": "users", "id": "tenant_201", "record": {}, "reason": "x"})):
+                self.assertIn(c.post(url, headers=chic, json=body).status_code, (401, 403))
+                self.assertEqual(c.post(url, headers=self.NOAUTH, json=body).status_code, 401)
+            self.assertEqual(tx("").status_code, 400)
+            self.assertEqual(c.post(f"{AD}/pool-search/text", headers=admin, json={"collection": "nope", "value": "a"}).status_code, 404)
+            r = tx(f"{t.name} {t.room_no}").json()
+            hit = next(x for x in r["rows"] if x["id"] == "tenant_201")
+            rec = hit["record"]
+            self.assertEqual(tx(f"{t.name} 없는단어").json()["total"], 0)                                      # 모든 단어 포함(AND)
+            # 보호·암호화 항목은 가려져서 내려온다
+            self.assertEqual(rec["password"], "•••(보호됨)")
+            self.assertNotIn("_kind", rec)
+            self.assertNotIn(Tenant.get("tenant_201").password, _json.dumps(r, ensure_ascii=False))
+            up = lambda record, reason="JSON 수정 시험": c.post(f"{AD}/pool-search/update-json", headers=admin, json={"collection": "users", "id": "tenant_201", "record": record, "reason": reason})
+            # 값을 그대로 두면 '바뀐 내용 없음', 사유 없으면 거절
+            self.assertEqual(up(rec).status_code, 400)
+            self.assertEqual(up({**rec, "name": "카드수정시험"}, reason="").status_code, 400)
+            # 거절되는 수정: 보호·읽기 전용·없는 항목·목록 항목
+            for bad in ({"password": "새비밀번호1"}, {"id": "zzz"}, {"created_at": "2000-01-01"}, {"새항목": "x"}, {"consents": {"x": 1}}):
+                self.assertEqual(up({**rec, **bad}).status_code, 400, bad)
+            self.assertEqual(Tenant.get("tenant_201").name, keep[0])                                         # 거절된 요청은 아무것도 바꾸지 않는다
+            # 허용: 보이는 값만 고치면 그 항목만 반영(가려진 항목을 그대로 보내도 비밀번호가 가림 값으로 덮이지 않는다)
+            pw_before = Tenant.get("tenant_201").password
+            ok = up({**rec, "name": "카드수정시험", "car_number": "34나5678"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(sorted(ok.json()["changed"]), ["car_number", "name"])
+            t2 = Tenant.get("tenant_201")
+            self.assertEqual((t2.name, t2.car_number, t2.password), ("카드수정시험", "34나5678", pw_before))
+            self.assertTrue(any(e["id"] == "tenant_201" and e["reason"] == "JSON 수정 시험" for e in ps.recent_edits()))
+            # 화면: 카드 선택 → 검색줄 → 결과 JSON → 수정 → 저장/취소, 자동 갱신이 결과를 덮지 않는다
+            html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "pool.html"), encoding="utf-8").read()
+            for needle in ("rawBar", "rawQ", "/pool-search/text", "/pool-search/update-json", "rh-save", "rh-cancel", "__rawHold", "poolcolchange", "수정 사유 (필수)"):
+                self.assertIn(needle, html, needle)
+        finally:
+            t3 = Tenant.get("tenant_201"); t3.name, t3.car_number = keep; t3.save(action="t")
+            for e in ps.PoolEditLog.all():
+                e.delete(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

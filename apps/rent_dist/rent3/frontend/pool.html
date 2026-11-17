@@ -69,12 +69,19 @@
     <section class="bass-card" style="margin-top:14px;">
       <h3>📂 공동 JSON Data Pool 파일별 실시간 상태 (클릭 시 원문 즉시 확인)</h3>
       <div id="fileGrid" class="file-grid"></div>
+      <div id="rawBar" class="bass-row" style="gap:8px;flex-wrap:wrap;align-items:center;margin:4px 0 10px;">
+        <strong id="rawBarTitle" style="font-size:13.5px;"></strong>
+        <input id="rawQ" class="bass-input" style="flex:1;min-width:180px;min-height:44px;" placeholder="이 파일에서 찾을 글자 (여러 단어는 모두 포함 — 예: 안동기 2026-09)">
+        <button id="rawGo" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 검색</button>
+        <button id="rawAll" class="bass-btn" type="button" style="min-height:44px;" hidden>전체 보기</button>
+      </div>
+      <div id="rawHits" hidden></div>
       <pre id="rawJsonBox" class="json-box">로딩 중...</pre>
     </section>
 
     <section class="bass-card" style="margin-top:14px;" id="psSection">
-      <h3>🔎 검색 · 수정 (관리인)</h3>
-      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">각 앱에 로그인하지 않고 원하는 데이터를 찾아 고칩니다. ① 컬렉션 선택 → ② 검색할 컬럼 체크 → ③ 검색 값 입력 → ④ 결과에서 한 건을 눌러 수정(사유 필수) → 저장/취소.
+      <details><summary style="cursor:pointer;font-weight:800;font-size:16px;">🔎 컬럼을 지정해 검색 · 수정 (고급)</summary>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:8px 0;">각 앱에 로그인하지 않고 원하는 데이터를 찾아 고칩니다. ① 컬렉션 선택 → ② 검색할 컬럼 체크 → ③ 검색 값 입력 → ④ 결과에서 한 건을 눌러 수정(사유 필수) → 저장/취소.
         비밀번호·기기 정보 같은 <strong>보호 항목은 보이지도 고칠 수도 없고</strong>, 🔒 암호화 항목(도어락·계좌)은 읽기 전용입니다. 고친 내용은 전/후 값과 사유가 기록됩니다. 수납 금액은 수납 화면의 수정 기능을 쓰는 것이 안전합니다.</div>
       <div class="bass-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
         <label class="bass-label" for="psCol" style="margin:0;">컬렉션</label>
@@ -89,6 +96,7 @@
       <div id="psRes" style="margin-top:10px;overflow-x:auto;"></div>
       <div id="psEdit" style="margin-top:10px;"></div>
       <details style="margin-top:10px;"><summary class="bass-muted" style="cursor:pointer;">최근 수정 기록</summary><div id="psLog" style="font-size:12.5px;line-height:1.6;margin-top:6px;"></div></details>
+      </details>
     </section>
 
     <section class="bass-card" style="margin-top:14px;">
@@ -103,6 +111,7 @@
     (function () {
       "use strict";
       let currentCol = "rooms";
+      window.__poolCol = currentCol;
 
       async function loadHub() {
         const res = await Bass.api("rent3", "/pool/overview");
@@ -121,12 +130,14 @@
         document.querySelectorAll(".file-card").forEach((el) => {
           el.addEventListener("click", () => {
             currentCol = el.dataset.col;
+            window.__poolCol = currentCol; window.__rawHold = false;
+            document.dispatchEvent(new Event("poolcolchange"));
             loadHub().catch(Bass.showError);
           });
         });
 
         const rawRes = await Bass.api("rent3", `/pool/files/${encodeURIComponent(currentCol)}`);
-        document.getElementById("rawJsonBox").textContent = JSON.stringify(rawRes, null, 2);
+        if (!window.__rawHold) document.getElementById("rawJsonBox").textContent = JSON.stringify(rawRes, null, 2);      // 검색 결과를 보거나 고치는 중에는 3초 갱신이 덮어쓰지 않는다
 
         document.getElementById("eventList").innerHTML = (res.recent_events || []).slice(0, 15).map((e) => `
           <div style="padding:7px 8px;border-bottom:1px solid var(--border);font-size:12.5px;">
@@ -215,6 +226,58 @@
       $("psGo").addEventListener("click", function () { Bass.withLock(this, search); });
       $("psVal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("psGo").click(); });
       loadCollections().then(loadLog).catch((e) => { if (!$("psCols").innerHTML) failBox(e && e.message); Bass.showError(e); });
+    })();
+  </script>
+<script>
+    // 카드 선택 → 위의 검색줄에 글자 입력 → 포함된 건이 카드 안에 JSON 으로 나타남 → [수정] → JSON 을 고치고 저장/취소 (사유 필수)
+    (function () {
+      "use strict";
+      const E = Bass.escapeHtml, $ = (id) => document.getElementById(id);
+      const api = (p, o) => Bass.request("/api/rent3_admin" + p, o);
+      const col = () => window.__poolCol || "rooms";
+      function title() { $("rawBarTitle").textContent = `📄 ${col()}.json 에서 검색`; }
+      function reset() { window.__rawHold = false; $("rawHits").hidden = true; $("rawHits").innerHTML = ""; $("rawJsonBox").hidden = false; $("rawAll").hidden = true; title(); }
+      document.addEventListener("poolcolchange", () => { $("rawQ").value = ""; reset(); });
+      title();
+      async function search() {
+        const q = $("rawQ").value.trim();
+        if (!q) { Bass.updateAppAlert("warning", "찾을 글자를 입력해 주세요."); return; }
+        const r = await api("/pool-search/text", { method: "POST", body: { collection: col(), value: q } });
+        window.__rawHold = true; $("rawJsonBox").hidden = true; $("rawAll").hidden = false;
+        const box = $("rawHits"); box.hidden = false;
+        box.innerHTML = `<div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">${r.total}건 일치${r.truncated ? ` (앞 ${r.shown}건만 표시 — 글자를 더 구체적으로 입력하세요)` : ""}${r.total === 0 ? " — 일치하는 건이 없습니다." : ""} · 비밀번호 해시·기기 정보는 가려지고 🔒 암호화 항목은 수정되지 않습니다.</div>` +
+          r.rows.map((x) => `<div class="rh" data-id="${E(x.id)}" style="margin-bottom:10px;"></div>`).join("");
+        box.querySelectorAll(".rh").forEach((h) => view(h, r.rows.find((x) => x.id === h.dataset.id)));
+      }
+      // 한 건의 JSON 보기(+ 수정 단추). 저장·취소 뒤에도 같은 자리에서 다시 보여 준다(고친 값 때문에 검색 조건에서 빠져도 사라지지 않게).
+      function view(host, row, note) {
+        host.innerHTML = `<pre class="json-box rh-view" style="max-height:260px;">${E(JSON.stringify(row.record, null, 2))}</pre>
+          <div class="bass-row" style="gap:8px;margin:4px 0;align-items:center;"><button class="bass-btn bass-btn--sm rh-edit" type="button" style="min-height:40px;">✏️ 수정</button><span class="bass-muted" style="font-size:12px;">${E(row.kind)} · ${E(row.id)}</span>${note ? `<span style="font-size:12.5px;color:var(--ok);">${E(note)}</span>` : ""}</div>`;
+        host.querySelector(".rh-edit").addEventListener("click", () => edit(host, row));
+      }
+      function edit(host, row) {
+        host.innerHTML = `<div class="bass-card" style="border-color:var(--primary);padding:10px;">
+          <strong>✏️ ${E(row.kind)} · <code>${E(row.id)}</code></strong>
+          <div class="bass-muted" style="font-size:12px;margin:4px 0;">값만 고치세요(항목 이름·id·시각·목록 형태·보호/잠금 항목은 바꿀 수 없습니다). 바뀐 항목만 검증을 거쳐 저장됩니다.</div>
+          <textarea class="bass-input rh-ta" spellcheck="false" style="width:100%;min-height:260px;font-family:monospace;font-size:12.5px;">${E(JSON.stringify(row.record, null, 2))}</textarea>
+          <input class="bass-input rh-why" placeholder="수정 사유 (필수) — 예: 이름 오타 정정" style="width:100%;min-height:44px;margin-top:6px;">
+          <div class="bass-row" style="gap:8px;margin-top:8px;"><button class="bass-btn bass-btn--primary rh-save" type="button" style="min-height:46px;">💾 저장</button><button class="bass-btn rh-cancel" type="button" style="min-height:46px;">취소</button></div></div>`;
+        host.querySelector(".rh-cancel").addEventListener("click", () => view(host, row));
+        host.querySelector(".rh-save").addEventListener("click", function () {
+          let rec;
+          try { rec = JSON.parse(host.querySelector(".rh-ta").value); } catch (e) { Bass.updateAppAlert("warning", "JSON 형식이 올바르지 않습니다: " + e.message); return; }
+          if (!window.confirm("이 건을 고칩니다. 계속할까요?")) return;
+          Bass.withLock(this, async () => {
+            const res = await api("/pool-search/update-json", { method: "POST", body: { collection: col(), id: row.id, record: rec, reason: host.querySelector(".rh-why").value } });
+            Bass.updateAppAlert("success", res.message);
+            res.changes.forEach((c) => { row.record[c.field] = c.after; });          // 고친 값으로 같은 자리에 다시 보여 준다
+            view(host, row, "✅ 저장됨");
+          });
+        });
+      }
+      $("rawGo").addEventListener("click", function () { Bass.withLock(this, search); });
+      $("rawQ").addEventListener("keydown", (e) => { if (e.key === "Enter") $("rawGo").click(); });
+      $("rawAll").addEventListener("click", () => { $("rawQ").value = ""; reset(); });
     })();
   </script>
 <script src="/shared/ui/phone_fmt.js"></script>

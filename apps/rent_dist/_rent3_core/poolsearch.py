@@ -174,6 +174,70 @@ def recent_edits(limit: int = 15) -> List[Dict[str, Any]]:
     return [{"at": r.created_at, "admin": r.admin, "collection": r.target_collection, "id": r.target_id, "reason": r.reason, "changes": r.changes} for r in rows]
 
 
+LOCK = "🔒 암호화됨(수정 불가)"
+
+
+def visible(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """카드에 보여 줄 한 건의 JSON: 보호 필드는 가림, 🔒 암호화 필드는 잠금 표시, 나머지는 그대로."""
+    out: Dict[str, Any] = {}
+    for k, v in raw.items():
+        if k == "_kind":
+            continue
+        if is_hidden(k):
+            out[k] = MASK if v not in ("", None, [], {}) else v
+        elif k in fieldcrypto.SENSITIVE_FIELDS:
+            out[k] = LOCK if v else v
+        else:
+            out[k] = v
+    return out
+
+
+def text_search(collection: str, value: str, limit: int = 30) -> Dict[str, Any]:
+    """카드에서 컬렉션을 고른 뒤 쓰는 간단 검색: 공백으로 나눈 모든 단어가 그 건의 (보이는) 값 어딘가에 들어 있으면 일치. 결과는 가려진 JSON 그대로."""
+    _check_collection(collection)
+    terms = [t for t in (value or "").strip().lower().split() if t]
+    if not terms:
+        raise DomainError("검색할 글자를 입력해 주세요.")
+    rows, total = [], 0
+    for it in pool().find(collection):
+        vis = visible(it)
+        hay = " ".join(str(v) for k, v in vis.items() if not is_hidden(k) and k not in fieldcrypto.SENSITIVE_FIELDS and not isinstance(v, (dict, list))).lower()
+        hay += " " + json.dumps({k: v for k, v in vis.items() if isinstance(v, (dict, list)) and not is_hidden(k)}, ensure_ascii=False, default=str).lower()
+        if all(t in hay for t in terms):
+            total += 1
+            if len(rows) < max(1, min(limit, 100)):
+                rows.append({"id": it.get("id", ""), "kind": it.get("_kind", ""), "record": vis})
+    return {"collection": collection, "total": total, "shown": len(rows), "truncated": total > len(rows), "rows": rows}
+
+
+def update_from_json(collection: str, obj_id: str, obj: Dict[str, Any], reason: str, admin: str = "관리인") -> Dict[str, Any]:
+    """카드의 JSON 을 고쳐 저장: 바뀐 항목만 골라 안전한 수정 경로(update)로 보낸다 — 가려진·잠긴 항목은 그대로 두면 무시하고, 바꾸면 거절한다.
+    id·시각·목록/사전 형태 항목을 바꾸거나 없는 항목을 만들 수는 없다. 통째 덮어쓰기는 하지 않는다."""
+    if not isinstance(obj, dict):
+        raise DomainError("JSON 형식이 올바르지 않습니다.", hint="중괄호 { } 로 된 한 건의 JSON 이어야 합니다.")
+    cls, _o = _load(collection, obj_id)
+    raw = next((r for r in pool().find(collection) if r.get("id") == obj_id), None)
+    if raw is None:
+        raise NotFound(f"'{obj_id}' 객체를 찾을 수 없습니다.")
+    cur = visible(raw)
+    sc = {f["name"]: f for f in schema(collection)["fields"]}
+    changes: Dict[str, Any] = {}
+    for k, v in obj.items():
+        if k == "_kind":
+            continue
+        if k not in cur:
+            raise DomainError(f"'{k}' 항목은 이 건에 없는 항목이라 만들 수 없습니다.", hint="항목 이름을 바꾸거나 새로 만들 수는 없습니다. 있는 항목의 값만 고칠 수 있습니다.")
+        if v == cur[k] or v in (MASK, LOCK):
+            continue
+        f = sc.get(k)
+        if f is None or is_hidden(k) or not f["editable"]:
+            raise DomainError(f"'{k}' 항목은 고칠 수 없습니다.", hint="id·시각·목록 형태·🔒 암호화·보호 항목은 읽기 전용입니다.")
+        changes[k] = v
+    if not changes:
+        raise DomainError("바뀐 내용이 없습니다.")
+    return update(collection, obj_id, changes, reason, admin)
+
+
 def redact_item(it: Dict[str, Any]) -> Dict[str, Any]:
     """기존 원문 뷰어용: 보호 필드 값을 가린다(관리인 화면에도 해시·기기 목록을 내려보내지 않는다)."""
     return {k: (MASK if is_hidden(k) and v not in ("", None, [], {}) else v) for k, v in it.items()}

@@ -877,6 +877,36 @@ def pool_search_query(req: PoolQueryReq):
     return {"success": True, **ps.query(req.collection, req.columns, req.value, max(1, min(req.limit, 300)))}
 
 
+class PoolTextReq(BaseModel):
+    collection: str
+    value: str = ""
+    limit: int = 30
+
+
+class PoolJsonUpdateReq(BaseModel):
+    collection: str
+    id: str
+    record: Dict[str, Any]
+    reason: str = ""
+
+
+@router.post("/pool-search/text", dependencies=ADMIN_ONLY)
+def pool_search_text(req: PoolTextReq):
+    """카드 선택 후 간단 검색: 글자가 들어 있는 한 건씩의 JSON(보호 항목은 가림)을 돌려준다."""
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    return {"success": True, **ps.text_search(req.collection, req.value, req.limit)}
+
+
+@router.post("/pool-search/update-json", dependencies=ADMIN_ONLY)
+def pool_search_update_json(req: PoolJsonUpdateReq, request: Request):
+    """카드의 JSON 을 고쳐 저장(사유 필수). 바뀐 항목만 안전한 수정 경로로 반영하고, 보호·잠금·읽기 전용 항목을 바꾸면 거절한다."""
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    res = ps.update_from_json(req.collection, req.id, req.record, req.reason, _admin_label(request))
+    return {"success": True, "message": f"{', '.join(res['changed'])} 항목을 고쳤습니다(사유 기록됨).", **res}
+
+
 @router.get("/pool-search/item", dependencies=ADMIN_ONLY)
 def pool_search_item(collection: str, id: str):
     from apps.rent_dist._rent3_core import poolsearch as ps
