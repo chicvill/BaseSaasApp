@@ -3,7 +3,7 @@ tests/test_rent3_pool_suite.py — 불변 BaseSaasApp 기반 Rent3 공동 JSON D
 """
 import json
 import os
-from datetime import date
+from datetime import date, datetime
 import shutil
 import subprocess
 import sys
@@ -76,7 +76,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         sess = self.client.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
         rd = sess.get("registry_data") or {}
         return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": {
-            "viewed_directly": True, "viewed_at": "2026-11-08T10:00",
+            "viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"),
             "owner_name": rd.get("owner_name") or "김임대", "mortgage_amount": int(rd.get("mortgage_amount") or 0),
             "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
         }})
@@ -986,7 +986,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
         def reg(**kw):
-            d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+            d = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": "김임대",
                  "mortgage_amount": 0, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
             d.update(kw)
             return self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": d})
@@ -1169,7 +1169,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 "role": "lessor", "checked_counterparty_id": True,
                 "registry_updates": {"owner_name": "김임대", "mortgage_amount": 1000000000}})
             rr = self.client.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {
-                "viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김임대",
+                "viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": "김임대",
                 "mortgage_amount": 1000000000, "seizure_or_trust": "없음", "guarantee_status": "가입 예정",
                 "low_deposit_risk_ack": True}}).json()
             self.assertTrue(rr["session"]["tenant_registry"]["ai_assisted"])
@@ -2391,7 +2391,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         return sid
 
     def _reg(self, sid, **kw):
-        d = {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김종심", "mortgage_amount": 0,
+        d = {"viewed_directly": True, "viewed_at": datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": "김종심", "mortgage_amount": 0,
              "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}
         d.update(kw)
         return self.client.post(f"/api/rent3_contract/sessions/{sid}/tenant-registry", json={"registry": d})
@@ -7004,6 +7004,53 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 o = Contract.get(x)
                 if o:
                     o.delete(action="t")
+
+    def test_110_contract_step1_registry_rules_match_recheck(self):
+        """110. 공동계약 1단계(임차인이 직접 열람한 등기부)도 입주 전 재확인과 같은 기준: 열람 일시가 3일 이내여야 하고,
+        AI 로 읽은 파일이 있으면 그 파일의 열람 일시와 입력한 일시가 맞아야 한다. 맞으면 통과."""
+        import base64
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import registry_ai
+        c, base = self.client, "/api/rent3_contract"
+        c.post("/api/rent3_lessor/rooms", headers=self._login("chic"), json={"branch": "main", "room_no": "917", "is_published": True, "deposit": 6000000})
+        sid = c.post(f"{base}/sessions/call", json={"caller_role": "lessor", "branch": "main", "room_no": "917", "mode": "NEW",
+                                                     "tenant_name": "1단계임차", "tenant_phone": "010-6666-0604"}).json()["session"]["id"]
+        c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": "1단계임차", "responder_phone": "010-6666-0604"})
+        c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True, "registry_updates": {"owner_name": "김종심", "mortgage_amount": 0}})
+        fmt = "%Y-%m-%dT%H:%M"
+        rec = lambda at: c.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {
+            "viewed_directly": True, "viewed_at": at, "owner_name": "김종심", "mortgage_amount": 0, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}})
+        now = datetime.now()
+        # 오래된 열람본·형식이 틀린 일시는 거부
+        bad = rec((now - timedelta(days=10)).strftime(fmt))
+        self.assertEqual(bad.status_code, 400)
+        self.assertIn("오래", bad.text)
+        self.assertEqual(rec("어제쯤").status_code, 400)
+        # AI 로 읽은 파일의 열람 일시와 입력이 다르면 거부(다른 서류·오래된 서류를 섞는 것 방지)
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+
+        class Fake:
+            is_available = True
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                return json.dumps({"document_type": "registry", "readable": True, "issue_number": "S1", "viewed_at": (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M"),
+                                   "owners": [{"name": "김종심"}], "mortgages": [], "restrictions": [], "ownership_transfers": []}, ensure_ascii=False)
+
+        orig = registry_ai._client
+        try:
+            registry_ai._client = lambda: Fake()
+            r = c.post(f"{base}/sessions/{sid}/registry-ai", json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["result"]["extracted"]["viewed_at"])
+            mism = rec(now.strftime(fmt))                                         # 파일은 2일 전, 입력은 지금 → 하루 넘게 다름
+            self.assertEqual(mism.status_code, 400)
+            self.assertIn("다릅니다", mism.text)
+            okr = rec((now - timedelta(days=2)).strftime(fmt))                    # 파일과 맞는 일시
+            self.assertEqual(okr.status_code, 200, okr.text)
+        finally:
+            registry_ai._client = orig
+        html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn("3일 이내 열람본만 인정", html)
 
 
 if __name__ == "__main__":

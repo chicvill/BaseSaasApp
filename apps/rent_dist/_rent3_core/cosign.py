@@ -292,6 +292,20 @@ class CoSignSession(PoolObj):
             )
         if not str(data.get("viewed_at", "")).strip():
             raise DomainError("열람 일시를 입력해 주세요.")
+        # 열람 일시는 최근(입주 전 재확인과 같은 기준)이어야 하고, AI 로 읽은 파일이 있으면 그 파일의 열람 일시와 맞아야 한다(오래된 서류·다른 서류 방지)
+        from . import balancecheck as _bc
+        if not _bc.is_recent(str(data["viewed_at"])):
+            raise DomainError(f"열람 일시가 오래되었거나 형식이 올바르지 않습니다.",
+                              hint=f"인터넷등기소에서 {_bc.RECENT_DAYS}일 이내에 열람한 등기부만 인정합니다. 오늘 다시 열람해 주세요.")
+        ai_view = ((self.registry_ai_result or {}).get("extracted") or {}).get("viewed_at", "")
+        if ai_view:
+            try:
+                gap = abs((datetime.fromisoformat(str(data["viewed_at"]).strip()[:16]).date() - datetime.fromisoformat(ai_view[:16]).date()).days)
+            except ValueError:
+                gap = 0
+            if gap > 1:
+                raise DomainError("입력한 열람 일시가 올린 등기부 파일의 열람 일시와 다릅니다.",
+                                  hint=f"파일에서 읽힌 열람 일시: {ai_view.replace('T', ' ')}. 방금 열람한 파일을 올리거나 열람 일시를 바르게 고쳐 주세요.")
         if not str(data.get("owner_name", "")).strip():
             raise DomainError("직접 열람한 등기부의 갑구 소유자 성명을 입력해 주세요.")
         try:

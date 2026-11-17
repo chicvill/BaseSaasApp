@@ -40,7 +40,7 @@ def main() -> None:
     sid = made.json()["session"]["id"]
     c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "tenant", "responder_name": "김예비", "responder_phone": phone})
     c.post(f"{base}/sessions/{sid}/step1", json={"role": "lessor", "checked_counterparty_id": True, "registry_updates": {"owner_name": "김종심", "mortgage_amount": 0}})
-    c.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {"viewed_directly": True, "viewed_at": "2026-11-08T10:00", "owner_name": "김종심",
+    c.post(f"{base}/sessions/{sid}/tenant-registry", json={"registry": {"viewed_directly": True, "viewed_at": __import__("datetime").datetime.now().strftime("%Y-%m-%dT%H:%M"), "owner_name": "김종심",
                                                                          "mortgage_amount": 0, "seizure_or_trust": "없음", "guarantee_status": "가입 예정"}})
     c.post(f"{base}/sessions/{sid}/step1", json={"role": "tenant", "checked_counterparty_id": True})
     c.post(f"{base}/sessions/{sid}/step2", json={"role": "lessor"})

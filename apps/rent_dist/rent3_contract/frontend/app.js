@@ -1265,7 +1265,7 @@
         <input type="checkbox" id="trViewed" ${done.viewed_directly ? "checked" : ""}>
       </label>
       <div class="field-grid" style="margin:8px 0;">
-        <div><label class="bass-label">열람 일시</label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || (aiEx && aiEx.viewed_at) || nowLocalInput())}"></div>
+        <div><label class="bass-label">열람 일시 <span class="bass-muted" style="font-weight:400;">(3일 이내 열람본만 인정${aiEx && aiEx.viewed_at ? " · 올린 파일: " + esc(aiEx.viewed_at.replace("T", " ")) : ""})</span></label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || (aiEx && aiEx.viewed_at) || nowLocalInput())}"></div>
         <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || (aiEx ? aiEx.owner_name : ""))}" placeholder="등기부에 적힌 이름"></div>
         <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : (aiEx ? aiEx.mortgage_total : "")}" placeholder="없으면 0"></div>
         <div><label class="bass-label">압류·가압류·가처분·신탁·경매개시·임차권등기</label>
