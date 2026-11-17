@@ -325,17 +325,8 @@ def balance_registry_check(tenant_id: str, req: BalanceRegistryReq):
     ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
     if ct is None or ct.keys_released is not False:
         raise DomainError("잔금일 등기부 확인 대상 계약이 아닙니다.", hint="출입 정보 교부 전의 새 계약에서만 사용합니다.")
-    from apps.rent_dist._rent3_core.balancecheck import check_no_change as bc_check
-    if ct.mortgage_cleanup_required and not req.changed and not req.mortgage_cleared:
-        raise DomainError(
-            "이 계약은 '잔금 시 근저당 말소 특약'이 있습니다. 등기부에서 근저당이 말소된 것을 확인해야 합니다.",
-            hint="아직 말소되지 않았다면 '변동 있음'이 아니라 잔금을 보내지 말고 임대인에게 말소를 요구하세요. 말소된 등기부를 확인한 뒤 다시 확인해 주세요.",
-        )
-    prior_read = (ct.balance_registry or {}).get("read") or {}
-    evidence = {} if req.changed else bc_check(ct, req.checked)         # '변동 없음'은 확인했음 체크·AI 대조·열람 일시 조건을 모두 통과해야 기록된다
-    ct.balance_registry = {"checked_at": now_iso(), "changed": bool(req.changed), "issue_number": req.issue_number.strip() or prior_read.get("issue_number", ""),
-                           "mortgage_cleared": bool(req.mortgage_cleared), "read": prior_read, "evidence": evidence}
-    ct.save(action="balance_registry_changed_reported" if req.changed else "balance_registry_checked", app_source=APP_SRC)
+    from apps.rent_dist._rent3_core import balancecheck as bc
+    bc.record(ct, req.changed, req.checked, req.issue_number, req.mortgage_cleared, app_source=APP_SRC)
     msg = ("등기부 변동을 신고했습니다. 임대인·본사 확인 전까지 잔금 납부를 보류하세요." if req.changed
            else "잔금일 등기부 확인을 기록했습니다. 잔금 입금 후 임대인이 확인하면 출입 정보가 열립니다.")
     return {"success": True, "message": msg, "balance_registry": ct.balance_registry}

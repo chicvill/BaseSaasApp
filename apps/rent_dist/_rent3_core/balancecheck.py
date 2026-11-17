@@ -112,3 +112,20 @@ def check_no_change(ct: Contract, checked: bool) -> Dict[str, Any]:
             raise DomainError("열람 일시가 오래되었거나 읽을 수 없습니다.",
                               hint=f"잔금 직전({RECENT_DAYS}일 이내)에 인터넷등기소에서 새로 열람한 등기부를 올려 주세요. (읽힌 열람 일시: {rd.get('viewed_at') or '없음'})")
     return {"ai": rd.get("status") == "ok", "viewed_at": rd.get("viewed_at", ""), "read_sha256": rd.get("sha256", "")}
+
+
+def record(ct: Contract, changed: bool, checked: bool, issue_number: str = "", mortgage_cleared: bool = False,
+           app_source: str = "rent3_contract") -> Dict[str, Any]:
+    """임차인의 '변동 없음 확인' 또는 '변동 있음 신고'를 계약에 기록한다(계약 화면·마이홈 공통 규칙).
+    변동 없음은 확인했음 체크·AI 대조·열람 일시 조건을 모두 통과해야 하고, 변동 신고는 언제나 가능하다."""
+    if ct.mortgage_cleanup_required and not changed and not mortgage_cleared:
+        raise DomainError(
+            "이 계약은 '잔금 시 근저당 말소 특약'이 있습니다. 등기부에서 근저당이 말소된 것을 확인해야 합니다.",
+            hint="아직 말소되지 않았다면 '변동 있음'이 아니라 잔금을 보내지 말고 임대인에게 말소를 요구하세요. 말소된 등기부를 확인한 뒤 다시 확인해 주세요.",
+        )
+    prior = (ct.balance_registry or {}).get("read") or {}
+    evidence = {} if changed else check_no_change(ct, checked)
+    ct.balance_registry = {"checked_at": now_iso(), "changed": bool(changed), "issue_number": (issue_number or "").strip() or prior.get("issue_number", ""),
+                           "mortgage_cleared": bool(mortgage_cleared), "read": prior, "evidence": evidence}
+    ct.save(action="balance_registry_changed_reported" if changed else "balance_registry_checked", app_source=app_source)
+    return ct.balance_registry

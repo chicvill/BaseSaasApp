@@ -791,6 +791,26 @@ class CarrySplitReq(BaseModel):
     confirm: bool = False
 
 
+@router.get("/legacy-registry/preview", dependencies=ADMIN_ONLY)
+def legacy_registry_preview():
+    """전자계약이 아닌 기존 입주자 중 '입주 전 등기부 확인'을 완료로 기록할 대상(읽기 전용)."""
+    from apps.rent_dist._rent3_core import legacyregistry as lg
+    ensure_pool_seeded()
+    p = lg.plan()
+    return {"success": True, "contracts_total": p["contracts_total"], "to_mark": p["to_mark"], "rows": p["rows"][:30]}
+
+
+@router.post("/legacy-registry/apply", dependencies=ADMIN_ONLY)
+def legacy_registry_apply(req: CarrySplitReq):
+    """풀 전체를 자동 백업한 뒤, 기존 입주자 계약에 '등기부 확인 완료(이전 입주자)'를 기록한다(출입 잠금·수납은 그대로)."""
+    from apps.rent_dist._rent3_core import legacyregistry as lg
+    ensure_pool_seeded()
+    if not req.confirm:
+        raise DomainError("확인(confirm)이 필요합니다.", hint="미리보기를 확인한 뒤 확인 창에서 진행해 주세요.")
+    res = lg.apply()
+    return {"success": True, "message": (f"기존 입주자 {res['marked']}건을 등기부 확인 완료로 기록했습니다(백업 {res['backup']})." if res["marked"] else "기록할 대상이 없습니다."), **res}
+
+
 @router.get("/room-defaults/preview", dependencies=ADMIN_ONLY)
 def room_defaults_preview():
     """방에 자동으로 들어갔던 샘플 등기부·가전 옵션·상태 설명을 정리할 계획(읽기 전용)."""

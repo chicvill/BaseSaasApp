@@ -245,23 +245,10 @@
                   ? (data.keys.registry_check.changed ? "⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요." : "✅ 잔금일 등기부 확인 완료 (" + Bass.escapeHtml(String(data.keys.registry_check.checked_at).slice(0, 16).replace("T", " ")) + ")")
                   : "아직 확인하지 않았습니다."}
                 ${data.keys.insurance_proof_required ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);"><strong>보증보험 가입 증빙</strong> (가입 예정으로 계약하셨습니다)<br>${data.keys.insurance_proof && data.keys.insurance_proof.policy_no ? "✅ 제출 완료: " + Bass.escapeHtml(data.keys.insurance_proof.issuer) + " " + Bass.escapeHtml(data.keys.insurance_proof.policy_no) : "아직 제출하지 않았습니다. 가입이 거절되면 계약은 무효이고 계약금은 전액 반환됩니다."}<div class="bass-row" style="margin-top:6px;gap:6px;"><button class="bass-btn bass-btn--sm bass-btn--primary btn-ins-proof" type="button">증빙 제출</button></div></div>` : ""}
-                <div style="margin-top:6px;font-size:12.5px;line-height:1.7;">① 인터넷등기소에서 <strong>오늘 다시 열람</strong>해 PDF로 저장 → ② 아래에서 올려 AI 로 계약 때와 비교 → ③ 원본과 대조하고 <strong>'확인했음'에 체크</strong>해야 다음 단계로 진행됩니다.<br>계약 뒤에 대출(근저당)이 새로 생긴 사례가 있어, <strong>잔금을 보내기 직전에</strong> 한 번 더 확인하세요.</div>
-                <div class="bass-row" style="margin-top:6px;gap:6px;flex-wrap:wrap;align-items:center;">
-                  <a class="bass-btn bass-btn--sm bass-btn--primary" href="https://www.iros.go.kr" target="_blank" rel="noopener">🏛 인터넷등기소 열기 ↗</a>
-                  <input type="file" id="balRegFile" accept="application/pdf,image/*" style="max-width:100%;">
-                </div>
-                <label style="display:flex;gap:6px;align-items:center;min-height:36px;font-size:12.5px;"><input type="checkbox" id="balRegConsent"> AI 읽기에 동의(파일이 AI 서비스로 전송되며 서버에는 저장하지 않습니다)</label>
-                <button class="bass-btn bass-btn--sm btn-bal-read" type="button" style="min-height:44px;">📤 올려서 AI로 확인</button>
-                ${(() => { const rd = (data.keys.registry_check || {}).read || {}; if (!rd.status) return ""; if (rd.status === "unavailable") return `<div style="margin-top:8px;font-size:12.5px;">⚠️ AI 를 쓸 수 없어 직접 확인으로 진행합니다.</div>`;
-                  return `<div style="margin-top:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;line-height:1.7;">
-                    <strong>AI 가 읽은 값</strong> — 열람 일시 <strong>${Bass.escapeHtml((rd.viewed_at || "읽지 못함").replace("T", " "))}</strong> ${rd.recent ? "✅ 최근" : "<span style='color:var(--err);font-weight:700;'>⚠️ 오래됨·확인 불가 — 오늘 다시 열람하세요</span>"}<br>
-                    소유자 ${Bass.escapeHtml(rd.owner_name || "-")} · 근저당 합계 ${Number(rd.mortgage_total || 0).toLocaleString()}원 · 압류·신탁 ${Bass.escapeHtml(rd.seizure_or_trust || "-")}
-                    ${(rd.differences || []).length ? `<div style="color:var(--err);font-weight:700;margin-top:4px;">⚠️ 계약 때와 달라진 점:<br>${rd.differences.map((x) => "· " + Bass.escapeHtml(x)).join("<br>")}<br>잔금을 보내지 말고 [변동 있음 신고]를 눌러 주세요.</div>` : `<div style="margin-top:4px;">계약 때와 달라진 점: 없음(AI 가 읽은 범위)</div>`}
-                  </div>`; })()}
-                <label style="display:flex;gap:6px;align-items:center;min-height:40px;margin-top:6px;font-size:12.5px;"><input type="checkbox" id="balRegChecked"> <strong>인터넷등기소 원본과 직접 대조했고, 변동이 없음을 확인했음</strong></label>
-                <div class="bass-row" style="margin-top:4px;gap:6px;flex-wrap:wrap;">
-                  <button class="bass-btn bass-btn--sm bass-btn--primary btn-bal-reg" data-changed="false" type="button" style="min-height:44px;">변동 없음 확인</button>
-                  <button class="bass-btn bass-btn--sm btn-bal-reg" data-changed="true" type="button" style="min-height:44px;">변동 있음 신고</button>
+                <div style="margin-top:6px;font-size:12.5px;line-height:1.7;">계약 뒤에 대출(근저당)이 새로 생긴 사례가 있어, <strong>잔금을 보내기 직전에</strong> 인터넷등기소에서 다시 열람해 확인해야 합니다. 확인은 <strong>계약 화면</strong>에서 합니다(등기부 올리기 → AI 비교 → '확인했음' 체크).</div>
+                <div class="bass-row" style="margin-top:6px;gap:6px;flex-wrap:wrap;">
+                  <a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant" style="min-height:44px;display:inline-flex;align-items:center;">📑 계약 화면에서 등기부 재확인 ↗</a>
+                  <a class="bass-btn bass-btn--sm" href="https://www.iros.go.kr" target="_blank" rel="noopener" style="min-height:44px;display:inline-flex;align-items:center;">🏛 인터넷등기소 ↗</a>
                 </div>
               </div></div></div>` : "";
 
@@ -632,29 +619,6 @@
         if (!no) return;
         const res = await Bass.api(APP_ID, `/myhome/${t.id}/insurance-proof`, { method: "POST", body: { issuer, policy_no: no } });
         Bass.updateAppAlert("success", res.message);
-        await loadMyhome();
-      });
-    }));
-
-    document.querySelectorAll(".btn-bal-read").forEach((btn) => btn.addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const file = document.getElementById("balRegFile").files[0];
-        if (!file) { Bass.updateAppAlert("warning", "인터넷등기소에서 열람한 등기부 파일(PDF·사진)을 먼저 골라 주세요."); return; }
-        if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
-        const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
-        const res = await Bass.api(APP_ID, `/myhome/${t.id}/balance-registry-read`, { method: "POST", body: { attachment_data_url: dataUrl, consent: document.getElementById("balRegConsent").checked } });
-        Bass.updateAppAlert(res.level || "warning", res.message);
-        await loadMyhome();
-      });
-    }));
-
-    document.querySelectorAll(".btn-bal-reg").forEach((btn) => btn.addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const changed = btn.dataset.changed === "true";
-        if (!changed && !document.getElementById("balRegChecked").checked) { Bass.updateAppAlert("warning", "원본과 대조하고 '확인했음'에 체크해야 진행할 수 있습니다."); return; }
-        if (!changed && !window.confirm("인터넷등기소에서 등기부를 직접 열람했고, 계약 이후 근저당·압류 등 새로 생긴 권리가 없는 것을 확인했습니까?")) return;
-        const res = await Bass.api(APP_ID, `/myhome/${t.id}/balance-registry-check`, { method: "POST", body: { changed, checked: !changed } });
-        Bass.updateAppAlert(changed ? "warning" : "success", res.message);
         await loadMyhome();
       });
     }));

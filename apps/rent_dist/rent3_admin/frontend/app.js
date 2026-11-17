@@ -640,6 +640,12 @@
         <div id="mfaBody" class="bass-muted">불러오는 중...</div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>📜 기존 입주자 등기부 확인 완료 처리</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">입주 전 등기부 확인은 <strong>공동 전자계약으로 새로 체결한 계약</strong>에서 임차인이 합니다. 전자계약이 아닌 <strong>기존 입주자</strong>는 이미 살고 있어 다시 할 대상이 아니므로 '확인 완료(이전 입주자)'로 기록합니다. 출입 정보 잠금·수납·계약 조건은 바꾸지 않습니다. [미리보기]는 아무것도 바꾸지 않고, [백업 후 기록]은 자동 백업 뒤에 진행합니다.</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><button id="btnLgPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button><button id="btnLgApply" class="bass-btn" type="button" style="min-height:44px;" disabled>📜 백업 후 기록</button></div>
+        <div id="lgResult" style="margin-top:10px;font-size:13px;line-height:1.7;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>🧹 방의 샘플 값 정리 (가짜 등기부·옵션)</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">예전에는 모든 방에 <strong>샘플 등기부(소유자 '김임대'·권리 깨끗함)·가전 옵션 5개·상태 설명</strong>이 자동으로 들어갔습니다. 실제 정보가 아닌데 공개 매물에 '등기클린'으로 나올 수 있어, <strong>샘플과 정확히 같은 값만</strong> 비웁니다(직접 고친 값·실제 등기부 값은 그대로). [미리보기]는 아무것도 바꾸지 않고, [백업 후 정리]는 자동 백업 뒤에 진행합니다.</div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><button id="btnRdPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button><button id="btnRdApply" class="bass-btn" type="button" style="min-height:44px;" disabled>🧹 백업 후 정리</button></div>
@@ -758,6 +764,21 @@
       }
     }
     loadMfa();
+    document.getElementById("btnLgPrev").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const out = document.getElementById("lgResult"), ap = document.getElementById("btnLgApply");
+        const r = await Bass.api(APP_ID, "/legacy-registry/preview");
+        out.innerHTML = `계약 ${r.contracts_total}건 중 기록 대상 <strong>${r.to_mark}</strong>건(전자계약이 아닌 진행 중 계약)`;
+        ap.disabled = r.to_mark === 0;
+        ap.onclick = function () {
+          if (!window.confirm(`${r.to_mark}건의 기존 입주자에게 '입주 전 등기부 확인 완료(이전 입주자)'를 기록합니다. 풀 전체를 자동 백업한 뒤 진행하며 출입 잠금·수납은 바꾸지 않습니다. 계속할까요?`)) return;
+          Bass.withLock(ap, async () => {
+            const res = await Bass.api(APP_ID, "/legacy-registry/apply", { method: "POST", body: { confirm: true } });
+            Bass.updateAppAlert("success", res.message); out.innerHTML = `<strong>${Bass.escapeHtml(res.message)}</strong>`; ap.disabled = true;
+          });
+        };
+      });
+    });
     document.getElementById("btnRdPrev").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const out = document.getElementById("rdResult"), ap = document.getElementById("btnRdApply");

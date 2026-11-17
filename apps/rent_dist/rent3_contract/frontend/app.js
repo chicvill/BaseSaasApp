@@ -2091,6 +2091,82 @@
     });
   }
 
+  // ── 입주(잔금) 전 등기부 재확인: 계약 체결 뒤 출입 정보를 받기 전까지, 임차인이 모달에서 ①등기소 열기 ②올리기 ③AI 비교 ④확인했음 체크 ──
+  function balRegState() {
+    const ct = sealedContract || {};
+    const br = ct.balance_registry || {};
+    return { show: currentRole === "tenant" && ct.keys_released === false, br, read: br.read || {}, done: !!br.checked_at && !br.changed, changed: !!br.checked_at && !!br.changed };
+  }
+
+  function balRegCardHtml() {
+    const st = balRegState();
+    if (!st.show) return "";
+    const line = st.done ? `<span style="color:var(--ok);font-weight:700;">✅ 입주 전 등기부 확인 완료 (${Bass.escapeHtml(String(st.br.checked_at).slice(0, 16).replace("T", " "))})</span>`
+      : st.changed ? `<span style="color:var(--err);font-weight:700;">⚠️ 변동을 신고했습니다. 해소되기 전에는 잔금을 보내지 마세요.</span>`
+      : `<span style="color:var(--err);font-weight:700;">아직 확인하지 않았습니다.</span>`;
+    return `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--primary);font-size:13px;line-height:1.7;">
+      <strong>🏛 입주 전 등기부 재확인</strong><br>
+      계약 뒤 입주(잔금)까지 사이에 대출(근저당)이 새로 생긴 사례가 있습니다. <strong>잔금을 보내기 직전에</strong> 인터넷등기소에서 다시 열람해 확인하세요. 확인하지 않으면 출입 정보를 받을 수 없습니다.<br>
+      ${line}
+      <div style="margin-top:8px;"><button id="btnBalReg" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🏛 ${st.done ? "다시 확인하기" : "등기부 재확인 시작"}</button></div>
+    </div>`;
+  }
+
+  function openBalRegModal(s) {
+    const body = R3.openModal("🏛 입주 전 등기부 재확인", "");
+    const E = Bass.escapeHtml;
+    const draw = () => {
+      const st = balRegState(), rd = st.read || {};
+      const readHtml = !rd.status ? "" : rd.status === "unavailable"
+        ? `<div style="margin:8px 0;font-size:12.5px;">⚠️ AI 를 쓸 수 없어 직접 확인으로 진행합니다. 인터넷등기소 원본을 직접 보고 아래에 체크해 주세요.</div>`
+        : `<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;line-height:1.7;">
+            <strong>AI 가 읽은 값</strong> — 열람 일시 <strong>${E((rd.viewed_at || "읽지 못함").replace("T", " "))}</strong> ${rd.recent ? "✅ 최근" : "<span style='color:var(--err);font-weight:700;'>⚠️ 오래됨·확인 불가 — 오늘 다시 열람하세요</span>"}<br>
+            소유자 ${E(rd.owner_name || "-")} · 근저당 합계 ${fmtWon(rd.mortgage_total || 0)} · 압류·신탁 ${E(rd.seizure_or_trust || "-")}
+            ${(rd.differences || []).length ? `<div style="color:var(--err);font-weight:700;margin-top:4px;">⚠️ 계약 때와 달라진 점:<br>${rd.differences.map((x) => "· " + E(x)).join("<br>")}<br>잔금을 보내지 말고 [변동 있음 신고]를 눌러 주세요.</div>` : `<div style="margin-top:4px;">계약 때와 달라진 점: 없음(AI 가 읽은 범위)</div>`}
+          </div>`;
+      body.innerHTML = `
+        <div style="font-size:13px;line-height:1.7;">
+          <div><strong>① 인터넷등기소에서 오늘 다시 열람</strong>해 PDF로 저장하세요.<br><a class="bass-btn bass-btn--primary" href="https://www.iros.go.kr" target="_blank" rel="noopener" style="margin-top:4px;min-height:44px;display:inline-flex;align-items:center;">🏛 인터넷등기소 열기 ↗</a></div>
+          <div style="margin-top:10px;"><strong>② 열람한 파일을 올려 AI 로 계약 때와 비교</strong>
+            <input type="file" id="balFile" accept="application/pdf,image/*" style="display:block;margin:6px 0;max-width:100%;">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;"><input type="checkbox" id="balConsent"> AI 읽기에 동의(파일이 AI 서비스로 전송되며 서버에는 저장하지 않습니다)</label>
+            <button id="balRead" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;margin-top:4px;">📤 올려서 AI로 확인</button>
+          </div>
+          ${readHtml}
+          <div style="margin-top:10px;"><strong>③ 원본과 직접 대조</strong>
+            <label style="display:flex;gap:6px;align-items:center;min-height:40px;font-size:12.5px;"><input type="checkbox" id="balChecked"> <strong>인터넷등기소 원본과 직접 대조했고, 변동이 없음을 확인했음</strong></label>
+            <div class="bass-muted" style="font-size:12px;">체크하지 않으면 다음 단계(잔금·출입 정보 받기)로 진행할 수 없습니다.</div>
+          </div>
+          <div class="bass-row" style="gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button id="balOk" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;">변동 없음 확인</button>
+            <button id="balChg" class="bass-btn" type="button" style="min-height:46px;">변동 있음 신고</button>
+          </div>
+        </div>`;
+      const post = (path, payload) => Bass.api(APP_ID, `/sessions/${s.id}/balance-registry/${path}`, { method: "POST", body: { role: "tenant", ...payload } });
+      body.querySelector("#balRead").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const file = body.querySelector("#balFile").files[0];
+          if (!file) { Bass.updateAppAlert("warning", "인터넷등기소에서 열람한 등기부 파일(PDF·사진)을 먼저 골라 주세요."); return; }
+          if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+          const dataUrl = await new Promise((res, rej) => { const rd2 = new FileReader(); rd2.onload = () => res(rd2.result); rd2.onerror = rej; rd2.readAsDataURL(file); });
+          const res = await post("read", { attachment_data_url: dataUrl, consent: body.querySelector("#balConsent").checked });
+          Bass.updateAppAlert(res.level || "warning", res.message);
+          await fetchActiveSession(); draw();
+        });
+      });
+      const record = (changed) => Bass.withLock(body.querySelector(changed ? "#balChg" : "#balOk"), async () => {
+        if (!changed && !body.querySelector("#balChecked").checked) { Bass.updateAppAlert("warning", "원본과 대조하고 '확인했음'에 체크해야 진행할 수 있습니다."); return; }
+        const res = await post("check", { changed, checked: !changed });
+        sealedContract = res.contract;
+        Bass.updateAppAlert(changed ? "warning" : "success", res.message);
+        R3.closeModal(); renderWorkspace();
+      });
+      body.querySelector("#balOk").addEventListener("click", () => record(false));
+      body.querySelector("#balChg").addEventListener("click", () => record(true));
+    };
+    draw();
+  }
+
   function renderStep5(s) {
     const t = s.terms || {};
     const done = s.status === "COMPLETED";
@@ -2109,6 +2185,7 @@
         입금 계좌: ${Bass.escapeHtml(s.lessor_account)} (예금주 ${Bass.escapeHtml(s.lessor_name)})<br>
         🔒 <strong>도어락·공동현관 번호는 입주 당일 잔금 입금을 임대인이 확인한 뒤 임차인 마이홈에 공개됩니다.</strong>
       </div>` : ""}
+      ${done ? balRegCardHtml() : ""}
       ${done ? `
         <div class="bass-row">
           <button onclick="window.print()" class="bass-btn bass-btn--primary" type="button">🖨️ 표준 임대차 전자계약서 A4 인쇄 / PDF 저장</button>
@@ -2136,6 +2213,8 @@
         </button>
       `}
     `;
+    const balBtn = document.getElementById("btnBalReg");
+    if (balBtn) balBtn.addEventListener("click", () => openBalRegModal(s));
     const btn = document.getElementById("btnCompleteSeal");
     if (btn) {
       btn.addEventListener("click", function () {

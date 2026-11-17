@@ -6918,11 +6918,92 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertTrue(ok.json()["balance_registry"]["evidence"]["ai"])
             self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
             # 변동 신고는 체크 없이 언제나 가능(막으면 안 된다) — 교부 전 상태가 아니면 대상 아님
-            js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
-            for needle in ("https://www.iros.go.kr", "balRegChecked", "balance-registry-read", "잔금을 보내기 직전에", "'확인했음'에 체크"):
+            # 화면: 확인은 계약 화면(모달)에서 한다 — 마이홈에는 안내와 링크만
+            js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("https://www.iros.go.kr", "openBalRegModal", "R3.openModal(\"🏛 입주 전 등기부 재확인\"", "balance-registry/${path}", 'post("read"', 'post("check"', "'확인했음'에 체크"):
                 self.assertIn(needle, js, needle)
+            tj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+            self.assertIn("/rent3_contract/?role=tenant", tj)
+            self.assertNotIn("balRegChecked", tj)
         finally:
             registry_ai._client = orig
+
+    def test_109_balance_registry_in_contract_flow_and_legacy_tenants(self):
+        """109. 입주 전 등기부 재확인은 공동계약 화면의 API(/sessions/{id}/balance-registry/*)로 임차인만 할 수 있고(임대인 역할 거부), 같은 조건(체크·AI 대조·열람 일시)이 적용된다.
+        전자계약이 아닌 기존 입주자는 관리자 도구로 '확인 완료(이전 입주자)'가 기록되며(미리보기는 읽기 전용, 백업 후 반영), 출입 잠금·계약 조건은 그대로다."""
+        import base64
+        from datetime import datetime
+        from apps.rent_dist._rent3_core import registry_ai, Contract, Room, Tenant, legacyregistry as lg
+        c = self.client
+        chic = self._login("chic")
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "916", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "계약화면임차", "phone": "01066660603", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        sid = self._complete_contract(chic, th, tid, "916", "계약화면임차", "010-6666-0603")
+        B = f"/api/rent3_contract/sessions/{sid}/balance-registry"
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+        ct = Contract.get(Room.get(Tenant.get(tid).current_room_id).active_contract_id)
+        owner = (ct.registry_snapshot or {}).get("tenant_direct_registry", {}).get("owner_name") or ct.registry_snapshot.get("owner_name") or "김임대"
+
+        class Fake:
+            is_available = True
+            reply = {}
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                return json.dumps(Fake.reply, ensure_ascii=False)
+
+        orig = registry_ai._client
+        try:
+            registry_ai._client = lambda: Fake()
+            Fake.reply = {"document_type": "registry", "readable": True, "issue_number": "N1", "viewed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                          "owners": [{"name": owner}], "mortgages": [], "restrictions": [], "ownership_transfers": []}
+            # 임대인 역할로는 불가
+            self.assertIn(c.post(f"{B}/read", headers=chic, json={"role": "lessor", "attachment_data_url": pdf, "consent": True}).status_code, (400, 403))
+            # 임차인: 동의 없이는 거부 → 읽기 → 체크 없이는 거부 → 체크하면 기록
+            self.assertEqual(c.post(f"{B}/read", headers=th, json={"role": "tenant", "attachment_data_url": pdf, "consent": False}).status_code, 400)
+            r = c.post(f"{B}/read", headers=th, json={"role": "tenant", "attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertTrue(r.json()["read"]["recent"])
+            self.assertEqual(c.post(f"{B}/check", headers=th, json={"role": "tenant", "changed": False, "checked": False}).status_code, 400)
+            ok = c.post(f"{B}/check", headers=th, json={"role": "tenant", "changed": False, "checked": True})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertTrue(ok.json()["contract"]["balance_registry"]["checked_at"])
+            self.assertIs(ok.json()["contract"]["keys_released"], False)           # 확인했어도 잠금은 임대인이 입금 확인 후 푼다
+            # 교부 전 상태가 아니면(이미 교부) 대상 아님
+            c.post(f"/api/rent3_lessor/rooms/{ct.id_room}/release-keys", headers=chic, json={"balance_checked": True})
+            self.assertEqual(c.post(f"{B}/read", headers=th, json={"role": "tenant", "attachment_data_url": pdf, "consent": True}).status_code, 400)
+        finally:
+            registry_ai._client = orig
+
+        # ── 기존(전자계약이 아닌) 입주자: 확인 완료 기록 ──
+        legacy = Contract(id="ct_t109_legacy", branch="main", room_no="9109", status="ACTIVE", tenant_name="기존입주자").save(action="t")
+        esign = Contract(id="ct_t109_esign", branch="main", room_no="9110", status="ACTIVE", tenant_name="전자계약", cosign_session_id="sess_x", keys_released=False).save(action="t")
+        try:
+            before = lg.plan()
+            self.assertIn("ct_t109_legacy", [x["id"] for x in before["rows"]])
+            self.assertNotIn("ct_t109_esign", [x["id"] for x in before["rows"]])             # 전자계약은 대상이 아님
+            admin = self._login("admin")
+            AD = "/api/rent3_admin"
+            pv = c.get(f"{AD}/legacy-registry/preview", headers=admin).json()
+            self.assertGreaterEqual(pv["to_mark"], 1)
+            self.assertFalse(Contract.get("ct_t109_legacy").balance_registry)                # 미리보기는 아무것도 바꾸지 않는다
+            self.assertEqual(c.post(f"{AD}/legacy-registry/apply", headers=admin, json={"confirm": False}).status_code, 400)
+            ap = c.post(f"{AD}/legacy-registry/apply", headers=admin, json={"confirm": True})
+            self.assertEqual(ap.status_code, 200, ap.text)
+            got = Contract.get("ct_t109_legacy")
+            self.assertTrue(got.balance_registry["legacy"] and got.balance_registry["checked_at"] and not got.balance_registry["changed"])
+            self.assertIsNone(got.keys_released)                                             # 출입 잠금 상태는 그대로
+            self.assertFalse(Contract.get("ct_t109_esign").balance_registry)                 # 전자계약은 기록하지 않음
+            self.assertEqual(lg.plan()["to_mark"], 0 if not [x for x in lg.plan()["rows"]] else lg.plan()["to_mark"])
+            self.assertEqual(c.post(f"{AD}/legacy-registry/apply", headers=admin, json={"confirm": True}).json()["marked"], 0)   # 다시 해도 중복 기록 없음
+            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("btnLgPrev", "/legacy-registry/preview", "/legacy-registry/apply"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for x in ("ct_t109_legacy", "ct_t109_esign"):
+                o = Contract.get(x)
+                if o:
+                    o.delete(action="t")
 
 
 if __name__ == "__main__":
