@@ -539,13 +539,17 @@ class CoSignSession(PoolObj):
             current_step=3 if is_renewal else 1,
             status="IN_PROGRESS",
             revision=1,
-            registry_data={
-                "issue_number": room.registry_info.get("issue_number", "1101-2026-884920"),
-                "owner_name": lessor.name if lessor else room.registry_info.get("owner_name", "김임대"),
+            # 방에 임대인이 확정한 등기부가 있을 때만 그 값을 쓴다(없으면 비워 '미확인'으로 — 가짜 번호·'깨끗함'을 만들지 않는다)
+            registry_data=({
+                "issue_number": room.registry_info.get("issue_number", ""),
+                "owner_name": lessor.name if lessor else room.registry_info.get("owner_name", ""),
                 "mortgage_amount": room.registry_info.get("mortgage_amount", 0),
-                "clean_title": room.registry_info.get("clean_title", True),
-                "checked_date": date_today().isoformat(),
-            },
+                "clean_title": bool(room.registry_info.get("clean_title")),
+                "checked_date": room.registry_info.get("verified_at") or date_today().isoformat(),
+            } if room.registry_checked else {
+                "issue_number": "", "owner_name": lessor.name if lessor else "", "mortgage_amount": 0,
+                "clean_title": False, "unverified": True, "checked_date": "",
+            }),
             lessor_checked_tenant_id=is_renewal,
             tenant_checked_lessor_id=is_renewal,
             step1_lessor_confirmed=True if is_renewal else (initiated_by_role == "lessor" or call_status == "CONNECTED"),

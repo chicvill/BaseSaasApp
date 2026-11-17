@@ -14,6 +14,8 @@
   let currentTab = params.get("tab") || "ledger";
   let dash = null;
   let brokerTargetRoomNo = "";
+  let regOpen = false;              // 등기부 확인 카드: 읽기·확정 뒤 다시 그려도 열린 채로 둔다
+  const REG_FRESH_DAYS = 90;        // 서버(roomregistry.FRESH_DAYS)와 같게
   let brokerPhotoDataUrl = "";
   let brokerPhotoFilename = "";
   const openPhotoRooms = new Set();
@@ -2832,6 +2834,33 @@
         </div>
       </div>
 
+      <details class="bass-card" ${regOpen ? "open" : ""}>
+        <summary style="cursor:pointer;font-weight:800;">📜 호실별 등기부 확인 (등기클린 표시)</summary>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:8px 0;">인터넷등기소에서 받은 <strong>등기사항증명서(PDF 또는 사진)</strong>를 올리면 AI 가 소유자·근저당·압류 여부를 읽습니다. <strong>원본과 대조해 [확인 완료]를 눌러야</strong> 기록되고, 소유자가 임대인과 같고 근저당·압류가 없을 때만 임차인에게 '등기클린'이 표시됩니다(확정 후 ${REG_FRESH_DAYS}일 동안). AI 는 서류의 진위를 가리지 못하므로 참고용입니다.</div>
+        ${rooms.map((r) => {
+          const ri = r.registry_info || {}, st = ri.status || (r.registry_checked ? "confirmed" : "");
+          const badge = st === "confirmed" && r.registry_checked ? `<span class="bass-badge bass-badge--ok">✅ 확인됨 ${Bass.escapeHtml(ri.verified_at || "")}</span>` : st === "pending" ? `<span class="bass-badge bass-badge--warn">⏳ 확인 대기</span>` : `<span class="bass-badge">미확인</span>`;
+          const risks = (ri.risks || []).map((x) => `<li style="color:${x.level === "high" ? "var(--err)" : x.level === "caution" ? "var(--warn, #b45309)" : "inherit"};">${Bass.escapeHtml(x.text)}</li>`).join("");
+          const pend = st === "pending" ? `
+            <div style="border:1px solid var(--primary);border-radius:10px;padding:10px;margin-top:8px;font-size:13px;line-height:1.7;">
+              <div>소유자 <strong>${Bass.escapeHtml(ri.owner_name || "읽지 못함")}</strong> ${ri.owner_matches ? "✅ 임대인과 같음" : "<span style='color:var(--err);font-weight:700;'>⚠️ 임대인과 다름 — 확정할 수 없습니다</span>"}</div>
+              <div>유효 근저당 ${ri.mortgage_count || 0}건 · 채권최고액 합계 ${Number(ri.mortgage_amount || 0).toLocaleString()}원 · 압류·신탁 ${Bass.escapeHtml(ri.seizure_or_trust || "없음")} · 발급번호 ${Bass.escapeHtml(ri.issue_number || "읽지 못함")}</div>
+              ${risks ? `<ul style="margin:6px 0 6px 18px;padding:0;">${risks}</ul>` : ""}
+              <label style="display:flex;gap:6px;align-items:center;min-height:36px;"><input type="checkbox" class="reg-orig" data-id="${r.id}"> 인터넷등기소 원본과 대조했습니다</label>
+              <label style="display:flex;gap:6px;align-items:center;min-height:36px;"><input type="checkbox" class="reg-all" data-id="${r.id}"> 같은 건물의 모든 호실에 적용</label>
+              <button class="bass-btn bass-btn--primary btn-reg-confirm" data-id="${r.id}" type="button" style="min-height:44px;" ${ri.owner_matches ? "" : "disabled"}>✅ 확인 완료</button>
+            </div>` : "";
+          return `<div class="room-card" style="margin-top:10px;">
+            <div class="bass-row" style="justify-content:space-between;gap:8px;flex-wrap:wrap;"><strong>${r.room_no}호</strong>${badge}</div>
+            <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center;">
+              <input type="file" class="reg-file" data-id="${r.id}" accept="application/pdf,image/*" style="max-width:100%;">
+              <label style="display:flex;gap:5px;align-items:center;font-size:12.5px;"><input type="checkbox" class="reg-consent" data-id="${r.id}"> AI 읽기에 동의(파일이 AI 서비스로 전송됩니다)</label>
+              <button class="bass-btn bass-btn--sm btn-reg-read" data-id="${r.id}" type="button" style="min-height:44px;">📤 올려서 읽기</button>
+            </div>${pend}
+          </div>`;
+        }).join("")}
+      </details>
+
       <details class="bass-card">
         <summary style="cursor:pointer;font-weight:800;">🔑 호실별 도어락 · 등록 차량 관리</summary>
         <div style="margin-top:10px;">
@@ -2947,6 +2976,30 @@
           });
           Bass.updateAppAlert("success", res.message);
           await refresh();
+        });
+      });
+    });
+
+    const regVal = (cls, id) => elTabContent.querySelector(`.${cls}[data-id="${id}"]`);
+    elTabContent.querySelectorAll(".btn-reg-read").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const file = regVal("reg-file", btn.dataset.id).files[0];
+          if (!file) { Bass.updateAppAlert("warning", "등기사항증명서 파일(PDF·사진)을 먼저 골라 주세요."); return; }
+          if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+          const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/registry/read`, { method: "POST", body: { attachment_data_url: dataUrl, consent: regVal("reg-consent", btn.dataset.id).checked } });
+          Bass.updateAppAlert("success", res.message);
+          regOpen = true; await refresh();
+        });
+      });
+    });
+    elTabContent.querySelectorAll(".btn-reg-confirm").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/rooms/${btn.dataset.id}/registry/confirm`, { method: "POST", body: { checked_original: regVal("reg-orig", btn.dataset.id).checked, all_rooms: regVal("reg-all", btn.dataset.id).checked } });
+          Bass.updateAppAlert("success", res.message);
+          regOpen = true; await refresh();
         });
       });
     });

@@ -3,6 +3,7 @@ tests/test_rent3_pool_suite.py — 불변 BaseSaasApp 기반 Rent3 공동 JSON D
 """
 import json
 import os
+from datetime import date
 import shutil
 import subprocess
 import sys
@@ -6721,7 +6722,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         a = Room(id="room_t103_a", branch="main", id_building="bldg_main", room_no="9902", is_published=True, registry_checked=True, status_description=rd.SAMPLE_STATUS, option_list=list(rd.SAMPLE_OPTIONS),
                  registry_info={"issue_number": rd.SAMPLE_ISSUE_NUMBER, "owner_name": "김임대", "clean_title": True, "verified_at": "2026-11-09"}, doorlock_pwd="2580*").save(action="t")
         b = Room(id="room_t103_b", branch="main", id_building="bldg_main", room_no="9903", is_published=True, registry_checked=True, status_description="리모델링 완료, 남향",
-                 option_list=[{"item": "붙박이장", "quantity": 1, "condition": "정상"}], registry_info={"issue_number": "REAL-77", "owner_name": "실제소유자", "clean_title": True}).save(action="t")
+                 option_list=[{"item": "붙박이장", "quantity": 1, "condition": "정상"}], registry_info={"issue_number": "REAL-77", "owner_name": "실제소유자", "clean_title": True, "verified_at": date.today().isoformat()}).save(action="t")
         try:
             # 공개 매물: 샘플이 아닌 실제 등기부가 있는 방만 '등기클린'
             lst = {x["room_no"]: x for x in c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]}
@@ -6775,6 +6776,71 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         import subprocess, sys
         r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(ROOT, "scripts", "check_forward_refs.py")], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stdout)
+
+    def test_107_room_registry_upload_read_confirm_flow(self):
+        """107. 임대인이 등기부를 올리면 AI 가 읽어 '확인 대기', 원본 대조 후 확정해야 확인됨, 소유자가 다르면 확정 불가, 코드가 깨끗함을 계산,
+        공개 '등기클린'은 확정·최근·깨끗할 때만, 새 공동계약 세션은 확정 전에는 가짜 번호·'깨끗함'을 만들지 않음."""
+        import base64
+        from apps.rent_dist._rent3_core import Room, registry_ai
+        c = self.client
+        chic = self._login("chic")
+        room = next(r for r in Room.find(branch="main") if r.room_no)
+        keep = (room.registry_info, room.registry_checked)
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+
+        class Fake:
+            is_available = True
+            reply = {}
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                return json.dumps(Fake.reply, ensure_ascii=False)
+
+        orig = registry_ai._client
+        L = "/api/rent3_lessor"
+        try:
+            registry_ai._client = lambda: Fake()
+            Fake.reply = {"document_type": "registry", "readable": True, "issue_number": "1101-2026-555111", "owners": [{"name": "김임대"}], "mortgages": [], "restrictions": [], "ownership_transfers": []}
+            # 동의 없으면 거부
+            self.assertEqual(c.post(f"{L}/rooms/{room.id}/registry/read", headers=chic, json={"attachment_data_url": pdf, "consent": False}).status_code, 400)
+            r = c.post(f"{L}/rooms/{room.id}/registry/read", headers=chic, json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual(r.status_code, 200, r.text)
+            got = Room.get(room.id)
+            self.assertEqual((got.registry_checked, got.registry_info["status"], got.registry_info["clean_title"], got.registry_info["owner_matches"]), (False, "pending", True, True))
+            # 읽기만으로는 공개 '등기클린' 아님
+            self.assertFalse(next((x for x in c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"] if x.get("id") == room.id), {"clean_title": False})["clean_title"])
+            # 원본 대조 없이 확정 불가
+            self.assertEqual(c.post(f"{L}/rooms/{room.id}/registry/confirm", headers=chic, json={"checked_original": False}).status_code, 400)
+            ok = c.post(f"{L}/rooms/{room.id}/registry/confirm", headers=chic, json={"checked_original": True})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            got = Room.get(room.id)
+            self.assertTrue(got.registry_checked)
+            from apps.rent_dist._rent3_core import roomregistry as rr
+            self.assertTrue(rr.public_clean(got))
+            # 오래된 확정은 '등기클린'을 끈다
+            got.registry_info = {**got.registry_info, "verified_at": "2020-01-01"}
+            self.assertFalse(rr.public_clean(got))
+            # 근저당이 있으면 코드가 깨끗하지 않다고 계산(AI 가 clean 이라 해도)
+            Fake.reply = {"document_type": "registry", "readable": True, "issue_number": "X", "owners": [{"name": "김임대"}], "clean_title": True,
+                          "mortgages": [{"creditor": "A", "amount": 500000000, "cancelled": False}], "restrictions": [], "ownership_transfers": []}
+            c.post(f"{L}/rooms/{room.id}/registry/read", headers=chic, json={"attachment_data_url": pdf, "consent": True})
+            self.assertEqual((Room.get(room.id).registry_info["clean_title"], Room.get(room.id).registry_info["mortgage_amount"]), (False, 500000000))
+            # 소유자가 임대인과 다르면 확정 불가
+            Fake.reply = {"document_type": "registry", "readable": True, "issue_number": "Y", "owners": [{"name": "남의이름"}], "mortgages": [], "restrictions": [], "ownership_transfers": []}
+            c.post(f"{L}/rooms/{room.id}/registry/read", headers=chic, json={"attachment_data_url": pdf, "consent": True})
+            bad = c.post(f"{L}/rooms/{room.id}/registry/confirm", headers=chic, json={"checked_original": True})
+            self.assertEqual(bad.status_code, 400)
+            self.assertFalse(Room.get(room.id).registry_checked)
+            # 등기부가 아닌 문서는 거절
+            Fake.reply = {"document_type": "other"}
+            self.assertEqual(c.post(f"{L}/rooms/{room.id}/registry/read", headers=chic, json={"attachment_data_url": pdf, "consent": True}).status_code, 400)
+            # 다른 지점 임대인은 접근 불가
+            self.assertEqual(c.post(f"{L}/rooms/{room.id}/registry/read", headers=self._login("sunho"), json={"attachment_data_url": pdf, "consent": True}).status_code, 403)
+            html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("/registry/read", "/registry/confirm", "원본과 대조했습니다"):
+                self.assertIn(needle, html, needle)
+        finally:
+            registry_ai._client = orig
+            r2 = Room.get(room.id); r2.registry_info, r2.registry_checked = keep; r2.save(action="t")
 
 
 if __name__ == "__main__":

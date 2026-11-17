@@ -17,6 +17,7 @@ from core.auth import require_role
 from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_scope, is_local_request, lessor_token, not_revoked, tenant_token
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
 from apps.rent_dist._rent3_core import mfa as mfa_mod
+from apps.rent_dist._rent3_core import roomregistry as room_registry
 from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
@@ -209,7 +210,7 @@ def portal_landing(request: Request) -> Dict[str, Any]:
             "vat_applicable": r.vat_applicable,
             "available_from": r.available_from or "즉시입주",
             "pre_moveout_notice": r.pre_moveout_notice,
-            "clean_title": bool(r.registry_checked and reg.get("clean_title")),       # 실제로 확인된 등기부가 있을 때만 '등기클린'
+            "clean_title": room_registry.public_clean(r),       # 임대인이 확정한 최근 등기부가 있고 코드가 깨끗하다고 계산할 때만 '등기클린'
             "status_description": r.status_description,
             "options": opts,
             "image": img_url,

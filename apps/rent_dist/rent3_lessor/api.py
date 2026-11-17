@@ -591,6 +591,35 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     }
 
 
+class RoomRegistryReadReq(BaseModel):
+    attachment_data_url: str
+    consent: bool = False
+
+
+class RoomRegistryConfirmReq(BaseModel):
+    checked_original: bool = False     # 인터넷등기소 원본과 직접 대조했음
+    all_rooms: bool = False            # 같은 건물(지점)의 모든 호실에 같은 등기부를 적용
+
+
+@router.post("/rooms/{room_id}/registry/read")
+def room_registry_read(room_id: str, req: RoomRegistryReadReq):
+    """등기사항증명서(PDF·사진)를 올리면 보관하고 AI 로 읽어 '확인 대기'로 저장한다(확정은 /registry/confirm)."""
+    from apps.rent_dist._rent3_core import roomregistry as rr
+    room = Room.require(room_id)
+    info = rr.read(room, req.attachment_data_url, req.consent)
+    return {"success": True, "message": "등기부를 읽었습니다. 아래 내용을 원본과 대조한 뒤 [확인 완료]를 눌러 주세요.", "registry": info}
+
+
+@router.post("/rooms/{room_id}/registry/confirm")
+def room_registry_confirm(room_id: str, req: RoomRegistryConfirmReq):
+    from apps.rent_dist._rent3_core import roomregistry as rr
+    room = Room.require(room_id)
+    if not req.checked_original:
+        raise DomainError("원본과 대조했는지 확인해 주세요.", hint="인터넷등기소 원본과 AI 가 읽은 값을 비교한 뒤 체크해 주세요.")
+    res = rr.confirm(room, all_rooms=req.all_rooms)
+    return {"success": True, "message": f"{room.room_no}호 등기부를 확인 완료로 기록했습니다" + (f" (같은 건물 {res['shared']}개 호실에도 적용)." if res["shared"] else "."), **res}
+
+
 class ReleaseKeysReq(BaseModel):
     balance_checked: bool = False   # 임대인이 본인 계좌의 실제 입금 내역에서 잔금을 직접 확인함
 
