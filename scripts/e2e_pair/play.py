@@ -292,9 +292,17 @@ def do_complete(c: Ctx) -> str:
     return f"계약 체결 {ct['id']} (접수번호 {ct.get('fixed_date_no')} — 법적 확정일자 아님)"
 
 
+def bal_read(tid: str, token: str) -> None:
+    """잔금 전 등기부 확인의 첫 단계(등기부 올려 AI 읽기). 시험 서버에는 AI 키가 없으므로 '직접 확인으로 진행' 기록이 남는다."""
+    import base64
+    pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 e2e").decode()
+    call("POST", f"/api/rent3_tenant/myhome/{tid}/balance-registry-read", {"attachment_data_url": pdf, "consent": True}, token)
+
+
 def do_balance_check(c: Ctx) -> str:
     tk = c.tenant_token()
-    st, res = call("POST", f"/api/rent3_tenant/myhome/{c.s['tenant_id']}/balance-registry-check", {"changed": False, "issue_number": "1101-2026-E2E"}, tk)
+    bal_read(c.s['tenant_id'], tk)
+    st, res = call("POST", f"/api/rent3_tenant/myhome/{c.s['tenant_id']}/balance-registry-check", {"changed": False, "checked": True, "issue_number": "1101-2026-E2E"}, tk)
     ok(st, res, "잔금일 등기부 확인")
     return "잔금일 등기부 재열람: 변동 없음"
 
@@ -582,11 +590,12 @@ def cmd_attack() -> int:
                 IMPL[(role, name)](Ctx(sj))                          # 합의·서명·재열람·체결까지 정상 진행
             tb = Ctx(sj).tenant_token()
             lb = Ctx(sj).lessor_token()
-            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False}, tb)
+            bal_read(sj['tenant_id'], tb)
+            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False, "checked": True}, tb)
             expect("말소 특약 계약 — 근저당 말소 확인 없이 잔금일 확인 기록", st, (400,))
             st, _r = call("POST", f"/api/rent3_lessor/rooms/{sj['room_id']}/release-keys", {"balance_checked": True}, lb)
             expect("말소 특약 계약 — 말소 확인 전에 도어락 교부", st, (400,))
-            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False, "mortgage_cleared": True}, tb)
+            st, _r = call("POST", f"/api/rent3_tenant/myhome/{sj['tenant_id']}/balance-registry-check", {"changed": False, "mortgage_cleared": True, "checked": True}, tb)
             st2, _r2 = call("POST", f"/api/rent3_lessor/rooms/{sj['room_id']}/release-keys", {"balance_checked": True}, lb)
             results.append((st == 200 and st2 == 200, "(정상) 말소를 확인하면 도어락이 교부된다"))
             print(f"  {'✅ 허용' if st == 200 and st2 == 200 else '❌ 막힘(오류)'}  (정상) 말소를 확인하면 도어락이 교부된다  (HTTP {st}/{st2})")
@@ -730,7 +739,8 @@ def cmd_fail() -> int:
     check(ct.get("success") is not False and st == 200, "체결된 계약은 자동 취소되지 않는다(임대인·본사가 해소해야 함)")
     st, _r = call("POST", f"/api/rent3_lessor/rooms/{s3['room_id']}/release-keys", {"balance_checked": True}, lt3)
     check(st == 400, "변동이 해소되기 전에는 임대인이 도어락을 교부할 수 없다", f"HTTP {st}")
-    st, _r = call("POST", f"/api/rent3_tenant/myhome/{s3['tenant_id']}/balance-registry-check", {"changed": False, "issue_number": "1101-2026-OK"}, tt3)
+    bal_read(s3['tenant_id'], tt3)
+    st, _r = call("POST", f"/api/rent3_tenant/myhome/{s3['tenant_id']}/balance-registry-check", {"changed": False, "checked": True, "issue_number": "1101-2026-OK"}, tt3)
     st2, _r2 = call("POST", f"/api/rent3_lessor/rooms/{s3['room_id']}/release-keys", {"balance_checked": True}, lt3)
     home = call("GET", f"/api/rent3_tenant/myhome/{s3['tenant_id']}", token=tt3)[1]
     check(st == 200 and st2 == 200 and not home["keys"]["locked"], "해소 뒤 임차인이 '변동 없음'으로 다시 확인하면 교부되고 도어락이 열린다")

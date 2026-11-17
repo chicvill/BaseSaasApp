@@ -1350,6 +1350,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         return r.json()
 
+    def _bal_prime(self, tid):
+        """잔금 전 등기부 확인의 새 조건(AI 읽기 기록)을 시험에서 채운다: AI 를 쓸 수 없는 상태로 읽은 기록 → 직접 확인 체크만으로 기록 가능."""
+        from apps.rent_dist._rent3_core import Contract, Room, Tenant
+        t = Tenant.get(tid) or Tenant.first(phone=tid)
+        ct = Contract.get(Room.get(t.current_room_id).active_contract_id)
+        ct.balance_registry = {**(ct.balance_registry or {}), "read": {"status": "unavailable"}}
+        ct.save(action="t")
+
     def _login(self, ident, pw="1212"):
         r = self.client.post("/api/rent3/pool/auth/login", headers=self.NOAUTH,
                              json={"login_mode": "account", "identifier": ident, "password": pw})
@@ -2005,7 +2013,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.post(rel, headers=self._login("sunho"), json={"balance_checked": True}).status_code, 403)  # 다른 지점도
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 잔금일 등기부 확인 전
         chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
-        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "issue_number": "1101-2026-555"}).status_code, 200)
+        self._bal_prime(tid)
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "issue_number": "1101-2026-555"}).status_code, 400)       # '확인했음' 체크 없이는 진행 불가
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "checked": True, "issue_number": "1101-2026-555"}).status_code, 200)
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": False}).status_code, 400)        # 입금 확인 표시 필수
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)         # 이미 교부
@@ -2156,7 +2166,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(home["keys"]["locked"])                                  # 변동 신고 중에는 잠금 유지
         self.assertTrue(home["keys"]["registry_check"]["changed"])
         # 해소 후 임차인이 다시 변동 없음으로 확인하면 교부 가능
-        self.assertEqual(c.post(chk, headers=th, json={"changed": False}).status_code, 200)
+        self._bal_prime(tid)
+        self.assertEqual(c.post(chk, headers=th, json={"changed": False, "checked": True}).status_code, 200)
         self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
         # 교부 후에는 더 기록할 수 없다
         self.assertEqual(c.post(chk, headers=th, json={"changed": True}).status_code, 400)
@@ -2466,7 +2477,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
         self.assertEqual(c.post(chk, json={"changed": False}).status_code, 400)                          # 말소 확인 없이는 기록 불가
         self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)
-        self.assertEqual(c.post(chk, json={"changed": False, "mortgage_cleared": True}).status_code, 200)
+        self._bal_prime(tid)
+        self.assertEqual(c.post(chk, json={"changed": False, "mortgage_cleared": True, "checked": True}).status_code, 200)
         self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 200)
 
 
@@ -2534,7 +2546,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         chk = f"/api/rent3_tenant/myhome/{tid}/balance-registry-check"
         prf = f"/api/rent3_tenant/myhome/{tid}/insurance-proof"
         rel = f"/api/rent3_lessor/rooms/{ct['id_room']}/release-keys"
-        self.assertEqual(c.post(chk, json={"changed": False}).status_code, 200)
+        self._bal_prime(tid)
+        self.assertEqual(c.post(chk, json={"changed": False, "checked": True}).status_code, 200)
         self.assertEqual(c.post(rel, json={"balance_checked": True}).status_code, 400)       # 증빙 없이는 교부 불가
         self.assertEqual(c.post(prf, json={"issuer": "H", "policy_no": "1"}).status_code, 400)  # 너무 짧은 값
         self.assertEqual(c.post(prf, json={"issuer": "HUG", "policy_no": "2026-123456"}).status_code, 200)
@@ -6841,6 +6854,75 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         finally:
             registry_ai._client = orig
             r2 = Room.get(room.id); r2.registry_info, r2.registry_checked = keep; r2.save(action="t")
+
+    def test_108_balance_registry_ai_compare_checkbox_gate_and_freshness(self):
+        """108. 잔금 전 등기부 재확인: 올린 등기부를 AI 가 읽고 계약 때와 코드로 비교, 근저당이 늘었으면 '변동 없음' 불가, 열람 일시가 오래되면 불가,
+        '확인했음' 체크 없으면 불가(진행 중단), 읽기 기록이 없으면 불가, 모두 통과해야 기록되어 교부 가능, 화면에 인터넷등기소 링크·안내."""
+        import base64
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import registry_ai, Contract, Room, Tenant
+        c = self.client
+        chic = self._login("chic")
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "915", "is_published": True, "deposit": 6000000})
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "재열람임차", "phone": "01066660602", "password": "Pw123456"}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        self._complete_contract(chic, th, tid, "915", "재열람임차", "010-6666-0602")
+        T = f"/api/rent3_tenant/myhome/{tid}"
+        pdf = "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4 fake").decode()
+        ct = Contract.get(Room.get(Tenant.get(tid).current_room_id).active_contract_id)
+        owner = (ct.registry_snapshot or {}).get("tenant_direct_registry", {}).get("owner_name") or ct.registry_snapshot.get("owner_name") or "김임대"
+
+        class Fake:
+            is_available = True
+            reply = {}
+
+            async def generate_with_image(self, prompt, b64, mime_type="image/jpeg"):
+                return json.dumps(Fake.reply, ensure_ascii=False)
+
+        def doc(viewed, mort=0):
+            return {"document_type": "registry", "readable": True, "issue_number": "1101-2026-RE", "viewed_at": viewed.strftime("%Y-%m-%d %H:%M"),
+                    "owners": [{"name": owner}], "restrictions": [], "ownership_transfers": [],
+                    "mortgages": ([{"creditor": "새은행", "amount": mort, "cancelled": False}] if mort else [])}
+
+        orig = registry_ai._client
+        try:
+            registry_ai._client = lambda: Fake()
+            now = datetime.now()
+            # 읽기 기록이 없으면 체크해도 불가
+            self.assertEqual(c.post(f"{T}/balance-registry-check", headers=th, json={"changed": False, "checked": True}).status_code, 400)
+            # 동의 없이는 읽기 거부
+            self.assertEqual(c.post(f"{T}/balance-registry-read", headers=th, json={"attachment_data_url": pdf, "consent": False}).status_code, 400)
+            # 계약 뒤 근저당이 새로 생김 → 달라진 점이 잡히고 '변동 없음' 불가(체크해도)
+            Fake.reply = doc(now, mort=300000000)
+            r = c.post(f"{T}/balance-registry-read", headers=th, json={"attachment_data_url": pdf, "consent": True}).json()
+            self.assertTrue(r["read"]["differences"], r)
+            bad = c.post(f"{T}/balance-registry-check", headers=th, json={"changed": False, "checked": True})
+            self.assertEqual(bad.status_code, 400)
+            self.assertIn("달라진", bad.text)
+            # 열람 일시가 오래됨 → 불가
+            Fake.reply = doc(now - timedelta(days=20))
+            r = c.post(f"{T}/balance-registry-read", headers=th, json={"attachment_data_url": pdf, "consent": True}).json()
+            self.assertFalse(r["read"]["recent"])
+            self.assertEqual(c.post(f"{T}/balance-registry-check", headers=th, json={"changed": False, "checked": True}).status_code, 400)
+            # 최근 열람·달라진 점 없음 — 그래도 '확인했음' 체크가 없으면 불가
+            Fake.reply = doc(now)
+            r = c.post(f"{T}/balance-registry-read", headers=th, json={"attachment_data_url": pdf, "consent": True}).json()
+            self.assertEqual((r["read"]["differences"], r["read"]["recent"]), ([], True))
+            self.assertEqual(c.post(f"{T}/balance-registry-check", headers=th, json={"changed": False, "checked": False}).status_code, 400)
+            home = c.get(T, headers=th).json()
+            self.assertTrue(home["keys"]["locked"])
+            rel = f"/api/rent3_lessor/rooms/{ct.id_room}/release-keys"
+            self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 400)       # 확인 전에는 교부 불가
+            ok = c.post(f"{T}/balance-registry-check", headers=th, json={"changed": False, "checked": True})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertTrue(ok.json()["balance_registry"]["evidence"]["ai"])
+            self.assertEqual(c.post(rel, headers=chic, json={"balance_checked": True}).status_code, 200)
+            # 변동 신고는 체크 없이 언제나 가능(막으면 안 된다) — 교부 전 상태가 아니면 대상 아님
+            js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("https://www.iros.go.kr", "balRegChecked", "balance-registry-read", "잔금을 보내기 직전에", "'확인했음'에 체크"):
+                self.assertIn(needle, js, needle)
+        finally:
+            registry_ai._client = orig
 
 
 if __name__ == "__main__":

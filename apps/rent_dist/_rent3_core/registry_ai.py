@@ -42,6 +42,7 @@ PROMPT = """당신은 한국 등기사항증명서(등기부등본) 문서를 �
   "document_type": "registry" 또는 "other",
   "readable": true 또는 false,
   "issue_number": "발급확인번호(없으면 null)",
+  "viewed_at": "문서에 찍힌 열람(발급) 일시 YYYY-MM-DD HH:MM (없으면 null)",
   "property_address": "부동산 소재지",
   "owners": [{"name": "소유자 성명", "share": "지분(없으면 null)", "id_front": "소유자 주민등록번호 앞 6자리(YYMMDD)만. 뒷자리는 절대 옮기지 마세요. 없으면 null"}],
   "mortgages": [{"creditor": "근저당권자", "amount": 채권최고액 숫자, "registered_date": "접수일", "cancelled": true/false}],
@@ -75,6 +76,18 @@ def _parse_date(v: Any) -> Optional[date]:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
     except ValueError:
         return None
+
+
+def _norm_dt(v: Any) -> str:
+    """열람 일시를 'YYYY-MM-DDTHH:MM'(입력창 형식)으로. 읽을 수 없으면 빈 문자열."""
+    m = re.match(r"^\s*(\d{4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2}))?", str(v or ""))
+    if not m:
+        return ""
+    try:
+        datetime(int(m[1]), int(m[2]), int(m[3]))
+    except ValueError:
+        return ""
+    return f"{int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}T{int(m[4] or 0):02d}:{m[5] or '00'}"
 
 
 def decode_data_url(data_url: str):
@@ -154,6 +167,7 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
         "document_type": "registry" if raw.get("document_type") == "registry" else "other",
         "readable": bool(raw.get("readable", True)),
         "issue_number": str(raw.get("issue_number") or "").strip(),
+        "viewed_at": _norm_dt(raw.get("viewed_at")),
         "property_address": str(raw.get("property_address") or "").strip(),
         "owners": owners,
         "owner_name": ", ".join(o["name"] for o in owners),
