@@ -164,7 +164,7 @@
         $("psCol").innerHTML = names.map((n) => `<option value="${E(n)}">${E(n)}.json</option>`).join("");
         if (names.length) await loadSchema();
       }
-      // 오류 알림은 2초 뒤 사라지므로, 컬럼 목록을 못 불러오면 그 자리에 이유와 다시 시도 단추를 남긴다
+      // 오류 알림은 4초 뒤 사라지므로, 컬럼 목록을 못 불러오면 그 자리에 이유와 다시 시도 단추를 남긴다
       function failBox(msg) {
         $("psCount").textContent = "";
         $("psCols").innerHTML = `<div style="border:1px solid var(--err);border-radius:10px;padding:10px;font-size:13px;line-height:1.6;">⚠️ 컬럼 목록을 불러오지 못했습니다: <strong>${E(msg || "알 수 없는 오류")}</strong><br><span class="bass-muted">화면을 새로고침(Ctrl+Shift+R)하거나 다시 로그인한 뒤 시도해 주세요. 배포 직후라면 몇 분 뒤에 다시 열어 보세요.</span><br><button id="psRetry" class="bass-btn bass-btn--sm" type="button" style="min-height:40px;margin-top:6px;">다시 시도</button></div>`;
@@ -271,7 +271,7 @@
           try { rec = JSON.parse(host.querySelector(".rh-ta").value); } catch (e) { msg.textContent = "❌ JSON 형식이 올바르지 않습니다: " + e.message; return; }
           if (!window.confirm("이 건을 고칩니다. 계속할까요?")) return;
           btn.disabled = true;
-          // 오류는 2초 뒤 사라지는 알림 대신 카드 안에 계속 보여 준다(왜 저장이 안 됐는지 읽을 수 있게)
+          // 오류는 4초 뒤 사라지는 알림 대신 카드 안에 계속 보여 준다(왜 저장이 안 됐는지 읽을 수 있게)
           api("/pool-search/update-json", { method: "POST", body: { collection: col(), id: row.id, record: rec, reason: host.querySelector(".rh-why").value } })
             .then((res) => {
               Bass.updateAppAlert("success", res.message);

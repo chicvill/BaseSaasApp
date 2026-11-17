@@ -6760,6 +6760,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if o is not None:
                     o.delete(action="t")
 
+    def test_104_error_alert_auto_close_is_4_seconds_everywhere(self):
+        """104. 오류·경고 알림은 4초 뒤 닫힌다 — 값을 지정하는 두 파일(auth_fetch.js·rent3_session_guard.js)이 같은 값이고, 알림 코드는 그 값을 오류·경고에 쓴다."""
+        rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
+        for f in ("auth_fetch.js", "rent3_session_guard.js"):
+            self.assertIn("window.BASS_ERROR_TIMEOUT = 4000;", rd("shared_ui", f), f)
+            self.assertNotIn("BASS_ERROR_TIMEOUT = 2000", rd("shared_ui", f), f)
+        bass = rd("shared_ui", "bass.js")
+        self.assertIn("BASS_ERROR_TIMEOUT", bass)
+        self.assertIn('(lv === "error" || lv === "warning") && errMs ? errMs', bass)
+
 
 if __name__ == "__main__":
     unittest.main()
