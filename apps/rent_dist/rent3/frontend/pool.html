@@ -72,6 +72,25 @@
       <pre id="rawJsonBox" class="json-box">로딩 중...</pre>
     </section>
 
+    <section class="bass-card" style="margin-top:14px;" id="psSection">
+      <h3>🔎 검색 · 수정 (관리인)</h3>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">각 앱에 로그인하지 않고 원하는 데이터를 찾아 고칩니다. ① 컬렉션 선택 → ② 검색할 컬럼 체크 → ③ 검색 값 입력 → ④ 결과에서 한 건을 눌러 수정(사유 필수) → 저장/취소.
+        비밀번호·기기 정보 같은 <strong>보호 항목은 보이지도 고칠 수도 없고</strong>, 🔒 암호화 항목(도어락·계좌)은 읽기 전용입니다. 고친 내용은 전/후 값과 사유가 기록됩니다. 수납 금액은 수납 화면의 수정 기능을 쓰는 것이 안전합니다.</div>
+      <div class="bass-row" style="gap:8px;flex-wrap:wrap;align-items:center;">
+        <label class="bass-label" for="psCol" style="margin:0;">컬렉션</label>
+        <select id="psCol" class="bass-select" style="min-height:44px;width:auto;"></select>
+        <span id="psCount" class="bass-muted"></span>
+      </div>
+      <div id="psCols" style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0;"></div>
+      <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+        <input id="psVal" class="bass-input" style="flex:1;min-width:180px;min-height:44px;" placeholder="검색 값 (예: 안동기, 202, 2026-09)">
+        <button id="psGo" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 검색</button>
+      </div>
+      <div id="psRes" style="margin-top:10px;overflow-x:auto;"></div>
+      <div id="psEdit" style="margin-top:10px;"></div>
+      <details style="margin-top:10px;"><summary class="bass-muted" style="cursor:pointer;">최근 수정 기록</summary><div id="psLog" style="font-size:12.5px;line-height:1.6;margin-top:6px;"></div></details>
+    </section>
+
     <section class="bass-card" style="margin-top:14px;">
       <h3>⚡ 앱 간 실시간 객체 업데이트 이벤트 로그 (<code>_events.jsonl</code>)</h3>
       <div id="eventList"></div>
@@ -119,6 +138,73 @@
 
       loadHub().catch(Bass.showError);
       setInterval(() => { if (!document.hidden) loadHub().catch(() => {}); }, 3000);
+    })();
+  </script>
+<script>
+    (function () {
+      "use strict";
+      const E = Bass.escapeHtml, $ = (id) => document.getElementById(id);
+      const api = (p, o) => Bass.api("rent3_admin", p, o);
+      let sch = null;
+      async function loadCollections() {
+        const ov = await Bass.api("rent3", "/pool/overview");
+        const names = Object.keys((ov.meta || {}).collections || {});
+        $("psCol").innerHTML = names.map((n) => `<option value="${E(n)}">${E(n)}.json</option>`).join("");
+        if (names.length) await loadSchema();
+      }
+      async function loadSchema() {
+        sch = await api(`/pool-search/schema?collection=${encodeURIComponent($("psCol").value)}`);
+        $("psCount").textContent = `${sch.count}개 객체`;
+        const pre = new Set(["name", "tenant_name", "room_no", "billing_month", "payer_name", "title", "username"]);
+        $("psCols").innerHTML = sch.fields.map((f) => `<label style="display:inline-flex;align-items:center;gap:5px;min-height:36px;font-size:13px;${f.searchable ? "" : "opacity:.5;"}">
+          <input type="checkbox" class="ps-c" value="${E(f.name)}" ${f.searchable ? "" : "disabled"} ${pre.has(f.name) ? "checked" : ""}> ${f.sealed ? "🔒 " : ""}${E(f.name)}</label>`).join("");
+        $("psRes").innerHTML = ""; $("psEdit").innerHTML = "";
+      }
+      async function search() {
+        const cols = [...document.querySelectorAll(".ps-c:checked")].map((x) => x.value);
+        const r = await api("/pool-search/query", { method: "POST", body: { collection: $("psCol").value, columns: cols, value: $("psVal").value } });
+        $("psRes").innerHTML = `<div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">${r.total}건 일치${r.truncated ? ` (앞 ${r.shown}건만 표시 — 검색 값을 더 구체적으로)` : ""}</div>
+          <table class="bass-table" style="width:100%;font-size:12.5px;"><thead><tr><th>id</th>${r.columns.map((c) => `<th>${E(c)}</th>`).join("")}<th></th></tr></thead><tbody>
+          ${r.rows.map((x) => `<tr><td><code>${E(x.id)}</code></td>${r.columns.map((c) => `<td>${E(x.cells[c] ?? "")}</td>`).join("")}<td><button class="bass-btn bass-btn--sm ps-open" data-id="${E(x.id)}" type="button" style="min-height:40px;">열기</button></td></tr>`).join("")}</tbody></table>`;
+        document.querySelectorAll(".ps-open").forEach((b) => b.addEventListener("click", () => openItem(b.dataset.id).catch(Bass.showError)));
+      }
+      async function openItem(id) {
+        const it = await api(`/pool-search/item?collection=${encodeURIComponent($("psCol").value)}&id=${encodeURIComponent(id)}`);
+        const row = (f) => {
+          const v = f.value == null ? "" : f.value;
+          const inp = !f.editable ? `<input class="bass-input" value="${E(String(v))}" disabled style="width:100%;">`
+            : f.type === "bool" ? `<select class="bass-select ps-f" data-f="${E(f.name)}" data-orig="${v ? "true" : "false"}" style="width:100%;min-height:44px;"><option value="true" ${v ? "selected" : ""}>true</option><option value="false" ${!v ? "selected" : ""}>false</option></select>`
+            : `<input class="bass-input ps-f" data-f="${E(f.name)}" data-orig="${E(String(v))}" value="${E(String(v))}" style="width:100%;min-height:44px;">`;
+          return `<label class="r3-fld" style="display:grid;gap:2px;font-size:12.5px;margin-bottom:6px;">${f.sealed ? "🔒 " : ""}${E(f.name)} <span class="bass-muted">(${E(f.type)}${f.editable ? "" : " · 읽기 전용"})</span>${inp}</label>`;
+        };
+        $("psEdit").innerHTML = `<div class="bass-card" style="border-color:var(--primary);padding:12px;">
+          <strong>✏️ ${E(it.kind)} · <code>${E(it.id)}</code></strong>
+          ${it.protected_fields.length ? `<div class="bass-muted" style="font-size:12px;margin:4px 0;">보호된 항목(${E(it.protected_fields.join(", "))})은 표시·수정되지 않습니다.</div>` : ""}
+          <div style="margin-top:8px;">${it.fields.map(row).join("")}</div>
+          <label class="r3-fld" style="display:grid;gap:2px;font-size:12.5px;margin:8px 0;">수정 사유 (필수)<input id="psWhy" class="bass-input" placeholder="예: 이름 오타 정정" style="min-height:44px;"></label>
+          <div class="bass-row" style="gap:8px;"><button id="psSave" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;">💾 저장</button><button id="psCancel" class="bass-btn" type="button" style="min-height:46px;">취소</button></div></div>`;
+        $("psEdit").scrollIntoView({ behavior: "smooth", block: "nearest" });
+        $("psCancel").addEventListener("click", () => { $("psEdit").innerHTML = ""; });
+        $("psSave").addEventListener("click", function () {
+          const changes = {};
+          document.querySelectorAll(".ps-f").forEach((el) => { if (el.value !== el.dataset.orig) changes[el.dataset.f] = el.value; });
+          if (!Object.keys(changes).length) { Bass.updateAppAlert("warning", "바뀐 내용이 없습니다."); return; }
+          if (!window.confirm(`${Object.keys(changes).join(", ")} 항목을 고칩니다. 계속할까요?`)) return;
+          Bass.withLock(this, async () => {
+            const res = await api("/pool-search/update", { method: "POST", body: { collection: $("psCol").value, id: it.id, changes, reason: $("psWhy").value } });
+            Bass.updateAppAlert("success", res.message);
+            $("psEdit").innerHTML = ""; await loadLog(); await search().catch(() => {});
+          });
+        });
+      }
+      async function loadLog() {
+        const r = await api("/pool-search/edits");
+        $("psLog").innerHTML = (r.edits || []).map((e) => `<div style="padding:4px 0;border-bottom:1px solid var(--border);"><code>${E(String(e.at).slice(0, 16).replace("T", " "))}</code> ${E(e.admin)} · ${E(e.collection)}:<code>${E(e.id)}</code> — 사유: ${E(e.reason)}<br>${(e.changes || []).map((c) => `${E(c.field)}: ${E(String(c.before))} → ${E(String(c.after))}`).join(" / ")}</div>`).join("") || "기록 없음";
+      }
+      $("psCol").addEventListener("change", () => loadSchema().catch(Bass.showError));
+      $("psGo").addEventListener("click", function () { Bass.withLock(this, search); });
+      $("psVal").addEventListener("keydown", (e) => { if (e.key === "Enter") $("psGo").click(); });
+      loadCollections().then(loadLog).catch(Bass.showError);
     })();
   </script>
 <script src="/shared/ui/phone_fmt.js"></script>

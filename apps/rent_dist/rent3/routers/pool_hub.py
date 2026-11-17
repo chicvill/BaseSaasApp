@@ -155,10 +155,13 @@ def pool_overview() -> Dict[str, Any]:
 @router.get("/files/{collection}", dependencies=ADMIN_ONLY)
 def pool_file_raw(collection: str) -> Dict[str, Any]:
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core import poolsearch as _ps
+    env = pool().raw_collection(collection)
+    env["items"] = [_ps.redact_item(it) for it in env["items"]]       # 비밀번호 해시·기기 목록 같은 보호 필드는 관리인 화면에도 내려보내지 않는다
     return {
         "success": True,
         "collections": list(POOL_COLLECTIONS),
-        **pool().raw_collection(collection),
+        **env,
     }
 
 

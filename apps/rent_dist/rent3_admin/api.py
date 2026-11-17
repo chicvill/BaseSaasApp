@@ -780,10 +780,64 @@ def remove_pool_duplicates(req: DupRemoveReq):
     return {"success": True, "message": msg, **res}
 
 
+class PoolQueryReq(BaseModel):
+    collection: str
+    columns: List[str] = []
+    value: str = ""
+    limit: int = 100
+
+
+class PoolUpdateReq(BaseModel):
+    collection: str
+    id: str
+    changes: Dict[str, Any] = {}
+    reason: str = ""
+
+
+@router.get("/pool-search/schema", dependencies=ADMIN_ONLY)
+def pool_search_schema(collection: str):
+    """검색·수정 화면용: 컬렉션의 컬럼 목록(타입·수정 가능 여부·🔒 암호화 여부). 보호 필드(비밀번호 해시 등)는 목록에 없다."""
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    return {"success": True, **ps.schema(collection)}
+
+
+@router.post("/pool-search/query", dependencies=ADMIN_ONLY)
+def pool_search_query(req: PoolQueryReq):
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    return {"success": True, **ps.query(req.collection, req.columns, req.value, max(1, min(req.limit, 300)))}
+
+
+@router.get("/pool-search/item", dependencies=ADMIN_ONLY)
+def pool_search_item(collection: str, id: str):
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    return {"success": True, **ps.get_item(collection, id)}
+
+
+@router.post("/pool-search/update", dependencies=ADMIN_ONLY)
+def pool_search_update(req: PoolUpdateReq, request: Request):
+    """한 건의 문자·숫자·참거짓 필드를 고친다(사유 필수, 전/후 값 기록). 보호·암호화·목록 필드는 고칠 수 없다."""
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    res = ps.update(req.collection, req.id, req.changes, req.reason, _admin_label(request))
+    return {"success": True, "message": f"{', '.join(res['changed'])} 항목을 고쳤습니다(사유 기록됨).", **res}
+
+
+@router.get("/pool-search/edits", dependencies=ADMIN_ONLY)
+def pool_search_edits():
+    from apps.rent_dist._rent3_core import poolsearch as ps
+    ensure_pool_seeded()
+    return {"success": True, "edits": ps.recent_edits()}
+
+
 @router.get("/pool/{collection}", dependencies=ADMIN_ONLY)
 def inspect_pool_collection(collection: str, q: str = ""):
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core import poolsearch as _ps
     envelope = pool().raw_collection(collection)
+    envelope["items"] = [_ps.redact_item(it) for it in envelope["items"]]
     if q.strip():
         kw = q.strip().lower()
         envelope["items"] = [

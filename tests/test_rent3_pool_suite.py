@@ -6424,6 +6424,76 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for _, d in olds:
                 Pay(**d).save(action="t")
 
+    def test_99_pool_search_edit_protected_fields_audit_and_redaction(self):
+        """99. 관리인 Data Pool 검색·수정: 컬렉션 → 컬럼 체크 → 값 검색, 한 건 수정(사유 필수·타입 검증·전후 기록), 보호 필드(비밀번호 해시 등)와 🔒 암호화 필드는 표시·검색·수정 불가, 관리인 전용, 원문 뷰어도 보호 필드를 가림."""
+        from apps.rent_dist._rent3_core import Lessor, Room, Tenant, poolsearch as ps
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        t = Tenant.get("tenant_201")
+        keep = (t.name, t.phone, t.car_number, t.checked_in)
+        try:
+            # 권한
+            for method, url, kw in (("get", f"{AD}/pool-search/schema?collection=users", {}), ("post", f"{AD}/pool-search/query", {"json": {"collection": "users", "columns": ["name"], "value": "a"}}),
+                                    ("get", f"{AD}/pool-search/item?collection=users&id=tenant_201", {}), ("post", f"{AD}/pool-search/update", {"json": {"collection": "users", "id": "tenant_201", "changes": {"name": "x"}, "reason": "시험"}}),
+                                    ("get", f"{AD}/pool-search/edits", {})):
+                self.assertIn(getattr(c, method)(url, headers=chic, **kw).status_code, (401, 403), url)
+                self.assertEqual(getattr(c, method)(url, headers=self.NOAUTH, **kw).status_code, 401, url)
+            # 스키마: 보호 필드는 목록에 없고, 암호화 필드는 🔒(검색·수정 불가)
+            sc = c.get(f"{AD}/pool-search/schema?collection=users", headers=admin).json()
+            names = {f["name"]: f for f in sc["fields"]}
+            for hidden in ("password", "pin_hash", "invite_hash", "quick_devices", "login_devices"):
+                self.assertNotIn(hidden, names, hidden)
+            self.assertTrue(names["account_number"]["sealed"] and not names["account_number"]["searchable"] and not names["account_number"]["editable"])
+            self.assertTrue(names["name"]["editable"] and not names["id"]["editable"] and not names["consents"]["editable"])
+            # 검색: 컬럼 체크·값 필요, 암호화 컬럼만 체크하면 거절, 일치 건수
+            q = lambda **kw: c.post(f"{AD}/pool-search/query", headers=admin, json={"collection": "users", **kw})
+            self.assertEqual(q(columns=[], value=t.name).status_code, 400)
+            self.assertEqual(q(columns=["name"], value="").status_code, 400)
+            self.assertEqual(q(columns=["account_number"], value="1").status_code, 400)
+            hit = q(columns=["name", "room_no"], value=t.name).json()
+            self.assertIn("tenant_201", [r["id"] for r in hit["rows"]])
+            self.assertEqual(c.post(f"{AD}/pool-search/query", headers=admin, json={"collection": "nope", "columns": ["a"], "value": "a"}).status_code, 404)
+            # 항목 열기: 보호 필드 값은 내려오지 않는다
+            it = c.get(f"{AD}/pool-search/item?collection=users&id=tenant_201", headers=admin).json()
+            self.assertEqual({f["name"] for f in it["fields"]} & {"password", "pin_hash", "invite_hash"}, set())
+            self.assertIn("password", it["protected_fields"])
+            self.assertNotIn(Tenant.get("tenant_201").password, c.get(f"{AD}/pool-search/item?collection=users&id=tenant_201", headers=admin).text)
+            # 수정: 사유 필수, 보호·읽기 전용·없는 항목 거절, 타입 오류 거절, 변경 없음 거절
+            up = lambda changes, reason="시험 정정": c.post(f"{AD}/pool-search/update", headers=admin, json={"collection": "users", "id": "tenant_201", "changes": changes, "reason": reason})
+            self.assertEqual(up({"name": "검색수정시험"}, reason="").status_code, 400)
+            for bad in ({"password": "x"}, {"pin_hash": "x"}, {"id": "zzz"}, {"consents": "{}"}, {"account_number": "1"}, {"nope": "1"}):
+                self.assertEqual(up(bad).status_code, 400, bad)
+            self.assertEqual(up({"checked_in": "아니오"}).status_code, 400)                              # bool 형식 오류
+            self.assertEqual(up({"name": t.name}).status_code, 400)                                      # 바뀐 내용 없음
+            ok = up({"name": "검색수정시험", "car_number": "12가3456"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(sorted(ok.json()["changed"]), ["car_number", "name"])
+            t2 = Tenant.get("tenant_201")
+            self.assertEqual((t2.name, t2.car_number), ("검색수정시험", "12가3456"))
+            self.assertEqual(Tenant.get("tenant_201").password, t.password)                              # 비밀번호는 그대로
+            self.assertEqual(up({"checked_in": "false"}).status_code, 200)                               # 'false' 문자열은 bool 로 변환
+            self.assertFalse(Tenant.get("tenant_201").checked_in)
+            # 기록: 사유·전후 값
+            ed = c.get(f"{AD}/pool-search/edits", headers=admin).json()["edits"]
+            self.assertTrue(any(e["id"] == "tenant_201" and e["reason"] == "시험 정정" and any(x["field"] == "name" and x["after"] == "검색수정시험" and x["before"] == keep[0] for x in e["changes"]) for e in ed))
+            # 원문 뷰어도 보호 필드를 가린다
+            for url in ("/api/rent3/pool/files/users", f"{AD}/pool/users"):
+                items = c.get(url, headers=admin).json()["items"]
+                self.assertTrue(items)
+                for row in items:
+                    for k in ("password", "pin_hash", "invite_hash", "quick_devices", "login_devices"):
+                        if k in row:
+                            self.assertIn(row[k], ("•••(보호됨)", "", None, [], {}), (url, k))
+            # 화면
+            html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "pool.html"), encoding="utf-8").read()
+            for needle in ("psSection", "/pool-search/query", "/pool-search/update", "수정 사유 (필수)", "저장", "취소", "ps-c"):
+                self.assertIn(needle, html, needle)
+        finally:
+            t3 = Tenant.get("tenant_201"); t3.name, t3.phone, t3.car_number, t3.checked_in = keep; t3.save(action="t")
+            for e in ps.PoolEditLog.all():
+                e.delete(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()
