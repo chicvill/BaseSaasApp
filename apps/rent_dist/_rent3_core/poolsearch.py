@@ -93,20 +93,21 @@ def _disp(v: Any, limit: int = 60) -> str:
 
 
 def query(collection: str, columns: List[str], value: str, limit: int = 100) -> Dict[str, Any]:
-    """체크한 컬럼 중 하나라도 값이 (대소문자 무시) 포함하면 일치. 암호화·보호 컬럼은 검색하지 않는다."""
+    """공백으로 나눈 단어가 모두 체크한 컬럼 어딘가에 (대소문자 무시) 포함되면 일치. 암호화·보호 컬럼은 검색하지 않는다."""
     _check_collection(collection)
     sc = {f["name"]: f for f in schema(collection)["fields"]}
     cols = [c for c in columns if c in sc and sc[c]["searchable"]]
     if not cols:
         raise DomainError("검색할 컬럼을 하나 이상 체크해 주세요.", hint="🔒 표시된 컬럼(암호화)과 보호된 컬럼은 검색할 수 없습니다.")
-    kw = (value or "").strip().lower()
-    if not kw:
+    terms = [t for t in (value or "").strip().lower().split() if t]
+    if not terms:
         raise DomainError("검색 값을 입력해 주세요.")
     show = [n for n in SHOW_FIRST if n in sc][:3]
     show_cols = list(dict.fromkeys(cols + show))
     rows, total = [], 0
     for it in pool().find(collection):
-        if any(kw in str(it.get(c, "")).lower() for c in cols):
+        # 여러 단어는 모두(AND) 포함돼야 하고, 각 단어는 체크한 컬럼 중 어느 하나에 들어 있으면 된다
+        if all(any(t in str(it.get(c, "")).lower() for c in cols) for t in terms):
             total += 1
             if len(rows) < limit:
                 rows.append({"id": it.get("id", ""), "kind": it.get("_kind", ""), "cells": {c: _disp(it.get(c, "")) for c in show_cols}})

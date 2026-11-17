@@ -83,7 +83,7 @@
       </div>
       <div id="psCols" style="display:flex;flex-wrap:wrap;gap:6px 14px;margin:10px 0;"></div>
       <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
-        <input id="psVal" class="bass-input" style="flex:1;min-width:180px;min-height:44px;" placeholder="검색 값 (예: 안동기, 202, 2026-09)">
+        <input id="psVal" class="bass-input" style="flex:1;min-width:180px;min-height:44px;" placeholder="검색 값 — 여러 단어는 모두 포함된 건을 찾습니다 (예: 안동기 2026-09)">
         <button id="psGo" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 검색</button>
       </div>
       <div id="psRes" style="margin-top:10px;overflow-x:auto;"></div>
@@ -144,7 +144,8 @@
     (function () {
       "use strict";
       const E = Bass.escapeHtml, $ = (id) => document.getElementById(id);
-      const api = (p, o) => Bass.api("rent3_admin", p, o);
+      // 이 화면은 /rent3/ 아래라 Bass.api 가 관리인 앱 주소를 /api/rent3_admin 이 아닌 /api 로 만든다(정적 파일 서버로 가서 405). 관리인 API 주소를 직접 쓴다.
+      const api = (p, o) => Bass.request("/api/rent3_admin" + p, o);
       let sch = null;
       async function loadCollections() {
         const ov = await Bass.api("rent3", "/pool/overview");
@@ -163,7 +164,7 @@
       async function search() {
         const cols = [...document.querySelectorAll(".ps-c:checked")].map((x) => x.value);
         const r = await api("/pool-search/query", { method: "POST", body: { collection: $("psCol").value, columns: cols, value: $("psVal").value } });
-        $("psRes").innerHTML = `<div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">${r.total}건 일치${r.truncated ? ` (앞 ${r.shown}건만 표시 — 검색 값을 더 구체적으로)` : ""}</div>
+        $("psRes").innerHTML = `<div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">${r.total === 0 ? "일치하는 건이 없습니다. 체크한 컬럼에 그 단어가 들어 있는지 확인하세요(예: 호실·이름은 해당 컬럼을 체크). — " : ""}${r.total}건 일치${r.truncated ? ` (앞 ${r.shown}건만 표시 — 검색 값을 더 구체적으로)` : ""}</div>
           <table class="bass-table" style="width:100%;font-size:12.5px;"><thead><tr><th>id</th>${r.columns.map((c) => `<th>${E(c)}</th>`).join("")}<th></th></tr></thead><tbody>
           ${r.rows.map((x) => `<tr><td><code>${E(x.id)}</code></td>${r.columns.map((c) => `<td>${E(x.cells[c] ?? "")}</td>`).join("")}<td><button class="bass-btn bass-btn--sm ps-open" data-id="${E(x.id)}" type="button" style="min-height:40px;">열기</button></td></tr>`).join("")}</tbody></table>`;
         document.querySelectorAll(".ps-open").forEach((b) => b.addEventListener("click", () => openItem(b.dataset.id).catch(Bass.showError)));

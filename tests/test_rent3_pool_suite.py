@@ -6453,6 +6453,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(q(columns=["account_number"], value="1").status_code, 400)
             hit = q(columns=["name", "room_no"], value=t.name).json()
             self.assertIn("tenant_201", [r["id"] for r in hit["rows"]])
+            multi = q(columns=["name", "room_no"], value=f"{t.name} {t.room_no}").json()                    # 여러 단어: 모두 포함(AND), 단어마다 체크한 컬럼 어딘가에
+            self.assertIn("tenant_201", [r["id"] for r in multi["rows"]])
+            self.assertEqual(q(columns=["name", "room_no"], value=f"{t.name} 없는단어").json()["total"], 0)
             self.assertEqual(c.post(f"{AD}/pool-search/query", headers=admin, json={"collection": "nope", "columns": ["a"], "value": "a"}).status_code, 404)
             # 항목 열기: 보호 필드 값은 내려오지 않는다
             it = c.get(f"{AD}/pool-search/item?collection=users&id=tenant_201", headers=admin).json()
@@ -6487,8 +6490,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                             self.assertIn(row[k], ("•••(보호됨)", "", None, [], {}), (url, k))
             # 화면
             html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "pool.html"), encoding="utf-8").read()
-            for needle in ("psSection", "/pool-search/query", "/pool-search/update", "수정 사유 (필수)", "저장", "취소", "ps-c"):
+            for needle in ("psSection", "/pool-search/query", "/pool-search/update", "수정 사유 (필수)", "저장", "취소", "ps-c", 'Bass.request("/api/rent3_admin" + p, o)'):
                 self.assertIn(needle, html, needle)
+            self.assertNotIn('Bass.api("rent3_admin"', html)          # /rent3/ 아래 화면에서는 주소가 /api 로 잘못 만들어져 405 가 난다
         finally:
             t3 = Tenant.get("tenant_201"); t3.name, t3.phone, t3.car_number, t3.checked_in = keep; t3.save(action="t")
             for e in ps.PoolEditLog.all():
