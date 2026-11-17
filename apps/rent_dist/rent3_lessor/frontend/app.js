@@ -44,6 +44,7 @@
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
+      { label: "📜 등기부 확인 (등기클린)", tab: "registry" },
     ] },
     { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }, { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" }] },
     { title: "임차인 소통 · 시설", items: [
@@ -86,7 +87,7 @@
   const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly) && (VIA_PIN ? pinOk(i) : !i.pinOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
   R3Shell.watchSupport();
-  const TAB_TITLES = { rooms: "임대매물 등록", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
+  const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
@@ -368,6 +369,7 @@
     else if (currentTab === "messages") renderMessagesTab();
     else if (currentTab === "bldgtax") renderBldgTaxTab();
     else if (currentTab === "rooms") renderRoomsTab();
+    else if (currentTab === "registry") { regOpen = true; renderRoomsTab(); const rc = document.getElementById("regCard"); if (rc) rc.scrollIntoView({ block: "start" }); }   // 호실별 등기부 카드를 열어 그 자리로
     pinLimit(elTabContent);
   }
   document.getElementById("btnBackLedger").addEventListener("click", () => switchTab("ledger"));
@@ -2834,7 +2836,7 @@
         </div>
       </div>
 
-      <details class="bass-card" ${regOpen ? "open" : ""}>
+      <details class="bass-card" id="regCard" ${regOpen ? "open" : ""}>
         <summary style="cursor:pointer;font-weight:800;">📜 호실별 등기부 확인 (등기클린 표시)</summary>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:8px 0;">인터넷등기소에서 받은 <strong>등기사항증명서(PDF 또는 사진)</strong>를 올리면 AI 가 소유자·근저당·압류 여부를 읽습니다. <strong>원본과 대조해 [확인 완료]를 눌러야</strong> 기록되고, 소유자가 임대인과 같고 근저당·압류가 없을 때만 임차인에게 '등기클린'이 표시됩니다(확정 후 ${REG_FRESH_DAYS}일 동안). AI 는 서류의 진위를 가리지 못하므로 참고용입니다.</div>
         ${rooms.map((r) => {

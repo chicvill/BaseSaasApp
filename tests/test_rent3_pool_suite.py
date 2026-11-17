@@ -3235,7 +3235,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
         menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
         tabs = set(re.findall(r'tab: "(\w+)"', menu))
-        self.assertEqual(tabs, {"ledger", "broker", "rooms", "tax", "ops", "expiry", "notice", "bldgtax", "messages"})
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "registry", "tax", "ops", "expiry", "notice", "bldgtax", "messages"})
         for t in tabs - {"ledger"}:
             self.assertIn(f'currentTab === "{t}"', app, t)
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
