@@ -895,6 +895,24 @@ class Pay(PoolObj):
     allocated_months: List[Dict[str, Any]] = Field(default_factory=list)
     idempotency_key: str = ""
     raw_sms: str = ""
+    deposit_group_id: str = ""               # 한 번의 입금이 여러 달로 나뉘어 저장된 건들을 묶는 표시(통장·문자 1건과 맞춰 보기 위함)
+    status: str = "ACTIVE"                   # ACTIVE / VOIDED(무효 처리: 기록은 남기되 원장·세금·중복 점검 계산에서는 빠진다)
+    void_reason: str = ""
+    voided_at: str = ""
+    voided_by: str = ""
+
+    # 무효(VOIDED) 건은 기본 조회에서 빠진다 — 원장·세무·중복 점검·문자 중복 차단이 모두 같은 규칙을 따르게 하려는 것(include_voided=True 로만 보인다)
+    @classmethod
+    def find(cls, include_voided: bool = False, **where: Any) -> List["Pay"]:
+        rows = super().find(**where)
+        return rows if include_voided else [r for r in rows if r.status != "VOIDED"]
+
+    @classmethod
+    def get(cls, obj_id: str, include_voided: bool = False) -> Optional["Pay"]:
+        o = super().get(obj_id)
+        if o is not None and o.status == "VOIDED" and not include_voided:
+            return None
+        return o
 
     def summary(self) -> str:
         return f"수납 {self.room_no}호 {self.payer_name} {self.total_amount:,}원 ({self.billing_month})"

@@ -187,6 +187,7 @@ class FifoPaymentEngine:
 
         pay_objs: List[Pay] = []
         multi = len(allocations) > 1
+        group_id = f"dep_{uuid4().hex[:8]}"          # 한 입금이 여러 달로 나뉘어도 같은 묶음으로 표시
         for a in allocations:
             row = a["_row"]
             due = row.get("due") or 0
@@ -211,6 +212,7 @@ class FifoPaymentEngine:
                 method=method,
                 allocated_months=[{k: v for k, v in a.items() if k != "_row"}],
                 idempotency_key=(f"{idem_key}:{a['ym']}" if multi else idem_key),
+                deposit_group_id=group_id,
                 raw_sms=raw_sms,
             ).save(action="fifo_payment_collected", app_source=app_source))
         for a in allocations:

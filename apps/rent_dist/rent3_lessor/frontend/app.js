@@ -394,7 +394,7 @@
     .r3-subbox { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); }
     .r3-subbox--direct { background: hsla(156, 54%, 46%, .09); border-color: hsla(156, 54%, 56%, .26); margin: 8px 0 12px; }
     .r3-subbox--msg { background: hsla(262, 64%, 58%, .10); border-color: hsla(262, 64%, 66%, .28); margin-top: 12px; }
-    .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
+    .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 52px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr .pr-del { padding: 4px; min-height: 40px; font-size: 12.5px; color: var(--err); width: 100%; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
@@ -502,13 +502,16 @@
       ${(r.payments || []).slice().reverse().slice(0, 60).map((p) => `<div data-pay="${E(p.id)}" style="display:flex;gap:6px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12.5px;">
         <span style="flex:1;min-width:0;"><strong>${E(p.billing_month || "-")}</strong> · ${fmtWon(p.total)} · 입금 ${E(p.paid_date)}<br><span class="bass-muted">${E(p.source)} · 기록 ${E(String(p.created_at || "").slice(0, 16).replace("T", " "))}${(p.allocated_months || []).length > 1 ? ` · 상계 ${E(p.allocated_months.join(", "))}` : ""}</span></span>
         <button type="button" class="bass-btn bass-btn--sm ls-del" style="min-height:40px;">삭제</button></div>`).join("")}
+      ${(r.voided || []).length ? `<div class="r3-lbl" style="margin-top:10px;">무효 처리된 납부 (계산에서 제외 · 기록만 보관)</div>${(r.voided || []).map((v) => `<div class="bass-muted" style="font-size:12px;padding:3px 0;">${E(v.billing_month)} · ${fmtWon(v.total)} · 입금 ${E(v.paid_date)} — 사유: ${E(v.reason)} (${E(String(v.voided_at || "").slice(0, 16).replace("T", " "))})</div>`).join("")}` : ""}
       <div class="r3-lbl" style="margin-top:10px;">달별 상계 결과 (밀린 달부터 표시)</div>
       ${(r.months || []).filter((m) => m.due > 0).slice().reverse().slice(0, 36).map((m) => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;${m.unpaid ? "color:var(--err);" : ""}"><span>${E(m.ym)}</span><span>청구 ${fmtWon(m.due)} · 상계 ${fmtWon(m.paid)}${m.unpaid ? ` · <strong>미납 ${fmtWon(m.unpaid)}</strong>` : ""}${m.labelled_total && m.labelled_total !== m.due ? ` · 이 달로 적힌 납부 ${fmtWon(m.labelled_total)}` : ""}</span></div>`).join("")}`);
     body.querySelectorAll(".ls-del").forEach((b) => b.addEventListener("click", function () {
       const id = this.closest("[data-pay]").dataset.pay;
-      if (!window.confirm("이 납부 건을 삭제할까요? 그 달 청구액은 다시 미납으로 돌아올 수 있습니다.")) return;
+      const reason = window.prompt("이 납부 건을 무효 처리합니다(기록은 남고 그 달은 미납으로 돌아갑니다). 사유를 적어 주세요:", "오입력");
+      if (reason === null) return;
+      if (!reason.trim()) { Bass.updateAppAlert("warning", "무효 처리 사유를 적어야 합니다."); return; }
       Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/payments/delete", { method: "POST", body: { branch: currentBranch, pay_id: id } });
+        const res = await Bass.api(APP_ID, "/payments/delete", { method: "POST", body: { branch: currentBranch, pay_id: id, reason: reason.trim() } });
         Bass.updateAppAlert("success", res.message);
         await refresh();
         await showLedgerStateModal(no);
@@ -539,7 +542,7 @@
         <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
         <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
         <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비">
-        <button type="button" class="bass-btn bass-btn--sm pr-del" aria-label="수납 내역 삭제">삭제</button></div>`));
+        <span style="display:flex;flex-direction:column;gap:2px;"><button type="button" class="bass-btn bass-btn--sm pr-mv" data-grp="${Bass.escapeHtml(p.grp || "")}" data-grpn="${p.grp_n || 1}" aria-label="다른 달로 옮기기" style="padding:2px;min-height:36px;font-size:12.5px;">달 옮김</button><button type="button" class="bass-btn bass-btn--sm pr-del" data-grpn="${p.grp_n || 1}" aria-label="수납 내역 무효 처리">삭제</button></span></div>`));
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
@@ -622,16 +625,34 @@
     if ($m("pmState")) $m("pmState").addEventListener("click", openState);
     if ($m("pmState2")) $m("pmState2").addEventListener("click", openState);
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
+      const mvBtn = row.querySelector(".pr-mv");
+      if (mvBtn) mvBtn.addEventListener("click", () => {
+        const cur = (r.pays || []).find((x) => x.id === row.dataset.pay) || {};
+        const free = unpaidMonths.map((m) => m.ym);
+        const to = window.prompt(`${no}호 ${cur.billing_month || ""}월 납부(${fmtWon(cur.total || 0)})를 어느 달로 옮길까요?\n비어 있는 달: ${free.length ? free.join(", ") : "없음"}\n옮길 달(YYYY-MM):`, free[0] || "");
+        if (!to || !to.trim()) return;
+        Bass.withLock(mvBtn, async () => {
+          const res = await Bass.api(APP_ID, "/payments/edit", { method: "POST", body: {
+            branch: currentBranch, pay_id: row.dataset.pay, billing_month: to.trim(),
+            paid_date: row.querySelector(".pr-date").value, rent_amount: Number(row.querySelector(".pr-rent").value || 0), maintenance_amount: Number(row.querySelector(".pr-fee").value || 0) } });
+          Bass.updateAppAlert("success", res.message);
+          delete receiptMsg[no];
+          await refresh();
+        });
+      });
       const delBtn = row.querySelector(".pr-del");
       if (delBtn) {
         delBtn.addEventListener("click", () => {
           const dt = row.querySelector(".pr-date").value;
           const tot = Number(row.dataset.total || (Number(row.querySelector(".pr-rent").value || 0) + Number(row.querySelector(".pr-fee").value || 0)));
-          if (!window.confirm(`${no}호 ${dt} (${fmtWon(tot)}) 수납 내역을 삭제할까요?`)) return;
+          const grpN = Number(delBtn.dataset.grpn || 1);
+          const reason = window.prompt(`${no}호 ${dt} (${fmtWon(tot)}) 수납 내역을 무효 처리합니다.\n기록은 사유와 함께 남고, 그 달은 미납으로 돌아갑니다.${grpN > 1 ? `\n(같은 입금에서 나뉜 다른 달 ${grpN - 1}건은 그대로 남습니다)` : ""}\n\n사유를 적어 주세요:`, "오입력");
+          if (reason === null) return;
+          if (!reason.trim()) { Bass.updateAppAlert("warning", "무효 처리 사유를 적어야 합니다."); return; }
           Bass.withLock(delBtn, async () => {
             const res = await Bass.api(APP_ID, "/payments/delete", {
               method: "POST",
-              body: { branch: currentBranch, pay_id: row.dataset.pay },
+              body: { branch: currentBranch, pay_id: row.dataset.pay, reason: reason.trim() },
             });
             Bass.updateAppAlert("success", res.message);
             delete receiptMsg[no];

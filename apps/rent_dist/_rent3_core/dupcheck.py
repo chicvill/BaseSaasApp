@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 from . import backup as bk
 from .models import Contract, Room, Tenant
 from .models import Pay
+from .pool import now_iso
 
 
 def _same_content(p: Pay) -> tuple:
@@ -77,6 +78,7 @@ def remove_exact(apply: bool = False) -> Dict[str, Any]:
     for pid in ids:
         p = Pay.get(pid)
         if p is not None:
-            p.delete(action="duplicate_payment_removed", app_source="rent3_dupcheck")
+            p.status, p.void_reason, p.voided_at, p.voided_by = "VOIDED", "중복 점검: 내용이 같은 납부 정리", now_iso(), "dupcheck"
+            p.save(action="duplicate_payment_voided", app_source="rent3_dupcheck")
             n += 1
     return {"applied": True, "removed": n, "ids": ids, "backup": info.get("name", "")}

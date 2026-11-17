@@ -6211,6 +6211,99 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for _, d in olds:
                 Pay(**d).save(action="t")
 
+    def test_96_void_instead_of_delete_edit_cap_month_move_and_deposit_group(self):
+        """96. 수납 '삭제'는 무효 처리(VOIDED: 사유·시각 보관, 원장·세무·중복 점검에서 제외·선수금 안 쌓임), 수정은 그 달 청구액 초과 불가, 달 옮기기(빈 자리 필요), 여러 달 입금은 같은 묶음 표시."""
+        from datetime import timedelta, datetime
+        from apps.rent_dist._rent3_core import Contract, Pay, current_ym, dupcheck
+        c = self.client
+        chic = self._login("chic")
+        LS = "/api/rent3_lessor"
+        ct = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        monthly = ct.monthly_rent + ct.maintenance_fee + ct.compute_vat()
+        olds = [(x, x.model_dump()) for x in Pay.find(id_contract=ct.id)]
+        keep_move = ct.move_in_date
+        made = []
+        try:
+            for x, _ in olds:
+                x.delete(action="t")
+            ym_now = current_ym(); y, m = int(ym_now[:4]), int(ym_now[5:7])
+            m0 = m - 3; y0 = y - (1 if m0 <= 0 else 0); m0 = m0 + (12 if m0 <= 0 else 0)
+            ct.move_in_date = f"{y0:04d}-{m0:02d}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            D = [r["ym"] for r in ct.ledger()["months"] if r["due"] > 0][:4]
+            self.assertGreaterEqual(len(D), 4)
+
+            def age():
+                ts = (datetime.now() - timedelta(minutes=5)).isoformat(timespec="seconds")
+                for x in Pay.find(id_contract=ct.id):
+                    x.created_at = ts; x.save(action="t")
+
+            def col(amount, **kw):
+                age()
+                r = c.post(f"{LS}/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": amount, **kw})
+                if r.status_code == 200:
+                    made.extend(x["id"] for x in r.json()["payments"])
+                return r
+
+            # ④ 두 달치 입금 → 달마다 한 건, 같은 묶음 표시
+            two = col(monthly * 2); self.assertEqual(two.status_code, 200, two.text)
+            ps = two.json()["payments"]
+            self.assertEqual(len(ps), 2)
+            self.assertTrue(ps[0]["deposit_group_id"] and ps[0]["deposit_group_id"] == ps[1]["deposit_group_id"])
+            self.assertEqual([p["billing_month"] for p in ps], D[:2])
+            one = col(monthly); self.assertEqual(one.status_code, 200)
+            self.assertNotEqual(one.json()["payment"]["deposit_group_id"], ps[0]["deposit_group_id"])
+            dash = c.get(f"{LS}/dashboard?branch=main", headers=chic).json()
+            pays201 = next(r for r in dash["rooms"] if r["room_no"] == "201")["pays"]
+            self.assertEqual({x["grp_n"] for x in pays201 if x["grp"] == ps[0]["deposit_group_id"]}, {2})
+            # ③ 삭제 = 무효 처리: 그 달 미납 복귀, 선수금 없음, 사유 보관, 계산·중복 점검·조회에서 제외, 같은 묶음의 다른 건은 유지
+            vid = ps[0]["id"]
+            dl = c.post(f"{LS}/payments/delete", headers=chic, json={"branch": "main", "pay_id": vid, "reason": "시험 오입력"})
+            self.assertEqual(dl.status_code, 200, dl.text)
+            self.assertIn("무효 처리", dl.json()["message"]); self.assertIn("1건은 그대로", dl.json()["message"])
+            raw = Pay.get(vid, include_voided=True)
+            self.assertEqual((raw.status, raw.void_reason), ("VOIDED", "시험 오입력"))
+            self.assertTrue(raw.voided_at)
+            self.assertIsNone(Pay.get(vid))
+            self.assertNotIn(vid, [x.id for x in Pay.find(id_contract=ct.id)])
+            lg = ct.ledger()
+            self.assertEqual(lg["advance_credit"], 0)
+            self.assertEqual([r["ym"] for r in lg["months"] if r["unpaid"] > 0 and r["ym"] in D[:3]], [D[0]])
+            self.assertEqual(c.post(f"{LS}/payments/delete", headers=chic, json={"branch": "main", "pay_id": vid}).status_code, 404)   # 이미 무효
+            st = c.get(f"{LS}/payments/ledger-state?branch=main&room_no=201", headers=chic).json()
+            self.assertIn("시험 오입력", [v["reason"] for v in st["voided"]])
+            # 반복해도 쌓이지 않는다: 같은 달을 다시 수납·무효를 3번 반복
+            for _ in range(3):
+                r = col(monthly, target_ym=D[0]); self.assertEqual(r.status_code, 200, r.text)
+                self.assertEqual(c.post(f"{LS}/payments/delete", headers=chic, json={"branch": "main", "pay_id": r.json()["payment"]["id"], "reason": "반복 시험"}).status_code, 200)
+                self.assertEqual(ct.ledger()["advance_credit"], 0)
+            self.assertEqual(dupcheck.scan()["removable_count"], 0)                                              # 무효 건은 중복으로 잡히지 않는다
+            # ① 수정 검증: 그 달 청구액을 넘게 고칠 수 없고(OVER_MONTH), 날짜만 고치는 것·줄이는 것은 가능
+            first = Pay.get(one.json()["payment"]["id"])
+            ed = lambda **kw: c.post(f"{LS}/payments/edit", headers=chic, json={"branch": "main", "pay_id": first.id, "paid_date": first.paid_date, "rent_amount": first.rent_amount, "maintenance_amount": first.maintenance_amount, **kw})
+            over = ed(rent_amount=first.rent_amount + 1000)
+            self.assertEqual((over.status_code, over.json().get("code")), (400, "OVER_MONTH"))
+            self.assertEqual(ed(paid_date="2026-10-02").status_code, 200)
+            self.assertEqual(ed(rent_amount=first.rent_amount - 1000).status_code, 200)                           # 줄이면 그 달이 일부 납부가 된다
+            self.assertEqual(ed(rent_amount=first.rent_amount).status_code, 200)
+            # ② 달 옮기기: 이미 가득 찬 달·청구 없는 달·형식 오류는 거절, 비어 있는 달로는 이동
+            self.assertEqual(ed(billing_month=D[1]).status_code, 400)                                            # 이미 낸 달(자리 없음)
+            self.assertEqual(ed(billing_month="1999-01").status_code, 400)
+            self.assertEqual(ed(billing_month="x").status_code, 400)
+            mv = ed(billing_month=D[0]); self.assertEqual(mv.status_code, 200, mv.text)
+            self.assertEqual(Pay.get(first.id).billing_month, D[0])
+            self.assertIn("옮겼습니다", mv.json()["message"])
+            self.assertEqual([r["ym"] for r in ct.ledger()["months"] if r["unpaid"] > 0 and r["ym"] in D[:3]], [D[2]])
+            # 화면
+            lj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("pr-mv", "달 옮김", "무효 처리", "무효 처리된 납부", "billing_month: to.trim()", "reason: reason.trim()"):
+                self.assertIn(needle, lj, needle)
+        finally:
+            for x in Pay.find(id_contract=ct.id, include_voided=True):
+                x.delete(action="t")
+            ct = Contract.get(ct.id); ct.move_in_date = keep_move; ct.save(action="t")
+            for _, d in olds:
+                Pay(**d).save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

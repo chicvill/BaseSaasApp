@@ -449,7 +449,8 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         card = {
             **r.model_dump(),
             "pays": [{"id": x.id, "paid_date": x.paid_date, "billing_month": x.billing_month, "rent": x.rent_amount,
-                      "fee": x.maintenance_amount, "total": x.total_amount} for x in pays],
+                      "fee": x.maintenance_amount, "total": x.total_amount, "grp": x.deposit_group_id,
+                      "grp_n": len([y for y in pays if x.deposit_group_id and y.deposit_group_id == x.deposit_group_id])} for x in pays],
             "is_occupied": r.is_occupied,
             "tenant": tenant.safe_dump() if tenant else None,
             "contract": ct.model_dump() if ct else None,
@@ -718,10 +719,12 @@ def payment_ledger_state(branch: str = "main", room_no: str = ""):
             anomalies.append({"kind": "SAME_MONTH_OVER", "ym": ym, "msg": f"{ym}월에 납부가 {len(ps)}건(합계 {sum(x.total_amount for x in ps):,}원)으로 청구액 {due:,}원보다 많습니다. 중복 수납이면 한 건을 삭제하세요.", "pay_ids": [x.id for x in ps]})
     if lg["advance_credit"] > 0:
         anomalies.append({"kind": "ADVANCE_CREDIT", "ym": "", "msg": f"선수금 {lg['advance_credit']:,}원이 쌓여 있습니다(밀린 청구보다 많이 받은 금액). 중복 수납이 아닌지 확인하세요.", "pay_ids": []})
-    return {"success": True, "room_no": room.room_no, "tenant_name": ct.tenant_name, "total_due": lg["total_due"], "total_paid": lg["total_paid"], "total_unpaid": lg["total_unpaid"],
+    voided = sorted((x for x in Pay.find(id_contract=ct.id, include_voided=True) if x.status == "VOIDED" and x.payment_kind == "MONTHLY_RENT"), key=lambda x: x.voided_at, reverse=True)[:30]
+    return {"success": True, "room_no": room.room_no, "tenant_name": ct.tenant_name, "total_due": lg["total_due"],
+            "voided": [{"id": x.id, "billing_month": x.billing_month, "paid_date": x.paid_date, "total": x.total_amount, "reason": x.void_reason, "voided_at": x.voided_at, "voided_by": x.voided_by} for x in voided], "total_paid": lg["total_paid"], "total_unpaid": lg["total_unpaid"],
             "advance_credit": lg["advance_credit"], "months": months, "anomalies": anomalies,
             "payments": [{"id": p.id, "billing_month": p.billing_month, "paid_date": p.paid_date, "total": p.total_amount, "source": source(p), "created_at": p.created_at,
-                          "allocated_months": [a.get("ym") for a in (p.allocated_months or [])]} for p in pays]}
+                          "allocated_months": [a.get("ym") for a in (p.allocated_months or [])], "group": p.deposit_group_id} for p in pays]}
 
 
 class PayEditReq(BaseModel):
@@ -730,6 +733,7 @@ class PayEditReq(BaseModel):
     paid_date: str = ""
     rent_amount: int = 0
     maintenance_amount: int = 0
+    billing_month: str = ""          # 비우면 그대로, 값이 있으면 그 달로 옮긴다(그 달의 빈 자리가 충분해야 한다)
 
 
 @router.post("/payments/edit")
@@ -745,29 +749,60 @@ def edit_payment(req: PayEditReq):
         raise DomainError("납부일 형식이 올바르지 않습니다 (예: 2026-03-15).")
     if req.rent_amount < 0 or req.maintenance_amount < 0 or req.rent_amount + req.maintenance_amount <= 0:
         raise DomainError("금액은 0원보다 커야 합니다.")
+    new_total = req.rent_amount + req.maintenance_amount + pay.vat_amount
+    old_ym = (pay.billing_month or "")[:7]
+    new_ym = (req.billing_month or old_ym).strip()[:7]
+    moving = bool(req.billing_month) and new_ym != old_ym
+    ct = Contract.get(pay.id_contract) if pay.id_contract else None
+    legacy = TaxAndCertificateService.is_carryover_payment(pay)
+    if moving and (legacy or ct is None):
+        raise DomainError("이 납부는 여러 달분을 합친 이월 건이라 달을 옮길 수 없습니다.", hint="이월 합산 건은 관리자가 달별로 나누는 정리를 거친 뒤에 옮길 수 있습니다.")
+    # 선수금 방지: 그 달 청구액을 넘게 고치거나, 자리가 부족한 달로 옮길 수 없다(날짜만 고치거나 금액을 줄이는 것은 허용)
+    if ct is not None and not legacy and (moving or new_total > pay.total_amount):
+        if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", new_ym):
+            raise DomainError("옮길 달은 YYYY-MM 형식이어야 합니다 (예: 2026-09).")
+        row = next((m for m in ct.ledger()["months"] if m["ym"] == new_ym), None)
+        if row is None or int(row["due"]) <= 0:
+            raise DomainError(f"{new_ym}월은 청구 대상 달이 아닙니다.", hint="청구가 있는 달(미납으로 표시될 수 있는 달)만 고를 수 있습니다.", code="NOT_DUE_MONTH")
+        others = sum(p.total_amount for p in Pay.find(id_contract=ct.id)
+                     if p.id != pay.id and p.payment_kind == "MONTHLY_RENT" and (p.billing_month or "")[:7] == new_ym and not TaxAndCertificateService.is_carryover_payment(p))
+        room_left = int(row["due"]) - others
+        if new_total > room_left:
+            raise DomainError(f"{new_ym}월에는 {max(room_left, 0):,}원까지만 넣을 수 있습니다(청구액 {int(row['due']):,}원, 이미 낸 {others:,}원). 선수금은 받지 않습니다.",
+                              hint="금액을 줄이거나 비어 있는 다른 달을 골라 주세요.", code="OVER_MONTH")
     pay.paid_date = d.isoformat()
     pay.rent_amount = req.rent_amount
     pay.maintenance_amount = req.maintenance_amount
-    pay.total_amount = req.rent_amount + req.maintenance_amount + pay.vat_amount
-    pay.save(action="payment_edited", app_source=APP_SRC)
-    return {"success": True, "message": f"{pay.room_no}호 수납 내역을 고쳤습니다 ({pay.paid_date}, {pay.total_amount:,}원).", "payment": pay.model_dump()}
+    pay.total_amount = new_total
+    if moving:
+        pay.billing_month = new_ym
+    pay.allocated_months = [{"ym": (pay.billing_month or "")[:7], "allocated": new_total, "cleared": False}] if not legacy else pay.allocated_months
+    pay.save(action="payment_month_moved" if moving else "payment_edited", app_source=APP_SRC)
+    msg = f"{pay.room_no}호 수납 내역을 고쳤습니다 ({pay.paid_date}, {pay.total_amount:,}원)." if not moving else f"{pay.room_no}호 납부를 {old_ym}월에서 {new_ym}월로 옮겼습니다 ({pay.total_amount:,}원)."
+    return {"success": True, "message": msg, "payment": pay.model_dump()}
 
 
 class PayDeleteReq(BaseModel):
     branch: str = "main"
     pay_id: str
+    reason: str = ""                 # 무효 처리 사유(화면은 반드시 묻는다)
 
 
 @router.post("/payments/delete")
-def delete_payment(req: PayDeleteReq):
-    """수납 내역 한 건을 삭제한다 (중복·오입력 수납 정정용, 이벤트 로그에 기록)."""
+def delete_payment(req: PayDeleteReq, request: Request):
+    """수납 내역 한 건을 **무효 처리**한다(오입력·중복·테스트 정정용). 기록은 사유·시각과 함께 남지만 원장·세금 계산·중복 점검에서는 빠지므로,
+    그 달은 원래대로 미납이 되고 선수금이 쌓이지 않는다. 같은 입금에서 나뉜 다른 달 건은 건드리지 않는다."""
     ensure_pool_seeded()
     pay = Pay.require(req.pay_id)
     if normalize_branch_id(pay.branch) != normalize_branch_id(req.branch):
         raise Forbidden("다른 지점의 수납 내역은 지울 수 없습니다.")
-    room_no, p_date, amt = pay.room_no, pay.paid_date, pay.total_amount
-    pay.delete(action="payment_deleted", app_source=APP_SRC)
-    return {"success": True, "message": f"{room_no}호 수납 내역({p_date}, {amt:,}원)을 삭제했습니다."}
+    room_no, p_date, amt, ym = pay.room_no, pay.paid_date, pay.total_amount, pay.billing_month
+    siblings = [x for x in Pay.find(id_contract=pay.id_contract) if pay.deposit_group_id and x.deposit_group_id == pay.deposit_group_id and x.id != pay.id]
+    pay.status, pay.void_reason = "VOIDED", (req.reason or "").strip() or "사유 미기재"
+    pay.voided_at, pay.voided_by = now_iso(), str((claims_from(request) or {}).get("u") or "")
+    pay.save(action="payment_voided", app_source=APP_SRC)
+    extra = f" 같은 입금에서 나뉜 다른 달 {len(siblings)}건은 그대로입니다." if siblings else ""
+    return {"success": True, "message": f"{room_no}호 {ym}월 수납 내역({p_date}, {amt:,}원)을 무효 처리했습니다(사유: {pay.void_reason}). 그 달은 미납으로 돌아갑니다.{extra}"}
 
 
 class ContractEditReq(BaseModel):
