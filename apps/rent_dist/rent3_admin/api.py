@@ -719,6 +719,45 @@ def settle_lessor_fee(lessor_id: str):
     }
 
 
+class CarrySplitReq(BaseModel):
+    confirm: bool = False
+
+
+@router.get("/carryover-split/preview", dependencies=ADMIN_ONLY)
+def carryover_split_preview():
+    """이관 '이전 입금 합산' 건을 달별 건으로 나눌 계획(읽기 전용): 어느 호실이 몇 개월로 풀리는지, 검토가 필요한 건은 무엇인지."""
+    from apps.rent_dist._rent3_core import carryover_split as cs
+    ensure_pool_seeded()
+    rows = cs.plan()
+    ok = [r for r in rows if r["status"] == "OK"]
+    return {"success": True, "total": len(rows), "ok": len(ok), "review": [r for r in rows if r["status"] != "OK"],
+            "new_records": sum(len(r["months"]) for r in ok), "sum_ok_amount": sum(r["total"] for r in ok),
+            "sum_planned_amount": sum(m["amount"] for r in ok for m in r["months"]),
+            "rows": [{"branch": r["branch"], "room_no": r["room_no"], "tenant": r["tenant"], "total": r["total"], "months": len(r["months"]),
+                      "from": (r["months"][0]["ym"] if r["months"] else ""), "to": (r["months"][-1]["ym"] if r["months"] else ""), "status": r["status"], "note": r["note"]} for r in rows]}
+
+
+@router.post("/carryover-split/apply", dependencies=ADMIN_ONLY)
+def carryover_split_apply(req: CarrySplitReq):
+    """풀 전체를 자동 백업한 뒤 분해한다. 건마다 그 계약의 입금·미납·선수금 합계와 미납 달 분포를 전후로 비교해 다르면 그 건만 되돌린다. 원본은 무효로 보관."""
+    from apps.rent_dist._rent3_core import carryover_split as cs, backup as bk
+    ensure_pool_seeded()
+    if not req.confirm:
+        raise DomainError("확인(confirm)이 필요합니다.", hint="미리보기를 확인한 뒤 확인 창에서 진행해 주세요.")
+    rows = cs.plan()
+    if not any(r["status"] == "OK" for r in rows):
+        return {"success": True, "message": "분해할 이월 합산 건이 없습니다.", "split": 0, "created": 0, "rolled_back": [], "backup": ""}
+    snap0 = cs.snapshot()
+    info = bk.create()
+    res = cs.apply(rows)
+    cmp = cs.compare(snap0, cs.snapshot())
+    ok = cmp["identical_totals"] and not res["rolled_back"]
+    return {"success": True, "backup": info.get("name", ""), **res, "identical_totals": cmp["identical_totals"], "mismatches": cmp["mismatches"],
+            "month_distribution_changed": len(cmp["month_distribution_changed"]),
+            "message": (f"분해 {res['split']}건 · 새 납부 건 {res['created']}개를 만들었습니다. 계약별 입금·미납·선수금 합계가 모두 그대로입니다(백업 {info.get('name', '')})."
+                        if ok else f"분해 {res['split']}건 완료, 되돌린 건 {len(res['rolled_back'])}건, 합계 불일치 {len(cmp['mismatches'])}건 — 확인이 필요합니다(백업 {info.get('name', '')})." )}
+
+
 class DupRemoveReq(BaseModel):
     apply: bool = False
 

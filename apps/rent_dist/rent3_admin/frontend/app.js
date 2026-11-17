@@ -636,6 +636,15 @@
         <div style="margin-top:8px;">${rows}</div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🧮 이관 '이전 입금 합산' 건 달별 분해</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">장부 이관 때 여러 달의 입금을 한 건으로 합쳐 넣은 납부를 <strong>달마다 한 건</strong>으로 풀어, 달별 옮기기·무효 처리가 가능하게 합니다. 합계는 바뀌지 않습니다. <strong>[미리보기]는 아무것도 바꾸지 않고</strong>, [백업 후 반영]은 풀 전체를 <strong>자동 백업</strong>한 뒤 진행하며 계약마다 입금·미납·선수금 합계가 다르면 그 건만 즉시 되돌립니다. 원본은 지우지 않고 보관합니다.</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+          <button id="btnCarryPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button>
+          <button id="btnCarryApply" class="bass-btn" type="button" style="min-height:44px;" disabled>🧮 백업 후 반영</button>
+        </div>
+        <div id="carryResult" style="margin-top:10px;font-size:13px;line-height:1.7;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>🔎 Data Pool 중복 점검</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">엑셀·장부를 여러 번 읽어 들였거나 같은 입금이 두 번 기록됐는지 점검합니다. <strong>점검만으로는 아무것도 바뀌지 않습니다.</strong> 내용이 완전히 같은 납부만 [중복 정리]로 지울 수 있고(가장 먼저 만든 한 건을 남김), 지우기 전에 자동 백업합니다.</div>
         <button id="btnDupScan" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 중복 점검</button>
@@ -698,6 +707,27 @@
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    document.getElementById("btnCarryPrev").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const E = Bass.escapeHtml, out = document.getElementById("carryResult");
+        const r = await Bass.api(APP_ID, "/carryover-split/preview");
+        out.innerHTML = `<div>이월 합산 건 <strong>${r.total}</strong>개 — 분해 가능 <strong>${r.ok}</strong>개(새 납부 건 ${r.new_records}개 예정) · 검토 필요 <strong style="color:${r.review.length ? "var(--err)" : "var(--ok)"};">${r.review.length}</strong>개<br>
+          금액 합계: 원본 ${Number(r.sum_ok_amount).toLocaleString("ko-KR")}원 → 분해 후 ${Number(r.sum_planned_amount).toLocaleString("ko-KR")}원 ${r.sum_ok_amount === r.sum_planned_amount ? "✅ 일치" : "❌ 불일치"}</div>
+          ${(r.rows || []).slice(0, 12).map((x) => `<div class="bass-muted" style="font-size:12.5px;">${E(x.branch)} ${E(x.room_no)}호 ${E(x.tenant)} · ${Number(x.total).toLocaleString("ko-KR")}원 → ${x.months}개월 (${E(x.from)}~${E(x.to)}) ${x.status !== "OK" ? `<strong style="color:var(--err);">검토 필요: ${E(x.note)}</strong>` : ""}</div>`).join("")}
+          ${r.rows.length > 12 ? `<div class="bass-muted" style="font-size:12.5px;">… 외 ${r.rows.length - 12}건</div>` : ""}`;
+        const ap = document.getElementById("btnCarryApply");
+        ap.disabled = !(r.ok > 0 && r.sum_ok_amount === r.sum_planned_amount);
+        ap.onclick = function () {
+          if (!window.confirm(`이월 합산 ${r.ok}건을 달별 ${r.new_records}개 건으로 분해합니다.\n풀 전체를 자동 백업한 뒤 진행하고, 계약마다 합계가 다르면 그 건만 되돌립니다.\n원본은 무효로 보관됩니다.\n\n계속할까요?`)) return;
+          Bass.withLock(ap, async () => {
+            const res = await Bass.api(APP_ID, "/carryover-split/apply", { method: "POST", body: { confirm: true } });
+            Bass.updateAppAlert(res.identical_totals && !(res.rolled_back || []).length ? "success" : "warning", res.message);
+            out.innerHTML = `<strong>${E(res.message)}</strong>`;
+            ap.disabled = true;
+          });
+        };
+      });
+    });
     document.getElementById("btnDupScan").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const E = Bass.escapeHtml, out = document.getElementById("dupResult");

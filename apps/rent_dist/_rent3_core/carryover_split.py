@@ -86,10 +86,18 @@ def snapshot() -> Dict[str, Dict[str, Any]]:
     return out
 
 
-def apply(rows: Optional[List[Dict[str, Any]]] = None, app_source: str = "rent3_carryover_split") -> Dict[str, Any]:
-    """plan() 의 OK 건만 분해한다. 원본은 무효 처리(보관), 달별 건을 새로 만든다."""
+def _snap_one(ct: Contract) -> Dict[str, Any]:
+    lg = ct.ledger()
+    return {"total_paid": lg["total_paid"], "total_unpaid": lg["total_unpaid"], "advance_credit": lg.get("advance_credit", 0),
+            "unpaid_months": [m["ym"] for m in lg["months"] if m["unpaid"] > 0]}
+
+
+def apply(rows: Optional[List[Dict[str, Any]]] = None, app_source: str = "rent3_carryover_split", verify: bool = True) -> Dict[str, Any]:
+    """plan() 의 OK 건만 분해한다. 원본은 무효 처리(보관), 달별 건을 새로 만든다.
+    verify=True 면 건마다 그 계약의 입금·미납·선수금 합계와 미납 달 분포를 전후로 비교해, 1원이라도 다르면 그 건만 즉시 되돌린다(새 건 삭제, 원본 복구)."""
     rows = plan() if rows is None else rows
     done = skipped = created = 0
+    rolled_back: List[Dict[str, Any]] = []
     for r in rows:
         if r["status"] != "OK":
             skipped += 1
@@ -99,20 +107,32 @@ def apply(rows: Optional[List[Dict[str, Any]]] = None, app_source: str = "rent3_
             skipped += 1
             continue
         ct = Contract.get(p.id_contract)
+        before_one = _snap_one(ct) if (verify and ct is not None) else None
+        kid_ids: List[str] = []
         group = f"dep_{uuid4().hex[:8]}"
         for m in r["months"]:
             ratio = m["amount"] / p.total_amount if p.total_amount else 0
             vat = round(p.vat_amount * ratio)
-            Pay(branch=p.branch, id_building=p.id_building, id_room=p.id_room, room_no=p.room_no, id_contract=p.id_contract, id_tenant=p.id_tenant,
+            kid = Pay(branch=p.branch, id_building=p.id_building, id_room=p.id_room, room_no=p.room_no, id_contract=p.id_contract, id_tenant=p.id_tenant,
                 payer_name=p.payer_name, billing_month=m["ym"], paid_date=p.paid_date, rent_amount=m["amount"] - vat - round(p.maintenance_amount * ratio),
                 maintenance_amount=round(p.maintenance_amount * ratio), vat_amount=vat, total_amount=m["amount"], payment_kind="MONTHLY_RENT", method=p.method,
                 cash_receipt_no=p.cash_receipt_no, is_carryover=True, allocated_months=[{"ym": m["ym"], "allocated": m["amount"], "cleared": m["amount"] >= m["due"]}],
                 idempotency_key=f"{p.idempotency_key}:{m['ym']}", deposit_group_id=group, raw_sms=p.raw_sms).save(action="carryover_split_child", app_source=app_source)
-            created += 1
+            kid_ids.append(kid.id)
         p.status, p.void_reason, p.voided_at, p.voided_by = "VOIDED", VOID_REASON, now_iso(), app_source
         p.save(action="carryover_split_voided", app_source=app_source)
+        if before_one is not None and _snap_one(ct) != before_one:      # 합계·미납 분포가 달라지면 이 건만 되돌린다
+            for kid_id in kid_ids:
+                k = Pay.get(kid_id, include_voided=True)
+                if k is not None:
+                    k.delete(action="carryover_split_rollback", app_source=app_source)
+            p.status, p.void_reason, p.voided_at, p.voided_by = "ACTIVE", "", "", ""
+            p.save(action="carryover_split_rolled_back", app_source=app_source)
+            rolled_back.append({"room_no": r["room_no"], "branch": r["branch"], "pay_id": r["pay_id"]})
+            continue
+        created += len(kid_ids)
         done += 1
-    return {"split": done, "skipped": skipped, "created": created}
+    return {"split": done, "skipped": skipped, "created": created, "rolled_back": rolled_back}
 
 
 def compare(before: Dict[str, Dict[str, Any]], after: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:

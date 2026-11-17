@@ -6360,6 +6360,70 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for _, d in olds:
                 Pay(**d).save(action="t")
 
+    def test_98_carryover_split_admin_api_backup_and_per_contract_rollback(self):
+        """98. 운영용 분해(관리인 앱): 미리보기는 읽기 전용·관리인 전용, 반영은 확인 필요·자동 백업·합계 불변, 합계가 달라지는 건은 그 건만 되돌려 원본 복구."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Contract, Pay, current_ym, carryover_split as cs
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        ct = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        olds = [(x, x.model_dump()) for x in Pay.find(id_contract=ct.id, include_voided=True)]
+        keep_move, keep_timing = ct.move_in_date, ct.pay_timing
+        try:
+            for x, _ in olds:
+                x.delete(action="t")
+            ym_now = current_ym(); y, m = int(ym_now[:4]), int(ym_now[5:7])
+            m0 = m - 6; y0 = y - (1 if m0 <= 0 else 0); m0 = m0 + (12 if m0 <= 0 else 0)
+            ct.move_in_date = f"{y0:04d}-{m0:02d}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            months = [r for r in ct.ledger()["months"] if r["due"] > 0]
+            mk = lambda: Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payer_name=ct.tenant_name, payment_kind="MONTHLY_RENT",
+                             billing_month=months[3]["ym"], paid_date="2025-12-31", total_amount=sum(r["due"] for r in months[:4]), rent_amount=sum(r["due"] for r in months[:4]),
+                             idempotency_key="import:main:201:carry", raw_sms="장부 이전 입금 합산(날짜 미상)").save(action="t")
+            carry = mk()
+            # 권한: 임대인은 불가
+            self.assertIn(c.get(f"{AD}/carryover-split/preview", headers=chic).status_code, (401, 403))
+            self.assertIn(c.post(f"{AD}/carryover-split/apply", headers=chic, json={"confirm": True}).status_code, (401, 403))
+            pv = c.get(f"{AD}/carryover-split/preview", headers=admin).json()
+            mine = [r for r in pv["rows"] if r["room_no"] == "201" and r["branch"] == "main"]
+            self.assertEqual((len(mine), mine[0]["months"], pv["sum_ok_amount"] == pv["sum_planned_amount"]), (1, 4, True))
+            self.assertEqual(Pay.get(carry.id).status, "ACTIVE")                                          # 미리보기는 읽기 전용
+            self.assertEqual(c.post(f"{AD}/carryover-split/apply", headers=admin, json={}).status_code, 400)   # 확인 없이는 안 됨
+            self.assertEqual(Pay.get(carry.id).status, "ACTIVE")
+            # 계약별 검증 실패 시 그 건만 되돌린다: 분해 직후 합계가 달라지도록 스냅샷 비교를 일부러 어긋나게 함
+            real = cs._snap_one
+            calls = {"n": 0}
+
+            def flaky(ct_):
+                out = real(ct_)
+                calls["n"] += 1
+                if calls["n"] % 2 == 0:                                                                   # 분해 후 스냅샷만 다르게
+                    out = {**out, "total_unpaid": out["total_unpaid"] + 1}
+                return out
+            with mock.patch.object(cs, "_snap_one", side_effect=flaky):
+                res0 = cs.apply(cs.plan())
+            self.assertEqual(len(res0["rolled_back"]), 1)
+            self.assertEqual(res0["split"], 0)
+            self.assertEqual(Pay.get(carry.id).status, "ACTIVE")                                          # 원본 복구
+            self.assertEqual([x for x in Pay.find(id_contract=ct.id) if x.idempotency_key.startswith("import:main:201:carry:")], [])   # 새 건 삭제
+            # 실제 반영: 자동 백업·합계 불변
+            res = c.post(f"{AD}/carryover-split/apply", headers=admin, json={"confirm": True}).json()
+            self.assertTrue(res["backup"])
+            self.assertEqual((res["identical_totals"], res["rolled_back"], res["mismatches"]), (True, [], []))
+            self.assertGreaterEqual(res["split"], 1)
+            self.assertEqual(Pay.get(carry.id), None)
+            self.assertEqual(Pay.get(carry.id, include_voided=True).status, "VOIDED")
+            self.assertEqual(c.post(f"{AD}/carryover-split/apply", headers=admin, json={"confirm": True}).json()["split"], 0)   # 재실행: 할 일 없음
+            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("btnCarryPrev", "btnCarryApply", "/carryover-split/preview", "/carryover-split/apply", "백업 후 반영"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for x in Pay.find(id_contract=ct.id, include_voided=True):
+                x.delete(action="t")
+            ct = Contract.get(ct.id); ct.move_in_date, ct.pay_timing = keep_move, keep_timing; ct.save(action="t")
+            for _, d in olds:
+                Pay(**d).save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()
