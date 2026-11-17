@@ -6304,6 +6304,62 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for _, d in olds:
                 Pay(**d).save(action="t")
 
+    def test_97_carryover_split_preview_apply_and_totals_unchanged(self):
+        """97. 이관 '이전 입금 합산' 건 분해: 계획(읽기 전용)·반영 후 계약별 입금/미납/선수금 합계 불변·원본 무효 보관·이월 표시 유지·재실행해도 변화 없음·빈 자리보다 큰 건은 검토 필요로 남김."""
+        from datetime import date
+        from apps.rent_dist._rent3_core import Contract, Pay, TaxAndCertificateService, carryover_split as cs, current_ym
+        ct = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        olds = [(x, x.model_dump()) for x in Pay.find(id_contract=ct.id, include_voided=True)]
+        keep_move, keep_timing = ct.move_in_date, ct.pay_timing
+        made = []
+        try:
+            for x, _ in olds:
+                x.delete(action="t")
+            ym_now = current_ym(); y, m = int(ym_now[:4]), int(ym_now[5:7])
+            m0 = m - 8; y0 = y - (1 if m0 <= 0 else 0); m0 = m0 + (12 if m0 <= 0 else 0)
+            ct.move_in_date = f"{y0:04d}-{m0:02d}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            months = [r for r in ct.ledger()["months"] if r["due"] > 0]
+            carry_end = months[4]["ym"]                                                         # 앞의 5개월분을 한 건으로 낸 이월 합산
+            total = sum(r["due"] for r in months[:5])
+            carry = Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payer_name=ct.tenant_name, payment_kind="MONTHLY_RENT",
+                        billing_month=carry_end, paid_date="2025-12-31", total_amount=total, rent_amount=total, idempotency_key="import:main:201:carry",
+                        raw_sms="장부 이전 입금 합산(날짜 미상)").save(action="t")
+            normal = Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payer_name=ct.tenant_name, payment_kind="MONTHLY_RENT",
+                         billing_month=months[5]["ym"], paid_date="2026-01-05", total_amount=months[5]["due"], rent_amount=months[5]["due"]).save(action="t")
+            snap0 = cs.snapshot()
+            rows = [r for r in cs.plan() if r["contract"] == ct.id]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual((rows[0]["status"], len(rows[0]["months"]), rows[0]["leftover"]), ("OK", 5, 0))
+            self.assertEqual([x["ym"] for x in rows[0]["months"]], [r["ym"] for r in months[:5]])
+            self.assertEqual(Pay.get(carry.id).status, "ACTIVE")                                # 계획은 읽기 전용
+            res = cs.apply(rows)
+            self.assertEqual((res["split"], res["created"]), (1, 5))
+            cmp = cs.compare(snap0, cs.snapshot())
+            self.assertTrue(cmp["identical_totals"], cmp)                                       # 입금·미납·선수금 합계 1원도 불변
+            self.assertEqual(cmp["month_distribution_changed"], [])
+            orig = Pay.get(carry.id, include_voided=True)
+            self.assertEqual(orig.status, "VOIDED")                                             # 원본은 지우지 않고 보관
+            kids = [x for x in Pay.find(id_contract=ct.id) if x.idempotency_key.startswith("import:main:201:carry:")]
+            self.assertEqual(sorted(k.billing_month for k in kids), [r["ym"] for r in months[:5]])
+            self.assertTrue(all(TaxAndCertificateService.is_carryover_payment(k) for k in kids))   # 세무상 계속 이월 건
+            self.assertEqual(len({k.deposit_group_id for k in kids}), 1)
+            self.assertEqual([r for r in cs.plan() if r["contract"] == ct.id], [])              # 재실행해도 더 풀 것이 없다
+            # 빈 자리보다 큰 이월 건(선수금 성격)은 자동 분해하지 않고 검토 필요로 남긴다
+            big = Pay(branch=ct.branch, id_contract=ct.id, room_no=ct.room_no, id_tenant=ct.id_tenant, payer_name=ct.tenant_name, payment_kind="MONTHLY_RENT",
+                      billing_month=carry_end, paid_date="2025-12-31", total_amount=total * 3, rent_amount=total * 3, idempotency_key="import:main:201:carry",
+                      raw_sms="장부 이전 입금 합산(날짜 미상)").save(action="t")
+            r2 = [r for r in cs.plan() if r["contract"] == ct.id]
+            self.assertEqual((r2[0]["status"], r2[0]["leftover"] > 0), ("REVIEW", True))
+            self.assertEqual(cs.apply(r2)["split"], 0)
+            self.assertEqual(Pay.get(big.id).status, "ACTIVE")
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, "scripts", "split_carryover.py")))
+        finally:
+            for x in Pay.find(id_contract=ct.id, include_voided=True):
+                x.delete(action="t")
+            ct = Contract.get(ct.id); ct.move_in_date, ct.pay_timing = keep_move, keep_timing; ct.save(action="t")
+            for _, d in olds:
+                Pay(**d).save(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()
