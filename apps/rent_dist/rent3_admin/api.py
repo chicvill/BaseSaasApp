@@ -787,6 +787,10 @@ def mfa_reset_other(req: MfaResetReq, request: Request):
     return {"success": True, "message": f"{target.username} 관리인의 2단계 인증을 해제했습니다. 다시 로그인해 새로 설정하도록 안내하세요."}
 
 
+class CarrySplitReq(BaseModel):
+    confirm: bool = False
+
+
 @router.get("/room-defaults/preview", dependencies=ADMIN_ONLY)
 def room_defaults_preview():
     """방에 자동으로 들어갔던 샘플 등기부·가전 옵션·상태 설명을 정리할 계획(읽기 전용)."""
@@ -805,10 +809,6 @@ def room_defaults_apply(req: CarrySplitReq):
         raise DomainError("확인(confirm)이 필요합니다.", hint="미리보기를 확인한 뒤 확인 창에서 진행해 주세요.")
     res = rd.apply()
     return {"success": True, "message": (f"샘플 값을 비운 방 {res['cleaned']}개(항목 {res['fields']}개)를 정리했습니다(백업 {res['backup']})." if res["cleaned"] else "정리할 샘플 값이 없습니다."), **res}
-
-
-class CarrySplitReq(BaseModel):
-    confirm: bool = False
 
 
 @router.get("/carryover-split/preview", dependencies=ADMIN_ONLY)

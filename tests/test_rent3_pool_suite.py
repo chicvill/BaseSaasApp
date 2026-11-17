@@ -6770,6 +6770,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("BASS_ERROR_TIMEOUT", bass)
         self.assertIn('(lv === "error" || lv === "warning") && errMs ? errMs', bass)
 
+    def test_106_no_forward_reference_annotations(self):
+        """106. 함수 타입 표기가 아래쪽에서 정의된 이름을 쓰면 운영(Python 3.11)에서 NameError 로 앱이 격리된다 — 정적으로 점검."""
+        import subprocess, sys
+        r = subprocess.run([sys.executable, "-X", "utf8", os.path.join(ROOT, "scripts", "check_forward_refs.py")], capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
