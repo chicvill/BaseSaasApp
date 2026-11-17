@@ -209,13 +209,13 @@ def portal_landing(request: Request) -> Dict[str, Any]:
             "vat_applicable": r.vat_applicable,
             "available_from": r.available_from or "즉시입주",
             "pre_moveout_notice": r.pre_moveout_notice,
-            "clean_title": bool(reg.get("clean_title", True)),
+            "clean_title": bool(r.registry_checked and reg.get("clean_title")),       # 실제로 확인된 등기부가 있을 때만 '등기클린'
             "status_description": r.status_description,
             "options": opts,
             "image": img_url,
             "contract_in_progress": CoSignSession.live_for_room(r.branch, r.room_no) is not None,
             "lessor_name": lsr.name if lsr else "건물 소유주",
-            "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "010-2222-1111")),
+            "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "")),
         })
 
     open_sessions = [

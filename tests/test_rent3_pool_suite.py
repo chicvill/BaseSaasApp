@@ -6653,6 +6653,113 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for e in ps.PoolEditLog.all():
                 e.delete(action="t")
 
+    def test_102_pool_json_edit_nested_values_denied_records_and_sealed_contracts(self):
+        """102. 카드 JSON 수정의 안쪽 값(예: 방의 registry_info.owner_name)도 고칠 수 있고 전후가 기록됨, 동의·본인확인·이력 같은 기록 항목과 봉인된 공동계약(cosign_sessions)은 고칠 수 없음,
+        열 때 보이는 그대로 다시 저장하면 '바뀐 내용 없음', 컬럼 편집 경로는 여전히 목록 항목을 못 고침."""
+        import copy
+        from apps.rent_dist._rent3_core import Room, Tenant, poolsearch as ps
+        c = self.client
+        admin = self._login("admin")
+        AD = "/api/rent3_admin"
+        room = Room.all()[0]
+        keep = copy.deepcopy(room.registry_info)
+        room.registry_info = {"issue_number": "TEST-1", "owner_name": "원래소유자", "mortgage_amount": 0, "clean_title": True}      # 방 기본값은 비어 있으므로 시험용 등기부 정보를 직접 넣는다
+        room.save(action="t")
+        base_info = copy.deepcopy(room.registry_info)
+        try:
+            sc = {f["name"]: f for f in c.get(f"{AD}/pool-search/schema?collection=rooms", headers=admin).json()["fields"]}
+            self.assertEqual((sc["registry_info"]["editable"], sc["registry_info"]["json_editable"]), (False, True))   # 컬럼 편집은 그대로 읽기 전용, JSON 수정에서만 가능
+            hit = next(x for x in c.post(f"{AD}/pool-search/text", headers=admin, json={"collection": "rooms", "value": room.room_no}).json()["rows"] if x["id"] == room.id)
+            rec = hit["record"]
+            up = lambda record, reason="안쪽 값 수정 시험", coll="rooms", oid=None: c.post(f"{AD}/pool-search/update-json", headers=admin, json={"collection": coll, "id": oid or room.id, "record": record, "reason": reason})
+            self.assertEqual(up(rec).status_code, 400)                                                       # 열 때 모습 그대로: 바뀐 내용 없음
+            new_info = {**rec["registry_info"], "owner_name": "이상한변경"}
+            ok = up({**rec, "registry_info": new_info})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertEqual(ok.json()["changed"], ["registry_info"])
+            self.assertEqual(Room.get(room.id).registry_info["owner_name"], "이상한변경")                    # 실제로 바뀐다
+            self.assertEqual({k: v for k, v in Room.get(room.id).registry_info.items() if k != "owner_name"}, {k: v for k, v in base_info.items() if k != "owner_name"})   # 다른 안쪽 값은 그대로
+            lg = [e for e in ps.recent_edits() if e["id"] == room.id][0]
+            self.assertIn("이상한변경", str(lg["changes"][0]["after"]))
+            self.assertIn(base_info["owner_name"], str(lg["changes"][0]["before"]))
+            # 컬럼 편집 경로(문자열 값)로는 목록·사전 항목을 못 고친다
+            bad = c.post(f"{AD}/pool-search/update", headers=admin, json={"collection": "rooms", "id": room.id, "changes": {"registry_info": "{}"}, "reason": "시험"})
+            self.assertEqual(bad.status_code, 400)
+            # 기록 항목(동의·본인확인·이력)은 JSON 수정으로도 불가
+            t = Tenant.get("tenant_201")
+            trec = next(x for x in c.post(f"{AD}/pool-search/text", headers=admin, json={"collection": "users", "value": t.name}).json()["rows"] if x["id"] == "tenant_201")["record"]
+            for k in ("consents", "identity"):
+                if k in trec:
+                    r = up({**trec, k: {"x": 1}}, coll="users", oid="tenant_201")
+                    self.assertEqual(r.status_code, 400, k)
+            # 봉인된 공동계약은 컬렉션 전체가 읽기 전용
+            from apps.rent_dist._rent3_core import CoSignSession
+            self.assertTrue(c.get(f"{AD}/pool-search/schema?collection=cosign_sessions", headers=admin).json()["fields"])
+            for sess in CoSignSession.all()[:1]:
+                r2 = c.post(f"{AD}/pool-search/update", headers=admin, json={"collection": "cosign_sessions", "id": sess.id, "changes": {"status": "CANCELLED"}, "reason": "시험"})
+                self.assertEqual(r2.status_code, 400)
+                self.assertIn("봉인", r2.text)
+            html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "pool.html"), encoding="utf-8").read()
+            for needle in ("rh-msg", "저장되지 않았습니다"):
+                self.assertIn(needle, html, needle)
+        finally:
+            r3 = Room.get(room.id); r3.registry_info = keep; r3.save(action="t")
+            for e in ps.PoolEditLog.all():
+                e.delete(action="t")
+
+    def test_103_room_sample_defaults_removed_cleanup_tool_and_consistency_scan(self):
+        """103. 방 기본값에 가짜 등기부·가전 옵션·상태 설명·도어락이 없음, 공개 매물의 '등기클린'은 실제 확인된 등기부가 있을 때만, 정리 도구는 샘플과 정확히 같은 값만 비우고(직접 고친 값 유지·백업)
+        관리인 전용·확인 필수, 유일성 점검 도구는 샘플 등기부 소유자와 연결 불일치를 찾는다."""
+        from apps.rent_dist._rent3_core import Room, Lessor, consistency, roomdefaults as rd
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        AD = "/api/rent3_admin"
+        # ① 새 방의 기본값
+        r0 = Room(id="room_t103_new", branch="main", room_no="9901")
+        self.assertEqual((r0.registry_info, r0.registry_checked, r0.option_list, r0.status_description, r0.doorlock_pwd), ({}, False, [], "", ""))
+        # ② 샘플 값이 든 방(예전 데이터)과 직접 고친 방을 만든다
+        a = Room(id="room_t103_a", branch="main", id_building="bldg_main", room_no="9902", is_published=True, registry_checked=True, status_description=rd.SAMPLE_STATUS, option_list=list(rd.SAMPLE_OPTIONS),
+                 registry_info={"issue_number": rd.SAMPLE_ISSUE_NUMBER, "owner_name": "김임대", "clean_title": True, "verified_at": "2026-11-09"}, doorlock_pwd="2580*").save(action="t")
+        b = Room(id="room_t103_b", branch="main", id_building="bldg_main", room_no="9903", is_published=True, registry_checked=True, status_description="리모델링 완료, 남향",
+                 option_list=[{"item": "붙박이장", "quantity": 1, "condition": "정상"}], registry_info={"issue_number": "REAL-77", "owner_name": "실제소유자", "clean_title": True}).save(action="t")
+        try:
+            # 공개 매물: 샘플이 아닌 실제 등기부가 있는 방만 '등기클린'
+            lst = {x["room_no"]: x for x in c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]}
+            self.assertTrue(lst["9903"]["clean_title"])
+            # 샘플이 든 방은 정리 전에는 예전처럼 나오지만(데이터가 그대로이므로), 정리 계획에 잡힌다
+            self.assertIn("room_t103_a", [x["id"] for x in rd.plan()["rows"]])
+            self.assertNotIn("room_t103_b", [x["id"] for x in rd.plan()["rows"]])                           # 직접 고친 방은 대상이 아님
+            pv = c.get(f"{AD}/room-defaults/preview", headers=admin).json()
+            self.assertGreaterEqual(pv["counts"]["registry"], 1)
+            self.assertIn(c.get(f"{AD}/room-defaults/preview", headers=chic).status_code, (401, 403))
+            self.assertIn(c.post(f"{AD}/room-defaults/apply", headers=chic, json={"confirm": True}).status_code, (401, 403))
+            self.assertEqual(c.post(f"{AD}/room-defaults/apply", headers=admin, json={}).status_code, 400)
+            self.assertEqual(Room.get("room_t103_a").registry_info["owner_name"], "김임대")                     # 미리보기·확인 없음은 바꾸지 않는다
+            done = c.post(f"{AD}/room-defaults/apply", headers=admin, json={"confirm": True}).json()
+            self.assertTrue(done["backup"])
+            ra, rb = Room.get("room_t103_a"), Room.get("room_t103_b")
+            self.assertEqual((ra.registry_info, ra.registry_checked, ra.option_list, ra.status_description), ({}, False, [], ""))
+            self.assertEqual(ra.doorlock_pwd, "2580*")                                                        # 도어락은 자동으로 지우지 않는다
+            self.assertEqual((rb.registry_info["owner_name"], rb.status_description, len(rb.option_list)), ("실제소유자", "리모델링 완료, 남향", 1))
+            lst2 = {x["room_no"]: x for x in c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]}
+            self.assertFalse(lst2["9902"]["clean_title"])
+            self.assertEqual(lst2["9902"]["options"], [])
+            self.assertEqual(c.post(f"{AD}/room-defaults/apply", headers=admin, json={"confirm": True}).json()["cleaned"], 0)    # 재실행: 할 일 없음
+            # 유일성 점검: 실제 등기부 소유자가 임대인 이름과 다르면 잡힌다
+            lsr = Lessor.first(branch="main")
+            sc = {x["code"]: x for x in consistency.scan()["checks"]}
+            self.assertTrue(any("9903" in e for e in sc["ROOM_OWNER_NAME"]["examples"]) or sc["ROOM_OWNER_NAME"]["count"] >= 1)
+            self.assertIn("DUP_ACTIVE_CT", sc)
+            self.assertTrue(lsr is not None)
+            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            for needle in ("btnRdPrev", "btnRdApply", "/room-defaults/preview", "/room-defaults/apply"):
+                self.assertIn(needle, aj, needle)
+        finally:
+            for rid in ("room_t103_a", "room_t103_b"):
+                o = Room.get(rid)
+                if o is not None:
+                    o.delete(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

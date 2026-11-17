@@ -394,23 +394,12 @@ class Room(PoolObj):
     vat_applicable: bool = False             # 상가/업무용 시 True
     id_tenant: str = ""
     active_contract_id: str = ""
-    doorlock_pwd: str = "2580*"
-    registry_checked: bool = True
-    registry_info: Dict[str, Any] = Field(default_factory=lambda: {
-        "issue_number": "1101-2026-884920",
-        "owner_name": "김임대",
-        "mortgage_amount": 0,
-        "clean_title": True,
-        "verified_at": date_today().isoformat(),
-    })
-    status_description: str = "남향 풀옵션, 도배·장판 클린 완료"
-    option_list: List[Dict[str, Any]] = Field(default_factory=lambda: [
-        {"item": "시스템 에어컨", "quantity": 1, "condition": "정상(최상)"},
-        {"item": "드럼 세탁기", "quantity": 1, "condition": "정상(양호)"},
-        {"item": "빌트인 냉장고", "quantity": 1, "condition": "정상(최상)"},
-        {"item": "인덕션 쿡탑", "quantity": 1, "condition": "정상"},
-        {"item": "디지털 도어락", "quantity": 1, "condition": "신규 교체"},
-    ])
+    # 아래 값들은 '실제로 입력·확인된 값'만 담는다 — 샘플 기본값을 넣지 않는다(예전에는 가짜 등기부·가전 옵션·도어락 번호가 모든 방에 자동으로 들어가 공개 매물에 나올 수 있었다)
+    doorlock_pwd: str = ""
+    registry_checked: bool = False
+    registry_info: Dict[str, Any] = Field(default_factory=dict)
+    status_description: str = ""
+    option_list: List[Dict[str, Any]] = Field(default_factory=list)
     lease_type: str = "월세"
     pay_timing: str = "후불"
     deposit: int = 5000000

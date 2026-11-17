@@ -261,18 +261,24 @@
           <div class="bass-muted" style="font-size:12px;margin:4px 0;">값만 고치세요(항목 이름·id·시각·목록 형태·보호/잠금 항목은 바꿀 수 없습니다). 바뀐 항목만 검증을 거쳐 저장됩니다.</div>
           <textarea class="bass-input rh-ta" spellcheck="false" style="width:100%;min-height:260px;font-family:monospace;font-size:12.5px;">${E(JSON.stringify(row.record, null, 2))}</textarea>
           <input class="bass-input rh-why" placeholder="수정 사유 (필수) — 예: 이름 오타 정정" style="width:100%;min-height:44px;margin-top:6px;">
+          <div class="rh-msg" role="alert" style="min-height:20px;font-size:13px;line-height:1.6;color:var(--err);margin-top:6px;"></div>
           <div class="bass-row" style="gap:8px;margin-top:8px;"><button class="bass-btn bass-btn--primary rh-save" type="button" style="min-height:46px;">💾 저장</button><button class="bass-btn rh-cancel" type="button" style="min-height:46px;">취소</button></div></div>`;
         host.querySelector(".rh-cancel").addEventListener("click", () => view(host, row));
         host.querySelector(".rh-save").addEventListener("click", function () {
+          const msg = host.querySelector(".rh-msg"), btn = this;
+          msg.textContent = "";
           let rec;
-          try { rec = JSON.parse(host.querySelector(".rh-ta").value); } catch (e) { Bass.updateAppAlert("warning", "JSON 형식이 올바르지 않습니다: " + e.message); return; }
+          try { rec = JSON.parse(host.querySelector(".rh-ta").value); } catch (e) { msg.textContent = "❌ JSON 형식이 올바르지 않습니다: " + e.message; return; }
           if (!window.confirm("이 건을 고칩니다. 계속할까요?")) return;
-          Bass.withLock(this, async () => {
-            const res = await api("/pool-search/update-json", { method: "POST", body: { collection: col(), id: row.id, record: rec, reason: host.querySelector(".rh-why").value } });
-            Bass.updateAppAlert("success", res.message);
-            res.changes.forEach((c) => { row.record[c.field] = c.after; });          // 고친 값으로 같은 자리에 다시 보여 준다
-            view(host, row, "✅ 저장됨");
-          });
+          btn.disabled = true;
+          // 오류는 2초 뒤 사라지는 알림 대신 카드 안에 계속 보여 준다(왜 저장이 안 됐는지 읽을 수 있게)
+          api("/pool-search/update-json", { method: "POST", body: { collection: col(), id: row.id, record: rec, reason: host.querySelector(".rh-why").value } })
+            .then((res) => {
+              Bass.updateAppAlert("success", res.message);
+              res.changes.forEach((c) => { row.record[c.field] = c.after; });          // 고친 값으로 같은 자리에 다시 보여 준다
+              view(host, row, "✅ 저장됨");
+            })
+            .catch((e) => { msg.textContent = "❌ 저장되지 않았습니다: " + (e.message || "알 수 없는 오류") + (e.hint ? " — " + e.hint : ""); btn.disabled = false; });
         });
       }
       $("rawGo").addEventListener("click", function () { Bass.withLock(this, search); });

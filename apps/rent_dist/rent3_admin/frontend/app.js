@@ -641,6 +641,12 @@
         <div id="mfaBody" class="bass-muted">불러오는 중...</div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🧹 방의 샘플 값 정리 (가짜 등기부·옵션)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">예전에는 모든 방에 <strong>샘플 등기부(소유자 '김임대'·권리 깨끗함)·가전 옵션 5개·상태 설명</strong>이 자동으로 들어갔습니다. 실제 정보가 아닌데 공개 매물에 '등기클린'으로 나올 수 있어, <strong>샘플과 정확히 같은 값만</strong> 비웁니다(직접 고친 값·실제 등기부 값은 그대로). [미리보기]는 아무것도 바꾸지 않고, [백업 후 정리]는 자동 백업 뒤에 진행합니다.</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><button id="btnRdPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button><button id="btnRdApply" class="bass-btn" type="button" style="min-height:44px;" disabled>🧹 백업 후 정리</button></div>
+        <div id="rdResult" style="margin-top:10px;font-size:13px;line-height:1.7;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>🧮 이관 '이전 입금 합산' 건 달별 분해</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">장부 이관 때 여러 달의 입금을 한 건으로 합쳐 넣은 납부를 <strong>달마다 한 건</strong>으로 풀어, 달별 옮기기·무효 처리가 가능하게 합니다. 합계는 바뀌지 않습니다. <strong>[미리보기]는 아무것도 바꾸지 않고</strong>, [백업 후 반영]은 풀 전체를 <strong>자동 백업</strong>한 뒤 진행하며 계약마다 입금·미납·선수금 합계가 다르면 그 건만 즉시 되돌립니다. 원본은 지우지 않고 보관합니다.</div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
@@ -753,6 +759,22 @@
       }
     }
     loadMfa();
+    document.getElementById("btnRdPrev").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const out = document.getElementById("rdResult"), ap = document.getElementById("btnRdApply");
+        const r = await Bass.api(APP_ID, "/room-defaults/preview");
+        out.innerHTML = `호실 ${r.rooms_total}개 중 정리 대상 <strong>${r.rooms_to_clean}</strong>개 — 샘플 등기부 ${r.counts.registry} · 가전 옵션 ${r.counts.options} · 상태 설명 ${r.counts.status}${r.public_now ? ` · <span style="color:var(--err);font-weight:700;">현재 공개 매물 ${r.public_now}개 포함</span>` : ""}
+          ${r.counts.door ? `<div class="bass-muted" style="font-size:12.5px;">도어락 기본값('2580*')인 방 ${r.counts.door}개는 실제로 쓰고 있을 수 있어 자동으로 바꾸지 않습니다(임대인이 직접 확인).</div>` : ""}`;
+        ap.disabled = r.rooms_to_clean === 0;
+        ap.onclick = function () {
+          if (!window.confirm(`${r.rooms_to_clean}개 방의 샘플 값(등기부·옵션·상태 설명)을 비웁니다. 풀 전체를 자동 백업한 뒤 진행하며, 직접 고친 값은 건드리지 않습니다. 계속할까요?`)) return;
+          Bass.withLock(ap, async () => {
+            const res = await Bass.api(APP_ID, "/room-defaults/apply", { method: "POST", body: { confirm: true } });
+            Bass.updateAppAlert("success", res.message); out.innerHTML = `<strong>${Bass.escapeHtml(res.message)}</strong>`; ap.disabled = true;
+          });
+        };
+      });
+    });
     document.getElementById("btnCarryPrev").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const E = Bass.escapeHtml, out = document.getElementById("carryResult");

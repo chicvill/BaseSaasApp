@@ -24,6 +24,10 @@ from .pool import POOL_COLLECTIONS, POOL_REGISTRY, PoolObj, now_iso, pool
 
 HIDDEN_RE = re.compile(r"(password|passwd|secret|hash|token|quick_devices|login_devices)", re.I)
 READONLY = {"id", "created_at", "updated_at", "_kind"}
+# 목록·사전 형태(JSON) 항목은 카드의 JSON 수정으로는 고칠 수 있지만(예: 등기부 정보의 소유자 이름), 아래 항목은 동의·본인확인·서류·이력 기록이라 고치지 못하게 한다.
+JSON_DENY = {"consents", "identity", "franchise_docs", "allocated_months", "history", "terms", "events"}
+# 봉인된 계약(전자서명·확정일자 해시 포함) 기록은 어떤 경로로도 여기서 고치지 못한다.
+READONLY_COLLECTIONS = {"cosign_sessions"}
 SHOW_FIRST = ("name", "tenant_name", "room_no", "billing_month", "payer_name", "branch", "status", "title", "username")
 MASK = "•••(보호됨)"
 
@@ -80,7 +84,9 @@ def schema(collection: str) -> Dict[str, Any]:
                 continue
             t = _type_of(f.annotation)
             sealed = name in fieldcrypto.SENSITIVE_FIELDS
-            fields[name] = {"name": name, "type": t, "sealed": sealed, "editable": (t != "json" and not sealed and name not in READONLY),
+            ro = collection in READONLY_COLLECTIONS
+            fields[name] = {"name": name, "type": t, "sealed": sealed, "editable": (t != "json" and not sealed and name not in READONLY and not ro),
+                            "json_editable": (t == "json" and not sealed and name not in READONLY and name not in JSON_DENY and not ro),
                             "searchable": not sealed, "kinds": [kind]}
     names = sorted(fields, key=lambda n: (SHOW_FIRST.index(n) if n in SHOW_FIRST else 99, n))
     items = pool().find(collection)
@@ -140,7 +146,17 @@ def get_item(collection: str, obj_id: str) -> Dict[str, Any]:
     return {"collection": collection, "id": obj_id, "kind": cls.kind_name(), "fields": out, "protected_fields": hidden}
 
 
-def update(collection: str, obj_id: str, changes: Dict[str, Any], reason: str, admin: str = "관리인") -> Dict[str, Any]:
+def _short(v: Any, n: int = 600) -> Any:
+    """기록에 남길 전/후 값: 큰 목록·사전은 잘라서 남긴다."""
+    if isinstance(v, (dict, list)):
+        s = json.dumps(v, ensure_ascii=False, default=str)
+        return s if len(s) <= n else s[: n - 1] + "…"
+    return v
+
+
+def update(collection: str, obj_id: str, changes: Dict[str, Any], reason: str, admin: str = "관리인", allow_json: bool = False) -> Dict[str, Any]:
+    if collection in READONLY_COLLECTIONS:
+        raise DomainError("이 컬렉션은 고칠 수 없습니다.", hint="공동계약 세션은 전자서명·확정일자로 봉인된 계약 기록이라 여기서 수정하지 않습니다.")
     cls, obj = _load(collection, obj_id)
     reason = (reason or "").strip()
     if len(reason) < 2:
@@ -151,8 +167,8 @@ def update(collection: str, obj_id: str, changes: Dict[str, Any], reason: str, a
         f = sc.get(k)
         if f is None or is_hidden(k):
             raise DomainError(f"'{k}' 항목은 고칠 수 없습니다(보호된 항목이거나 없는 항목).")
-        if not f["editable"]:
-            raise DomainError(f"'{k}' 항목은 고칠 수 없습니다.", hint="id·시각·목록 형태·🔒 암호화 항목은 읽기 전용입니다.")
+        if not (f["editable"] or (allow_json and f.get("json_editable") and not isinstance(v, str))):
+            raise DomainError(f"'{k}' 항목은 고칠 수 없습니다.", hint="id·시각·동의/본인확인/이력 기록·🔒 암호화 항목은 읽기 전용입니다(목록·사전 항목은 카드의 JSON 수정에서만 고칠 수 있습니다).")
         clean[k] = v
     if not clean:
         raise DomainError("바뀐 내용이 없습니다.")
@@ -165,7 +181,8 @@ def update(collection: str, obj_id: str, changes: Dict[str, Any], reason: str, a
     if not diff:
         raise DomainError("바뀐 내용이 없습니다.")
     new.save(action="admin_pool_edit", app_source="rent3_admin_pool")
-    PoolEditLog(admin=admin, target_collection=collection, target_kind=cls.kind_name(), target_id=obj_id, reason=reason, changes=diff).save(action="admin_pool_edit_logged", app_source="rent3_admin_pool")
+    logged = [{"field": d["field"], "before": _short(d["before"]), "after": _short(d["after"])} for d in diff]
+    PoolEditLog(admin=admin, target_collection=collection, target_kind=cls.kind_name(), target_id=obj_id, reason=reason, changes=logged).save(action="admin_pool_edit_logged", app_source="rent3_admin_pool")
     return {"id": obj_id, "changed": [d["field"] for d in diff], "changes": diff}
 
 
@@ -212,7 +229,7 @@ def text_search(collection: str, value: str, limit: int = 30) -> Dict[str, Any]:
 
 def update_from_json(collection: str, obj_id: str, obj: Dict[str, Any], reason: str, admin: str = "관리인") -> Dict[str, Any]:
     """카드의 JSON 을 고쳐 저장: 바뀐 항목만 골라 안전한 수정 경로(update)로 보낸다 — 가려진·잠긴 항목은 그대로 두면 무시하고, 바꾸면 거절한다.
-    id·시각·목록/사전 형태 항목을 바꾸거나 없는 항목을 만들 수는 없다. 통째 덮어쓰기는 하지 않는다."""
+    목록·사전 항목(예: registry_info)은 안의 값을 고칠 수 있다(동의·본인확인·서류·이력 항목은 제외). id·시각을 바꾸거나 없는 항목을 만들 수는 없다. 통째 덮어쓰기는 하지 않는다."""
     if not isinstance(obj, dict):
         raise DomainError("JSON 형식이 올바르지 않습니다.", hint="중괄호 { } 로 된 한 건의 JSON 이어야 합니다.")
     cls, _o = _load(collection, obj_id)
@@ -230,12 +247,12 @@ def update_from_json(collection: str, obj_id: str, obj: Dict[str, Any], reason: 
         if v == cur[k] or v in (MASK, LOCK):
             continue
         f = sc.get(k)
-        if f is None or is_hidden(k) or not f["editable"]:
-            raise DomainError(f"'{k}' 항목은 고칠 수 없습니다.", hint="id·시각·목록 형태·🔒 암호화·보호 항목은 읽기 전용입니다.")
+        if f is None or is_hidden(k) or not (f["editable"] or f.get("json_editable")):
+            raise DomainError(f"'{k}' 항목은 고칠 수 없습니다.", hint="id·시각·동의/본인확인/이력 기록·🔒 암호화·보호 항목은 읽기 전용입니다.")
         changes[k] = v
     if not changes:
         raise DomainError("바뀐 내용이 없습니다.")
-    return update(collection, obj_id, changes, reason, admin)
+    return update(collection, obj_id, changes, reason, admin, allow_json=True)
 
 
 def redact_item(it: Dict[str, Any]) -> Dict[str, Any]:
