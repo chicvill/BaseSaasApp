@@ -640,6 +640,12 @@
         <div id="mfaBody" class="bass-muted">불러오는 중...</div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>📈 임대인 유입 현황 (채널별 가입 → 승인 → 첫 방 → 첫 수납)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">홍보 링크의 <code>?ref=채널&amp;campaign=캠페인</code> 값으로 어느 채널에서 가입했는지 셉니다. 방문 기록·연락처는 저장하지 않고, 임대인 가입 때 짧은 표식만 남깁니다. 표식 없이 가입한 임대인은 '(출처 없음)'입니다.</div>
+        <button id="btnAcq" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">📈 현황 보기</button>
+        <div id="acqResult" style="margin-top:10px;overflow-x:auto;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>📜 기존 입주자 등기부 확인 완료 처리</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">입주 전 등기부 확인은 <strong>공동 전자계약으로 새로 체결한 계약</strong>에서 임차인이 합니다. 전자계약이 아닌 <strong>기존 입주자</strong>는 이미 살고 있어 다시 할 대상이 아니므로 '확인 완료(이전 입주자)'로 기록합니다. 출입 정보 잠금·수납·계약 조건은 바꾸지 않습니다. [미리보기]는 아무것도 바꾸지 않고, [백업 후 기록]은 자동 백업 뒤에 진행합니다.</div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><button id="btnLgPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button><button id="btnLgApply" class="bass-btn" type="button" style="min-height:44px;" disabled>📜 백업 후 기록</button></div>
@@ -764,6 +770,14 @@
       }
     }
     loadMfa();
+    document.getElementById("btnAcq").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const r = await Bass.api(APP_ID, "/acquisition/summary");
+        const E = Bass.escapeHtml;
+        const tbl = (title, rows) => `<div style="font-weight:700;margin:10px 0 4px;">${title}</div><table class="bass-table" style="width:100%;font-size:12.5px;"><thead><tr><th>구분</th><th>가입</th><th>가맹 승인</th><th>첫 방 등록</th><th>첫 수납</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${E(x.key)}</td><td>${x.signups}</td><td>${x.approved}</td><td>${x.with_room}</td><td>${x.with_payment}</td></tr>`).join("") || `<tr><td colspan="5">자료 없음</td></tr>`}</tbody></table>`;
+        document.getElementById("acqResult").innerHTML = `전체 임대인 ${r.total_lessors}명 중 유입 표식이 있는 가입 <strong>${r.tracked}</strong>명` + tbl("채널(ref)별", r.by_ref) + tbl("캠페인별", r.by_campaign);
+      });
+    });
     document.getElementById("btnLgPrev").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const out = document.getElementById("lgResult"), ap = document.getElementById("btnLgApply");

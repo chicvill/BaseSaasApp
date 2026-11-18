@@ -18,6 +18,7 @@ from apps.rent_dist._rent3_core.authz import api_headers, client_ip, contract_sc
 from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, ratelimit
 from apps.rent_dist._rent3_core import mfa as mfa_mod
 from apps.rent_dist._rent3_core import roomregistry as room_registry
+from apps.rent_dist._rent3_core import acquisition
 from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
@@ -83,6 +84,7 @@ class PortalRegisterReq(BaseModel):
     target_hint: str = ""
     agree_privacy: bool = False          # (필수) 개인정보 수집·이용 동의
     agree_support: bool = False          # (선택) 관리인 원격 지원 접속 동의
+    acq: Dict[str, Any] = {}             # 유입 표식(ref·campaign·from·first_seen). 임대인 가입에만 기록하며 형식이 틀리면 조용히 버린다
 
 
 class ConsentReq(BaseModel):
@@ -1358,6 +1360,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
             branch=branch_code,
             status="PENDING_APPROVAL",  # 가맹 심사 통과 전에는 매물 공개·직거래 불가
             consents=new_consents,
+            acq=acquisition.record(req.acq),
             password=pwd.hash_password(pw),
         ).save("portal_lessor_registered", app_source="rent3_portal")
 

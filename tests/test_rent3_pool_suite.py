@@ -7221,6 +7221,65 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             promo.generate_promo(Room(id="room_t111_pub", branch="zzz", room_no="779", id_tenant="tenant_x", active_contract_id="ct_x", is_published=True))
 
 
+    def test_112_lessor_acquisition_attribution_p0(self):
+        """112. 임대인 유입 귀속(P0): 허용되는 표식(짧은 영숫자)만 저장하고 나머지는 조용히 버리며(가입은 막지 않음), 임차인 가입에는 기록하지 않고,
+        관리인만 채널별 전환(가입·승인·첫 방·첫 수납) 현황을 볼 수 있고, 포털은 처음 닿은 표식을 30일 보관해 임대인 가입 때만 보낸다."""
+        from apps.rent_dist._rent3_core import Lessor, Tenant, acquisition
+        c = self.client
+        # 표식 검증(단위)
+        self.assertEqual(acquisition.sanitize({"ref": "daangn", "campaign": "spring-26", "from": "tn_ab12", "first_seen": "2026-11-18"}),
+                         {"ref": "daangn", "campaign": "spring-26", "from_tenant": "tn_ab12", "first_seen": "2026-11-18"})
+        self.assertEqual(acquisition.sanitize({"ref": "<script>", "campaign": "x" * 40, "from": "a b"}), {})                # 형식이 틀리면 전부 버림
+        self.assertEqual(acquisition.sanitize("문자열"), {})
+        self.assertEqual(acquisition.record({}), {})
+        # 임대인 가입: 표식 저장, 잘못된 값이 섞여도 가입은 성공
+        reg = lambda name, phone, user, **extra: c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
+            "role": "lessor", "name": name, "phone": phone, "username": user, "password": "Pw123456", "agree_privacy": True, **extra})
+        ok = reg("유입임대", "01077770001", "acq_one", acq={"ref": "daangn", "campaign": "spring-26", "first_seen": "2026-11-18"})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        l1 = Lessor.first(username="acq_one")
+        self.assertEqual((l1.acq["ref"], l1.acq["campaign"]), ("daangn", "spring-26"))
+        self.assertTrue(l1.acq["registered_at"])
+        bad = reg("잘못된표식", "01077770002", "acq_two", acq={"ref": "<img src=x onerror=1>", "campaign": "ok_1"})
+        self.assertEqual(bad.status_code, 200, bad.text)
+        self.assertEqual(Lessor.first(username="acq_two").acq.get("ref"), None)                                           # 잘못된 값은 버리고
+        self.assertEqual(Lessor.first(username="acq_two").acq["campaign"], "ok_1")                                        # 올바른 값은 남김
+        none = reg("표식없음", "01077770003", "acq_three")
+        self.assertEqual(none.status_code, 200, none.text)
+        self.assertEqual(Lessor.first(username="acq_three").acq, {})
+        # 임차인(예비임차인) 가입에는 기록하지 않는다
+        t = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "표식임차", "phone": "01077770004", "password": "Pw123456",
+                                                                              "agree_privacy": True, "acq": {"ref": "daangn"}})
+        self.assertEqual(t.status_code, 200, t.text)
+        self.assertFalse(hasattr(Tenant.get(t.json()["user"]["id"]), "acq"))
+        # 관리인 전용 현황
+        AD = "/api/rent3_admin/acquisition/summary"
+        self.assertIn(c.get(AD, headers=self._login("chic")).status_code, (401, 403))
+        self.assertIn(c.get(AD, headers=self.NOAUTH).status_code, (401, 403))
+        r = c.get(AD, headers=self._login("admin"))
+        self.assertEqual(r.status_code, 200, r.text)
+        sm = r.json()
+        refs = {x["key"]: x for x in sm["by_ref"]}
+        self.assertGreaterEqual(refs["daangn"]["signups"], 1)
+        self.assertEqual(refs["daangn"]["approved"], 0)                                                                    # 가맹 승인 전
+        self.assertIn(acquisition.NONE_LABEL, refs)                                                                       # 표식 없는 임대인은 '(출처 없음)'
+        self.assertGreaterEqual(sm["tracked"], 2)
+        # 승인·방 등록이 전환 단계에 반영된다
+        l1.status = "ACTIVE"
+        l1.save(action="t")
+        self.assertEqual({x["key"]: x for x in acquisition.summary()["by_ref"]}["daangn"]["approved"], 1)
+        # 포털 화면: 처음 닿은 표식 보관(30일)·임대인 가입에만 전송·형식 검증
+        js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ('ACQ_KEY = "r3_acq"', "ACQ_DAYS = 30", "captureAcq", 'acq: $("regRole").value === "lessor"', "ACQ_OK"):
+            self.assertIn(needle, js, needle)
+        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnAcq", "/acquisition/summary", "임대인 유입 현황"):
+            self.assertIn(needle, aj, needle)
+        for u in ("acq_one", "acq_two", "acq_three"):
+            o = Lessor.first(username=u)
+            if o:
+                o.delete(action="t")
+
 
 if __name__ == "__main__":
     unittest.main()

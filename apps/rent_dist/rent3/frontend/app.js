@@ -795,6 +795,7 @@
             target_hint: $("loginTargetHint").value || "",
             agree_privacy: $("regAgreePrivacy").checked,
             agree_support: $("regAgreeSupport").checked,
+            acq: $("regRole").value === "lessor" ? (readAcq() || {}) : {},
           },
         });
         saveSession(res.user, res.token);
@@ -927,6 +928,25 @@
 
   // 초기 진입 처리 (?logout=1 또는 ?login=1 지원)
   const urlParams = new URLSearchParams(window.location.search);
+
+  // 유입 표식(?ref=채널&campaign=캠페인&from=소개한 임차인 코드): 처음 닿은 값을 30일간 브라우저에 보관했다가 임대인 가입 때 보낸다.
+  // 짧은 영숫자만 허용하고, 방문 기록은 서버로 보내지 않는다.
+  const ACQ_KEY = "r3_acq", ACQ_DAYS = 30, ACQ_OK = /^[A-Za-z0-9_-]{1,32}$/;
+  function readAcq() {
+    try {
+      const v = JSON.parse(localStorage.getItem(ACQ_KEY) || "null");
+      if (v && v.first_seen && (Date.now() - Date.parse(v.first_seen)) / 864e5 <= ACQ_DAYS) return v;
+    } catch (_) { /* 저장소를 못 쓰는 환경 */ }
+    return null;
+  }
+  (function captureAcq() {
+    try {
+      if (readAcq()) return;                                                     // 처음 닿은 값을 유지(덮어쓰지 않음)
+      const pick = (v) => (ACQ_OK.test(v || "") ? v : "");
+      const a = { ref: pick(urlParams.get("ref")), campaign: pick(urlParams.get("campaign") || urlParams.get("utm_campaign")), from_tenant: pick(urlParams.get("from")) };
+      if (a.ref || a.campaign || a.from_tenant) localStorage.setItem(ACQ_KEY, JSON.stringify({ ...a, first_seen: new Date().toISOString().slice(0, 10) }));
+    } catch (_) { /* 무시: 표식이 없어도 가입은 된다 */ }
+  })();
   if (urlParams.get("logout") === "1") {
     clearSession();
     window.history.replaceState({}, "", window.location.pathname);

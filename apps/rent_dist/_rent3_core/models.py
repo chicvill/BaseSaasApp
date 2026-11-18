@@ -167,6 +167,7 @@ class Lessor(PoolObj):
     identity: Dict[str, Any] = Field(default_factory=dict)        # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
     franchise_docs: Dict[str, Any] = Field(default_factory=dict)  # 제출한 등기부(파일 해시)·AI 읽기·소유자 대조 결과
     applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
+    acq: Dict[str, Any] = Field(default_factory=dict)   # 유입 귀속: 가입 때 처음 닿은 링크의 표식(ref·campaign·from_tenant). acquisition.py
     franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
     consents: Dict[str, Any] = Field(default_factory=dict)       # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
     pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py, RENT3_LESSOR_PIN 켠 뒤에만 사용)

@@ -791,6 +791,14 @@ class CarrySplitReq(BaseModel):
     confirm: bool = False
 
 
+@router.get("/acquisition/summary", dependencies=ADMIN_ONLY)
+def acquisition_summary():
+    """임대인 유입 현황(읽기 전용): 채널·캠페인별 가입 → 가맹 승인 → 첫 방 등록 → 첫 수납 기록 수."""
+    from apps.rent_dist._rent3_core import acquisition
+    ensure_pool_seeded()
+    return {"success": True, **acquisition.summary()}
+
+
 @router.get("/legacy-registry/preview", dependencies=ADMIN_ONLY)
 def legacy_registry_preview():
     """전자계약이 아닌 기존 입주자 중 '입주 전 등기부 확인'을 완료로 기록할 대상(읽기 전용)."""
