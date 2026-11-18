@@ -59,6 +59,7 @@ class RoomCreateReq(BaseModel):
     direction: str = ""
     available_from: str = "즉시입주"
     is_published: bool = True
+    pre_moveout_notice: Optional[bool] = None
 
 
 class PublishToggleReq(BaseModel):
@@ -533,6 +534,22 @@ def create_or_update_room(req: RoomCreateReq):
             hint="더 등록하려면 관리자에게 한도 상향을 요청해 주세요.",
         )
     if existing:
+        if existing.is_occupied:
+            if req.is_published:
+                if not (req.pre_moveout_notice is True or existing.pre_moveout_notice):
+                    raise DomainError(
+                        "입주 중인 호실은 전출 예정 확인 후 사전 매물로 등록할 수 있습니다.",
+                        hint="세입자의 전출 계획이 확정되었는지 확인 체크 후 입주가능일을 지정해 주세요.",
+                    )
+                avail_clean = (req.available_from or "").strip()
+                if not avail_clean or avail_clean == "즉시입주":
+                    raise DomainError(
+                        "입주 중인 호실은 '즉시입주'로 등록할 수 없습니다.",
+                        hint="세입자 전출 예정일 이후의 입주가능일을 지정해 주세요.",
+                    )
+                existing.pre_moveout_notice = True
+            elif req.pre_moveout_notice is False:
+                existing.pre_moveout_notice = False
         existing.name = req.name or existing.name
         existing.floor = req.floor
         existing.area_sqm = req.area_sqm
@@ -548,7 +565,12 @@ def create_or_update_room(req: RoomCreateReq):
         existing.status_description = req.status_description
         existing.is_published = req.is_published
         existing.save(action="room_updated", app_source=APP_SRC)
-        return {"success": True, "message": f"{req.room_no}호 정보가 저장되었습니다.", "room": existing.model_dump()}
+        msg = (
+            f"{req.room_no}호가 전출 예정 사전 매물로 등록되었습니다."
+            if existing.is_occupied and existing.pre_moveout_notice
+            else f"{req.room_no}호 정보가 저장되었습니다."
+        )
+        return {"success": True, "message": msg, "room": existing.model_dump()}
 
     room = Room(
         id=f"room_{b_id}_{req.room_no}",
@@ -581,7 +603,13 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
             "가맹 승인 후에 매물을 공개할 수 있습니다.",
             hint="관리자의 가맹 심사가 끝나면 공개할 수 있어요. 심사 상태는 임대인 화면 상단에서 확인하세요.",
         )
+    if req.is_published and room.is_occupied and not room.pre_moveout_notice:
+        raise DomainError(
+            "입주 중인 호실은 전출 예정 확인과 입주가능일을 지정해 임대매물 등록 화면에서 사전 공개해 주세요.",
+        )
     room.is_published = req.is_published
+    if not req.is_published and room.is_occupied:
+        room.pre_moveout_notice = False
     room.save(action="room_publish_toggled", app_source=APP_SRC)
     state_label = "직거래 매물 공개" if room.is_published else "매물 비공개"
     return {

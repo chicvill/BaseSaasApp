@@ -7463,6 +7463,65 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for code in ("offline-incheon", "offline-incheon-michuhol"):
             self.assertEqual(acquisition.sanitize({"ref": code})["ref"], code)
 
+    def test_117_occupied_room_pre_moveout_listing(self):
+        """117. 입주 중인 호실도 전출 예정이 확정되면 입주가능일을 지정해 미리 매물로 등록·공개·홍보할 수 있고, 매물 내리기 시 사전공개도 해제된다."""
+        from apps.rent_dist._rent3_core import Room
+        c = self.client
+        chic = self._login("chic")
+
+        occ = Room.first(branch="main", room_no="201")
+        self.assertTrue(occ.is_occupied)
+        old_state = (occ.is_published, occ.pre_moveout_notice, occ.available_from, occ.deposit, occ.monthly_rent)
+        try:
+            # 1) 전출 예정 확인 없이 입주 호실 공개 시도 → 거부(400)
+            r1 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main", "room_no": "201", "available_from": "2026-12-31", "is_published": True,
+            })
+            self.assertEqual(r1.status_code, 400, r1.text)
+
+            # 2) 전출 예정 확인은 했으나 '즉시입주'로 등록 시도 → 거부(400)
+            r2 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main", "room_no": "201", "available_from": "즉시입주",
+                "is_published": True, "pre_moveout_notice": True,
+            })
+            self.assertEqual(r2.status_code, 400, r2.text)
+
+            # 3) 전출 예정 확인 + 입주가능일 지정 → 성공(200), pre_moveout_notice=True, 포털 공개 및 홍보글 생성 허용
+            r3 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main", "room_no": "201", "deposit": 5000000, "monthly_rent": 480000,
+                "available_from": "2026-12-31", "is_published": True, "pre_moveout_notice": True,
+            })
+            self.assertEqual(r3.status_code, 200, r3.text)
+            rm = Room.first(branch="main", room_no="201")
+            self.assertTrue(rm.pre_moveout_notice)
+            self.assertTrue(rm.is_published)
+            self.assertEqual(rm.available_from, "2026-12-31")
+
+            landing = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
+            self.assertTrue(any(l["id"] == rm.id and l["pre_moveout_notice"] for l in landing))
+
+            pr = c.get(f"/api/rent3_lessor/rooms/{rm.id}/promo", headers=chic)
+            self.assertEqual(pr.status_code, 200, pr.text)
+
+            # 4) 매물 내리기(is_published=False) → pre_moveout_notice도 함께 False, 포털에서 내려감
+            r4 = c.post(f"/api/rent3_lessor/rooms/{rm.id}/publish", headers=chic, json={"is_published": False})
+            self.assertEqual(r4.status_code, 200, r4.text)
+            rm2 = Room.first(branch="main", room_no="201")
+            self.assertFalse(rm2.is_published)
+            self.assertFalse(rm2.pre_moveout_notice)
+            landing2 = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
+            self.assertFalse(any(l["id"] == rm.id for l in landing2))
+        finally:
+            rm_f = Room.first(branch="main", room_no="201")
+            rm_f.is_published, rm_f.pre_moveout_notice, rm_f.available_from, rm_f.deposit, rm_f.monthly_rent = old_state
+            rm_f.save(action="test_117_restore")
+
+        # 5) 임대인 UI: 호실 드롭다운에서 입주 호실 disabled 제거 및 전출예정 확인 체크박스 포함
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertNotIn('${r.is_occupied ? "disabled" : ""}', fe)
+        self.assertIn("nrMoveoutNoticeWrap", fe)
+        self.assertIn("nrPreMoveout", fe)
+
 
 if __name__ == "__main__":
     unittest.main()

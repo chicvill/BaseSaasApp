@@ -2905,13 +2905,18 @@
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>🏷️ 임대매물 등록</h3>
-        <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">호실을 고르고 조건을 확인한 뒤 등록하면 임차인 화면에 공개됩니다. 입주 중인 호실은 고를 수 없습니다.</p>
+        <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">호실을 고르고 조건을 확인한 뒤 등록하면 임차인 화면에 공개됩니다. 입주 중인 호실도 전출(퇴실) 계획이 확정된 경우 입주가능일을 지정해 미리 매물로 등록할 수 있습니다.</p>
         <div class="field-grid" style="margin:10px 0;">
           <div>
             <label class="bass-label">호실</label>
             <select id="nrRoom" class="bass-select">
               <option value="">호실을 선택하세요</option>
-              ${sortedRooms.map((r) => `<option value="${Bass.escapeHtml(r.id)}" ${r.is_occupied ? "disabled" : ""}>${Bass.escapeHtml(r.room_no)}호 — ${r.is_occupied ? "입주중" : (r.is_published ? "매물 공개중" : "공실")}</option>`).join("")}
+              ${sortedRooms.map((r) => {
+                const st = r.is_occupied
+                  ? (r.pre_moveout_notice ? "입주중 · 전출예정 공개중" : "입주중 (전출예정 사전등록)")
+                  : (r.is_published ? "공실 · 매물 공개중" : "공실");
+                return `<option value="${Bass.escapeHtml(r.id)}">${Bass.escapeHtml(r.room_no)}호 — ${st}</option>`;
+              }).join("")}
               <option value="__new__">➕ 목록에 없는 새 호실 추가…</option>
             </select>
           </div>
@@ -2941,6 +2946,13 @@
         <div style="margin-bottom:10px;">
           <label class="bass-label">매물 소개 (선택)</label>
           <input id="nrDesc" class="bass-input" placeholder="예: 남향 풀옵션, 도배·장판 새로 시공">
+        </div>
+        <div id="nrMoveoutNoticeWrap" class="bass-card" style="display:none;margin:0 0 10px;padding:10px;background:var(--surface-2,#f8fafc);border-color:var(--warn,#d97706);">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📦 입주 중인 호실 — 전출 예정 사전 매물 등록</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 전출(퇴실) 계획이 확정된 경우에만 '입주가능일'을 지정해 사전 매물로 공개해 주세요.</div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">
+            <input id="nrPreMoveout" type="checkbox"> 현재 세입자의 전출(퇴실) 계획이 확정되어 사전 매물로 공개합니다
+          </label>
         </div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
           <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">📢 임대매물 등록</button>
@@ -3009,9 +3021,19 @@
       const v = $nr("nrRoom").value;
       $nr("nrNewWrap").style.display = v === "__new__" ? "block" : "none";
       const r = roomById(v);
-      $nr("btnUnpublishRoom").style.display = r && r.is_published ? "inline-flex" : "none";
-      $nr("btnCreateRoom").textContent = r && r.is_published ? "📢 변경 내용으로 다시 등록" : "📢 임대매물 등록";
-      if (!r) return;
+      const isOcc = Boolean(r && r.is_occupied);
+      const isLive = Boolean(r && (r.is_published || r.pre_moveout_notice));
+      $nr("nrMoveoutNoticeWrap").style.display = isOcc ? "block" : "none";
+      $nr("nrPreMoveout").checked = Boolean(r && r.pre_moveout_notice);
+      $nr("btnUnpublishRoom").style.display = isLive ? "inline-flex" : "none";
+      $nr("btnCreateRoom").textContent = isLive ? "📢 변경 내용으로 다시 등록" : (isOcc ? "📢 전출예정 사전 매물 등록" : "📢 임대매물 등록");
+      if (!r) {
+        $nr("nrAvailNow").disabled = false;
+        $nr("nrAvailNow").checked = true;
+        $nr("nrAvail").value = "";
+        syncAvailInputs();
+        return;
+      }
       $nr("nrCat").value = r.room_category || "주거용 원룸";
       $nr("nrDep").value = r.deposit;
       $nr("nrRent").value = r.monthly_rent;
@@ -3021,10 +3043,19 @@
       $nr("nrFloor").value = r.floor;
       $nr("nrTotalFloors").value = r.total_floors || 0;
       $nr("nrDesc").value = r.status_description || "";
-      const af = r.available_from || "즉시입주";
-      const isDate = /^\d{4}-\d{2}-\d{2}$/.test(af);
-      $nr("nrAvailNow").checked = !isDate;
-      $nr("nrAvail").value = isDate ? af : "";
+      const af = r.available_from || "";
+      const mDate = af.match(/\d{4}-\d{2}-\d{2}/);
+      const expDate = r.contract && /^\d{4}-\d{2}-\d{2}$/.test(r.contract.expiry_date || "") ? r.contract.expiry_date : "";
+      if (isOcc) {
+        $nr("nrAvailNow").checked = false;
+        $nr("nrAvailNow").disabled = true;
+        $nr("nrAvail").value = mDate ? mDate[0] : expDate;
+      } else {
+        $nr("nrAvailNow").disabled = false;
+        const isDate = Boolean(mDate);
+        $nr("nrAvailNow").checked = !isDate;
+        $nr("nrAvail").value = isDate ? mDate[0] : "";
+      }
       syncAvailInputs();
     });
 
@@ -3050,9 +3081,14 @@
           Bass.updateAppAlert("warning", sel === "__new__" ? "새 호실 번호를 입력해 주세요." : "등록할 호실을 선택해 주세요.");
           return;
         }
+        const isOcc = Boolean(picked && picked.is_occupied);
+        if (isOcc && !$nr("nrPreMoveout").checked) {
+          Bass.updateAppAlert("warning", "입주 중인 호실은 세입자의 전출 계획 확정 확인을 체크해 주세요.");
+          return;
+        }
         const avail = $nr("nrAvailNow").checked ? "즉시입주" : $nr("nrAvail").value;
-        if (!avail) {
-          Bass.updateAppAlert("warning", "입주가능일을 고르거나 '즉시입주'를 체크해 주세요.");
+        if (!avail || (isOcc && avail === "즉시입주")) {
+          Bass.updateAppAlert("warning", isOcc ? "입주 중인 호실은 전출 후 입주가능일을 지정해 주세요." : "입주가능일을 고르거나 '즉시입주'를 체크해 주세요.");
           return;
         }
         const cat = $nr("nrCat").value;
@@ -3073,6 +3109,7 @@
             available_from: avail,
             status_description: $nr("nrDesc").value.trim() || "신규 등록 호실",
             is_published: true,
+            pre_moveout_notice: isOcc ? Boolean($nr("nrPreMoveout").checked) : null,
           },
         });
         Bass.updateAppAlert("success", res.message);
