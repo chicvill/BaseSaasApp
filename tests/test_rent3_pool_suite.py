@@ -7089,7 +7089,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 에브리타임 검증 (대학생 타겟 복비 절약 강조)
         eta = channels["everytime"]
         self.assertIn("에브리타임", eta["name"])
-        self.assertIn("복비(중개수수료 20~30만원) 아끼고", eta["content"])
+        self.assertNotIn("20~30만원", eta["content"])          # 근거 없는 평균 금액은 쓰지 않는다
+        self.assertIn("중개수수료 없이 직거래", eta["content"])
         self.assertIn("ref=everytime", eta["link"])
 
         # 네이버 블로그 검증 (SEO 소제목, 해시태그 목록)
@@ -7217,6 +7218,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         txt_real = promo.generate_promo(Room(id="room_t111_real", branch="zzz", room_no="778", floor=5, total_floors=7, area_sqm=31.5))["channels"]["daangn"]["content"]
         self.assertIn("5층 / 전체 7층", txt_real)
         self.assertIn("31.5㎡", txt_real)
+        # 8. 임차인 대상 글에 근거 없는 단정·평균 금액·안전 보증 표현이 없고, 입주일을 입력하지 않았으면 지어내지 않는다
+        full = Room(id="room_t111_full", branch="zzz", room_no="305", deposit=5000000, monthly_rent=450000, maintenance_fee=50000, floor=3, total_floors=5,
+                    area_sqm=19.8, direction="남향", available_from="", option_list=[{"item": "에어컨"}], status_description="리모델링 완료", is_published=True)
+        alltxt = "\n".join(ch["title"] + ch["content"] for ch in promo.generate_promo(full, base_url="https://x.example")["channels"].values())
+        for bad in ("20~30만", "전액 세이브", "안심", "안전", "투명", "신속", "실시간", "검증 완료", "즉시입주", "사기 걱정", "떼일", "보장"):
+            self.assertNotIn(bad, alltxt, bad)
+        self.assertNotIn("입주가능일", alltxt)
         with self.assertRaises(DomainError):
             promo.generate_promo(Room(id="room_t111_pub", branch="zzz", room_no="779", id_tenant="tenant_x", active_contract_id="ct_x", is_published=True))
 

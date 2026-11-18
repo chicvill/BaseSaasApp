@@ -2,7 +2,7 @@
 apps/rent_dist/_rent3_core/promo.py — 멀티 채널 원클릭 홍보 생성기
 
 당근마켓, 네이버 피터팬, 에브리타임, 네이버 블로그, 카카오톡/문자 5대 채널에 최적화된
-매물 소개글과 안심 직거래 링크를 실시간 생성한다.
+매물 소개글과 직거래 안내 링크를 생성한다.
 사실에 기반한 내용만 반영하며, 입력되지 않은 정보는 지어내지 않고 생략한다.
 등기부 검증 배지는 roomregistry.public_clean() 검증을 통과한 경우에만 부착한다.
 """
@@ -88,7 +88,7 @@ def generate_promo(
     floor_str = " / ".join(floor_parts) if floor_parts else ""
 
     direction_str = (room.direction or "").strip()
-    avail_str = (room.available_from or "즉시입주").strip()
+    avail_str = (room.available_from or "").strip()          # 입력하지 않았으면 '즉시입주' 같은 값을 지어내지 않고 생략한다
     category = (room.room_category or "원룸").strip()
 
     options = clean_options(room.option_list)
@@ -137,9 +137,9 @@ def generate_promo(
         d_feats.append(f"• {bldg_name} 임대인이 직접 관리합니다.")
     if registry_badge:
         d_feats.append(f"• {registry_badge}")
-        d_feats.append("• 등기부 확인 완료 및 비대면 안심 전자계약으로 진행됩니다.")
+        d_feats.append("• 비대면 전자계약으로 진행됩니다.")
     else:
-        d_feats.append("• 비대면 직거래 안심 전자계약으로 진행됩니다.")
+        d_feats.append("• 비대면 직거래 전자계약으로 진행됩니다.")
 
     daangn_content = f"""[수수료 0원 / 집주인 직접 등록] {room_label} 직거래합니다!
 
@@ -149,14 +149,14 @@ def generate_promo(
 ✨ 특징 및 안내
 {chr(10).join(d_feats)}
 
-👇 실시간 매물 상세 확인 & 안심 계약 링크
+👇 매물 상세 확인 & 계약 안내 링크
 {daangn_link}
 
 💬 편하게 채팅으로 문의주세요! (방 보실 분 환영)"""
 
     # 2. ☕ 네이버 피터팬 (지어낸 난방방식/포함항목 제거)
     peter_link = make_link("peterpan")
-    peter_title = f"[직거래] {room_label} / 보증금 {dep_str} 월세 {rent_str} / {avail_str} / 수수료 0원"
+    peter_title = f"[직거래] {room_label} / 보증금 {dep_str} 월세 {rent_str}" + (f" / {avail_str}" if avail_str else "") + " / 수수료 0원"
 
     p_items = [f"1. 매물종류: {category}"]
     if address:
@@ -188,7 +188,7 @@ def generate_promo(
 
 ■ 비대면 직거래 전자계약 링크
 {peter_link}
-(※ 비대면으로 매물 정보 확인 및 안전한 전자계약 체결 가능)"""
+(※ 비대면으로 매물 정보 확인 및 전자계약 체결이 가능합니다)"""
 
     # 3. 🎓 에브리타임 (과장 표현 제거)
     eta_link = make_link("everytime")
@@ -198,19 +198,20 @@ def generate_promo(
     if address:
         e_items.append(f"📍 위치: {address}")
     e_items.append(f"💰 금액: 보증금 {dep_str} / 월세 {rent_str}" + (f" (관리비 {maint_str})" if maint_amt > 0 else ""))
-    e_items.append(f"🚪 입주: {avail_str}" + (f" ({floor_str})" if floor_str else ""))
+    if avail_str or floor_str:
+        e_items.append("🚪 " + (f"입주: {avail_str}" if avail_str else "층") + (f" ({floor_str})" if floor_str and avail_str else (f" {floor_str}" if floor_str else "")))
     if options_str:
         e_items.append(f"🛋️ 옵션: {options_str}")
 
     e_feats = []
     if desc:
         e_feats.append(f"• {desc}")
-    e_feats.append("• 중개수수료 0원! 복비 전액 세이브 가능")
+    e_feats.append("• 중개수수료 0원 집주인 직거래")
     if registry_badge:
         e_feats.append(f"• {registry_badge}")
     e_feats.append("• 비대면 직거래 전자계약 지원")
 
-    eta_content = f"""선후배님들 복비(중개수수료 20~30만원) 아끼고 깨끗한 방 구하세요! 🙌
+    eta_content = f"""선후배님들 중개수수료 없이 직거래하실 수 있는 방입니다. 🙌
 집주인 직접 직거래 매물입니다.
 
 {chr(10).join(e_items)}
@@ -218,7 +219,7 @@ def generate_promo(
 💡 특징:
 {chr(10).join(e_feats)}
 
-👇 방 사진 더 보기 & 실시간 직거래 계약:
+👇 매물 상세 확인 & 직거래 계약 안내:
 {eta_link}
 
 궁금한 점 있으시면 편하게 연락주세요!"""
@@ -233,8 +234,8 @@ def generate_promo(
     else:
         blog_titles.append(f"{room_label} {category} 월세 직거래 (보증금 {dep_str} / 월세 {rent_str}) 수수료 0원")
 
-    blog_titles.append(f"{room_label} {category} 직거래 매물 안내 - {avail_str}")
-    blog_titles.append(f"복비 아끼는 부동산 직거래 - {room_label} 비대면 안심 전자계약")
+    blog_titles.append(f"{room_label} {category} 직거래 매물 안내" + (f" - {avail_str}" if avail_str else ""))
+    blog_titles.append(f"복비 아끼는 부동산 직거래 - {room_label} 비대면 전자계약")
 
     blog_tags = ["원룸직거래", "부동산직거래", "중개수수료무료", "복비0원", "월세직거래", "비대면전자계약", "자취방구하기", "OpenRent"]
     if bldg_name:
@@ -249,7 +250,8 @@ def generate_promo(
     b_sec1.append(f"* **임대조건**: **보증금 {dep_str} / 월세 {rent_str}**")
     if maint_amt > 0:
         b_sec1.append(f"* **관리비**: 매월 {maint_str}")
-    b_sec1.append(f"* **입주시기**: {avail_str}")
+    if avail_str:
+        b_sec1.append(f"* **입주시기**: {avail_str}")
     if direction_str:
         b_sec1.append(f"* **방향**: {direction_str}")
 
@@ -263,14 +265,14 @@ def generate_promo(
     if desc:
         b_sec3.append(desc)
     if bldg_name:
-        b_sec3.append(f"{bldg_name} 임대인이 직접 관리하여 신속하게 소통할 수 있습니다.")
+        b_sec3.append(f"{bldg_name} 임대인이 직접 관리합니다.")
     else:
-        b_sec3.append("임대인이 직접 관리하여 신속하게 소통할 수 있습니다.")
+        b_sec3.append("임대인이 직접 관리합니다.")
 
     b_sec4 = []
     if registry_badge:
         b_sec4.append(f"* {registry_badge}")
-    b_sec4.append("* OpenRent 비대면 전자계약 솔루션을 통해 투명하고 안전하게 계약을 체결합니다.")
+    b_sec4.append("* OpenRent 비대면 전자계약으로 계약을 진행합니다.")
 
     blog_content = f"""# {blog_titles[0]}
 
@@ -294,10 +296,10 @@ def generate_promo(
 
 ---
 
-## 4. 안전한 비대면 직거래 안내
+## 4. 비대면 직거래 안내
 {chr(10).join(b_sec4)}
 
-👉 **실시간 매물 확인 및 안심 계약 링크**:
+👉 **매물 확인 및 계약 안내 링크**:
 {blog_link}
 
 ---
@@ -311,17 +313,18 @@ def generate_promo(
     elif floor_str:
         k_items.append(f"• 층: {floor_str}")
     k_items.append(f"• 조건: 보증금 {dep_str} / 월세 {rent_str}" + (f" (관리비 {maint_str})" if maint_amt > 0 else ""))
-    k_items.append(f"• 입주: {avail_str}" + (f" ({direction_str})" if direction_str else ""))
+    if avail_str or direction_str:
+        k_items.append("• 입주: " + (avail_str or "") + (f" ({direction_str})" if direction_str and avail_str else (direction_str or "")))
     if options_str:
         k_items.append(f"• 옵션: {options_str}")
     if registry_badge:
         k_items.append(f"• {registry_badge}")
     k_items.append("• 특징: 중개수수료 0원 집주인 직거래")
 
-    kakao_content = f"""[집주인 직거래 안심 매물 안내]
+    kakao_content = f"""[집주인 직거래 매물 안내]
 {chr(10).join(k_items)}
 
-👇 매물 상세 사진 및 안심 계약 링크
+👇 매물 상세 및 계약 안내 링크
 {kakao_link}"""
 
     return {
