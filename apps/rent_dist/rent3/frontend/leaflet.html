@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>임대인 안내 리플릿</title>
+  <style>
+    :root { --ink:#1e293b; --mute:#64748b; --line:#cbd5e1; --pri:#e11d48; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:#e2e8f0; color:var(--ink); font:15px/1.65 -apple-system,"Pretendard","Malgun Gothic",sans-serif; }
+    .bar { max-width:210mm; margin:12px auto; padding:0 12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .bar button { min-height:46px; padding:0 18px; border-radius:12px; border:1px solid var(--line); background:#fff; font-size:15px; font-weight:700; cursor:pointer; }
+    .bar .pri { background:var(--pri); border-color:var(--pri); color:#fff; }
+    .page { width:210mm; min-height:297mm; margin:0 auto 20px; background:#fff; padding:16mm 16mm 12mm; position:relative; }
+    .ad { font-size:12px; color:var(--mute); border:1px solid var(--line); display:inline-block; padding:1px 8px; border-radius:6px; }
+    h1 { font-size:30px; line-height:1.3; margin:12px 0 6px; }
+    h2 { font-size:18px; margin:18px 0 6px; border-bottom:2px solid var(--pri); padding-bottom:3px; }
+    ul { margin:6px 0; padding-left:22px; }
+    .qrbox { display:flex; gap:18px; align-items:center; border:2px solid var(--ink); border-radius:14px; padding:14px; margin-top:20px; }
+    .qrbox svg { width:42mm; height:42mm; flex:none; }
+    .fee { font-size:20px; font-weight:800; }
+    .note { font-size:12.5px; color:var(--mute); }
+    .foot { position:absolute; left:16mm; right:16mm; bottom:10mm; font-size:11.5px; color:var(--mute); border-top:1px solid var(--line); padding-top:6px; }
+    @media print { body { background:#fff; } .bar { display:none; } .page { margin:0; box-shadow:none; width:auto; min-height:auto; } @page { size:A4; margin:0; } }
+  </style>
+</head>
+<body>
+<div class="bar">
+  <button class="pri" onclick="window.print()">🖨️ 인쇄 / PDF로 저장</button>
+  <span id="barNote" style="font-size:13px;color:#475569;"></span>
+</div>
+<div class="page">
+  <span class="ad">[광고] 운영자가 제작한 서비스 안내 리플릿</span>
+  <h1><span id="regionLabel"></span> 원룸·다가구 집주인님께</h1>
+  <div class="note">공실 때문에 중개수수료를 내고 계시다면, 직접 계약하는 방법도 있습니다.</div>
+
+  <h2>할 수 있는 것</h2>
+  <ul>
+    <li><strong>세입자와 직접 계약</strong> — 중개수수료 없음. 등기부 확인·서명은 비대면 전자계약</li>
+    <li><strong>월세 장부 정리</strong> — 은행 입금 문자를 붙여넣으면 호실별 수납 기록, 미납 월·금액 자동 계산</li>
+    <li><strong>세무 참고 자료</strong> — 장부를 홈택스 신고용 입금 증빙 자료(CSV)로 정리</li>
+  </ul>
+
+  <h2>이용 조건 (숨기지 않고 적습니다)</h2>
+  <div class="fee" id="fee">불러오는 중…</div>
+  <ul id="feeNotes"></ul>
+  <div class="note" id="taxNote"></div>
+
+  <div class="qrbox">
+    <div id="qr"></div>
+    <div>
+      <div style="font-size:18px;font-weight:800;">QR을 휴대폰 카메라로 비춰 보세요</div>
+      <div>서비스 내용과 요금을 먼저 확인하실 수 있습니다. 가입하지 않으셔도 됩니다.</div>
+      <div class="note" id="shortLink" style="margin-top:6px;word-break:break-all;"></div>
+    </div>
+  </div>
+
+  <div class="foot">이 안내는 서비스 소개용 광고입니다. 개인정보(이름·연락처)를 수집하지 않으며, QR로 들어와 가입하실 때에만 가입 정보를 입력하게 됩니다. 문의: 운영자 연락처를 이 자리에 적어 주세요.</div>
+</div>
+<script src="/rent3_contract/qrcode.min.js"></script>
+<script>
+(function () {
+  "use strict";
+  var q = new URLSearchParams(location.search);
+  var TOKEN = /^[A-Za-z0-9_-]{1,32}$/;
+  var region = TOKEN.test(q.get("region") || "") ? q.get("region") : "";
+  var campaign = TOKEN.test(q.get("campaign") || "") ? q.get("campaign") : "leaflet1";
+  var label = (q.get("label") || "").replace(/[\u0000-\u001f<>]/g, "").slice(0, 20) || "우리 동네";
+  document.getElementById("regionLabel").textContent = label;
+  var ref = region ? "offline-" + region : "offline";
+  if (ref.length > 32) ref = ref.slice(0, 32);
+  var link = location.origin + "/rent3/lessor-intro.html?ref=" + encodeURIComponent(ref) + "&campaign=" + encodeURIComponent(campaign);
+  document.getElementById("shortLink").textContent = link;
+  document.getElementById("barNote").textContent = "유입 표식: ref=" + ref + " · campaign=" + campaign;
+  try {
+    var qr = qrcode(0, "M"); qr.addData(link); qr.make();
+    document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+  } catch (e) { document.getElementById("qr").textContent = "QR 생성 실패 — 아래 주소를 직접 입력해 주세요."; }
+  var won = function (n) { return Number(n).toLocaleString("ko-KR") + "원"; };
+  fetch("/api/rent3/pool/lessor-offer").then(function (r) { return r.json(); }).then(function (t) {
+    document.getElementById("fee").textContent = "가맹비 월 " + won(t.monthly_fee) + " (부가세 포함 · " + t.fee_basis + ")";
+    var notes = [t.after_approval_only, t.individual_note];
+    if (t.free_text) notes.unshift(t.free_text);
+    document.getElementById("feeNotes").innerHTML = notes.map(function (n) { return "<li></li>"; }).join("");
+    [].forEach.call(document.querySelectorAll("#feeNotes li"), function (li, i) { li.textContent = notes[i]; });
+    document.getElementById("taxNote").textContent = t.tax_scope;
+  }).catch(function () { document.getElementById("fee").textContent = "요금은 QR 페이지에서 확인해 주세요."; });
+})();
+</script>
+</body>
+</html>

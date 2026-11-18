@@ -646,6 +646,16 @@
         <div id="acqResult" style="margin-top:10px;overflow-x:auto;"></div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>🖨️ 오프라인 QR 리플릿 (인천 시범)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">구·군을 고르면 그 지역 표식(<code>ref=offline-incheon-…</code>)이 든 QR 리플릿(A4)을 엽니다. 인쇄하거나 PDF로 저장해 열쇠점·도배점 등 <strong>허락받은 곳에 비치</strong>하세요. 우편함 투입은 건물 관리 규정을 확인하고, 이름·연락처를 수집하지 않습니다. 효과는 위 '유입 현황'에서 지역별 가입·승인 수로 봅니다.</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+          <select id="lfRegion" class="bass-select" style="width:auto;min-height:44px;">
+            ${[["incheon","인천 전체"],["incheon-namdong","인천 남동구"],["incheon-bupyeong","인천 부평구"],["incheon-michuhol","인천 미추홀구"],["incheon-yeonsu","인천 연수구"],["incheon-gyeyang","인천 계양구"],["incheon-seo","인천 서구"],["incheon-jung","인천 중구"],["incheon-dong","인천 동구"]].map((x) => `<option value="${x[0]}">${x[1]}</option>`).join("")}
+          </select>
+          <button id="btnLf" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🖨️ 리플릿 열기</button>
+        </div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>📣 임대인 대상 홍보 글 (카페·밴드·블로그)</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">운영자가 직접 올리는 글 초안입니다. 맨 앞 <strong>[광고] 표시</strong>를 지우거나 후기처럼 바꾸지 마세요. 요금은 실제 조건에서 읽어 옵니다. 올리기 전 아래 규정 확인 목록을 지켜 주세요.</div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
@@ -780,6 +790,11 @@
       }
     }
     loadMfa();
+    document.getElementById("btnLf").addEventListener("click", () => {
+      const sel = document.getElementById("lfRegion");
+      const label = sel.options[sel.selectedIndex].text;
+      window.open(`/rent3/leaflet.html?region=${encodeURIComponent(sel.value)}&label=${encodeURIComponent(label)}&campaign=leaflet1`, "_blank", "noopener");
+    });
     document.getElementById("btnLp").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const E = Bass.escapeHtml;

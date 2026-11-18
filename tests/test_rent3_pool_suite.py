@@ -7435,6 +7435,26 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, aj, needle)
         self.assertIn("r3_modal.js", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8").read())
 
+    def test_116_offline_qr_leaflet_incheon_p4(self):
+        """116. 오프라인 QR 리플릿(P4, 인천 시범): 서빙되고, 맨 앞 '[광고]'·실제 요금 API·세무 범위·개인정보 미수집 문구가 있고, QR 링크는 지역 표식(offline-<지역>)으로
+        안내 페이지에 연결되며(표식은 영숫자 검증), 금지 표현이 없고, 관리인 앱에서 인천 구·군을 골라 열 수 있다."""
+        c = self.client
+        r = c.get("/rent3/leaflet.html", headers=self.NOAUTH)
+        self.assertEqual(r.status_code, 200)
+        html = r.text
+        for needle in ("[광고] 운영자가 제작한 서비스 안내 리플릿", "/api/rent3/pool/lessor-offer", "lessor-intro.html?ref=", "offline-", "qrcode(0",
+                       "개인정보(이름·연락처)를 수집하지 않으며", "중개수수료 없음", "홈택스 신고용 입금 증빙 자료(CSV)", "가입하지 않으셔도 됩니다", "TOKEN.test"):
+            self.assertIn(needle, html, needle)
+        for bad in ("평생 무료", "1초", "신고서 완성", "사기 걱정", "떼일", "보장합니다", "과태료 걱정", "25만", "후기"):
+            self.assertNotIn(bad, html, bad)
+        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnLf", "lfRegion", "incheon-namdong", "leaflet.html?region="):
+            self.assertIn(needle, aj, needle)
+        # 지역 표식은 P0 기록 형식(32자 이하 영숫자)에 맞아 가입 때 그대로 귀속된다
+        from apps.rent_dist._rent3_core import acquisition
+        for code in ("offline-incheon", "offline-incheon-michuhol"):
+            self.assertEqual(acquisition.sanitize({"ref": code})["ref"], code)
+
 
 if __name__ == "__main__":
     unittest.main()
