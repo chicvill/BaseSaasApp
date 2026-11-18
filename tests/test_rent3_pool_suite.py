@@ -7200,11 +7200,25 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("showPromoModal", lessor_fe)
         self.assertIn("btn-open-promo", lessor_fe)
         self.assertIn("📢 홍보글 복사", lessor_fe)
-        self.assertIn("r.pre_moveout_notice || r.is_published", lessor_fe)
+        self.assertNotIn("r.pre_moveout_notice || r.is_published", lessor_fe)        # 입주 중인 방은 전출 예고가 있을 때만 버튼(공개 표시가 남아 있어도 아님)
+        self.assertIn("r.pre_moveout_notice ? `<button", lessor_fe)
 
         portal_fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn('urlParams.get("room")', portal_fe)
         self.assertIn('data-room-id="${esc(l.id)}"', portal_fe)
+        # 딥링크: 주소창 값을 선택자에 넣지 않고 속성 값과 비교
+        self.assertNotIn('querySelector(`[data-room-id="${targetRoom}"]`)', portal_fe)
+        self.assertIn("el.dataset.roomId === targetRoom", portal_fe)
+
+        # 7. 보강: 모델 기본값(2층·23㎡)은 입력한 값이 아니므로 생략하고, 위치 줄이 비지 않으며, 공개 표시가 남은 입주 방도 막는다
+        txt_def = "\n".join(ch["content"] for ch in promo.generate_promo(Room(id="room_t111_def", branch="zzz", room_no="777"))["channels"].values())
+        for bad in ("2층", "23.0㎡", "위치: (", "위치:\n"):
+            self.assertNotIn(bad, txt_def, bad)
+        txt_real = promo.generate_promo(Room(id="room_t111_real", branch="zzz", room_no="778", floor=5, total_floors=7, area_sqm=31.5))["channels"]["daangn"]["content"]
+        self.assertIn("5층 / 전체 7층", txt_real)
+        self.assertIn("31.5㎡", txt_real)
+        with self.assertRaises(DomainError):
+            promo.generate_promo(Room(id="room_t111_pub", branch="zzz", room_no="779", id_tenant="tenant_x", active_contract_id="ct_x", is_published=True))
 
 
 
