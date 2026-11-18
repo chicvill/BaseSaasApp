@@ -255,7 +255,7 @@
     }
 
     grid.innerHTML = list.map((l) => `
-      <article class="or-prop-card">
+      <article class="or-prop-card" data-room-id="${esc(l.id)}" data-room-no="${esc(l.room_no)}">
         <div class="or-prop-media">
           <img src="${esc(l.image)}" alt="${esc(l.building_name)} ${esc(l.room_no)}호">
           <div class="or-prop-badges">
@@ -934,11 +934,11 @@
   }
 
   // 이미 로그인되어 있으면 포털 첫 화면 대신 내 업무 화면(임대인=내 건물, 임차인=내 집, 관리인=관리인 앱)으로 바로 들어간다.
-  // 다른 건물·계정으로 가려면 로그아웃 후 그 아이디로 다시 로그인한다. 포털 홈을 일부러 보려면 ?home=1.
+  // 다른 건물·계정으로 가려면 로그아웃 후 그 아이디로 다시 로그인한다. 포털 홈을 일부러 보려면 ?home=1, 특정 매물 공유 링크는 ?room=.
   (function autoEnter() {
     const u = getSession();
     const tok = Bass.token();
-    if (!u || !u.redirect_url || !tok || urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1") return;
+    if (!u || !u.redirect_url || !tok || urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1" || urlParams.get("room")) return;
     if (!["lessor", "tenant", "admin", "superadmin"].includes(u.role)) return;
     try {
       const p = JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
@@ -953,6 +953,32 @@
   if (urlParams.get("connect")) window.__rent3ConnectOpen(urlParams.get("connect"));   // 임대인이 보낸 링크: 메뉴 없이 연결 창만
   loadPortalData()
     .then(() => {
+      // 공유 홍보 링크(?room=room_xxx&ref=daangn): 특정 매물 카드로 부드럽게 스크롤 & 강조 표시
+      const targetRoom = urlParams.get("room");
+      if (targetRoom) {
+        // 주소창 값은 선택자에 넣지 않고 속성 값과 비교한다(따옴표 등이 들어간 값으로 오류가 나지 않게)
+        const cards = [...document.querySelectorAll("[data-room-id]")];
+        const card = cards.find((el) => el.dataset.roomId === targetRoom) || cards.find((el) => el.dataset.roomNo === targetRoom);
+        if (card) {
+          card.scrollIntoView({ behavior: "smooth", block: "center" });
+          card.style.outline = "3px solid var(--accent, #0284c7)";
+          card.style.borderRadius = "12px";
+          card.style.transition = "outline 0.3s ease";
+          const ref = urlParams.get("ref");
+          const refLabels = {
+            daangn: "🥕 당근마켓",
+            peterpan: "☕ 네이버 피터팬",
+            everytime: "🎓 에브리타임",
+            blog: "📝 네이버 블로그",
+            kakao: "💬 카카오톡",
+          };
+          const refName = refLabels[ref] || (ref ? `[${ref}]` : "");
+          if (refName) {
+            Bass.updateAppAlert("info", `${refName} 공유 링크를 통해 매물을 열었습니다. 중개수수료 0원 안심 직거래 매물입니다.`);
+          }
+        }
+      }
+
       // 공통 안내 링크(/rent3/?home=1&find=1): 내 페이지 찾기(문자 인증)를 바로 연다. 연결 요청 중인 브라우저면 대기 화면으로.
       if (urlParams.get("find") === "1") {
         if (window.__rent3ConnectPending && window.__rent3ConnectPending()) { window.__rent3ConnectOpen(""); return; }

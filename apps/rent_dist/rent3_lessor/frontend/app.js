@@ -495,6 +495,114 @@
     }).catch(Bass.showError);
   }
 
+  // 📢 멀티채널 원클릭 홍보 생성기: 당근마켓, 네이버 피터팬, 에브리타임, 네이버 블로그, 카카오톡/문자 맞춤형 서식과 안심 직거래 링크를 원클릭으로 복사
+  async function showPromoModal(roomId, roomNo) {
+    const E = Bass.escapeHtml;
+    try {
+      const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(roomId)}/promo`);
+      const promo = res.promo;
+      const channels = promo.channels || {};
+      const channelKeys = Object.keys(channels);
+      let curKey = "daangn";
+
+      const body = openModal(`📢 ${E(roomNo)}호 멀티채널 원클릭 홍보 생성기`, `
+        <div style="font-size:13.5px;color:var(--muted);margin-bottom:12px;line-height:1.6;">
+          원클릭으로 <strong>당근마켓, 네이버 피터팬, 에브리타임, 네이버 블로그, 카톡</strong> 맞춤형 홍보글과 안심 직거래 링크를 복사하여 공실을 빠르게 채우세요!
+        </div>
+        <div class="promo-tabs" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:12px;">
+          ${channelKeys.map((k) => `
+            <button type="button" class="bass-btn bass-btn--sm promo-tab-btn ${k === curKey ? "bass-btn--primary" : ""}" data-ch="${k}" style="min-height:36px;white-space:nowrap;padding:4px 10px;font-size:13px;">
+              ${E(channels[k].icon)} ${E(channels[k].name)}
+            </button>
+          `).join("")}
+        </div>
+        <div id="promoContentWrap">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:13.5px;" id="promoChannelTitle"></span>
+            <span class="bass-badge bass-badge--info" style="font-size:12px;">내용 직접 수정 가능</span>
+          </div>
+          <textarea id="promoTextarea" class="bass-input" rows="12" style="width:100%;font-size:13px;line-height:1.6;font-family:inherit;padding:10px;border-radius:8px;resize:vertical;"></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;justify-content:flex-end;">
+            <button type="button" id="btnCopyLinkOnly" class="bass-btn bass-btn--sm" style="min-height:40px;">🔗 안심 링크만 복사</button>
+            <button type="button" id="btnOpenDaangnApp" class="bass-btn bass-btn--sm" style="min-height:40px;background:hsla(28,95%,55%,.15);border-color:hsla(28,95%,50%,.4);display:none;">🥕 당근 앱 열기</button>
+            <button type="button" id="btnCopyAllPromo" class="bass-btn bass-btn--sm bass-btn--primary" style="min-height:40px;font-weight:600;">📋 홍보글 전체 복사</button>
+          </div>
+        </div>
+      `);
+
+      function updateChannelView(k) {
+        curKey = k;
+        body.querySelectorAll(".promo-tab-btn").forEach((b) => {
+          if (b.dataset.ch === k) {
+            b.classList.add("bass-btn--primary");
+          } else {
+            b.classList.remove("bass-btn--primary");
+          }
+        });
+        const ch = channels[k] || {};
+        const titleEl = body.querySelector("#promoChannelTitle");
+        const areaEl = body.querySelector("#promoTextarea");
+        const daangnBtn = body.querySelector("#btnOpenDaangnApp");
+        if (titleEl) titleEl.textContent = `${ch.icon || ""} ${ch.name || ""} 맞춤형 서식`;
+        if (areaEl) areaEl.value = ch.content || "";
+        if (daangnBtn) {
+          daangnBtn.style.display = k === "daangn" ? "inline-flex" : "none";
+        }
+      }
+
+      body.querySelectorAll(".promo-tab-btn").forEach((b) => {
+        b.addEventListener("click", () => updateChannelView(b.dataset.ch));
+      });
+
+      body.querySelector("#btnCopyAllPromo").addEventListener("click", async () => {
+        const text = body.querySelector("#promoTextarea").value;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const ta = body.querySelector("#promoTextarea");
+            ta.select();
+            document.execCommand("copy");
+          }
+          const chName = (channels[curKey] && channels[curKey].name) || "홍보글";
+          Bass.updateAppAlert("success", `${chName} 홍보글이 클립보드에 복사되었습니다! 원하는 앱이나 웹사이트에 붙여넣으세요.`);
+        } catch (err) {
+          copyText(text);
+          Bass.updateAppAlert("success", "클립보드에 복사되었습니다.");
+        }
+      });
+
+      body.querySelector("#btnCopyLinkOnly").addEventListener("click", async () => {
+        const link = (channels[curKey] && channels[curKey].link) || `https://${window.location.host}/rent3/?room=${encodeURIComponent(roomId)}`;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(link);
+          } else {
+            copyText(link);
+          }
+          Bass.updateAppAlert("success", "안심 직거래 링크가 복사되었습니다!");
+        } catch (err) {
+          window.prompt("아래 링크를 복사하세요:", link);
+        }
+      });
+
+      body.querySelector("#btnOpenDaangnApp").addEventListener("click", () => {
+        const scheme = "karrot://";
+        const t0 = Date.now();
+        window.location.href = scheme;
+        setTimeout(() => {
+          if (Date.now() - t0 < 1500) {
+            window.open("https://www.daangn.com", "_blank");
+          }
+        }, 1000);
+      });
+
+      updateChannelView("daangn");
+    } catch (err) {
+      Bass.showError(err);
+    }
+  }
+
   // 🔍 원장 상태: 저장된 납부 건(출처·적힌 청구월)과 상계 결과·선수금·이상 징후를 보여 주고, 잘못 들어간 건은 여기서 삭제한다
   async function showLedgerStateModal(no) {
     const E = Bass.escapeHtml;
@@ -1383,6 +1491,7 @@
           <div><strong style="font-size:17px;">${Bass.escapeHtml(r.room_no)}호</strong> <span class="bass-badge ${r.is_published ? "bass-badge--info" : "bass-badge--warn"}">${r.is_published ? "공실 · 매물 공개중" : "공실 · 비공개"}</span></div>
           <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
             <button class="bass-btn bass-btn--sm btn-pub-toggle" data-id="${r.id}" data-pub="${!r.is_published}" type="button">${r.is_published ? "비공개 전환" : "직거래 매물 공개"}</button>
+            <button class="bass-btn bass-btn--sm btn-open-promo" data-id="${r.id}" data-room="${r.room_no}" type="button" style="border-color:hsla(28,95%,50%,.4);background:hsla(28,95%,55%,.1);font-weight:600;">📢 홍보글 복사</button>
             <button class="bass-btn bass-btn--sm btn-go-broker" data-room="${r.room_no}" type="button">📸 중개계약 사진등록</button>
             <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 서식 계약</a>
           </div>
@@ -1396,6 +1505,7 @@
           await refresh();
         });
       }));
+      box.querySelectorAll(".btn-open-promo").forEach((btn) => btn.addEventListener("click", () => showPromoModal(btn.dataset.id, btn.dataset.room)));
       box.querySelectorAll(".btn-go-broker").forEach((btn) => btn.addEventListener("click", () => { brokerTargetRoomNo = btn.dataset.room || ""; switchTab("broker"); }));
       return;
     }
@@ -1412,7 +1522,8 @@
         <button class="bass-btn bass-btn--sm" data-act="moveout" type="button">전출</button>
       </div>
       <div class="rc-subbtns"><button class="bass-btn bass-btn--sm" data-act="invite" type="button" style="min-height:44px;border-color:hsla(199,80%,60%,.4);">📲 입주 안내 카드 (QR)</button>
-        <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;border-color:hsla(356,75%,62%,.4);">📵 분실 폰 해제</button></div>
+        <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;border-color:hsla(356,75%,62%,.4);">📵 분실 폰 해제</button>
+        ${r.pre_moveout_notice ? `<button class="bass-btn bass-btn--sm btn-open-promo" data-id="${r.id}" data-room="${r.room_no}" type="button" style="min-height:44px;border-color:hsla(28,95%,50%,.4);">📢 홍보글 복사</button>` : ""}</div>
       <div class="rc-info">
         <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
@@ -1421,6 +1532,7 @@
       <div id="payInline" class="room-card r3-zone r3-zone--pay" style="margin-top:10px;"></div>`;
     const acts = { contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
+    box.querySelectorAll(".btn-open-promo").forEach((btn) => btn.addEventListener("click", () => showPromoModal(btn.dataset.id, btn.dataset.room)));
     renderPayInline(r.room_no);      // 호실을 고르면 그 호실의 수납 내용이 바로 펼쳐진 채로 열린다
   }
 
@@ -2965,6 +3077,9 @@
         });
         Bass.updateAppAlert("success", res.message);
         await refresh();
+        if (res.room && res.room.id) {
+          showPromoModal(res.room.id, res.room.room_no);
+        }
       });
     });
 

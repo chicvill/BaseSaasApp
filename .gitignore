@@ -49,3 +49,7 @@ e2e_runtime/
 2026년_*수납부.csv
 data/private/
 2025-26_*수납부.csv
+
+# 에이전트 연락장 (로컬 전용, 저장소 추적 금지)
+docs/agent_board.md
+

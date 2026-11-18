@@ -591,6 +591,22 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     }
 
 
+@router.get("/rooms/{room_id}/promo")
+def get_room_promo(room_id: str, request: Request):
+    """호실의 5대 채널(당근, 피터팬, 에타, 블로그, 카톡) 멀티채널 원클릭 홍보 텍스트 생성."""
+    room = Room.require(room_id)
+    lsr = _my_lessor(room.branch)
+    bldg = Building.get(room.id_building) if room.id_building else Building.first(branch=room.branch)
+
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    base_url = f"{proto}://{host}" if host else ""
+
+    from apps.rent_dist._rent3_core import promo
+    data = promo.generate_promo(room, building=bldg, lessor=lsr, base_url=base_url)
+    return {"success": True, "promo": data}
+
+
 class RoomRegistryReadReq(BaseModel):
     attachment_data_url: str
     consent: bool = False

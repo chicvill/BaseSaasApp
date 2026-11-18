@@ -7052,6 +7052,161 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn("3일 이내 열람본만 인정", html)
 
+    def test_111_promo_generator_templates_and_modal(self):
+        """111. 멀티채널 원클릭 홍보 생성기: 5대 채널 사실 기반 텍스트 생성, 등기클린 엄격 판정, 미입력 항목 생략, 입주방 차단 및 교차지점 거부 검증."""
+        from apps.rent_dist._rent3_core import promo, Room, Building, Lessor
+        from core.errors import DomainError
+        chic = self._login("chic")
+        sunho = self._login("sunho")
+        c = self.client
+
+        # 1. 코어 promo.generate_promo() 기본 검증 (공실 및 공개 매물 203호)
+        room = Room.first(branch="main", room_no="203")
+        bldg = Building.first(branch="main")
+        lsr = Lessor.first(branch="main")
+        res = promo.generate_promo(room, building=bldg, lessor=lsr, base_url="https://saas.test.io")
+
+        self.assertEqual(res["room_no"], "203")
+        channels = res["channels"]
+        self.assertEqual(set(channels.keys()), {"daangn", "peterpan", "everytime", "blog", "kakao"})
+
+        # 당근마켓 검증 (복비 0원, 안심링크, 딥링크 스킴, 과장 문구 부재)
+        daangn = channels["daangn"]
+        self.assertIn("당근마켓", daangn["name"])
+        self.assertIn("[수수료 0원", daangn["content"])
+        self.assertIn("ref=daangn", daangn["link"])
+        self.assertTrue(daangn["scheme"].startswith("karrot://"))
+        self.assertNotIn("보증금 떼일 걱정 없는", daangn["content"])
+        self.assertNotIn("사기 걱정 없이", daangn["content"])
+
+        # 네이버 피터팬 검증 (피터팬 직거래 표준 양식, 임의 가열/포함항목 없음)
+        peter = channels["peterpan"]
+        self.assertIn("피터팬", peter["name"])
+        self.assertIn("■ 매물 정보 (피터팬 직거래 표준 양식)", peter["content"])
+        self.assertIn("ref=peterpan", peter["link"])
+        self.assertNotIn("도시가스 개별난방", peter["content"])
+
+        # 에브리타임 검증 (대학생 타겟 복비 절약 강조)
+        eta = channels["everytime"]
+        self.assertIn("에브리타임", eta["name"])
+        self.assertIn("복비(중개수수료 20~30만원) 아끼고", eta["content"])
+        self.assertIn("ref=everytime", eta["link"])
+
+        # 네이버 블로그 검증 (SEO 소제목, 해시태그 목록)
+        blog = channels["blog"]
+        self.assertIn("네이버 블로그", blog["name"])
+        self.assertGreaterEqual(len(blog["recommended_titles"]), 3)
+        self.assertGreaterEqual(len(blog["tags"]), 8)
+        self.assertIn("원룸직거래", blog["tags"])
+        self.assertIn("ref=blog", blog["link"])
+        for title in blog["recommended_titles"]:
+            self.assertNotIn("신림역 인근", title)
+
+        # 카카오톡 / 문자 요약본 검증
+        kakao = channels["kakao"]
+        self.assertIn("카카오톡", kakao["name"])
+        self.assertIn("ref=kakao", kakao["link"])
+
+        # 2. 미입력 항목 생략 및 사실 기반 검증 (정보가 비어있는 777호)
+        empty_room = Room(
+            branch="main",
+            room_no="777",
+            deposit=10000000,
+            monthly_rent=500000,
+            is_occupied=False,
+            is_published=True,
+        )
+        res_empty = promo.generate_promo(empty_room, base_url="https://saas.test.io")
+        self.assertFalse(res_empty["clean_title"])
+        for ch_key, ch_data in res_empty["channels"].items():
+            txt = ch_data["content"]
+            self.assertNotIn("시크빌", txt)
+            self.assertNotIn("관악구 신림로", txt)
+            self.assertNotIn("에어컨·세탁기·냉장고", txt)
+            self.assertNotIn("도시가스 개별난방", txt)
+            self.assertNotIn("인터넷, 수도 등 포함", txt)
+            self.assertNotIn("신림역 인근", txt)
+            self.assertNotIn("등기부 확인 완료", txt)
+            self.assertNotIn("소유자 일치 · 권리 깨끗함", txt)
+
+        # 3. 등기부 확인 문구의 roomregistry.public_clean() 엄격 연동 검증
+        # 3-1) 최근 확정 + 깨끗함인 호실: 배지 부착
+        from apps.rent_dist._rent3_core import roomregistry
+        clean_room = Room(
+            branch="main",
+            room_no="888",
+            deposit=5000000,
+            monthly_rent=400000,
+            is_occupied=False,
+            is_published=True,
+            registry_checked=True,
+            registry_info={
+                "status": "confirmed",
+                "clean_title": True,
+                "owner_matches": True,
+                "verified_at": "2026-11-18",
+            },
+        )
+        res_clean = promo.generate_promo(clean_room, base_url="https://saas.test.io")
+        self.assertTrue(res_clean["clean_title"])
+        self.assertIn("등기부 확인 완료 (소유자 일치 · 권리 깨끗함)", res_clean["channels"]["daangn"]["content"])
+
+        # 3-2) 90일 지난 등기부: public_clean=False 이므로 배지 미부착
+        old_reg_room = Room(
+            branch="main",
+            room_no="889",
+            deposit=5000000,
+            monthly_rent=400000,
+            is_occupied=False,
+            is_published=True,
+            registry_checked=True,
+            registry_info={
+                "status": "confirmed",
+                "clean_title": True,
+                "owner_matches": True,
+                "verified_at": "2020-01-01",
+            },
+        )
+        res_old = promo.generate_promo(old_reg_room, base_url="https://saas.test.io")
+        self.assertFalse(res_old["clean_title"])
+        self.assertNotIn("등기부 확인 완료", res_old["channels"]["daangn"]["content"])
+
+        # 4. 입주 중인 방(만기전출 예고 없음) 홍보 차단 검증
+        occ_room = Room.first(branch="main", room_no="201")
+        self.assertTrue(occ_room.is_occupied)
+        self.assertFalse(occ_room.pre_moveout_notice)
+        self.assertFalse(occ_room.is_published)
+        with self.assertRaises(DomainError):
+            promo.generate_promo(occ_room)
+
+        # 만기 전출 예정(pre_moveout_notice=True)인 입주 방은 사전 홍보 허용
+        occ_room.pre_moveout_notice = True
+        res_occ_notice = promo.generate_promo(occ_room)
+        self.assertIn("201호", res_occ_notice["channels"]["daangn"]["content"])
+        occ_room.pre_moveout_notice = False  # 원상 복구
+
+        # 5. 임대인 API /api/rent3_lessor/rooms/{room.id}/promo 검증 및 타 지점 접근 차단(403)
+        r = c.get(f"/api/rent3_lessor/rooms/{room.id}/promo", headers=chic)
+        self.assertEqual(r.status_code, 200, r.text)
+        api_data = r.json()
+        self.assertTrue(api_data["success"])
+
+        # 동작 지점 임대인(sunho)이 관악 main 지점 호실의 홍보글 요청 시 403 Forbidden
+        r_forbidden = c.get(f"/api/rent3_lessor/rooms/{room.id}/promo", headers=sunho)
+        self.assertEqual(r_forbidden.status_code, 403)
+
+        # 6. 임대인 화면(app.js) 및 포털(app.js) UI 연동 검증
+        lessor_fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn("showPromoModal", lessor_fe)
+        self.assertIn("btn-open-promo", lessor_fe)
+        self.assertIn("📢 홍보글 복사", lessor_fe)
+        self.assertIn("r.pre_moveout_notice || r.is_published", lessor_fe)
+
+        portal_fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn('urlParams.get("room")', portal_fe)
+        self.assertIn('data-room-id="${esc(l.id)}"', portal_fe)
+
+
 
 if __name__ == "__main__":
     unittest.main()
