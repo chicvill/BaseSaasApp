@@ -7390,6 +7390,51 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn("lessor-intro.html", pj)
 
+    def test_115_landlord_promo_templates_p3(self):
+        """115. 임대인 대상 홍보 글(P3): 관리인만, 채널·시기별 초안에 '[광고]' 표시·실제 요금·세무 범위·유입 추적 링크·규정 확인 목록이 있고,
+        무료 기간은 설정 시에만 쓰며, 후기 위장·보장·단정 표현이 없고, 잘못된 입력은 거부한다."""
+        from apps.rent_dist._rent3_core import landlordpromo as lp, offer
+        c = self.client
+        AD = "/api/rent3_admin/landlord-promo"
+        self.assertIn(c.get(AD, headers=self._login("chic")).status_code, (401, 403))
+        self.assertIn(c.get(AD, headers=self.NOAUTH).status_code, (401, 403))
+        admin = self._login("admin")
+        old = os.environ.pop("RENT3_FEE_FREE_UNTIL", None)
+        try:
+            for ch in ("cafe", "band", "blog"):
+                for se in ("none", "vat_jan", "tax_may", "vat_jul"):
+                    r = c.get(AD, headers=admin, params={"channel": ch, "season": se})
+                    self.assertEqual(r.status_code, 200, r.text)
+                    p = r.json()["post"]
+                    txt = p["title"] + " " + p["content"]
+                    self.assertTrue(p["title"].startswith("[광고]"), p["title"])
+                    self.assertTrue(p["content"].startswith(lp.AD_LABEL))
+                    self.assertIn(f"{offer.default_fee():,}원", p["content"])                  # 실제 가맹비
+                    self.assertIn("가맹 심사", p["content"])
+                    self.assertIn("홈택스 신고용 입금 증빙 자료(CSV)", p["content"])
+                    self.assertIn(f"ref={ch}&campaign=", p["link"])
+                    self.assertNotIn("무료 기간", txt)                                           # 설정 전에는 무료 문구 없음
+                    self.assertEqual(len(p["checklist"]), len(lp.CHECKLIST))
+                    for bad in ("평생 무료", "1초", "신고서 완성", "사기 걱정", "떼일", "보장합니다", "과태료 걱정", "후기", "써봤", "덕분에", "25만"):
+                        self.assertNotIn(bad, txt, (ch, se, bad))
+            self.assertIn("5월은 종합소득세", c.get(AD, headers=admin, params={"channel": "cafe", "season": "tax_may"}).json()["post"]["content"])
+            self.assertIn("tags", c.get(AD, headers=admin, params={"channel": "blog"}).json()["post"])
+            os.environ["RENT3_FEE_FREE_UNTIL"] = "2026-12"
+            self.assertIn("2026년 12월분까지", c.get(AD, headers=admin).json()["post"]["content"])
+        finally:
+            os.environ.pop("RENT3_FEE_FREE_UNTIL", None)
+            if old is not None:
+                os.environ["RENT3_FEE_FREE_UNTIL"] = old
+        # 잘못된 입력 거부
+        self.assertEqual(c.get(AD, headers=admin, params={"channel": "tiktok"}).status_code, 400)
+        self.assertEqual(c.get(AD, headers=admin, params={"season": "dec"}).status_code, 400)
+        self.assertEqual(c.get(AD, headers=admin, params={"campaign": "<x> y"}).status_code, 400)
+        self.assertIn("campaign=my_camp1", c.get(AD, headers=admin, params={"campaign": "my_camp1"}).json()["post"]["link"])
+        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnLp", "/landlord-promo", "광고 표시는 지우지 말고"):
+            self.assertIn(needle, aj, needle)
+        self.assertIn("r3_modal.js", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8").read())
+
 
 if __name__ == "__main__":
     unittest.main()

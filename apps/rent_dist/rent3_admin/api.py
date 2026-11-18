@@ -791,6 +791,15 @@ class CarrySplitReq(BaseModel):
     confirm: bool = False
 
 
+@router.get("/landlord-promo", dependencies=ADMIN_ONLY)
+def landlord_promo(request: Request, channel: str = "cafe", season: str = "none", campaign: str = ""):
+    """임대인 대상 홍보 글 초안(카페·밴드·블로그). '[광고]' 표시·실제 요금·채널 규정 확인 목록이 들어 있다. 운영자가 직접 올린다."""
+    from apps.rent_dist._rent3_core import landlordpromo as lp
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    return {"success": True, "seasons": lp.SEASONS, "post": lp.generate(channel, season, campaign, f"{proto}://{host}" if host else "")}
+
+
 @router.get("/acquisition/summary", dependencies=ADMIN_ONLY)
 def acquisition_summary():
     """임대인 유입 현황(읽기 전용): 채널·캠페인별 가입 → 가맹 승인 → 첫 방 등록 → 첫 수납 기록 수."""

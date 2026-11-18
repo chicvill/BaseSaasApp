@@ -646,6 +646,16 @@
         <div id="acqResult" style="margin-top:10px;overflow-x:auto;"></div>
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
+        <h3>📣 임대인 대상 홍보 글 (카페·밴드·블로그)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">운영자가 직접 올리는 글 초안입니다. 맨 앞 <strong>[광고] 표시</strong>를 지우거나 후기처럼 바꾸지 마세요. 요금은 실제 조건에서 읽어 옵니다. 올리기 전 아래 규정 확인 목록을 지켜 주세요.</div>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+          <select id="lpChannel" class="bass-select" style="width:auto;min-height:44px;"><option value="cafe">☕ 네이버 카페</option><option value="band">👥 네이버 밴드</option><option value="blog">📝 네이버 블로그</option></select>
+          <select id="lpSeason" class="bass-select" style="width:auto;min-height:44px;"><option value="none">상시</option><option value="vat_jan">1월 부가세철</option><option value="tax_may">5월 종소세철</option><option value="vat_jul">7월 부가세철</option></select>
+          <button id="btnLp" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✍️ 글 만들기</button>
+        </div>
+        <div id="lpResult" style="margin-top:10px;"></div>
+      </div>
+      <div class="bass-card" style="margin-bottom:14px;">
         <h3>📜 기존 입주자 등기부 확인 완료 처리</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">입주 전 등기부 확인은 <strong>공동 전자계약으로 새로 체결한 계약</strong>에서 임차인이 합니다. 전자계약이 아닌 <strong>기존 입주자</strong>는 이미 살고 있어 다시 할 대상이 아니므로 '확인 완료(이전 입주자)'로 기록합니다. 출입 정보 잠금·수납·계약 조건은 바꾸지 않습니다. [미리보기]는 아무것도 바꾸지 않고, [백업 후 기록]은 자동 백업 뒤에 진행합니다.</div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;"><button id="btnLgPrev" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">🔎 미리보기</button><button id="btnLgApply" class="bass-btn" type="button" style="min-height:44px;" disabled>📜 백업 후 기록</button></div>
@@ -770,6 +780,25 @@
       }
     }
     loadMfa();
+    document.getElementById("btnLp").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const E = Bass.escapeHtml;
+        const r = await Bass.api(APP_ID, `/landlord-promo?channel=${document.getElementById("lpChannel").value}&season=${document.getElementById("lpSeason").value}`);
+        const p = r.post;
+        document.getElementById("lpResult").innerHTML = `
+          <div style="font-weight:700;margin-bottom:4px;">제목</div><input id="lpTitle" class="bass-input" style="width:100%;min-height:44px;" value="${E(p.title)}">
+          <div style="font-weight:700;margin:8px 0 4px;">본문 (직접 고칠 수 있어요)</div><textarea id="lpBody" class="bass-input" rows="16" style="width:100%;font-size:13px;line-height:1.6;">${E(p.content)}</textarea>
+          ${p.tags ? `<div class="bass-muted" style="font-size:12.5px;">태그: ${p.tags.map((x) => "#" + E(x)).join(" ")}</div>` : ""}
+          <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">유입 추적 링크: <code>${E(p.link)}</code></div>
+          <div class="bass-row" style="gap:8px;margin-top:8px;"><button id="lpCopy" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">📋 제목+본문 복사</button></div>
+          <div style="margin-top:10px;font-weight:700;">올리기 전 확인</div>
+          <ul style="margin:4px 0 0 18px;font-size:12.5px;line-height:1.7;">${p.checklist.map((x) => `<li>${E(x)}</li>`).join("")}</ul>`;
+        document.getElementById("lpCopy").addEventListener("click", async () => {
+          await R3.copyText(document.getElementById("lpTitle").value + "\n\n" + document.getElementById("lpBody").value);
+          Bass.updateAppAlert("success", "복사했습니다. 광고 표시는 지우지 말고 올려 주세요.");
+        });
+      });
+    });
     document.getElementById("btnAcq").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const r = await Bass.api(APP_ID, "/acquisition/summary");
