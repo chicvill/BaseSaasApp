@@ -113,6 +113,10 @@ def ensure_notices(month: str = "", branch: str = "", force: bool = False) -> Li
     mk = month or month_key()
     if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", mk):
         raise DomainError("청구월은 YYYY-MM 형식이어야 합니다.")
+    from . import offer
+    if not force and offer.is_free_month(mk):          # 임대인 안내(P2)에서 약속한 무료 기간(RENT3_FEE_FREE_UNTIL)에는 청구하지 않는다
+        _mark_overdue()
+        return []
     made: List[FranchiseFee] = []
     existing = {(f.id_lessor, f.billing_month) for f in FranchiseFee.all() if f.status != "CANCELLED"}
     for lsr in Lessor.all():

@@ -975,7 +975,7 @@
     openAuthModal({ tab: "register" });
     $("regRole").value = "lessor";
     $("regRole").dispatchEvent(new Event("change"));
-    $("authModalSub").textContent = "세입자가 직접 계약(중개수수료 없음)을 제안했습니다. 임대인으로 가입하면 가맹 심사 후 호실을 등록하고 전자계약을 진행할 수 있습니다. 이용 조건은 가입 전에 확인해 주세요.";
+    $("authModalSub").innerHTML = 'Rent3 직접 계약(중개수수료 없음)을 제안받았습니다. 가입 후 가맹 심사를 통과해야 호실을 공개할 수 있습니다. <a href="/rent3/lessor-intro.html' + location.search.replace(/&?invite=lessor/, "").replace(/^\?&/, "?") + '" style="color:inherit;font-weight:700;">월 이용 요금·서비스 내용 먼저 보기 →</a>';
   }
   if (urlParams.get("connect")) window.__rent3ConnectOpen(urlParams.get("connect"));   // 임대인이 보낸 링크: 메뉴 없이 연결 창만
   loadPortalData()

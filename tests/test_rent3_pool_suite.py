@@ -7341,6 +7341,55 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             if o:
                 o.delete(action="t")
 
+    def test_114_lessor_intro_page_honest_terms_p2(self):
+        """114. 임대인 안내(P2): 공개 API 가 실제 가맹비(코드 값)를 부가세 포함·월 정액으로 알리고, 무료 기간은 환경변수를 설정했을 때만 안내하며 청구도 그 기간에는 만들지 않고,
+        세무는 '홈택스 신고용 입금 증빙 자료(CSV) 정리'까지만 말하고, 샘플 CSV 는 가상 자료임을 밝히며, 화면·문구에 금지 표현이 없다."""
+        import re
+        from apps.rent_dist._rent3_core import Lessor, feebilling, offer
+        c = self.client
+        old = os.environ.pop("RENT3_FEE_FREE_UNTIL", None)
+        try:
+            t = c.get("/api/rent3/pool/lessor-offer", headers=self.NOAUTH)                       # 로그인 없이 볼 수 있다
+            self.assertEqual(t.status_code, 200, t.text)
+            d = t.json()
+            self.assertEqual(d["monthly_fee"], Lessor.model_fields["app_fee"].default)           # 안내 금액 = 실제 청구 기본값
+            self.assertEqual(d["fee_supply"] + d["fee_vat"], d["monthly_fee"])
+            self.assertTrue(d["vat_included"])
+            self.assertEqual(d["free_until"], "")                                                # 설정이 없으면 무료 안내도 없다
+            self.assertEqual(d["free_text"], "")
+            for k in ("tax_scope", "after_approval_only", "individual_note"):
+                self.assertTrue(d[k], k)
+            self.assertIn("홈택스 신고용 입금 증빙 자료(CSV)", d["tax_scope"])
+            self.assertIn("대신 작성·제출하지 않", d["tax_scope"])
+            # 무료 기간 설정: 안내하고 청구도 지킨다
+            os.environ["RENT3_FEE_FREE_UNTIL"] = "2026-12"
+            d2 = c.get("/api/rent3/pool/lessor-offer", headers=self.NOAUTH).json()
+            self.assertEqual((d2["free_until"], "2026년 12월분까지" in d2["free_text"]), ("2026-12", True))
+            self.assertTrue(offer.is_free_month("2026-11") and offer.is_free_month("2026-12") and not offer.is_free_month("2027-01"))
+            self.assertEqual(feebilling.ensure_notices("2026-12", force=False), [])              # 무료 달에는 만들지 않는다
+            os.environ["RENT3_FEE_FREE_UNTIL"] = "잘못된값"
+            self.assertEqual(offer.free_until(), "")                                             # 형식이 틀리면 무료 안내 없음
+        finally:
+            os.environ.pop("RENT3_FEE_FREE_UNTIL", None)
+            if old is not None:
+                os.environ["RENT3_FEE_FREE_UNTIL"] = old
+        # 샘플 CSV: 가상 자료 표기, 장부와 같은 머리글
+        r = c.get("/api/rent3/pool/lessor-offer/sample.csv", headers=self.NOAUTH)
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/csv", r.headers["content-type"])
+        self.assertIn("샘플입니다", r.text)
+        self.assertIn("(샘플)", r.text)
+        # 화면: 요금 표기·계산기·가입 연결, 금지 표현 없음
+        page = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "lessor-intro.html"), encoding="utf-8").read()
+        for needle in ("이용 요금", "lessor-offer", "calcFee", "joinBtn", "신고서를 대신 작성·제출하지 않고", "홈택스 신고용 입금 증빙 자료(CSV)", "가맹 심사"):
+            self.assertIn(needle, page, needle)
+        blob = page + " ".join(str(v) for v in d.values())
+        for bad in ("평생 무료", "1초", "신고서 완성", "사기 걱정", "떼일", "보장합니다", "과태료 걱정", "25만"):
+            self.assertNotIn(bad, blob, bad)
+        self.assertEqual(c.get("/rent3/lessor-intro.html", headers=self.NOAUTH).status_code, 200)   # 실제로 서빙된다
+        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn("lessor-intro.html", pj)
+
 
 if __name__ == "__main__":
     unittest.main()

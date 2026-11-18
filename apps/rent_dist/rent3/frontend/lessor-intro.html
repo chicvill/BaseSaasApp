@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>임대인 안내 · OpenRent</title>
+  <style>
+    :root { --bg:#f8fafc; --card:#fff; --ink:#1e293b; --mute:#64748b; --line:#e2e8f0; --pri:#e11d48; --ok:#15803d; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f172a; --card:#1e293b; --ink:#e2e8f0; --mute:#94a3b8; --line:#334155; --pri:#fb7185; --ok:#4ade80; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.7 -apple-system,"Pretendard","Malgun Gothic",sans-serif; }
+    main { max-width:720px; margin:0 auto; padding:20px 16px 60px; }
+    h1 { font-size:22px; margin:8px 0 4px; } h2 { font-size:17px; margin:0 0 8px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
+    .mute { color:var(--mute); font-size:13px; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:46px; padding:0 18px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
+    .btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; }
+    input { min-height:44px; width:100%; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font-size:15px; }
+    label { display:block; font-size:13px; margin:8px 0 2px; font-weight:700; }
+    .big { font-size:20px; font-weight:800; }
+    ul { padding-left:20px; margin:6px 0; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="mute"><a href="/rent3/" style="color:inherit;">← OpenRent 홈</a></div>
+  <h1>🏢 임대인(집주인)님께</h1>
+  <div class="mute">세입자가 직접 계약을 제안했거나, 직거래로 공실을 채우고 월세 장부를 정리하고 싶은 분을 위한 안내입니다.</div>
+
+  <div class="card">
+    <h2>① 중개수수료 없이 직접 계약</h2>
+    공인중개사를 거치지 않고 집주인과 세입자가 직접 계약합니다. 등기부 확인과 계약서 서명은 비대면 전자계약으로 진행합니다.
+    <div class="mute" style="margin-top:6px;">※ 계약서의 법적 효력·확정일자 등 세부 사항은 계약 화면의 안내를 확인해 주세요.</div>
+  </div>
+
+  <div class="card">
+    <h2>② 입금 문자로 장부 정리 · 세무 자료</h2>
+    은행 입금 문자를 붙여넣으면 호실별 수납 장부에 기록됩니다. 장부는 <strong>홈택스 신고용 입금 증빙 자료(CSV)로 자동 정리</strong>됩니다.
+    <div class="mute" style="margin-top:6px;">신고서를 대신 작성·제출하지 않고, 세액을 계산하거나 절세를 보장하지 않습니다. 신고는 직접 하시거나 세무 전문가와 상의해 주세요.</div>
+    <div style="margin-top:8px;"><a class="btn" href="/api/rent3/pool/lessor-offer/sample.csv">📥 샘플 CSV 받기 (가상 자료)</a></div>
+  </div>
+
+  <div class="card">
+    <h2>③ 미납 자동 계산 · 안내 문자</h2>
+    납부 기록으로 호실별 미납 월과 금액을 계산하고, 안내 문구를 문자창에 바로 불러옵니다.
+  </div>
+
+  <div class="card" id="feeCard">
+    <h2>💳 이용 요금 (숨기지 않고 알려 드립니다)</h2>
+    <div id="feeBody" class="mute">불러오는 중…</div>
+  </div>
+
+  <div class="card">
+    <h2>🧮 내 경우 비교해 보기</h2>
+    <div class="mute">숫자는 모두 직접 입력하는 값입니다. 예상 절감액을 대신 알려 드리지 않습니다.</div>
+    <label for="calcFee">최근 한 번 중개수수료로 낸 금액(원)</label>
+    <input id="calcFee" type="number" min="0" inputmode="numeric" placeholder="예: 입력">
+    <label for="calcN">1년에 세입자가 바뀌는 횟수(호실 합계)</label>
+    <input id="calcN" type="number" min="0" inputmode="numeric" placeholder="예: 입력">
+    <div id="calcOut" style="margin-top:10px;" class="big"></div>
+    <div class="mute" id="calcNote"></div>
+  </div>
+
+  <div class="card">
+    <h2>가입 순서</h2>
+    <ul><li>임대인으로 가입 → 가맹 심사(서류·등기부 확인) → 승인 후 호실 등록·매물 공개</li><li>심사를 통과하기 전에는 매물 공개와 직거래 계약이 되지 않습니다.</li></ul>
+    <a id="joinBtn" class="btn pri" href="/rent3/?invite=lessor" style="width:100%;margin-top:8px;">임대인으로 가입하기</a>
+  </div>
+</main>
+<script>
+(function () {
+  "use strict";
+  var won = function (n) { return Number(n).toLocaleString("ko-KR") + "원"; };
+  // 이 화면으로 들어온 유입 표식(?ref=&campaign=&from=)을 가입 화면까지 그대로 넘긴다
+  try {
+    var q = new URLSearchParams(location.search), keep = new URLSearchParams();
+    ["ref", "campaign", "from"].forEach(function (k) { if (q.get(k)) keep.set(k, q.get(k)); });
+    keep.set("invite", "lessor");
+    document.getElementById("joinBtn").href = "/rent3/?" + keep.toString();
+  } catch (e) {}
+  var fee = 0;
+  fetch("/api/rent3/pool/lessor-offer").then(function (r) { return r.json(); }).then(function (t) {
+    fee = t.monthly_fee;
+    var h = '<div class="big">월 ' + won(t.monthly_fee) + ' <span class="mute">(부가세 포함 · ' + t.fee_basis + ')</span></div>' +
+      '<div class="mute">공급가액 ' + won(t.fee_supply) + ' + 부가세 ' + won(t.fee_vat) + '</div>' +
+      (t.free_text ? '<div style="color:var(--ok);font-weight:700;margin-top:6px;">🎁 ' + t.free_text + '</div>' : '') +
+      '<ul><li>' + t.after_approval_only + '</li><li>' + t.individual_note + '</li><li>입금이 확인되면 전자세금계산서를 발급하며, 종합소득세 증빙으로 쓸 수 있도록 내역을 제공합니다.</li></ul>';
+    document.getElementById("feeBody").innerHTML = h;
+    calc();
+  }).catch(function () { document.getElementById("feeBody").textContent = "요금 정보를 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요."; });
+  function calc() {
+    var f = Number(document.getElementById("calcFee").value), n = Number(document.getElementById("calcN").value);
+    var out = document.getElementById("calcOut"), note = document.getElementById("calcNote");
+    if (!(f > 0) || !(n >= 0) || !fee) { out.textContent = ""; note.textContent = ""; return; }
+    var paid = f * n, ours = fee * 12;
+    out.textContent = "중개수수료 연 " + won(paid) + " · 이 서비스 가맹비 연 " + won(ours);
+    note.textContent = "입력하신 값으로 단순 비교한 숫자입니다(무료 기간·개별 조건은 반영하지 않음). 실제 절감액을 보장하지 않습니다.";
+  }
+  document.getElementById("calcFee").addEventListener("input", calc);
+  document.getElementById("calcN").addEventListener("input", calc);
+})();
+</script>
+</body>
+</html>

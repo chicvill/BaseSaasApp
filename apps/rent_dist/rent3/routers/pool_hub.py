@@ -169,6 +169,22 @@ def pool_file_raw(collection: str) -> Dict[str, Any]:
     }
 
 
+@router.get("/lessor-offer")
+def lessor_offer() -> Dict[str, Any]:
+    """임대인용 서비스 안내(공개): 월 가맹비·무료 기간·세무 자료 범위. 값은 청구 로직과 같은 곳에서 읽는다."""
+    from apps.rent_dist._rent3_core import offer
+    return offer.terms()
+
+
+@router.get("/lessor-offer/sample.csv")
+def lessor_offer_sample():
+    """가상 자료로 만든 납부현황 샘플 CSV(공개)."""
+    from fastapi.responses import Response
+    from apps.rent_dist._rent3_core import offer
+    return Response(content=offer.sample_csv().encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{offer.SAMPLE_CSV_NAME}"'})
+
+
 @router.get("/landing")
 def portal_landing(request: Request) -> Dict[str, Any]:
     """OpenRent 스타일 직거래 포털 메인 화면용 실시간 Data Pool 집계."""
