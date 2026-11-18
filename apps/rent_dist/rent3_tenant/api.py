@@ -298,6 +298,28 @@ def _balance_contract(tenant_id: str):
     return ct
 
 
+def _invite_base(request: Request) -> str:
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    return f"{proto}://{host}" if host else ""
+
+
+@router.get("/myhome/{tenant_id}/lessor-invite", dependencies=[Depends(tenant_scope)])
+def lessor_invite_info(tenant_id: str, request: Request, label: str = ""):
+    """집주인에게 보낼 안심계약 제안 문안·링크·오늘 남은 횟수·이 코드로 가입한 집주인 수(횟수는 올리지 않는다)."""
+    from apps.rent_dist._rent3_core import lessorinvite as li
+    t = _tenant_by_id(tenant_id)
+    return {"success": True, **li.info(t, label, _invite_base(request))}
+
+
+@router.post("/myhome/{tenant_id}/lessor-invite/sent", dependencies=[Depends(tenant_scope)])
+def lessor_invite_sent(tenant_id: str):
+    """임차인이 [문자로 보내기]·[복사]를 눌렀음을 기록(하루 한도 적용). 집주인의 번호·이름은 받지 않는다."""
+    from apps.rent_dist._rent3_core import lessorinvite as li
+    t = _tenant_by_id(tenant_id)
+    return {"success": True, **li.record_sent(t)}
+
+
 @router.post("/myhome/{tenant_id}/balance-registry-read", dependencies=[Depends(tenant_scope)])
 def balance_registry_read(tenant_id: str, req: BalanceRegistryReadReq):
     """잔금 직전에 임차인이 인터넷등기소에서 열람한 등기부를 올리면 AI 가 읽고, 계약 때 값과 코드로 비교해 달라진 점을 알려 준다."""

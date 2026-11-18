@@ -67,6 +67,14 @@ def summary() -> Dict[str, Any]:
         for bucket, key in ((by_ref, acq.get("ref") or NONE_LABEL), (by_campaign, acq.get("campaign") or NONE_LABEL)):
             for k, v in step.items():
                 bucket[key][k] += v
+    by_from: Dict[str, Dict[str, int]] = defaultdict(blank)
+    for l in lessors:
+        code = (l.acq or {}).get("from_tenant")
+        if code:
+            for k, v in {"signups": 1, "approved": int(l.status == "ACTIVE"), "with_room": int(room_branches.get(l.branch, 0) > 0), "with_payment": int(l.branch in pay_branches)}.items():
+                by_from[code][k] += v
     rows = lambda b: sorted(({"key": k, **v} for k, v in b.items()), key=lambda x: (-x["signups"], x["key"]))
     tracked = sum(1 for l in lessors if (l.acq or {}).get("ref") or (l.acq or {}).get("campaign") or (l.acq or {}).get("from_tenant"))
-    return {"total_lessors": len(lessors), "tracked": tracked, "by_ref": rows(by_ref), "by_campaign": rows(by_campaign)}
+    from .models import Tenant
+    sent = sum(int(t.lessor_invite_total or 0) for t in Tenant.all())
+    return {"total_lessors": len(lessors), "tracked": tracked, "invites_sent": sent, "by_ref": rows(by_ref), "by_campaign": rows(by_campaign), "by_from": rows(by_from)[:20]}

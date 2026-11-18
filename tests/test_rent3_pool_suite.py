@@ -3473,7 +3473,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
         self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
-                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo"})
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo", "btnLessorInvite"})
         for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
                        'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
             self.assertIn(needle, menu, needle)
@@ -7276,6 +7276,67 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("btnAcq", "/acquisition/summary", "임대인 유입 현황"):
             self.assertIn(needle, aj, needle)
         for u in ("acq_one", "acq_two", "acq_three"):
+            o = Lessor.first(username=u)
+            if o:
+                o.delete(action="t")
+
+    def test_113_tenant_proposes_direct_contract_to_lessor_p1(self):
+        """113. 세입자→집주인 초대(P1): 임차인별 추측 불가 코드·사실만 쓴 문안·하루 한도, 문구 입력은 정리(링크·제어문자 제거), 남의 코드로는 못 봄,
+        이 코드로 임대인이 가입하면 귀속되고 임차인에게 가입 수가 보이며, 집주인 번호는 어디에도 저장·전송되지 않고, 포털은 초대 링크에서 임대인 가입 화면을 연다."""
+        import re
+        from apps.rent_dist._rent3_core import Lessor, Tenant, lessorinvite as li
+        c = self.client
+        reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "초대임차", "phone": "01088880001", "password": "Pw123456", "agree_privacy": True}).json()
+        th, tid = self._as(reg["token"]), reg["user"]["id"]
+        other = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": "남임차", "phone": "01088880002", "password": "Pw123456", "agree_privacy": True}).json()
+        oh = self._as(other["token"])
+        U = f"/api/rent3_tenant/myhome/{tid}/lessor-invite"
+        # 문구 정리(단위)
+        self.assertEqual(li.clean_label("신림동 <b>빌라</b>\n201호 https://evil.example/x 끝"), "신림동 <b>빌라</b> 201호 끝")
+        self.assertEqual(len(li.clean_label("가" * 100)), 40)
+        # 정보 조회: 코드·링크·문안
+        r = c.get(U, headers=th, params={"label": "신림동 ○○빌라 201호"})
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        self.assertRegex(d["code"], r"^tn_[0-9a-f]{8}$")
+        self.assertIn(f"/rent3/?invite=lessor&ref=tenant&from={d['code']}", d["link"])
+        self.assertIn("신림동 ○○빌라 201호", d["message"])
+        self.assertEqual(c.get(U, headers=th).json()["code"], d["code"])                              # 코드는 한 번 발급되면 그대로
+        for bad in ("평생 무료", "사기 걱정", "떼일", "25만", "보장"):                                  # 임차인이 보내는 글에도 과장·단정 표현을 쓰지 않는다
+            self.assertNotIn(bad, d["message"], bad)
+        self.assertIn("가맹 심사", d["message"])                                                       # 가입 후 심사가 있다는 사실을 밝힌다
+        # 조회만으로는 횟수가 오르지 않는다
+        self.assertEqual((d["sent_today"], d["left_today"], d["joined"]), (0, li.DAILY_LIMIT, 0))
+        # 남의 계정으로는 못 본다
+        self.assertEqual(c.get(U, headers=oh).status_code, 403)
+        self.assertEqual(c.get(U, headers=self.NOAUTH).status_code, 401)
+        # 보냈다고 기록: 하루 한도
+        for i in range(li.DAILY_LIMIT):
+            self.assertEqual(c.post(f"{U}/sent", headers=th, json={}).status_code, 200)
+        over = c.post(f"{U}/sent", headers=th, json={})
+        self.assertEqual(over.status_code, 400)
+        self.assertEqual(Tenant.get(tid).lessor_invite_total, li.DAILY_LIMIT)
+        # 이 코드로 임대인 가입 → 귀속, 임차인에게 가입 수가 보임
+        code = d["code"]
+        j = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "lessor", "name": "초대받은임대", "phone": "01088880003", "username": "inv_lsr", "password": "Pw123456",
+                                                                              "agree_privacy": True, "acq": {"ref": "tenant", "from": code, "first_seen": "2026-11-18"}})
+        self.assertEqual(j.status_code, 200, j.text)
+        self.assertEqual(Lessor.first(username="inv_lsr").acq["from_tenant"], code)
+        self.assertEqual(c.get(U, headers=th).json()["joined"], 1)
+        # 관리인 현황: 소개 코드별·보낸 횟수
+        sm = c.get("/api/rent3_admin/acquisition/summary", headers=self._login("admin")).json()
+        self.assertEqual(sm["by_from"][0]["key"], code)
+        self.assertGreaterEqual(sm["invites_sent"], li.DAILY_LIMIT)
+        # 집주인 번호는 저장하지 않는다(모델·요청에 그런 칸이 없다)
+        self.assertFalse([f for f in Tenant.model_fields if "landlord" in f.lower() or f in ("lessor_phone", "target_phone")])
+        # 화면: 임차인 메뉴·모달, 포털의 초대 링크 처리
+        tj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnLessorInvite", "lessor-invite/sent", "집주인의 번호·이름은 이 서비스로 전송되거나 저장되지 않습니다", '"sms:" + sep + "body="'):
+            self.assertIn(needle, tj, needle)
+        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ('urlParams.get("invite") === "lessor"', 'urlParams.get("invite")) return;', '$("regRole").value = "lessor"'):
+            self.assertIn(needle, pj, needle)
+        for u in ("inv_lsr",):
             o = Lessor.first(username=u)
             if o:
                 o.delete(action="t")

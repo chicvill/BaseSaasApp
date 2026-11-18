@@ -775,7 +775,7 @@
         const r = await Bass.api(APP_ID, "/acquisition/summary");
         const E = Bass.escapeHtml;
         const tbl = (title, rows) => `<div style="font-weight:700;margin:10px 0 4px;">${title}</div><table class="bass-table" style="width:100%;font-size:12.5px;"><thead><tr><th>구분</th><th>가입</th><th>가맹 승인</th><th>첫 방 등록</th><th>첫 수납</th></tr></thead><tbody>${rows.map((x) => `<tr><td>${E(x.key)}</td><td>${x.signups}</td><td>${x.approved}</td><td>${x.with_room}</td><td>${x.with_payment}</td></tr>`).join("") || `<tr><td colspan="5">자료 없음</td></tr>`}</tbody></table>`;
-        document.getElementById("acqResult").innerHTML = `전체 임대인 ${r.total_lessors}명 중 유입 표식이 있는 가입 <strong>${r.tracked}</strong>명` + tbl("채널(ref)별", r.by_ref) + tbl("캠페인별", r.by_campaign);
+        document.getElementById("acqResult").innerHTML = `전체 임대인 ${r.total_lessors}명 중 유입 표식이 있는 가입 <strong>${r.tracked}</strong>명` + tbl("채널(ref)별", r.by_ref) + tbl("캠페인별", r.by_campaign) + (r.by_from.length ? tbl("임차인 소개 코드별(상위 20)", r.by_from) : "") + `<div class="bass-muted" style="font-size:12.5px;margin-top:6px;">임차인이 '집주인에게 제안'을 보냈다고 기록한 횟수: ${r.invites_sent}회</div>`;
       });
     });
     document.getElementById("btnLgPrev").addEventListener("click", function () {

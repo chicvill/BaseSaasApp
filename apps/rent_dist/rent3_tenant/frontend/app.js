@@ -49,7 +49,10 @@
       { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
     ] },
-    { title: "다른 집 찾기", items: [{ label: "🔍 빈 집 찾기", id: "btnMenuListings" }] },
+    { title: "다른 집 찾기", items: [
+      { label: "🔍 빈 집 찾기", id: "btnMenuListings" },
+      { label: "💌 집주인에게 안심계약 제안하기", id: "btnLessorInvite", userOnly: true },
+    ] },
     { title: "이동 (관리인)", items: [
       { label: "🏢 임대인 앱", href: "/rent3_lessor/", adminOnly: true },
       { label: "👑 관리인 앱", href: "/rent3_admin/", adminOnly: true },
@@ -131,6 +134,58 @@
   const btnShortcut = document.getElementById("btnShortcut");
   if (btnShortcut) btnShortcut.addEventListener("click", () => { closeDrawer(); R3Shell.openShortcutSettings(); });
   // 🏢 사업자 임차인: 사업자등록증 촬영·선택(AI가 읽어 채움) + 세금계산서 받을 이메일. 번호가 없으면 세금계산서 대신 현금영수증을 요청한다.
+  // 💌 집주인에게 안심계약 제안: 문안을 만들어 임차인의 폰으로 직접 보내게 한다(집주인 번호는 서버로 보내지 않는다).
+  const btnLessorInvite = document.getElementById("btnLessorInvite");
+  if (btnLessorInvite) btnLessorInvite.addEventListener("click", () => {
+    const tid = selectedTenantId || (savedSession && (savedSession.tenant_id || savedSession.id));
+    if (!tid) { Bass.updateAppAlert("warning", "로그인한 뒤 이용해 주세요."); return; }
+    const E = Bass.escapeHtml;
+    const body = R3.openModal("💌 집주인에게 안심계약 제안하기", "");
+    let cur = null;
+    const load = async (label) => {
+      cur = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(tid)}/lessor-invite?label=${encodeURIComponent(label || "")}`);
+      return cur;
+    };
+    const draw = () => {
+      body.innerHTML = `
+        <div style="font-size:13px;line-height:1.7;">
+          마음에 드는 집의 집주인에게 <strong>직접 계약(중개수수료 없음)</strong>을 제안하는 문자입니다. 문자는 <strong>내 폰에서 내가 직접</strong> 보내고, 집주인의 번호·이름은 이 서비스로 전송되거나 저장되지 않습니다.
+          <label class="r3-fld" style="margin:8px 0;">관심 있는 집 (선택 · 40자)
+            <input id="liLabel" class="bass-input" maxlength="40" value="${E(cur.label)}" placeholder="예: 신림동 ○○빌라 201호" style="min-height:44px;">
+          </label>
+          <label class="r3-fld">보낼 문구 (직접 고칠 수 있어요)
+            <textarea id="liMsg" class="bass-input" rows="9" style="font-size:13px;line-height:1.6;">${E(cur.message)}</textarea>
+          </label>
+          <div class="bass-muted" style="font-size:12.5px;margin-top:6px;">오늘 ${cur.sent_today}/${cur.daily_limit}회 보냄 · 내가 보낸 제안으로 가입한 집주인 <strong>${cur.joined}</strong>명<br>같은 집주인에게 반복해서 보내지 마세요.</div>
+          <div class="bass-row" style="gap:8px;margin-top:10px;flex-wrap:wrap;">
+            <button id="liSms" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;">📱 문자로 보내기</button>
+            <button id="liCopy" class="bass-btn" type="button" style="min-height:46px;">📋 문구 복사 (카톡·당근 채팅에 붙여넣기)</button>
+          </div>
+        </div>`;
+      body.querySelector("#liLabel").addEventListener("change", async function () {
+        await load(this.value);
+        draw();
+      });
+      const sent = async () => { const r = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(tid)}/lessor-invite/sent`, { method: "POST", body: {} }); cur.sent_today = r.sent_today; };
+      body.querySelector("#liCopy").addEventListener("click", function () {
+        Bass.withLock(this, async () => { await sent(); await R3.copyText(body.querySelector("#liMsg").value); Bass.updateAppAlert("success", "복사했습니다. 집주인에게 보낼 곳(문자·카톡·당근 채팅)에 붙여넣어 보내세요."); draw(); });
+      });
+      body.querySelector("#liSms").addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          await sent();
+          const text = body.querySelector("#liMsg").value;
+          await R3.copyText(text);
+          // 받는 사람은 비워 둔다: 문자 앱에서 집주인 번호를 직접 고른다(번호를 이 서비스가 알 필요가 없다)
+          const sep = /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "&" : "?";
+          if (/Android|iPhone|iPad/i.test(navigator.userAgent)) { const a = document.createElement("a"); a.href = "sms:" + sep + "body=" + encodeURIComponent(text); a.click(); }
+          else Bass.updateAppAlert("success", "문구를 복사했습니다. 휴대폰 문자 앱에 붙여넣어 집주인 번호로 보내세요.");
+          draw();
+        });
+      });
+    };
+    load("").then(draw).catch(Bass.showError);
+  });
+
   const btnBizInfo = document.getElementById("btnBizInfo");
   if (btnBizInfo) btnBizInfo.addEventListener("click", async () => {
     closeDrawer();

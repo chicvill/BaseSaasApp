@@ -958,7 +958,7 @@
   (function autoEnter() {
     const u = getSession();
     const tok = Bass.token();
-    if (!u || !u.redirect_url || !tok || urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1" || urlParams.get("room")) return;
+    if (!u || !u.redirect_url || !tok || urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1" || urlParams.get("room") || urlParams.get("invite")) return;
     if (!["lessor", "tenant", "admin", "superadmin"].includes(u.role)) return;
     try {
       const p = JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
@@ -970,6 +970,13 @@
   renderSessionUI();
   bindPasswordReset();
   bindConnect();
+  // 세입자가 보낸 '안심계약 제안' 링크(?invite=lessor): 임대인 가입 화면을 바로 연다(표식은 captureAcq 가 보관)
+  if (urlParams.get("invite") === "lessor") {
+    openAuthModal({ tab: "register" });
+    $("regRole").value = "lessor";
+    $("regRole").dispatchEvent(new Event("change"));
+    $("authModalSub").textContent = "세입자가 직접 계약(중개수수료 없음)을 제안했습니다. 임대인으로 가입하면 가맹 심사 후 호실을 등록하고 전자계약을 진행할 수 있습니다. 이용 조건은 가입 전에 확인해 주세요.";
+  }
   if (urlParams.get("connect")) window.__rent3ConnectOpen(urlParams.get("connect"));   // 임대인이 보낸 링크: 메뉴 없이 연결 창만
   loadPortalData()
     .then(() => {

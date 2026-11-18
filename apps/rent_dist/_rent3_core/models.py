@@ -249,6 +249,10 @@ class Tenant(PoolObj):
     business_address: str = ""               # 사업자등록증상 사업장 주소 (미입력 시 호실 주소 사용)
     biz_submitted_at: str = ""               # 임차인이 사업자등록증을 직접 제출한 시각(임대인이 확인 후 세금계산서 발급)
     biz_ai_calls: int = 0                    # 사업자등록증 AI 읽기 호출 수(남용 방지)
+    lessor_invite_code: str = ""             # 집주인에게 안심계약을 제안할 때 쓰는 소개 코드(추측 불가). lessorinvite.py
+    lessor_invite_day: str = ""              # 오늘 보낸 횟수를 센 날짜
+    lessor_invite_today: int = 0
+    lessor_invite_total: int = 0
     car_number: str = ""
     car_model: str = ""
     doorlock_pwd: str = "1234*"
