@@ -7724,6 +7724,80 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, js.text, needle)
         self.assertIn("tab=", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read())
 
+    def test_121_sms_multi_month_pick_and_overpay_guard(self):
+        """121. 입금 문자 수납 시 미납이 1달(당월)만 있으면 즉시 처리, 완납/초과 입금은 오류 차단, 미납이 여러 달이면 체크 선택으로 반영(달 옮김 사유 차단)."""
+        from apps.rent_dist._rent3_core import Contract, Pay
+        c = self.client
+        chic = self._login("chic")
+        # 격리: 앞선 시험이 남긴 201호 수납 기록을 치워 미납 달 수를 확정하고, 끝나면 원래 기록으로 되돌린다
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        olds = [x.model_dump() for x in Pay.find(id_contract=ct0.id, include_voided=True)]
+        for x in Pay.find(id_contract=ct0.id, include_voided=True):
+            x.delete(action="t")
+
+        def _restore_pays():
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            for d in olds:
+                Pay(**d).save(action="t")
+        self.addCleanup(_restore_pays)
+        # 201호에 여러 달 미납 열기 (현재 기준월 기준)
+        self._open_unpaid("201", 2)
+        ct = next(x for x in Contract.all() if x.branch == "main" and x.status == "ACTIVE" and x.room_no == "201")
+        monthly = int(ct.monthly_rent or 0) + int(ct.maintenance_fee or 0) + int(ct.compute_vat() or 0)
+        led = ct.ledger()
+        unpaid_yms = [r["ym"] for r in led["months"] if r["unpaid"] > 0]
+        self.assertGreaterEqual(len(unpaid_yms), 2)
+        oldest_ym, latest_ym = unpaid_yms[0], unpaid_yms[-1]
+
+        # 1) 미납이 여러 달이고 1개월분만 입금(pick_if_multi=True) → 저장하지 않고 체크 선택 요청
+        sms1 = f"[신한] 11/13 201호 {ct.tenant_name} {monthly:,}원 입금"
+        r_pick = c.post("/api/rent3_lessor/payments/sms-paste", headers=chic, json={
+            "branch": "main", "sms_text": sms1, "pick_if_multi": True,
+        })
+        self.assertEqual(r_pick.status_code, 200, r_pick.text)
+        d_pick = r_pick.json()
+        self.assertTrue(d_pick["needs_month_pick"])
+        self.assertIn(oldest_ym, [m["ym"] for m in d_pick["unpaid_months"]])
+        self.assertIn(latest_ym, [m["ym"] for m in d_pick["unpaid_months"]])
+
+        # 2) 사용자가 당월(latest_ym)을 체크해 보내면 oldest_ym 이 아닌 latest_ym 으로 입금 처리
+        r_chosen = c.post("/api/rent3_lessor/payments/sms-paste", headers=chic, json={
+            "branch": "main", "sms_text": sms1, "pick_if_multi": True, "target_months": [latest_ym],
+        })
+        self.assertEqual(r_chosen.status_code, 200, r_chosen.text)
+        self.assertEqual(r_chosen.json()["payment"]["billing_month"], latest_ym)
+
+        # 3) 남은 미납이 1달뿐이면 체크 요청 없이 즉시 입금 처리
+        rest_yms = [r["ym"] for r in ct.ledger()["months"] if r["unpaid"] > 0]
+        for ym in rest_yms[:-1]:
+            c.post("/api/rent3_lessor/payments/collect", headers=chic, json={
+                "branch": "main", "room_no": "201", "amount": monthly, "target_ym": ym,
+            })
+            # 같은 금액 30초 이중 클릭 방지에 걸리지 않도록 방금 건의 접수 시각을 과거로 돌린다(시험 전용)
+            for _p in Pay.find(id_contract=ct0.id):
+                _p.created_at = "2020-01-01T00:00:00"; _p.save(action="t")
+        last_ym = rest_yms[-1]
+        sms2 = f"[신한] 11/14 201호 {ct.tenant_name} {monthly:,}원 입금"
+        r_auto = c.post("/api/rent3_lessor/payments/sms-paste", headers=chic, json={
+            "branch": "main", "sms_text": sms2, "pick_if_multi": True,
+        })
+        self.assertEqual(r_auto.status_code, 200, r_auto.text)
+        self.assertFalse(r_auto.json().get("needs_month_pick", False))
+        self.assertEqual(r_auto.json()["payment"]["billing_month"], last_ym)
+
+        # 4) 완납 상태에서 추가 입금 시도 → 400 오류(선수금 차단)
+        sms3 = f"[신한] 11/15 201호 {ct.tenant_name} {monthly:,}원 입금"
+        r_over = c.post("/api/rent3_lessor/payments/sms-paste", headers=chic, json={
+            "branch": "main", "sms_text": sms3, "pick_if_multi": True,
+        })
+        self.assertEqual(r_over.status_code, 400, r_over.text)
+
+        # 5) 프론트엔드 체크 UI 및 수동 조치 문구 확인
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("pick_if_multi: true", "needs_month_pick", "sms-ym-chk", "송금자와 통화"):
+            self.assertIn(needle, fe, needle)
+
 
 if __name__ == "__main__":
     unittest.main()

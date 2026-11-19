@@ -86,6 +86,8 @@ class SmsPasteReq(BaseModel):
     sms_text: str
     up_to_ym: Optional[str] = None
     force: bool = False   # 장부와 어긋난 문자를 확인한 뒤 '입금자명 기준'으로 그대로 반영
+    target_months: Optional[List[str]] = None   # 체크박스로 지정한 귀속월(YYYY-MM) 목록
+    pick_if_multi: bool = False                 # 미납 달이 2개 이상이고 일부 입금이면 저장 전 달 선택 요청
 
 
 class OutlayCreateReq(BaseModel):
@@ -1430,6 +1432,8 @@ def paste_sms_payment(req: SmsPasteReq, request: Request):
         up_to_ym=req.up_to_ym,
         app_source="rent3_lessor_pin" if pc else APP_SRC,
         force=req.force,
+        target_months=req.target_months,
+        pick_if_multi=req.pick_if_multi,
     )
     _pin_pay_record(pc, res)
     return {**res, "success": not res.get("needs_confirm")}

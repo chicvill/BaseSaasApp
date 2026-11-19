@@ -1634,18 +1634,59 @@
     // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 메시지를 보낸다
     // 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고 → '원본 고치기' 또는 '입금자명 기준으로 그대로 반영'
     const smsWarn = document.getElementById("smsWarn");
-    async function runSms(force) {
+    async function runSms(force, targetMonths) {
       const t = document.getElementById("bankSms").value.trim();
       if (!t) { Bass.updateAppAlert("warning", "붙여넣은 입금 문자가 없습니다."); return; }
       smsWarn.innerHTML = "";
-      const res = await Bass.api(APP_ID, "/payments/sms-paste", { method: "POST", body: { branch: currentBranch, sms_text: t, force: !!force } });
+      const res = await Bass.api(APP_ID, "/payments/sms-paste", {
+        method: "POST",
+        body: {
+          branch: currentBranch,
+          sms_text: t,
+          force: !!force,
+          pick_if_multi: true,
+          target_months: targetMonths || null,
+        },
+      });
+      if (res.needs_month_pick) {
+        const p = res.parsed || {};
+        const ms = res.unpaid_months || [];
+        const curYm = new Date().toISOString().slice(0, 7);
+        smsWarn.innerHTML = `
+          <div role="alert" style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid var(--primary,#2563eb);background:rgba(37,99,235,.07);font-size:14px;line-height:1.55;">
+            <div style="font-weight:800;margin-bottom:4px;">📅 ${Bass.escapeHtml(res.room_no)}호 ${Bass.escapeHtml(res.tenant_name || "")} — 어느 달 입금으로 처리할까요?</div>
+            <div class="bass-muted" style="font-size:13px;margin-bottom:8px;">
+              입금액 <strong>${fmtWon(p.amount || 0)}</strong> (${Bass.escapeHtml(dotDate(p.paid_date || ""))}) · 밀린 달이 여러 개이므로 반영할 달을 체크해 주세요.
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">
+              ${ms.map((m) => `
+                <label class="check-row" style="display:flex;align-items:center;gap:8px;min-height:42px;padding:6px 8px;border-radius:8px;background:#fff;border:1px solid var(--border,#e2e8f0);cursor:pointer;">
+                  <input type="checkbox" class="sms-ym-chk" value="${Bass.escapeHtml(m.ym)}">
+                  <span><strong>${Bass.escapeHtml(m.ym)}분</strong>${m.ym === curYm ? ' <span class="bass-badge bass-badge--info" style="font-size:12px;">이달 분</span>' : ""} · 미납 ${fmtWon(m.unpaid)}</span>
+                </label>
+              `).join("")}
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button id="smsMonthFix" class="bass-btn" type="button" style="flex:1;min-width:120px;min-height:46px;">✏️ 문자 수정</button>
+              <button id="smsMonthGo" class="bass-btn bass-btn--primary" type="button" style="flex:1;min-width:160px;min-height:46px;">✅ 선택한 달로 입금 처리</button>
+            </div>
+          </div>`;
+        Bass.updateAppAlert("warning", res.message);
+        document.getElementById("smsMonthFix").addEventListener("click", () => { smsWarn.innerHTML = ""; document.getElementById("bankSms").focus(); });
+        document.getElementById("smsMonthGo").addEventListener("click", function () {
+          const picked = Array.from(smsWarn.querySelectorAll(".sms-ym-chk:checked")).map((el) => el.value);
+          if (!picked.length) { Bass.updateAppAlert("warning", "반영할 달을 하나 이상 체크해 주세요."); return; }
+          Bass.withLock(this, () => runSms(!!force, picked));
+        });
+        return;
+      }
       if (res.needs_confirm) {
         const p = res.parsed || {}, bn = res.by_name || {};
         smsWarn.innerHTML = `
           <div role="alert" style="margin-top:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--warn);background:rgba(234,179,8,.14);font-size:14px;line-height:1.55;">
             <div style="font-weight:800;margin-bottom:4px;">⚠️ 문자 내용이 장부와 다릅니다</div>
             ${res.issues.map((i) => `<div>· ${Bass.escapeHtml(i.msg)}</div>`).join("")}
-            <div class="bass-muted" style="font-size:13px;margin:6px 0;">읽은 값: ${p.room_no ? Bass.escapeHtml(p.room_no) + "호 " : "호실 없음 "}${Bass.escapeHtml(p.payer_name || "")} ${fmtWon(p.amount || 0)}<br>원본 문자의 호실·입금자명·금액을 확인해 고친 뒤 다시 처리하세요. 그대로 진행하면 <strong>입금자명 기준</strong>으로 ${Bass.escapeHtml(bn.room_no || "")}호 ${Bass.escapeHtml(bn.tenant_name || "")}님 계약에 반영합니다.</div>
+            <div class="bass-muted" style="font-size:13px;margin:6px 0;">읽은 값: ${p.room_no ? Bass.escapeHtml(p.room_no) + "호 " : "호실 없음 "}${Bass.escapeHtml(p.payer_name || "")} ${fmtWon(p.amount || 0)}<br>문자에서 호실·금액·이름이 잘못 읽혔다면 원본 문자를 수정하거나 송금자와 통화해 확인한 뒤 다시 처리하세요. 그대로 진행하면 <strong>입금자명 기준</strong>으로 ${Bass.escapeHtml(bn.room_no || "")}호 ${Bass.escapeHtml(bn.tenant_name || "")}님 계약에 반영합니다.</div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <button id="smsFix" class="bass-btn" type="button" style="flex:1;min-width:120px;min-height:46px;">✏️ 원본 문자 고치기</button>
               <button id="smsForce" class="bass-btn bass-btn--primary" type="button" style="flex:1;min-width:160px;min-height:46px;">그대로 진행 (${Bass.escapeHtml(bn.room_no || "")}호 ${Bass.escapeHtml(bn.tenant_name || "")})</button>

@@ -103,6 +103,7 @@ class FifoPaymentEngine:
         up_to_ym: Optional[str] = None,
         app_source: str = "rent3_lessor",
         target_ym: Optional[str] = None,
+        target_months: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """입금을 '월 칸'에 채운다. target_ym 이 있으면 그 달의 빈칸(미납)부터, 없으면 가장 오래된 미납 달부터 채우고,
         한 입금이 여러 달에 걸치면 달마다 납부 건을 하나씩 만들어 각 건에 자기 청구월을 적는다(건이 달을 가로질러 숨어 있지 않게).
@@ -170,7 +171,19 @@ class FifoPaymentEngine:
                 code="OVER_UNPAID",
             )
         order = list(unpaid_rows)
-        if target_ym:
+        if target_months:
+            picked_set = {m.strip() for m in target_months if m and m.strip()}
+            order = [r for r in unpaid_rows if r["ym"] in picked_set]
+            if not order:
+                raise DomainError("선택한 달에 밀린 청구가 없습니다.", hint="미납으로 표시된 달을 체크해 주세요.", code="NOT_UNPAID_MONTH")
+            picked_unpaid = sum(r["unpaid"] for r in order)
+            if amount > picked_unpaid:
+                raise DomainError(
+                    f"입금액 {amount:,}원이 선택한 달의 미납 합계 {picked_unpaid:,}원보다 많습니다.",
+                    hint="입금액에 맞게 달을 더 선택하거나, 금액이 맞는지 확인해 주세요.",
+                    code="OVER_UNPAID",
+                )
+        elif target_ym:
             hit = next((r for r in unpaid_rows if r["ym"] == target_ym), None)
             if hit is None:
                 raise DomainError(f"{target_ym}월은 밀린 청구가 아닙니다.", hint="미납으로 표시된 달을 골라 주세요(이미 납부된 달에는 수납할 수 없습니다).", code="NOT_UNPAID_MONTH")
@@ -301,9 +314,11 @@ class FifoPaymentEngine:
         up_to_ym: Optional[str] = None,
         app_source: str = "rent3_lessor",
         force: bool = False,
+        target_months: Optional[List[str]] = None,
+        pick_if_multi: bool = False,
     ) -> Dict[str, Any]:
         """문자를 읽어 수납한다. 호실·입금자명·금액 중 장부와 어긋난 것이 있으면 저장하지 않고 확인을 요청하고(needs_confirm),
-        force=True로 다시 요청하면 '입금자명 기준'(그 이름의 활성 계약 호실)으로 반영한다."""
+        pick_if_multi=True 이고 미납 달이 2개 이상이면서 일부 금액만 입금된 경우(target_months 미지정) 어느 달에 넣을지 선택을 요청한다(needs_month_pick)."""
         parsed = SmsDepositParser.parse(sms_text)
         b_id = normalize_branch_id(branch)
         chk = cls.check_sms(b_id, parsed, up_to_ym)
@@ -313,11 +328,11 @@ class FifoPaymentEngine:
                 if not parsed["room_no"]:
                     raise DomainError(
                         f"문자에서 호실 번호를 찾을 수 없으며 '{parsed['payer_name']}' 명의의 활성 계약도 없습니다.",
-                        hint="호실 번호를 직접 선택하거나 문자에 '201호'를 포함해 주세요.",
+                        hint="문자 내용의 호실 번호를 수정하거나 송금자에게 전화로 확인한 뒤 다시 처리해 주세요.",
                     )
                 raise DomainError(
                     " ".join(i["msg"] for i in issues) + f" '{parsed['payer_name']}' 명의의 활성 계약도 찾지 못했습니다.",
-                    hint="문자의 호실·입금자명·금액을 확인해 원본을 고친 뒤 다시 붙여넣어 주세요.",
+                    hint="문자의 호실·입금자명·금액을 확인해 원본을 고치거나 송금자에게 확인한 뒤 다시 붙여넣어 주세요.",
                 )
             if not force:
                 return {
@@ -329,8 +344,28 @@ class FifoPaymentEngine:
                     "by_name": {"room_no": by_name.room_no, "tenant_name": by_name.tenant_name},
                 }
             room_no = by_name.room_no
+            target_ct = by_name
         else:
-            room_no = parsed["room_no"] or (chk["room_contract"].room_no if chk["room_contract"] else "")
+            target_ct = chk["room_contract"]
+            room_no = parsed["room_no"] or (target_ct.room_no if target_ct else "")
+
+        # 미납 달이 2개 이상이고 입금액이 전체 미납액보다 적으면(일부 입금), 임의로 앞 달부터 채우지 않고 사용자에게 체크 선택을 요청
+        if pick_if_multi and not target_months and target_ct:
+            led = target_ct.ledger(up_to_ym=up_to_ym or current_ym())
+            unpaid_rows = [r for r in led["months"] if r["unpaid"] > 0]
+            total_unpaid = sum(r["unpaid"] for r in unpaid_rows)
+            if unpaid_rows and parsed["amount"] <= total_unpaid and len(unpaid_rows) >= 2 and parsed["amount"] < total_unpaid:
+                return {
+                    "needs_confirm": True,
+                    "needs_month_pick": True,
+                    "level": "warning",
+                    "message": f"{room_no}호에 밀린 달이 {len(unpaid_rows)}개 있습니다. 어느 달 입금으로 처리할지 선택해 주세요.",
+                    "parsed": parsed,
+                    "room_no": room_no,
+                    "tenant_name": target_ct.tenant_name,
+                    "unpaid_months": [{"ym": r["ym"], "unpaid": r["unpaid"], "due": r.get("due", 0)} for r in unpaid_rows],
+                }
+
         result = cls.collect(
             branch=b_id,
             room_no=room_no,
@@ -341,6 +376,7 @@ class FifoPaymentEngine:
             raw_sms=sms_text,
             up_to_ym=up_to_ym,
             app_source=app_source,
+            target_months=target_months,
         )
         result["parsed"] = parsed
         if issues:
