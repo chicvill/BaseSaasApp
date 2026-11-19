@@ -7579,6 +7579,31 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for rel, needle in (("ops.py", "room.next_listing = {}"), ("cosign.py", "room.next_listing = {}"), ("broker.py", "room.next_listing = {}")):
             self.assertIn(needle, open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", rel), encoding="utf-8").read(), rel)
 
+    def test_119_naver_style_icon_menu_modal(self):
+        """119. 햄버거 메뉴가 네이버 스타일의 중앙 모달 창(카테고리별 아이콘 그리드 + 기능 검색)으로 열리고, r3_shell.js 가 배지 갱신 시 타일 구조를 보존한다."""
+        import re
+        hb = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "hamburger.js"), encoding="utf-8").read()
+        for needle in (
+            "r3-drawer__grid",
+            "r3-drawer__section",
+            "r3-tile-ico",
+            "r3-tile-txt",
+            "r3-menu-search",
+            "grid-template-columns:repeat(4",
+            "grid-template-columns:repeat(3",
+            'aria-modal", "true"',
+            "MutationObserver",
+        ):
+            self.assertIn(needle, hb, needle)
+        # 모바일 글자 12px 미만 규칙 위반 없음 확인
+        small = re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+        self.assertFalse(small.search(hb), "hamburger.js에 12px 미만 글자가 없어야 합니다")
+
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        self.assertIn(".r3-menu-search", shell)
+        self.assertIn(".r3-menu-empty", shell)
+        self.assertIn('.querySelector(".r3-tile-txt")', shell)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -49,8 +49,13 @@
   function renderMenu(drawer, groups) {
     if (!drawer) return;
     ensureStyle();
-    var keep = drawer.querySelector(".r3-drawer__head");   // hamburger.js 가 이미 만든 머리줄은 남긴다
-    Array.prototype.slice.call(drawer.children).forEach(function (c) { if (c !== keep) c.remove(); });
+    var keep = { ".r3-drawer__head": 1, ".r3-menu-search": 1, ".r3-menu-empty": 1 };
+    Array.prototype.slice.call(drawer.children).forEach(function (c) {
+      if (!c.classList || (!c.classList.contains("r3-drawer__head") && !c.classList.contains("r3-menu-search") && !c.classList.contains("r3-menu-empty"))) {
+        c.remove();
+      }
+    });
+    void keep;
     var html = "";
     groups.forEach(function (g) {
       if (g.title) html += '<div class="r3-drawer__group">' + esc(g.title) + "</div>";
@@ -58,7 +63,9 @@
     });
     // 서랍 맨 아래: 어느 앱에서나 포털 홈으로 가거나 로그아웃할 수 있게 한다(공유 휴대폰에서 꼭 필요)
     html += '<div class="r3-drawer__group">계정</div><a href="/rent3/?home=1">🌐 포털 홈</a><a href="/rent3/?logout=1">🚪 로그아웃</a>';
-    drawer.insertAdjacentHTML("beforeend", html);
+    var emptyEl = drawer.querySelector(".r3-menu-empty");
+    if (emptyEl) emptyEl.insertAdjacentHTML("beforebegin", html);
+    else drawer.insertAdjacentHTML("beforeend", html);
   }
 
   function menuTabs(groups) {
@@ -549,7 +556,12 @@
         .then(function (d) {
           if (!d) return;
           var btn = document.getElementById("btnSupportChat");
-          if (btn) btn.textContent = "💬 관리인에게 문의" + (d.unread > 0 ? " (" + d.unread + ")" : "");
+          if (btn) {
+            var supTxt = "관리인에게 문의" + (d.unread > 0 ? " (" + d.unread + ")" : "");
+            var tileTxt = btn.querySelector(".r3-tile-txt");
+            if (tileTxt) tileTxt.textContent = supTxt;
+            else btn.textContent = "💬 " + supTxt;
+          }
           var bar = document.getElementById("r3AdminViewing");
           if (d.admin_viewing && !bar) {
             bar = document.createElement("div");
