@@ -354,7 +354,8 @@ class FifoPaymentEngine:
             led = target_ct.ledger(up_to_ym=up_to_ym or current_ym())
             unpaid_rows = [r for r in led["months"] if r["unpaid"] > 0]
             total_unpaid = sum(r["unpaid"] for r in unpaid_rows)
-            if unpaid_rows and parsed["amount"] <= total_unpaid and len(unpaid_rows) >= 2 and parsed["amount"] < total_unpaid:
+            overdue_n = sum(1 for r in unpaid_rows if r.get("phase") == "OVERDUE")     # 납부 예정(납입일 전) 달은 '미납 달 수'에 세지 않는다
+            if unpaid_rows and parsed["amount"] < total_unpaid and overdue_n >= 2:
                 return {
                     "needs_confirm": True,
                     "needs_month_pick": True,
@@ -363,7 +364,7 @@ class FifoPaymentEngine:
                     "parsed": parsed,
                     "room_no": room_no,
                     "tenant_name": target_ct.tenant_name,
-                    "unpaid_months": [{"ym": r["ym"], "unpaid": r["unpaid"], "due": r.get("due", 0)} for r in unpaid_rows],
+                    "unpaid_months": [{"ym": r["ym"], "unpaid": r["unpaid"], "due": r.get("due", 0), "phase": r.get("phase", "OVERDUE")} for r in unpaid_rows],
                 }
 
         result = cls.collect(

@@ -7798,6 +7798,37 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("pick_if_multi: true", "needs_month_pick", "sms-ym-chk", "송금자와 통화"):
             self.assertIn(needle, fe, needle)
 
+    def test_122_ledger_phase_paid_due_soon_overdue(self):
+        """122. 원장 3단계: 납입일(입주일의 일자) 당일까지 안 낸 달은 '납부 예정'(DUE_SOON), 다음 날부터 '연체'(OVERDUE), 낸 달은 완납. 미납 호실 알림·문자 달 선택은 연체만 센다. 수납 엔진은 그대로(납부 예정 달에도 미리 입금 가능)."""
+        from apps.rent_dist._rent3_core import Contract
+        base = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        ct = base.model_copy(update={"id": "ct_t122_unsaved", "move_in_date": "2026-09-15", "pay_timing": "선불"})   # 저장하지 않는 사본: 수납 기록 없음
+        old = os.environ.get("RENT3_TODAY")
+        try:
+            os.environ["RENT3_TODAY"] = "2026-11-15"        # 11월 납입일 당일
+            lg = ct.ledger()
+            ph = {r["ym"]: r["phase"] for r in lg["months"]}
+            self.assertEqual((ph["2026-09"], ph["2026-10"], ph["2026-11"]), ("OVERDUE", "OVERDUE", "DUE_SOON"))
+            row11 = next(r for r in lg["months"] if r["ym"] == "2026-11")
+            self.assertIn("납부 예정", row11["note"])
+            self.assertEqual(lg["overdue_unpaid"], lg["total_unpaid"] - row11["unpaid"])
+            os.environ["RENT3_TODAY"] = "2026-11-16"        # 납입일 다음 날부터 연체
+            lg2 = ct.ledger()
+            self.assertEqual(next(r["phase"] for r in lg2["months"] if r["ym"] == "2026-11"), "OVERDUE")
+            self.assertEqual(lg2["overdue_unpaid"], lg2["total_unpaid"])
+            os.environ["RENT3_TODAY"] = "2026-11-05"        # 11월 납입일 전: 9·10월만 연체
+            lg3 = ct.ledger()
+            self.assertEqual(next(r["phase"] for r in lg3["months"] if r["ym"] == "2026-11"), "DUE_SOON")
+        finally:
+            if old is None:
+                os.environ.pop("RENT3_TODAY", None)
+            else:
+                os.environ["RENT3_TODAY"] = old
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn('m.phase === "DUE_SOON"', fe)
+        nf = open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", "notifications.py"), encoding="utf-8").read()
+        self.assertIn("overdue_unpaid", nf)
+
 
 if __name__ == "__main__":
     unittest.main()

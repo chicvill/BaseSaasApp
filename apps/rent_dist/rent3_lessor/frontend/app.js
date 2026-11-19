@@ -1651,7 +1651,7 @@
       if (res.needs_month_pick) {
         const p = res.parsed || {};
         const ms = res.unpaid_months || [];
-        const curYm = new Date().toISOString().slice(0, 7);
+        const nowD = new Date(), curYm = `${nowD.getFullYear()}-${String(nowD.getMonth() + 1).padStart(2, "0")}`;
         smsWarn.innerHTML = `
           <div role="alert" style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid var(--primary,#2563eb);background:rgba(37,99,235,.07);font-size:14px;line-height:1.55;">
             <div style="font-weight:800;margin-bottom:4px;">📅 ${Bass.escapeHtml(res.room_no)}호 ${Bass.escapeHtml(res.tenant_name || "")} — 어느 달 입금으로 처리할까요?</div>
@@ -1662,7 +1662,7 @@
               ${ms.map((m) => `
                 <label class="check-row" style="display:flex;align-items:center;gap:8px;min-height:42px;padding:6px 8px;border-radius:8px;background:#fff;border:1px solid var(--border,#e2e8f0);cursor:pointer;">
                   <input type="checkbox" class="sms-ym-chk" value="${Bass.escapeHtml(m.ym)}">
-                  <span><strong>${Bass.escapeHtml(m.ym)}분</strong>${m.ym === curYm ? ' <span class="bass-badge bass-badge--info" style="font-size:12px;">이달 분</span>' : ""} · 미납 ${fmtWon(m.unpaid)}</span>
+                  <span><strong>${Bass.escapeHtml(m.ym)}분</strong>${m.ym === curYm ? ' <span class="bass-badge bass-badge--info" style="font-size:12px;">이달 분</span>' : ""} · ${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</span>
                 </label>
               `).join("")}
             </div>

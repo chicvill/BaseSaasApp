@@ -828,15 +828,25 @@ class Contract(PoolObj):
                 st = "UNPAID"
                 note = "미납"
 
+            # 3단계 구분: 완납(PAID) / 납부 예정(DUE_SOON: 납입일 당일까지 아직 안 냄) / 연체(OVERDUE: 납입일 다음 날부터)
+            if unpaid == 0:
+                phase = "PAID"
+            else:
+                dd = self.due_date_for_ym(ym_str)
+                phase = "DUE_SOON" if (dd is None or date_today() <= dd) else "OVERDUE"
+                if phase == "DUE_SOON" and st == "UNPAID" and dd is not None:
+                    note = f"납부 예정 ({dd.month}/{dd.day}까지)"
             rows.append({
                 **spec,
                 "paid": allocated,
                 "unpaid": unpaid,
                 "status": st,
+                "phase": phase,
                 "note": note,
             })
 
         total_unpaid = sum(r["unpaid"] for r in rows)
+        overdue_unpaid = sum(r["unpaid"] for r in rows if r.get("phase") == "OVERDUE")
         oldest = next((r["ym"] for r in rows if r["unpaid"] > 0), None)
         return {
             "contract_id": self.id,
@@ -848,6 +858,7 @@ class Contract(PoolObj):
             "total_paid": total_pool_paid,
             "advance_credit": remaining_credit,
             "total_unpaid": total_unpaid,
+            "overdue_unpaid": overdue_unpaid,       # 납입일이 지난 달의 미입금 합계(진짜 미납)
             "oldest_unpaid_ym": oldest,
             "days_to_expiry": self.days_to_expiry(),
         }

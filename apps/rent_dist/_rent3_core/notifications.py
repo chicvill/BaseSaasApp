@@ -167,7 +167,7 @@ def _l_unpaid(l: Lessor) -> Optional[Dict[str, Any]]:
     n = 0
     for c in Contract.find(branch=l.branch, status="ACTIVE"):
         try:
-            if int(c.ledger()["total_unpaid"]) > 0:
+            if int(c.ledger().get("overdue_unpaid", 0)) > 0:      # 납입일이 지난 미납만(납부 예정은 제외)
                 n += 1
         except Exception:
             continue
