@@ -7604,6 +7604,114 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn(".r3-menu-empty", shell)
         self.assertIn('.querySelector(".r3-tile-txt")', shell)
 
+    def test_120_notification_center_batch_collectors(self):
+        """120. 알림 센터(일괄 수집): 원본 데이터의 상태에서 역할별 알림(건수·종류·이동 주소)을 한 번에 계산하고, 처리되면 사라지며, 본인 몫만 보이고(타 임차인·타 지점·비관리인 거부),
+        한 수집기가 실패해도 나머지는 계속되고, 요약에는 개인정보가 없고, 안내성 알림은 '확인함' 뒤 다시 안 뜨며, 세 앱 화면이 알림 센터를 불러온다."""
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import Lessor, Tenant, notifications as nf
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement, ConnectRequest, ExpiryRenewalCheck, MaintenanceTicket, TransferNotice
+        c = self.client
+        t = Tenant.get("tenant_201")
+        th = {"Authorization": f"Bearer {tenant_token(t)}"}
+        other = Tenant.get("tenant_202") or next(x for x in Tenant.all() if x.id != t.id and x.status == "ACTIVE")
+        oh = {"Authorization": f"Bearer {tenant_token(other)}"}
+        chic, sunho, admin = self._login("chic"), self._login("sunho"), self._login("admin")
+        TN = f"/api/rent3_tenant/myhome/{t.id}/notifications"
+        now = datetime.now().isoformat(timespec="seconds")
+        made = []
+        try:
+            made += [
+                CheckOutSettlement(id="co_t120", branch=t.branch, id_room="room_x", room_no=t.room_no, id_contract="ct_x", id_tenant=t.id, tenant_name=t.name, status="CALCULATED").save(action="t"),
+                ExpiryRenewalCheck(id="exp_t120", branch=t.branch, room_no=t.room_no, id_tenant=t.id, status="AWAITING_TENANT").save(action="t"),
+                TransferNotice(id="trn_t120", branch=t.branch, room_no=t.room_no, tenant_id=t.id, status="REJECTED", handled_at=now).save(action="t"),
+            ]
+            # ── 임차인: 종류별 건수·이동 주소 ──
+            r = c.get(TN, headers=th)
+            self.assertEqual(r.status_code, 200, r.text)
+            d = r.json()
+            kinds = {i["kind"]: i for i in d["items"]}
+            for k in ("checkout_agree", "expiry_reply", "transfer_rejected"):
+                self.assertIn(k, kinds, k)
+            self.assertIn("svc=checkout", kinds["checkout_agree"]["link"])
+            self.assertEqual(kinds["checkout_agree"]["level"], "urgent")
+            self.assertEqual(d["total"], sum(i["count"] for i in d["items"]))
+            self.assertEqual(d["urgent"], sum(i["count"] for i in d["items"] if i["level"] == "urgent"))
+            self.assertEqual([i["level"] for i in d["items"]], sorted((i["level"] for i in d["items"]), key=lambda x: nf.LEVEL_ORDER[x]))   # 긴급이 먼저
+            # 개인정보·본문 없음: 항목 키는 정해진 것뿐
+            for i in d["items"]:
+                self.assertEqual(set(i), {"kind", "title", "count", "link", "level", "action", "detail"})
+            # 본인 몫만
+            self.assertEqual(c.get(TN, headers=oh).status_code, 403)
+            self.assertEqual(c.get(TN, headers=self.NOAUTH).status_code, 401)
+            # 안내성 알림은 '확인함' 뒤 다시 안 뜬다(상태 기반 알림은 그대로)
+            sr = c.post(TN + "/seen", headers=th, json={"kind": "transfer_rejected"})
+            self.assertEqual(sr.status_code, 200, sr.text)
+            k2 = {i["kind"] for i in sr.json()["items"]}
+            self.assertNotIn("transfer_rejected", k2)
+            self.assertIn("checkout_agree", k2)
+            # 처리되면 저절로 사라진다(풀이 바뀌면 캐시도 갱신)
+            co = CheckOutSettlement.get("co_t120"); co.status = "AGREED"; co.save(action="t")
+            self.assertNotIn("checkout_agree", {i["kind"] for i in c.get(TN, headers=th).json()["items"]})
+            # ── 임대인 ──
+            made += [
+                ConnectRequest(id="cnr_t120", branch="main", room_no="201", tenant_id=t.id, tenant_name=t.name, status="PENDING", expires_at=(datetime.now() + timedelta(hours=1)).isoformat(timespec="seconds")).save(action="t"),
+                MaintenanceTicket(id="as_t120", branch="main", room_no="201", id_tenant=t.id, status="RECEIVED").save(action="t"),
+                CheckOutSettlement(id="co_t120b", branch="main", id_room="room_x", room_no="203", id_contract="ct_x", id_tenant="tenant_x", status="REQUESTED").save(action="t"),
+                TransferNotice(id="trn_t120b", branch="main", room_no="201", tenant_id=t.id, status="PENDING").save(action="t"),
+            ]
+            LN = "/api/rent3_lessor/notifications"
+            ld = c.get(LN, headers=chic, params={"branch": "main"})
+            self.assertEqual(ld.status_code, 200, ld.text)
+            lk = {i["kind"]: i for i in ld.json()["items"]}
+            for k in ("connect_request", "as_received", "checkout_requested", "transfer_pending"):
+                self.assertIn(k, lk, k)
+            self.assertIn("tab=ops", lk["as_received"]["link"])
+            self.assertIn("branch=main", lk["connect_request"]["link"])
+            self.assertEqual(c.get(LN, headers=sunho, params={"branch": "main"}).status_code, 403)       # 다른 지점 임대인
+            self.assertEqual(c.get(LN, headers=self.NOAUTH, params={"branch": "main"}).status_code, 401)
+            # 만료된 연결 요청은 세지 않는다
+            cr = ConnectRequest.get("cnr_t120"); cr.expires_at = "2000-01-01T00:00:00"; cr.save(action="t")
+            self.assertNotIn("connect_request", {i["kind"] for i in c.get(LN, headers=chic, params={"branch": "main"}).json()["items"]})
+            # ── 관리인 ──
+            made.append(Lessor(id="lsr_t120", username="t120", name="심사대기", phone="01011112222", branch="t120", status="PENDING_APPROVAL", applied_at=now).save(action="t"))
+            AN = "/api/rent3_admin/notifications"
+            ad = c.get(AN, headers=admin)
+            self.assertEqual(ad.status_code, 200, ad.text)
+            ak = {i["kind"]: i for i in ad.json()["items"]}
+            self.assertGreaterEqual(ak["franchise_review"]["count"], 1)
+            self.assertIn("tab=lessors", ak["franchise_review"]["link"])
+            self.assertIn(c.get(AN, headers=chic).status_code, (401, 403))                              # 관리인 전용
+            self.assertIn(c.get(AN, headers=self.NOAUTH).status_code, (401, 403))
+        finally:
+            for o in made:
+                cur = type(o).get(o.id)
+                if cur:
+                    cur.delete(action="t")
+            for x in ("co_t120b", "cnr_t120", "as_t120", "trn_t120b"):
+                for cls in (CheckOutSettlement, ConnectRequest, MaintenanceTicket, TransferNotice):
+                    cur = cls.get(x)
+                    if cur:
+                        cur.delete(action="t")
+            tt = Tenant.get(t.id); tt.notice_seen = {}; tt.save(action="t")
+        # 한 수집기가 실패해도 나머지는 계속된다
+        def boom(_):
+            raise RuntimeError("x")
+        ok = nf._run([boom, lambda _: nf._item("k", "정상", 2, "/x", "normal")], None)
+        self.assertEqual([(i["kind"], i["count"]) for i in ok], [("k", 2)])
+        self.assertIsNone(nf._item("k", "없음", 0))
+        # 화면: 세 앱이 알림 센터를 불러오고 시작한다
+        for app, needle in (("rent3_admin", "/api/rent3_admin/notifications"), ("rent3_lessor", "/api/rent3_lessor/notifications?branch="), ("rent3_tenant", "/notifications`")):
+            fe = os.path.join(ROOT, "apps", "rent_dist", app, "frontend")
+            self.assertIn("/shared/ui/r3_notify.js", open(os.path.join(fe, "index.html"), encoding="utf-8").read(), app)
+            self.assertIn("R3Notify.start", open(os.path.join(fe, "app.js"), encoding="utf-8").read(), app)
+            self.assertIn(needle, open(os.path.join(fe, "app.js"), encoding="utf-8").read(), app)
+        js = c.get("/shared/ui/r3_notify.js", headers=self.NOAUTH)
+        self.assertEqual(js.status_code, 200)
+        for needle in ("data-r3-burger", "r3-nbadge", "visibilitychange", "30000", "확인하기", "처리를 마치면 알림은 저절로 사라집니다"):
+            self.assertIn(needle, js.text, needle)
+        self.assertIn("tab=", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read())
+
 
 if __name__ == "__main__":
     unittest.main()

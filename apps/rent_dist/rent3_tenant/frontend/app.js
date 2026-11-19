@@ -238,6 +238,8 @@
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
   R3Shell.watchSupport();
+  // 🔔 알림 센터: 정산서·만기 회신·메시지·미납 등 내가 확인할 일을 한곳에 모아 건수로 알린다
+  if (window.R3Notify && selectedTenantId && !ME_ADMIN) R3Notify.start({ url: `/api/rent3_tenant/myhome/${encodeURIComponent(selectedTenantId)}/notifications`, seenUrl: `/api/rent3_tenant/myhome/${encodeURIComponent(selectedTenantId)}/notifications/seen`, openSupport: () => R3Shell.openSupportChat() });
   if (params.get("welcome")) {    // 입주 안내 링크로 가입을 마친 직후: 홈 화면 추가 방법을 한 번 보여 주고 주소에서 welcome 을 뺀다
     try { const u = new URL(window.location.href); u.searchParams.delete("welcome"); window.history.replaceState(null, "", u.toString()); } catch (_) { /* 무시 */ }
     setTimeout(() => R3Shell.installHelp(), 600);

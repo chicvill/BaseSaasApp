@@ -800,6 +800,14 @@ def landlord_promo(request: Request, channel: str = "cafe", season: str = "none"
     return {"success": True, "seasons": lp.SEASONS, "post": lp.generate(channel, season, campaign, f"{proto}://{host}" if host else "")}
 
 
+@router.get("/notifications", dependencies=ADMIN_ONLY)
+def admin_notifications():
+    """관리인 알림 일괄 요약: 문의 안 읽음·가맹 심사 대기·홈택스 확인 대기·가맹비 연체·세금계산서 발행 필요(건수·이동 주소만)."""
+    from apps.rent_dist._rent3_core import notifications as nf
+    ensure_pool_seeded()
+    return {"success": True, **nf.summary("admin", None, "admin")}
+
+
 @router.get("/acquisition/summary", dependencies=ADMIN_ONLY)
 def acquisition_summary():
     """임대인 유입 현황(읽기 전용): 채널·캠페인별 가입 → 가맹 승인 → 첫 방 등록 → 첫 수납 기록 수."""

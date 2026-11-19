@@ -305,6 +305,26 @@ def _invite_base(request: Request) -> str:
     return f"{proto}://{host}" if host else ""
 
 
+@router.get("/myhome/{tenant_id}/notifications", dependencies=[Depends(tenant_scope)])
+def tenant_notifications(tenant_id: str):
+    """내게 온 알림 일괄 요약(건수·종류·이동 주소만, 본문·계좌 없음). 앱을 열지 않은 동안 생긴 일도 원본 상태에서 계산해 보여 준다."""
+    from apps.rent_dist._rent3_core import notifications as nf
+    t = _tenant_by_id(tenant_id)
+    return {"success": True, **nf.summary("tenant", t, t.id)}
+
+
+class NoticeSeenReq(BaseModel):
+    kind: str
+
+
+@router.post("/myhome/{tenant_id}/notifications/seen", dependencies=[Depends(tenant_scope)])
+def tenant_notice_seen(tenant_id: str, req: NoticeSeenReq):
+    from apps.rent_dist._rent3_core import notifications as nf
+    t = _tenant_by_id(tenant_id)
+    nf.mark_seen(t, req.kind)
+    return {"success": True, **nf.summary("tenant", t, t.id, use_cache=False)}
+
+
 @router.get("/myhome/{tenant_id}/lessor-invite", dependencies=[Depends(tenant_scope)])
 def lessor_invite_info(tenant_id: str, request: Request, label: str = ""):
     """집주인에게 보낼 안심계약 제안 문안·링크·오늘 남은 횟수·이 코드로 가입한 집주인 수(횟수는 올리지 않는다)."""

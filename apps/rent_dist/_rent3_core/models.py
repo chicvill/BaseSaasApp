@@ -167,6 +167,7 @@ class Lessor(PoolObj):
     identity: Dict[str, Any] = Field(default_factory=dict)        # 휴대폰 본인인증 결과(실명·생년월일 앞6자리·업체)
     franchise_docs: Dict[str, Any] = Field(default_factory=dict)  # 제출한 등기부(파일 해시)·AI 읽기·소유자 대조 결과
     applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
+    notice_seen: Dict[str, str] = Field(default_factory=dict)   # 안내성 알림을 확인한 시각(종류별). notifications.py
     acq: Dict[str, Any] = Field(default_factory=dict)   # 유입 귀속: 가입 때 처음 닿은 링크의 표식(ref·campaign·from_tenant). acquisition.py
     franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
     consents: Dict[str, Any] = Field(default_factory=dict)       # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
@@ -249,6 +250,7 @@ class Tenant(PoolObj):
     business_address: str = ""               # 사업자등록증상 사업장 주소 (미입력 시 호실 주소 사용)
     biz_submitted_at: str = ""               # 임차인이 사업자등록증을 직접 제출한 시각(임대인이 확인 후 세금계산서 발급)
     biz_ai_calls: int = 0                    # 사업자등록증 AI 읽기 호출 수(남용 방지)
+    notice_seen: Dict[str, str] = Field(default_factory=dict)   # 안내성 알림을 확인한 시각(종류별). notifications.py
     lessor_invite_code: str = ""             # 집주인에게 안심계약을 제안할 때 쓰는 소개 코드(추측 불가). lessorinvite.py
     lessor_invite_day: str = ""              # 오늘 보낸 횟수를 센 날짜
     lessor_invite_today: int = 0

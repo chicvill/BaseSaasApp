@@ -636,6 +636,27 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     }
 
 
+class NoticeSeenReq(BaseModel):
+    branch: str = "main"
+    kind: str
+
+
+@router.get("/notifications")
+def lessor_notifications(branch: str = "main"):
+    """내 건물에 온 알림 일괄 요약(건수·종류·이동 주소만). 관리인이 보는 경우에도 해당 지점 것만."""
+    from apps.rent_dist._rent3_core import notifications as nf
+    lsr = _my_lessor(branch)
+    return {"success": True, **nf.summary("lessor", lsr, lsr.branch)}
+
+
+@router.post("/notifications/seen")
+def lessor_notice_seen(req: NoticeSeenReq):
+    from apps.rent_dist._rent3_core import notifications as nf
+    lsr = _my_lessor(req.branch)
+    nf.mark_seen(lsr, req.kind)
+    return {"success": True, **nf.summary("lessor", lsr, lsr.branch, use_cache=False)}
+
+
 @router.get("/rooms/{room_id}/promo")
 def get_room_promo(room_id: str, request: Request):
     """호실의 5대 채널(당근, 피터팬, 에타, 블로그, 카톡) 멀티채널 원클릭 홍보 텍스트 생성."""

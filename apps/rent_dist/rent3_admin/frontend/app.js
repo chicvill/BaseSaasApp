@@ -3,7 +3,8 @@
   "use strict";
 
   const APP_ID = "rent3_admin";
-  let currentTab = "support";
+  // 알림 센터 링크(?tab=lessors 등)로 들어오면 그 탭부터 연다
+  let currentTab = ["support", "lessors", "portfolio", "ops"].includes(new URLSearchParams(location.search).get("tab")) ? new URLSearchParams(location.search).get("tab") : "support";
   let ov = null;
 
   const FR_LABEL = { PENDING_APPROVAL: "⏳ 가맹 심사 중", ACTIVE: "✅ 가맹 승인", SUSPENDED: "⛔ 이용 정지", REJECTED: "❌ 가맹 반려" };
@@ -969,6 +970,8 @@
     `;
   }
 
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === currentTab));
+  if (window.R3Notify) R3Notify.start({ url: "/api/rent3_admin/notifications" });     // 🔔 알림 센터: 문의·가맹 심사·홈택스 확인·가맹비 연체·세금계산서 발행
   refresh().catch(Bass.showError);
 })();
 
