@@ -109,10 +109,16 @@ def _l_base(l: Lessor) -> str:
     return f"/rent3_lessor/?branch={l.branch}"
 
 
-def _l_messages(l: Lessor) -> Optional[Dict[str, Any]]:
+def _l_messages(l: Lessor) -> List[Optional[Dict[str, Any]]]:
+    """호실별로 한 줄씩: 누르면 그 호실 대화가 바로 열린다(?tab=messages&room=호실)."""
+    from urllib.parse import quote
     from . import room_messages as rm
-    n = sum(int(r["unread"]) for r in rm.rooms_overview(l.branch))
-    return _item("messages", "세입자가 보낸 메시지", n, _l_base(l) + "&tab=messages", "normal")
+    out = []
+    for r in rm.rooms_overview(l.branch):
+        who = f" · {r['tenant_name']}" if r.get("tenant_name") else ""
+        out.append(_item(f"messages:{r['room_no']}", f"{r['room_no']}호 세입자 메시지", int(r["unread"]),
+                         _l_base(l) + f"&tab=messages&room={quote(str(r['room_no']))}", "normal", detail=f"{r['room_no']}호{who}"))
+    return out
 
 
 def _l_support(l: Lessor) -> Optional[Dict[str, Any]]:

@@ -2776,7 +2776,7 @@
   }
 
   // ── 운영 ▸ 메시지: 호실별 1:1 대화(임차인과) + 접어 둔 계약 협상 기록. 관리인 지원 채팅·계약방 대화는 섞지 않는다 ──
-  let msgRoom = "";
+  let msgRoom = currentTab === "messages" ? (params.get("room") || "") : "";   // 알림에서 호실을 지정해 들어오면 그 호실 대화부터 연다
   let msgTimer = null;
   const fmtMsgTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
 

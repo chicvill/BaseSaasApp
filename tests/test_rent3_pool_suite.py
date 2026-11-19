@@ -7668,6 +7668,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertIn(k, lk, k)
             self.assertIn("tab=ops", lk["as_received"]["link"])
             self.assertIn("branch=main", lk["connect_request"]["link"])
+            # 메시지 알림은 호실별로 나뉘고, 누르면 그 호실 대화가 열리는 주소(room=)를 가진다
+            from apps.rent_dist._rent3_core import room_messages as _rm
+            _m = _rm.post("main", "201", "tenant", "임차인", "알림 시험", tenant_id=t.id)
+            try:
+                _ml = [i for i in c.get(LN, headers=chic, params={"branch": "main"}).json()["items"] if i["kind"].startswith("messages:")]
+                _mk = {i["kind"]: i for i in _ml}
+                self.assertIn("messages:201", _mk)
+                self.assertIn("tab=messages", _mk["messages:201"]["link"])
+                self.assertIn("room=201", _mk["messages:201"]["link"])
+            finally:
+                _m.delete(action="t")
+            self.assertIn("params.get(\"room\")", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read())
             self.assertEqual(c.get(LN, headers=sunho, params={"branch": "main"}).status_code, 403)       # 다른 지점 임대인
             self.assertEqual(c.get(LN, headers=self.NOAUTH, params={"branch": "main"}).status_code, 401)
             # 만료된 연결 요청은 세지 않는다
