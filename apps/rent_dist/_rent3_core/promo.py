@@ -63,6 +63,7 @@ def generate_promo(
             hint="임차인의 만기 전출 의사가 확인되었거나 공실일 때 홍보를 진행해 주세요.",
         )
 
+    room = room.as_listing()        # 입주 중 사전 매물이면 '다음 세입자용 조건'으로 만든다
     bldg_name = (building.building_name if building else room.building_name) or ""
     address = (building.address if building else "") or ""
     room_label = f"{bldg_name} {room.room_no}호" if bldg_name else f"{room.room_no}호"

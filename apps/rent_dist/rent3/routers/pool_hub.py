@@ -205,6 +205,7 @@ def portal_landing(request: Request) -> Dict[str, Any]:
         is_public_vacancy = (not r.is_occupied and r.is_published) or r.pre_moveout_notice
         if not is_public_vacancy or not franchise_ok.get(r.branch, True):
             continue
+        r = r.as_listing()          # 입주 중 사전 매물은 '다음 세입자용 조건'으로 보여 준다(현재 계약 값은 그대로)
         b = bldg_by_branch.get(r.branch)
         lsr = lessor_by_branch.get(r.branch)
         reg = r.registry_info or {}

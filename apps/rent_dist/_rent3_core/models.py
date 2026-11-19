@@ -412,6 +412,9 @@ class Room(PoolObj):
     maintenance_fee: int = 50000
     available_from: str = "즉시입주"
     pre_moveout_notice: bool = False         # 만기 전출예정 회신 시 사전 공실 매물 예고 플래그
+    # 입주 중인 호실을 사전 매물로 등록할 때 '다음 세입자용 조건'을 여기에 따로 둔다(현재 계약과 방 값은 건드리지 않는다).
+    # 퇴실이 확정돼 호실이 비면(vacate) 방 값에 반영하고 곧바로 비운다. 새 계약이 체결되면 계약 값으로 덮이고 이 값도 비워진다.
+    next_listing: Dict[str, Any] = Field(default_factory=dict)
     is_published: bool = True
     images: List[str] = Field(default_factory=list)
 
@@ -434,13 +437,27 @@ class Room(PoolObj):
                 t.save(action="doorlock_synced", app_source=app_source)
         return self.save(action="doorlock_updated", app_source=app_source)
 
+    LISTING_FIELDS: ClassVar[tuple] = ("name", "room_category", "floor", "area_sqm", "total_floors", "direction", "deposit", "monthly_rent",
+                                       "maintenance_fee", "pay_timing", "vat_applicable", "available_from", "status_description")
+
+    def as_listing(self) -> "Room":
+        """공개 목록·홍보글이 읽는 값: 입주 중이고 다음 세입자용 조건이 있으면 그 조건을 덮어쓴 복사본(저장하지 않는다)."""
+        if self.is_occupied and self.next_listing:
+            return self.model_copy(update={k: v for k, v in self.next_listing.items() if k in self.LISTING_FIELDS})
+        return self
+
     def vacate(self, app_source: str = "rent3_lessor") -> "Room":
-        """퇴실 정산 완료 시 공실 전환 및 직거래 매물 자동 재노출."""
+        """퇴실 정산 완료 시 공실 전환 및 직거래 매물 자동 재노출. 다음 세입자용 조건(next_listing)이 있으면 방 값으로 반영하고 비운다."""
+        nl = {k: v for k, v in (self.next_listing or {}).items() if k in self.LISTING_FIELDS}
+        for k, v in nl.items():
+            setattr(self, k, v)
+        self.next_listing = {}
         self.id_tenant = ""
         self.active_contract_id = ""
         self.pre_moveout_notice = False
         self.is_published = True
-        self.available_from = "즉시입주"
+        if not str(nl.get("available_from") or "").strip():
+            self.available_from = "즉시입주"
         return self.save(action="room_vacated_and_relisted", app_source=app_source)
 
     def save(self, action: str = "updated", app_source: str = "rent3") -> "Room":

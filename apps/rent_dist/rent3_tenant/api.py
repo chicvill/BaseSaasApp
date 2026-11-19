@@ -110,6 +110,7 @@ def list_open_listings(branch: Optional[str] = None):
             continue
         if not Lessor.franchise_open(r.branch):
             continue
+        r = r.as_listing()          # 입주 중 사전 매물은 '다음 세입자용 조건'으로 보여 준다
         b = bldgs.get(r.id_building)
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)

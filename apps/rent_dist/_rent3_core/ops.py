@@ -179,6 +179,34 @@ class CheckOutSettlement(PoolObj):
     tenant_signature: str = ""
     inspection_notes: str = ""
     completed_at: str = ""
+    purged_at: str = ""                      # 민감 정보(계좌·서명·메모)를 지운 시각. 반환액·공제 내역은 남긴다
+
+    # 보증금 반환 확정(수취 확인·자동 확정) 때 또는 퇴실 희망일 후 이 일수가 지나면 아래 항목을 지운다. 금액·공제 내역·계약·수납 기록은 남긴다(연말정산·소득 증빙).
+    PURGE_DAYS: ClassVar[int] = 30
+    SENSITIVE_FIELDS: ClassVar[tuple] = ("refund_bank_account", "account_holder", "tenant_signature", "dispute_note", "tenant_request_memo", "inspection_notes", "paid_memo")
+
+    def purge_sensitive(self, app_source: str = "rent3_checkout") -> bool:
+        """반환 계좌·예금주·서명·이의/점검/요청 메모를 지운다. 이미 지웠거나 지울 것이 없으면 False."""
+        if self.purged_at or not any(getattr(self, f) for f in self.SENSITIVE_FIELDS):
+            return False
+        for f in self.SENSITIVE_FIELDS:
+            setattr(self, f, "")
+        self.purged_at = now_iso()
+        self.save(action="checkout_sensitive_purged", app_source=app_source)
+        return True
+
+    @classmethod
+    def purge_due(cls, branch: str = "", tenant_id: str = "") -> int:
+        """끝나지 않은 정산도 퇴실 희망일(없으면 신청·생성일)로부터 PURGE_DAYS 가 지나면 민감 정보를 지운다. 조회 때 함께 실행한다."""
+        limit = (datetime.now() - timedelta(days=cls.PURGE_DAYS)).date().isoformat()
+        n = 0
+        for s in cls.all():
+            if (branch and s.branch != branch) or (tenant_id and s.id_tenant != tenant_id) or s.purged_at:
+                continue
+            ref = (s.desired_date or s.requested_at or s.created_at or "")[:10]
+            if ref and ref <= limit and s.purge_sensitive():
+                n += 1
+        return n
 
     def summary(self) -> str:
         return f"퇴실정산 [{self.room_no}호] 반환액 {self.refund_amount:,}원 ({self.status})"
@@ -323,6 +351,7 @@ class CheckOutSettlement(PoolObj):
     @classmethod
     def auto_confirm_due(cls, branch: str = "", tenant_id: str = "") -> int:
         """송금 표시 뒤 7일 동안 이의가 없으면 자동 확정(퇴실 처리). 조회 때 함께 실행한다. 처리한 건수를 돌려준다."""
+        cls.purge_due(branch=branch, tenant_id=tenant_id)       # 퇴실 후 1개월이 지난 정산의 민감 정보 삭제
         now, n = now_iso(), 0
         for s in cls.find(status="PAID"):
             if (branch and s.branch != branch) or (tenant_id and s.id_tenant != tenant_id):
@@ -364,6 +393,8 @@ class CheckOutSettlement(PoolObj):
         room = Room.get(self.id_room)
         if room:
             room.vacate(app_source=app_source)
+
+        self.purge_sensitive(app_source=app_source)             # 보증금 반환이 확정됐으니 계좌·서명·메모를 지운다(금액·공제 내역은 남김)
 
         self._chat("system", "퇴실정산 안내", "[✅ 정산 완료] 보증금 반환이 확정되어 퇴실 처리되었습니다. "
                    + ("(7일 동안 이의가 없어 자동 확정) " if auto else "") + f"{tenant.readonly_until if tenant else ''}까지 로그인해서 연말정산 납부확인서·정산서를 조회할 수 있습니다.",
@@ -634,6 +665,7 @@ class ExpiryRenewalCheck(PoolObj):
 
             if room and room.pre_moveout_notice:
                 room.pre_moveout_notice = False
+                room.next_listing = {}
                 room.is_published = False
                 room.available_from = "즉시입주"
                 room.save(action="room_prelist_cancelled_for_stay", app_source=app_source)

@@ -7471,7 +7471,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         occ = Room.first(branch="main", room_no="201")
         self.assertTrue(occ.is_occupied)
-        old_state = (occ.is_published, occ.pre_moveout_notice, occ.available_from, occ.deposit, occ.monthly_rent)
+        old_state = (occ.is_published, occ.pre_moveout_notice, occ.available_from, occ.deposit, occ.monthly_rent, occ.next_listing)
         try:
             # 1) 전출 예정 확인 없이 입주 호실 공개 시도 → 거부(400)
             r1 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
@@ -7495,10 +7495,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             rm = Room.first(branch="main", room_no="201")
             self.assertTrue(rm.pre_moveout_notice)
             self.assertTrue(rm.is_published)
-            self.assertEqual(rm.available_from, "2026-12-31")
+            # 입주 중이므로 방 값(현재 계약 조건)은 그대로이고, 다음 세입자용 조건은 next_listing 에만 임시 저장된다
+            self.assertEqual((rm.monthly_rent, rm.available_from), (old_state[4], old_state[2]))
+            self.assertEqual((rm.next_listing["monthly_rent"], rm.next_listing["available_from"]), (480000, "2026-12-31"))
 
             landing = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
-            self.assertTrue(any(l["id"] == rm.id and l["pre_moveout_notice"] for l in landing))
+            mine = next(l for l in landing if l["id"] == rm.id and l["pre_moveout_notice"])
+            self.assertEqual((mine["monthly_rent"], mine["available_from"]), (480000, "2026-12-31"))      # 공개 목록은 다음 세입자용 조건
 
             pr = c.get(f"/api/rent3_lessor/rooms/{rm.id}/promo", headers=chic)
             self.assertEqual(pr.status_code, 200, pr.text)
@@ -7509,11 +7512,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             rm2 = Room.first(branch="main", room_no="201")
             self.assertFalse(rm2.is_published)
             self.assertFalse(rm2.pre_moveout_notice)
+            self.assertEqual(rm2.next_listing, {})                                                         # 내리면 임시 조건도 삭제
             landing2 = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
             self.assertFalse(any(l["id"] == rm.id for l in landing2))
         finally:
             rm_f = Room.first(branch="main", room_no="201")
-            rm_f.is_published, rm_f.pre_moveout_notice, rm_f.available_from, rm_f.deposit, rm_f.monthly_rent = old_state
+            rm_f.is_published, rm_f.pre_moveout_notice, rm_f.available_from, rm_f.deposit, rm_f.monthly_rent, rm_f.next_listing = old_state
             rm_f.save(action="test_117_restore")
 
         # 5) 임대인 UI: 호실 드롭다운에서 입주 호실 disabled 제거 및 전출예정 확인 체크박스 포함
@@ -7521,6 +7525,59 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn('${r.is_occupied ? "disabled" : ""}', fe)
         self.assertIn("nrMoveoutNoticeWrap", fe)
         self.assertIn("nrPreMoveout", fe)
+
+    def test_118_next_listing_staging_and_checkout_sensitive_purge(self):
+        """118. 입주 중 호실 사전 매물 조건은 next_listing 에 임시 저장(방 값·계약 불변) → 퇴실 확정(vacate) 때 방 값에 반영하고 곧바로 비움,
+        새 계약 체결 때도 비움, 연장 확정 때도 비움. 퇴실 정산의 민감 정보(계좌·예금주·서명·메모)는 반환 확정 때 또는 1개월 뒤 지우되 금액·공제 내역은 남긴다."""
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import Room, Contract
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        # ① 임시 조건: 현재 값 불변, 공개용 복사본만 덮임, vacate 때 반영·삭제
+        r = Room(id="room_t118", branch="main", room_no="9118", deposit=1000000, monthly_rent=300000, id_tenant="tenant_x", active_contract_id="ct_x",
+                 pre_moveout_notice=True, is_published=True, next_listing={"deposit": 2000000, "monthly_rent": 350000, "available_from": "2027-01-15", "bogus": 1})
+        self.assertEqual((r.deposit, r.monthly_rent), (1000000, 300000))
+        view = r.as_listing()
+        self.assertEqual((view.deposit, view.monthly_rent, view.available_from), (2000000, 350000, "2027-01-15"))
+        self.assertEqual(r.monthly_rent, 300000)                                      # 복사본이라 원본은 그대로
+        self.assertFalse(hasattr(view, "bogus"))
+        r.vacate()
+        self.assertEqual((r.deposit, r.monthly_rent, r.available_from, r.next_listing), (2000000, 350000, "2027-01-15", {}))
+        r2 = Room(id="room_t118b", branch="main", room_no="9119", id_tenant="tenant_x", active_contract_id="ct_x", pre_moveout_notice=True, next_listing={})
+        r2.vacate()
+        self.assertEqual(r2.available_from, "즉시입주")                                  # 임시 조건이 없으면 예전처럼
+        # ② 비입주 호실은 as_listing 이 그대로
+        self.assertIs(Room(id="room_t118c", branch="main", room_no="9120", next_listing={"deposit": 1}).as_listing().deposit, Room.model_fields["deposit"].default)
+        # ③ 퇴실 정산 민감 정보: 반환 확정 때 삭제(금액·공제 내역은 유지), 이미 지웠으면 반복 없음
+        co = CheckOutSettlement(id="co_t118", branch="main", id_room="room_none", room_no="9118", id_contract="ct_none", id_tenant="tenant_none", tenant_name="정산임차",
+                                status="PAID", refund_amount=900000, deposit_original=1000000, unpaid_rent_deduction=100000, refund_bank_account="국민 123-456-789012",
+                                account_holder="정산임차", tenant_signature="서명", dispute_note="이의", tenant_request_memo="요청", inspection_notes="점검", paid_memo="송금")
+        co.save(action="t")
+        try:
+            co.complete_refund_and_vacate(app_source="t")
+            got = CheckOutSettlement.get("co_t118")
+            for f in CheckOutSettlement.SENSITIVE_FIELDS:
+                self.assertEqual(getattr(got, f), "", f)
+            self.assertTrue(got.purged_at)
+            self.assertEqual((got.refund_amount, got.deposit_original, got.unpaid_rent_deduction, got.status), (900000, 1000000, 100000, "COMPLETED"))
+            self.assertFalse(got.purge_sensitive())
+            # ④ 반환이 끝나지 않아도 퇴실 희망일 후 1개월이 지나면 삭제(이전 건만), 최근 건은 유지
+            old_day = (datetime.now() - timedelta(days=45)).date().isoformat()
+            new_day = (datetime.now() + timedelta(days=5)).date().isoformat()
+            CheckOutSettlement(id="co_t118_old", branch="main", id_room="room_none", room_no="9121", id_tenant="tenant_old", tenant_name="오래", status="AGREED",
+                               desired_date=old_day, refund_bank_account="신한 111-222-333333", account_holder="오래", tenant_signature="서명").save(action="t")
+            CheckOutSettlement(id="co_t118_new", branch="main", id_room="room_none", room_no="9122", id_tenant="tenant_new", tenant_name="최근", status="AGREED",
+                               desired_date=new_day, refund_bank_account="신한 444-555-666666", account_holder="최근", tenant_signature="서명").save(action="t")
+            CheckOutSettlement.purge_due()
+            self.assertEqual((CheckOutSettlement.get("co_t118_old").refund_bank_account, bool(CheckOutSettlement.get("co_t118_old").purged_at)), ("", True))
+            self.assertEqual(CheckOutSettlement.get("co_t118_new").refund_bank_account, "신한 444-555-666666")
+        finally:
+            for x in ("co_t118", "co_t118_old", "co_t118_new"):
+                o = CheckOutSettlement.get(x)
+                if o:
+                    o.delete(action="t")
+        # ⑤ 연장 확정·새 계약 체결 경로가 임시 조건을 비우는 코드가 있다
+        for rel, needle in (("ops.py", "room.next_listing = {}"), ("cosign.py", "room.next_listing = {}"), ("broker.py", "room.next_listing = {}")):
+            self.assertIn(needle, open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", rel), encoding="utf-8").read(), rel)
 
 
 if __name__ == "__main__":

@@ -3034,16 +3034,18 @@
         syncAvailInputs();
         return;
       }
-      $nr("nrCat").value = r.room_category || "주거용 원룸";
-      $nr("nrDep").value = r.deposit;
-      $nr("nrRent").value = r.monthly_rent;
-      $nr("nrMaint").value = r.maintenance_fee;
-      $nr("nrArea").value = r.area_sqm;
-      $nr("nrDir").value = r.direction || "";
-      $nr("nrFloor").value = r.floor;
-      $nr("nrTotalFloors").value = r.total_floors || 0;
-      $nr("nrDesc").value = r.status_description || "";
-      const af = r.available_from || "";
+      // 입주 중인 호실은 현재 계약 값이 아니라 '다음 세입자용 조건'(임시 저장분)을 보여 준다. 저장해 둔 것이 없으면 현재 값에서 시작한다.
+      const L = isOcc && r.next_listing && Object.keys(r.next_listing).length ? { ...r, ...r.next_listing } : r;
+      $nr("nrCat").value = L.room_category || "주거용 원룸";
+      $nr("nrDep").value = L.deposit;
+      $nr("nrRent").value = L.monthly_rent;
+      $nr("nrMaint").value = L.maintenance_fee;
+      $nr("nrArea").value = L.area_sqm;
+      $nr("nrDir").value = L.direction || "";
+      $nr("nrFloor").value = L.floor;
+      $nr("nrTotalFloors").value = L.total_floors || 0;
+      $nr("nrDesc").value = L.status_description || "";
+      const af = L.available_from || "";
       const mDate = af.match(/\d{4}-\d{2}-\d{2}/);
       const expDate = r.contract && /^\d{4}-\d{2}-\d{2}$/.test(r.contract.expiry_date || "") ? r.contract.expiry_date : "";
       if (isOcc) {

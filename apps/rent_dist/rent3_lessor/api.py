@@ -550,6 +550,22 @@ def create_or_update_room(req: RoomCreateReq):
                 existing.pre_moveout_notice = True
             elif req.pre_moveout_notice is False:
                 existing.pre_moveout_notice = False
+        if existing.is_occupied:
+            # 입주 중: 현재 계약·방 값은 그대로 두고 '다음 세입자용 조건'만 임시로 저장한다(퇴실 확정 때 반영, 새 계약 체결 때 삭제)
+            if req.is_published:
+                existing.next_listing = {
+                    "name": req.name or existing.name, "room_category": req.room_category, "floor": req.floor, "area_sqm": req.area_sqm,
+                    "total_floors": req.total_floors, "direction": req.direction, "deposit": req.deposit, "monthly_rent": req.monthly_rent,
+                    "maintenance_fee": req.maintenance_fee, "pay_timing": req.pay_timing, "vat_applicable": req.vat_applicable,
+                    "available_from": req.available_from, "status_description": req.status_description,
+                }
+            else:
+                existing.next_listing = {}
+            existing.is_published = req.is_published
+            existing.save(action="room_prelisting_saved", app_source=APP_SRC)
+            msg = (f"{req.room_no}호가 전출 예정 사전 매물로 등록되었습니다. (현재 계약·방 값은 그대로이며, 퇴실이 확정되면 이 조건이 적용됩니다)"
+                   if existing.pre_moveout_notice else f"{req.room_no}호 정보가 저장되었습니다.")
+            return {"success": True, "message": msg, "room": existing.model_dump()}
         existing.name = req.name or existing.name
         existing.floor = req.floor
         existing.area_sqm = req.area_sqm
@@ -610,6 +626,7 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     room.is_published = req.is_published
     if not req.is_published and room.is_occupied:
         room.pre_moveout_notice = False
+        room.next_listing = {}
     room.save(action="room_publish_toggled", app_source=APP_SRC)
     state_label = "직거래 매물 공개" if room.is_published else "매물 비공개"
     return {
