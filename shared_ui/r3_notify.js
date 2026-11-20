@@ -5,7 +5,7 @@
  *     url      알림 요약 API 주소(GET). 응답: { total, urgent, items:[{kind,title,count,link,level,action,detail}] }
  *     seenUrl  안내성 알림 '확인함' 기록 주소(POST, 선택). seenBody = 같이 보낼 값(예: {branch}).
  *     openSupport  action==="support" 항목을 눌렀을 때 실행할 함수(관리인 문의 창 열기).
- * 하는 일: 30초마다(화면이 보일 때만) 요약을 불러 ☰ 버튼과 🔔 버튼에 건수 배지를 달고, 🔔 를 누르면 종류별 알림 목록(건수·[확인하기] 링크)을 연다.
+ * 하는 일: 30초마다(화면이 보일 때만) 요약을 불러 🔔 버튼(☰ 와 같은 줄 오른쪽 끝)에만 건수 배지를 달고, 🔔 를 누르면 종류별 알림 목록(건수·[확인하기] 링크)을 연다.
  * 앱을 열지 않은 동안 생긴 일은 서버의 원본 데이터에 남아 있다가 이때 한꺼번에 보인다. 메시지 본문·계좌 같은 개인정보는 요약에 없다.
  */
 (function (global) {
@@ -52,7 +52,7 @@
     bell.type = "button"; bell.className = "r3-bell"; bell.setAttribute("aria-label", "알림"); bell.textContent = "🔔";
     bell.addEventListener("click", openPanel);
     var burger = document.querySelector("[data-r3-burger]");
-    if (burger && burger.parentNode) burger.insertAdjacentElement("afterend", bell);
+    if (burger && burger.parentNode) { bell.style.marginLeft = "auto"; burger.parentNode.appendChild(bell); }   // ☰ 와 같은 줄의 오른쪽 끝(건수는 🔔 에만 단다)
     else { bell.classList.add("r3-bell--float"); document.body.appendChild(bell); }
     state.bell = bell;
     return bell;
@@ -63,7 +63,6 @@
     ensureBell();
     setBadge(state.bell, d.total, urgent);
     state.bell.setAttribute("aria-label", d.total > 0 ? "알림 " + d.total + "건" : "알림 없음");
-    Array.prototype.forEach.call(document.querySelectorAll("[data-r3-burger]"), function (b) { setBadge(b, d.total, urgent); });
   }
 
   function acked(it) { return it.detail === "확인하면 사라집니다" && state.opts && state.opts.seenUrl; }
