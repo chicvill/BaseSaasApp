@@ -115,35 +115,69 @@ def _fresh(o: Dict[str, Any], key: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+MAX_ACCOUNTS = 5
+
+
+def accounts_of(o: Dict[str, Any]) -> List[Dict[str, str]]:
+    """등록한 입금 계좌 목록 [{bank, tail}]. 예전 설정(bank·acct_tail 한 쌍)도 한 계좌로 읽는다."""
+    accs = o.get("accounts")
+    if isinstance(accs, list) and accs:
+        return [{"bank": str(a.get("bank", "")), "tail": str(a.get("tail", ""))} for a in accs if isinstance(a, dict)]
+    if o.get("bank") and o.get("acct_tail"):
+        return [{"bank": o["bank"], "tail": o["acct_tail"]}]
+    return []
+
+
+def _norm_accounts(accounts: Optional[List[Dict[str, Any]]]) -> List[Dict[str, str]]:
+    out: List[Dict[str, str]] = []
+    for a in accounts or []:
+        bank = str((a or {}).get("bank") or "")
+        tail = "".join(ch for ch in str((a or {}).get("tail") or (a or {}).get("acct_tail") or "") if ch.isdigit())
+        if bank not in mp.BANKS:
+            raise DomainError("지원하지 않는 은행입니다.", hint="목록에서 은행을 골라 주세요.")
+        if len(tail) != 4:
+            raise DomainError("입금 계좌 끝 4자리를 숫자로 입력해 주세요.", hint="예: 계좌번호가 351-0123-4567-83 이면 6783")
+        if not any(x["bank"] == bank and x["tail"] == tail for x in out):
+            out.append({"bank": bank, "tail": tail})
+    if not out:
+        raise DomainError("입금 계좌를 하나 이상 등록해 주세요.", hint="은행과 계좌 끝 4자리를 입력합니다.")
+    if len(out) > MAX_ACCOUNTS:
+        raise DomainError(f"계좌는 최대 {MAX_ACCOUNTS}개까지 등록할 수 있습니다.")
+    return out
+
+
 def settings_view(lsr: Lessor) -> Dict[str, Any]:
     purge_due()
     o = _opt(lsr)
-    bank = o.get("bank") or ""
+    accs = accounts_of(o)
+    bank = accs[0]["bank"] if accs else ""
     fc, fe = _fresh(o, "forward_code"), _fresh(o, "forward_code_error")
     return {
+        "accounts": [{"bank": a["bank"], "bank_label": (mp.BANKS.get(a["bank"]) or {}).get("label", a["bank"]), "tail": a["tail"],
+                      "verified": bool((mp.BANKS.get(a["bank"]) or {}).get("verified")), "domains": list((mp.BANKS.get(a["bank"]) or {}).get("domains", ()))[:2]} for a in accs],
         "test_mode": bool(test_domains_for(lsr)),
         "forward_code": fc["code"] if fc else "", "forward_error": bool(fe),
         "active": bool(o.get("active")), "bank": bank, "bank_label": (mp.BANKS.get(bank) or {}).get("label", ""),
-        "acct_tail": o.get("acct_tail", ""), "auto": bool(o.get("auto")),
+        "acct_tail": accs[0]["tail"] if accs else "", "auto": bool(o.get("auto")),
         "address": address_for(o.get("token", "")) if o.get("active") else "", "domain_ready": bool(inbound_domain()),
         "consented_at": o.get("consented_at", ""), "consent_ver": o.get("consent_ver", ""),
         "consent_text": CONSENT_TEXT, "retention_days": RETENTION_DAYS,
-        "banks": [{"id": k, "label": v["label"], "verified": v["verified"], "note": v["note"]} for k, v in mp.BANKS.items()],
+        "banks": [{"id": k, "label": v["label"], "verified": v["verified"], "note": v["note"], "domains": list(v["domains"])[:2]} for k, v in mp.BANKS.items()],
+        "max_accounts": MAX_ACCOUNTS,
     }
 
 
-def enable(lsr: Lessor, consent: bool, bank: str, acct_tail: str, auto: bool) -> Lessor:
+def enable(lsr: Lessor, consent: bool, bank: str, acct_tail: str, auto: bool, accounts: Optional[List[Dict[str, Any]]] = None) -> Lessor:
+    """켜기(동의 필수). accounts=[{bank, tail}, ...] 로 계좌를 여러 개 등록한다(bank·acct_tail 한 쌍도 허용). 은행은 메일의 발신 도메인으로 자동 판별한다."""
     if not consent:
         raise DomainError("메일 수신 동의가 필요합니다.", hint="동의 문구를 확인하고 체크해 주세요. 동의하지 않아도 다른 기능은 그대로 쓸 수 있습니다.")
-    if bank not in mp.BANKS:
-        raise DomainError("지원하지 않는 은행입니다.", hint="목록에서 은행을 골라 주세요.")
-    tail = "".join(ch for ch in (acct_tail or "") if ch.isdigit())
-    if len(tail) != 4:
-        raise DomainError("입금 계좌 끝 4자리를 숫자로 입력해 주세요.", hint="예: 계좌번호가 351-0123-4567-83 이면 6783")
-    if auto and not mp.BANKS[bank]["verified"]:
-        raise DomainError("이 은행은 아직 '일치하면 자동 처리'를 쓸 수 없습니다.", hint="실제 메일로 형식이 확인되기 전에는 '확인 후 처리'만 선택할 수 있습니다.")
+    accs = _norm_accounts(accounts if accounts else [{"bank": bank, "tail": acct_tail}])
+    if auto and not all(mp.BANKS[a["bank"]]["verified"] for a in accs):
+        raise DomainError("검증되지 않은 은행이 있어 '일치하면 자동 처리'를 쓸 수 없습니다.", hint="실제 메일로 형식이 확인되기 전에는 '확인 후 처리'만 선택할 수 있습니다.")
     o = _opt(lsr)
-    o.update({"active": True, "bank": bank, "acct_tail": tail, "auto": bool(auto), "consent_ver": CONSENT_VER})
+    o.update({"active": True, "accounts": accs, "auto": bool(auto), "consent_ver": CONSENT_VER})
+    o.pop("bank", None)
+    o.pop("acct_tail", None)
     if not o.get("consented_at") or o.get("revoked_at"):
         o["consented_at"] = now_iso()
     o.pop("revoked_at", None)
@@ -151,6 +185,22 @@ def enable(lsr: Lessor, consent: bool, bank: str, acct_tail: str, auto: bool) ->
         o["token"] = secrets.token_hex(10)
     lsr.mail_opt = o
     lsr.save(action="mail_opt_enabled", app_source="rent3_mail")
+    return lsr
+
+
+def set_accounts(lsr: Lessor, accounts: List[Dict[str, Any]]) -> Lessor:
+    """켜져 있는 동안 입금 계좌 목록을 바꾼다. 검증되지 않은 은행이 들어오면 자동 처리는 저절로 꺼진다."""
+    o = _opt(lsr)
+    if not o.get("active"):
+        raise DomainError("입금 메일 연동이 꺼져 있습니다.")
+    accs = _norm_accounts(accounts)
+    o["accounts"] = accs
+    o.pop("bank", None)
+    o.pop("acct_tail", None)
+    if o.get("auto") and not all(mp.BANKS[a["bank"]]["verified"] for a in accs):
+        o["auto"] = False
+    lsr.mail_opt = o
+    lsr.save(action="mail_accounts_changed", app_source="rent3_mail")
     return lsr
 
 
@@ -282,9 +332,8 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     if lsr is None:
         return {"status": "REJECTED"}                 # 토큰 없음·철회·꺼짐: 기록하지 않고 폐기
     o = lsr.mail_opt or {}
-    bank = o.get("bank") or ""
-    spec = mp.BANKS.get(bank)
-    if not spec:
+    accs = accounts_of(o)
+    if not accs or not all(a["bank"] in mp.BANKS for a in accs):
         return {"status": "REJECTED"}
     mid = str(payload.get("message_id") or "").strip()
     body = str(payload.get("text") or payload.get("html") or "")
@@ -296,8 +345,15 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     fwd = _forward_confirmation(lsr, payload, from_dom, dkim)
     if fwd is not None:
         return fwd
-    allowed = spec["domains"]
-    auth_ok = any(_in_domains(d, allowed) for d in dkim)
+    # 은행 자동 판별: 등록한 계좌의 은행 중 발신(DKIM 통과 도메인 우선, 그다음 From 도메인)이 맞는 은행
+    my_banks = list(dict.fromkeys(a["bank"] for a in accs))
+    bank = next((b for b in my_banks if any(_in_domains(d, mp.BANKS[b]["domains"]) for d in dkim)), "") \
+        or next((b for b in my_banks if _in_domains(from_dom, mp.BANKS[b]["domains"])), "")
+    auth_ok = bool(bank) and any(_in_domains(d, mp.BANKS[bank]["domains"]) for d in dkim)
+    allowed = mp.BANKS[bank]["domains"] if bank else ()
+    if not bank:
+        bank = my_banks[0]                      # 테스트 도메인 메일을 읽을 때 쓸 해석기(첫 계좌의 은행)
+    spec = mp.BANKS[bank]
     tdoms = test_domains_for(lsr)
     is_test = (not auth_ok and not _in_domains(from_dom, allowed)) and bool(tdoms) and (any(_in_domains(d, tdoms) for d in dkim) or _in_domains(from_dom, tdoms))
     base = {"msg_hash": msg_hash, "from_domain": from_dom, "auth_ok": auth_ok, "is_test": is_test}
@@ -312,7 +368,7 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     except mp.MailParseError as e:
         _save(lsr, status="FAILED", reason=f"메일 형식을 읽지 못했습니다: {e}", **base)
         return {"status": "FAILED"}
-    if p["acct_tail"] != o.get("acct_tail"):
+    if not any(a["bank"] == bank and a["tail"] == p["acct_tail"] for a in accs) and not (is_test and any(a["tail"] == p["acct_tail"] for a in accs)):
         _save(lsr, status="IGNORED", reason="내 입금 계좌가 아닙니다", **base)
         return {"status": "IGNORED"}
     fields = {"amount": p["amount"], "payer_name": p["payer_name"], "paid_date": p["paid_date"], "room_no": p["room_no"]}

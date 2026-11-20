@@ -2841,20 +2841,30 @@
     if (!st.active) {
       html += card(`
         <h3 style="margin:0 0 6px;">📧 입금 메일 자동 정리 <span class="bass-badge">꺼짐</span></h3>
-        <div class="bass-muted" style="font-size:13px;line-height:1.6;margin-bottom:10px;">은행이 보내는 입금 알림 메일을 전용 주소로 자동 전달해 두면, 조건이 맞는 입금만 골라 수납 처리하고 결과를 알림으로 알려 드립니다.
+        <div class="bass-muted" style="font-size:13px;line-height:1.6;margin-bottom:10px;"><strong>지메일(Gmail) 전용입니다.</strong> 은행이 보내는 입금 알림 메일을 지메일에서 전용 주소로 자동 전달해 두면, 조건이 맞는 입금만 골라 수납 처리하고 결과를 알림으로 알려 드립니다.
           맞지 않는 메일은 처리하지 않고 [확인 대기]에 둡니다. 쓰지 않아도 다른 기능은 그대로입니다.</div>
         <label style="display:flex;gap:8px;align-items:flex-start;min-height:44px;font-size:13px;line-height:1.55;margin-bottom:10px;"><input id="mlConsent" type="checkbox" style="margin-top:4px;"><span><strong>수신 동의</strong> — ${E(st.consent_text)}</span></label>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
           <select id="mlBank" class="bass-select" style="min-height:44px;" aria-label="은행">${st.banks.map((b) => `<option value="${E(b.id)}">${E(b.label)}</option>`).join("")}</select>
           <input id="mlTail" class="bass-input" inputmode="numeric" maxlength="4" placeholder="입금 계좌 끝 4자리" style="width:170px;" aria-label="입금 계좌 끝 4자리">
         </div>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">계좌를 더 추가하려면 먼저 켠 뒤 이 화면에서 추가합니다. 은행은 메일의 보낸 주소로 자동 구분됩니다.</div>
         <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">${st.banks.map((b) => (b.verified ? "" : `${E(b.label)}: ${E(b.note)}`)).join("")}</div>
         <label style="display:flex;gap:8px;align-items:center;min-height:44px;font-size:13px;"><input id="mlAuto" type="checkbox" disabled><span>일치하면 자동 처리 <span class="bass-muted">(검증된 은행에서만 선택할 수 있습니다. 기본은 '확인 후 처리')</span></span></label>
         <button id="mlEnable" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;margin-top:8px;">켜기</button>`);
     } else {
       html += card(`
         <h3 style="margin:0 0 6px;">📧 입금 메일 자동 정리 <span class="bass-badge bass-badge--ok">켜짐</span></h3>
-        <div style="font-size:13px;line-height:1.7;">은행: <strong>${E(st.bank_label)}</strong> · 입금 계좌 끝 4자리 <strong>${E(st.acct_tail)}</strong> · 처리 방식 <strong>${st.auto ? "일치하면 자동 처리" : "확인 후 처리"}</strong></div>
+        <div style="font-size:13px;line-height:1.7;">처리 방식 <strong>${st.auto ? "일치하면 자동 처리" : "확인 후 처리"}</strong> · 은행은 메일의 보낸 주소로 자동 구분합니다.</div>
+        <div style="margin:8px 0;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">입금 계좌 (${st.accounts.length}/${st.max_accounts})</div>
+          ${st.accounts.map((a, i) => `<div class="bass-row" style="justify-content:space-between;gap:8px;min-height:40px;border-top:1px solid var(--border);font-size:13px;"><span><strong>${E(a.bank_label)}</strong> · 끝 4자리 <strong>${E(a.tail)}</strong>${a.verified ? "" : ' <span class="bass-badge" style="font-size:12px;">형식 미검증</span>'}</span>
+            <button class="bass-btn bass-btn--sm ml-acc-del" data-i="${i}" type="button" style="min-height:40px;" ${st.accounts.length <= 1 ? "disabled" : ""}>삭제</button></div>`).join("")}
+          ${st.accounts.length < st.max_accounts ? `<div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:6px;">
+            <select id="mlNewBank" class="bass-select" style="min-height:44px;" aria-label="은행">${st.banks.map((b) => `<option value="${E(b.id)}">${E(b.label)}</option>`).join("")}</select>
+            <input id="mlNewTail" class="bass-input" inputmode="numeric" maxlength="4" placeholder="끝 4자리" style="width:110px;" aria-label="입금 계좌 끝 4자리">
+            <button id="mlAccAdd" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">계좌 추가</button></div>` : ""}
+        </div>
         <div style="margin:10px 0;padding:10px;border-radius:10px;background:var(--surface-2,#f1f5f9);">
           <div style="font-size:12.5px;" class="bass-muted">내 전용 수신 주소</div>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><code id="mlAddr" style="font-size:13px;word-break:break-all;">${st.address ? E(st.address) : "(수신 도메인이 아직 설정되지 않았습니다 — 관리인에게 문의)"}</code>
@@ -2864,7 +2874,9 @@
           <div class="bass-muted" style="font-size:12.5px;margin:4px 0 6px;">지메일의 '전달' 설정 화면에 이 코드를 입력하세요. 1시간 뒤 저절로 사라집니다.</div>
           <button id="mlCodeDone" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">입력했어요 (코드 지우기)</button></div>` : ""}
         ${st.forward_error ? '<div role="alert" style="margin:0 0 10px;padding:10px;border-radius:10px;background:#fff1f2;font-size:13px;">⚠️ 지메일 확인 메일이 도착했으나 코드를 읽지 못했습니다. 지메일 전달 설정 화면의 안내에 따라 다시 시도하거나 관리인에게 문의해 주세요.</div>' : ""}
-        <ol style="margin:0 0 10px;padding-left:20px;font-size:13px;line-height:1.7;"><li>쓰시는 메일(네이버·지메일 등) 설정에서 <strong>자동 전달</strong>을 엽니다.</li><li>위 주소를 전달 받는 주소로 등록합니다.</li><li>은행 입금 알림 메일만 자동 전달되도록 조건(보낸 사람)을 지정합니다.</li></ol>
+        <ol style="margin:0 0 10px;padding-left:20px;font-size:13px;line-height:1.7;"><li>지메일 <strong>설정 → 전달 및 POP/IMAP → 전달 주소 추가</strong>에 위 주소를 입력합니다. 구글이 보낸 <strong>확인 코드</strong>는 이 화면에 잠시 나타납니다.</li>
+          <li>지메일 <strong>설정 → 필터 및 차단된 주소 → 새 필터 만들기</strong>에서 <strong>보낸사람</strong>에 ${E([...new Set(st.accounts.flatMap((a) => a.domains))].join(" 또는 "))} 를 넣고, <strong>다음 주소로 전달</strong>에서 위 주소를 고릅니다.</li>
+          <li>은행에서 <strong>입금 알림을 이메일로</strong> 받도록 설정되어 있어야 합니다(은행 앱/인터넷뱅킹의 알림 설정).</li></ol>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
           <button id="mlRotate" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">🔄 주소 새로 받기</button>
           <button id="mlDisable" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;border-color:var(--err);color:var(--err);">동의 철회 · 끄기 (보관 자료 삭제)</button>
@@ -2893,6 +2905,15 @@
       Bass.updateAppAlert("ok", "입금 메일 자동 정리를 켰습니다. 안내에 따라 자동 전달을 설정해 주세요."); renderMailTab();
     });
     on("mlCopy", async () => { R3.copyText(st.address); });
+    const accNow = () => st.accounts.map((a) => ({ bank: a.bank, tail: a.tail }));
+    on("mlAccAdd", async () => {
+      await post("/mail/accounts", { accounts: [...accNow(), { bank: document.getElementById("mlNewBank").value, tail: document.getElementById("mlNewTail").value }] });
+      renderMailTab();
+    });
+    elTabContent.querySelectorAll(".ml-acc-del").forEach((b) => b.addEventListener("click", function () {
+      const i = Number(this.dataset.i);
+      Bass.withLock(this, () => done(async () => { await post("/mail/accounts", { accounts: accNow().filter((_, k) => k !== i) }); renderMailTab(); }));
+    }));
     on("mlCodeDone", async () => { await post("/mail/forward-code/clear"); renderMailTab(); });
     clearTimeout(window.__mlRefresh);     // 열려 있는 동안 15초마다 새로 불러온다(지메일 확인 코드·새 입금 메일). 입력 중이면 건너뛴다
     if (st.active) window.__mlRefresh = setTimeout(() => { const ae = document.activeElement; if (currentTab === "mail" && !document.hidden && !(ae && ae.tagName === "INPUT")) renderMailTab(); }, 15000);

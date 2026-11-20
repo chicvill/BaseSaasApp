@@ -664,12 +664,23 @@ def lessor_notice_seen(req: NoticeSeenReq):
 
 
 # ── 입금 메일 자동 정리(선택, 기본 꺼짐): 동의·설정·확인 대기 처리. 수신은 /api/rent3/inbound/mail (서명 웹훅) ──
+class MailAccount(BaseModel):
+    bank: str = ""
+    tail: str = ""
+
+
 class MailEnableReq(BaseModel):
     branch: str = "main"
     consent: bool = False
-    bank: str = ""
+    bank: str = ""                           # 예전 방식(한 계좌). accounts 가 있으면 무시
     acct_tail: str = ""
+    accounts: Optional[List[MailAccount]] = None
     auto: bool = False
+
+
+class MailAccountsReq(BaseModel):
+    branch: str = "main"
+    accounts: List[MailAccount]
 
 
 class MailBranchReq(BaseModel):
@@ -691,7 +702,15 @@ def mail_settings(branch: str = "main"):
 @router.post("/mail/enable")
 def mail_enable(req: MailEnableReq):
     from apps.rent_dist._rent3_core import mailpay
-    lsr = mailpay.enable(_my_lessor(req.branch), req.consent, req.bank, req.acct_tail, req.auto)
+    lsr = mailpay.enable(_my_lessor(req.branch), req.consent, req.bank, req.acct_tail, req.auto,
+                         accounts=[a.model_dump() for a in req.accounts] if req.accounts else None)
+    return {"success": True, **mailpay.settings_view(lsr)}
+
+
+@router.post("/mail/accounts")
+def mail_accounts(req: MailAccountsReq):
+    from apps.rent_dist._rent3_core import mailpay
+    lsr = mailpay.set_accounts(_my_lessor(req.branch), [a.model_dump() for a in req.accounts])
     return {"success": True, **mailpay.settings_view(lsr)}
 
 

@@ -8123,5 +8123,90 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, fe, needle)
 
 
+    def test_125_bank_mail_multi_accounts_and_bank_autodetect(self):
+        """125. 입금 메일: 한 임대인이 여러 은행·여러 계좌(최대 5개)를 등록하면 메일의 발신 도메인으로 은행을 자동 판별하고, 그 은행 계좌의 끝 4자리와 맞을 때만 처리한다.
+        다른 은행의 끝자리·등록하지 않은 은행·삭제한 계좌는 무시, 검증 안 된 은행이 섞이면 자동 처리 불가, 예전 설정(한 계좌)도 읽고, 안내는 지메일 전용."""
+        import hashlib, hmac, json, time
+        from apps.rent_dist._rent3_core import Lessor, date_today, mailpay, mailparse
+        c = self.client
+        chic = self._login("chic")
+        LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
+        SECRET = "test-secret-125"
+        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES")
+        old_env = {k: os.environ.get(k) for k in keys}
+        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example"})
+        os.environ.pop("RENT3_MAIL_EXTRA_DOMAINS", None); os.environ.pop("RENT3_MAIL_TEST_BRANCHES", None)
+        keep_opt = dict(Lessor.for_branch("main").mail_opt or {})
+        had_fake = "tbank" in mailparse.BANKS
+        mailparse.BANKS["tbank"] = {"label": "시험은행", "domains": ("testbank.example",), "verified": False, "parser": mailparse.parse_nonghyup, "note": "시험용"}
+        n = [0]
+
+        def mail(tail, amount=550000):
+            d = date_today().strftime("%Y/%m/%d")
+            return chr(10).join(["거래일시 : " + d + " 10:00:00", "거래구분 : 입금", f"입금계좌 : 351-****-{tail}", "보낸분 : 이민수", f"입금금액 : {amount:,}원", "메모 : 201호"])
+
+        def send(token, text, dom):
+            n[0] += 1
+            body = json.dumps({"to": f"pay-{token}@in.rent3-test.example", "message_id": f"t125-{n[0]}-{time.time()}", "from_addr": f"noreply@{dom}",
+                               "dkim_pass_domains": [dom], "subject": "입금 알림", "text": text, "ts": time.time()}).encode("utf-8")
+            return c.post(IN, content=body, headers={"X-Rent3-Signature": hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest(), "Content-Type": "application/json"}).json()["status"]
+
+        def last_reason():
+            return " | ".join(r["reason"] for r in c.get(LS + "/mail/intakes", headers=chic, params={"branch": "main"}).json()["items"])   # 같은 초에 쌓여 순서가 흔들리므로 전체에서 찾는다
+
+        def post(path, body):
+            return c.post(LS + path, headers=chic, json={"branch": "main", **body})
+
+        try:
+            A = [{"bank": "nonghyup", "tail": "6783"}, {"bank": "tbank", "tail": "1111"}]
+            self.assertEqual(post("/mail/enable", {"consent": True, "accounts": A, "auto": True}).status_code, 400)        # 검증 안 된 은행이 섞이면 자동 처리 불가
+            self.assertEqual(post("/mail/enable", {"consent": True, "accounts": [{"bank": "nope", "tail": "1234"}]}).status_code, 400)
+            self.assertEqual(post("/mail/enable", {"consent": True, "accounts": [{"bank": "nonghyup", "tail": "12"}]}).status_code, 400)
+            self.assertEqual(post("/mail/enable", {"consent": True, "accounts": [{"bank": "nonghyup", "tail": f"{i:04d}"} for i in range(6)]}).status_code, 400)   # 최대 5개
+            en = post("/mail/enable", {"consent": True, "accounts": A + [A[0]], "auto": False})                              # 같은 계좌는 하나로
+            self.assertEqual(en.status_code, 200, en.text)
+            st = en.json()
+            self.assertEqual([(a["bank"], a["tail"]) for a in st["accounts"]], [("nonghyup", "6783"), ("tbank", "1111")])
+            self.assertEqual(st["max_accounts"], 5)
+            token = st["address"].split("@")[0][4:]
+            # 은행 자동 판별: 발신 도메인 → 그 은행의 계좌 끝자리와 맞을 때만 처리
+            self.assertEqual(send(token, mail("4567-83"), "nonghyup.com"), "PENDING")
+            self.assertEqual(send(token, mail("1111-11"), "testbank.example"), "PENDING")
+            self.assertEqual(send(token, mail("4567-83"), "testbank.example"), "IGNORED")           # 농협 계좌 끝자리를 시험은행 메일로 받음
+            self.assertIn("내 입금 계좌", last_reason())
+            self.assertEqual(send(token, mail("1111-11"), "nonghyup.com"), "IGNORED")               # 시험은행 끝자리를 농협 메일로 받음
+            self.assertEqual(send(token, mail("4567-83"), "other-bank.example"), "IGNORED")         # 등록하지 않은 은행
+            self.assertIn("허용된 은행", last_reason())
+            # 계좌 목록 바꾸기: 삭제하면 그 은행 메일은 무시, 0개는 거부, 자동 처리는 검증 안 된 은행이 있으면 저절로 꺼진다
+            self.assertEqual(post("/mail/accounts", {"accounts": []}).status_code, 400)
+            self.assertEqual(post("/mail/accounts", {"accounts": [A[0]]}).status_code, 200)
+            self.assertEqual(send(token, mail("1111-11"), "testbank.example"), "IGNORED")
+            self.assertEqual(c.post(LS + "/mail/accounts", headers=self.NOAUTH, json={"branch": "main", "accounts": [A[0]]}).status_code, 401)
+            self.assertEqual(c.post(LS + "/mail/accounts", headers=self._login("sunho"), json={"branch": "main", "accounts": [A[0]]}).status_code, 403)
+            lsr = Lessor.for_branch("main")
+            o = dict(lsr.mail_opt); o["auto"] = True; lsr.mail_opt = o; lsr.save(action="t")
+            self.assertFalse(post("/mail/accounts", {"accounts": A}).json()["auto"])
+            # 예전 설정(한 쌍)도 한 계좌로 읽는다
+            lsr = Lessor.for_branch("main")
+            o = dict(lsr.mail_opt); o.pop("accounts", None); o.update({"bank": "nonghyup", "acct_tail": "6783"}); lsr.mail_opt = o; lsr.save(action="t")
+            self.assertEqual(mailpay.accounts_of(Lessor.for_branch("main").mail_opt), [{"bank": "nonghyup", "tail": "6783"}])
+            self.assertEqual(send(token, mail("4567-83"), "nonghyup.com"), "PENDING")
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            if not had_fake:
+                mailparse.BANKS.pop("tbank", None)
+            lsr = Lessor.for_branch("main")
+            for x in mailpay.MailIntake.find(lessor_id=lsr.id):
+                x.delete(action="t")
+            lsr.mail_opt = keep_opt; lsr.save(action="t")
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("mlAccAdd", "ml-acc-del", "/mail/accounts", "지메일(Gmail) 전용", "전달 및 POP/IMAP", "필터 및 차단된 주소"):
+            self.assertIn(needle, fe, needle)
+
+
 if __name__ == "__main__":
     unittest.main()
