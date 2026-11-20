@@ -3248,7 +3248,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 메뉴에 있는 화면 = 앱이 그릴 수 있는 화면
         menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
         tabs = set(re.findall(r'tab: "(\w+)"', menu))
-        self.assertEqual(tabs, {"ledger", "broker", "rooms", "registry", "tax", "ops", "expiry", "notice", "bldgtax", "messages"})
+        self.assertEqual(tabs, {"ledger", "broker", "rooms", "registry", "tax", "ops", "expiry", "notice", "bldgtax", "messages", "mail"})
         for t in tabs - {"ledger"}:
             self.assertIn(f'currentTab === "{t}"', app, t)
             self.assertIn(f'{t}: "', app[app.index("const TAB_TITLES"):], t)
@@ -7838,6 +7838,194 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         if d.status_code == 200:
             j = d.json()
             self.assertEqual(j["total_overdue_branch"] + j["total_due_soon_branch"], j["total_unpaid_branch"])
+
+
+    def test_123_bank_mail_auto_collect_optin_flow(self):
+        """123. 은행 입금 메일 자동 정리(선택·기본 꺼짐): 동의·검증 안 된 은행의 자동 처리 거부, 서명 웹훅, 위조·출금·타 계좌·중복·해석 실패 무시, 발신 확인 불가·장부 불일치·달 선택 필요는 확인 대기,
+        확인 후 수납(구조화 값·멱등), 자동 조건이면 수납, 알림(확인 대기·자동 수납·실패), 원문 미저장, 타 지점 거부, 철회 시 즉시 삭제·주소 폐기, 보관 만료 삭제."""
+        import hashlib, hmac, json, time
+        from datetime import timedelta
+        from apps.rent_dist._rent3_core import Contract, Lessor, Pay, current_ym, date_today, mailpay, mailparse
+        c = self.client
+        chic, sunho = self._login("chic"), self._login("sunho")
+        LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
+        SECRET = "test-secret-123"
+        old_env = {k: os.environ.get(k) for k in ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN")}
+        os.environ["RENT3_MAIL_SECRET"], os.environ["RENT3_MAIL_DOMAIN"] = SECRET, "in.rent3-test.example"
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        keep_in, keep_timing = ct0.move_in_date, ct0.pay_timing
+        olds = [x.model_dump() for x in Pay.find(id_contract=ct0.id, include_voided=True)]
+        lsr0 = Lessor.for_branch("main")
+        keep_opt = dict(lsr0.mail_opt or {})
+        bank_verified = mailparse.BANKS["nonghyup"]["verified"]
+        counter = [0]
+
+        def reset_pays(move_in=None):
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            ct = Contract.get(ct0.id); ct.move_in_date = move_in or f"{current_ym()}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            return ct
+
+        def nh(amount, payer, memo="201호 월세", kind="입금", tail="4567-83", day=None):
+            d = (day or date_today()).strftime("%Y/%m/%d")
+            lines = ["NH농협은행 전자금융 입금 안내", f"거래일시 : {d} 10:23:45", f"거래구분 : {kind}", f"입금계좌 : 351-****-{tail}",
+                     f"보낸분 : {payer}", f"입금금액 : {amount:,}원", "거래후잔액 : 1,230,000원", f"메모 : {memo}"]
+            return chr(10).join(lines) + chr(10)
+
+        def send(token, text, dkim=("nonghyup.com",), frm="noreply@nonghyup.com", mid=None, sign=True, ts=None):
+            counter[0] += 1
+            body = json.dumps({"to": f"pay-{token}@in.rent3-test.example", "message_id": mid or f"m{counter[0]}-{time.time()}", "from_addr": frm,
+                               "dkim_pass_domains": list(dkim), "subject": "[NH농협은행] 입금 알림", "text": text, "ts": ts or time.time()}).encode("utf-8")
+            sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest() if sign else "bad"
+            return c.post(IN, content=body, headers={"X-Rent3-Signature": sig, "Content-Type": "application/json"})
+
+        def intakes():
+            return c.get(LS + "/mail/intakes", headers=chic, params={"branch": "main"}).json()["items"]
+
+        def notices():
+            return {i["kind"]: i for i in c.get(LS + "/notifications", headers=chic, params={"branch": "main"}).json()["items"]}
+
+        try:
+            ct = reset_pays()
+            monthly = int(ct.monthly_rent or 0) + int(ct.maintenance_fee or 0) + int(ct.compute_vat() or 0)
+            name = ct.tenant_name
+            # ── 설정: 기본 꺼짐 / 동의 필수 / 검증 안 된 은행은 자동 처리 거부 ──
+            st = c.get(LS + "/mail/settings", headers=chic, params={"branch": "main"}).json()
+            self.assertFalse(st["active"])
+            self.assertTrue(any(b["id"] == "nonghyup" and not b["verified"] for b in st["banks"]))
+            base = {"branch": "main", "bank": "nonghyup", "acct_tail": "6783", "auto": False}
+            self.assertEqual(c.post(LS + "/mail/enable", headers=chic, json={**base, "consent": False}).status_code, 400)
+            self.assertEqual(c.post(LS + "/mail/enable", headers=chic, json={**base, "consent": True, "auto": True}).status_code, 400)
+            self.assertEqual(c.post(LS + "/mail/enable", headers=chic, json={**base, "consent": True, "acct_tail": "12"}).status_code, 400)
+            self.assertEqual(c.post(LS + "/mail/enable", headers=sunho, json={**base, "consent": True}).status_code, 403)
+            self.assertEqual(c.post(LS + "/mail/enable", headers=self.NOAUTH, json={**base, "consent": True}).status_code, 401)
+            # 꺼져 있을 때: 어떤 토큰이든 폐기, 서명 틀리면 401, 시각 틀리면 401, 비밀키 없으면 503
+            self.assertEqual(send("deadbeef" * 2 + "0000", "x").json()["status"], "REJECTED")
+            self.assertEqual(send("x", "y", sign=False).status_code, 401)
+            self.assertEqual(send("x", "y", ts=1).status_code, 401)
+            os.environ["RENT3_MAIL_SECRET"] = ""
+            self.assertEqual(c.post(IN, content=b"{}", headers={"X-Rent3-Signature": "x"}).status_code, 503)
+            os.environ["RENT3_MAIL_SECRET"] = SECRET
+            en = c.post(LS + "/mail/enable", headers=chic, json={**base, "consent": True})
+            self.assertEqual(en.status_code, 200, en.text)
+            e = en.json()
+            self.assertTrue(e["active"] and e["address"].startswith("pay-") and e["address"].endswith("@in.rent3-test.example"))
+            token = e["address"].split("@")[0][4:]
+            self.assertNotIn("mail_opt", Lessor.for_branch("main").safe_dump())      # 수신 토큰은 일반 응답에 안 실린다
+
+            # ── 확인 후 처리(자동 꺼짐): 일치해도 확인 대기 ──
+            A = nh(monthly, name)
+            self.assertEqual(send(token, A, mid="mail-A").json()["status"], "PENDING")
+            self.assertEqual(send(token, A, mid="mail-A").json()["status"], "DUPLICATE")             # 같은 메일 두 번
+            self.assertEqual(send(token, nh(monthly, name, tail="1111-11")).json()["status"], "IGNORED")       # 내 계좌 아님
+            self.assertEqual(send(token, nh(monthly, name, kind="출금")).json()["status"], "IGNORED")            # 출금
+            self.assertEqual(send(token, nh(monthly, name), dkim=(), frm="x@evil.example").json()["status"], "IGNORED")   # 위조 도메인
+            self.assertEqual(send(token, "안녕하세요 광고입니다").json()["status"], "FAILED")                       # 해석 실패
+            self.assertEqual(send(token, nh(monthly, name), dkim=()).json()["status"], "PENDING")                # 서명 확인 불가 → 확인 대기
+            self.assertEqual(send(token, nh(monthly + 1000, name)).json()["status"], "PENDING")                  # 금액 불일치 → 확인 대기
+            rows = intakes()
+            by = lambda st_: [r for r in rows if r["status"] == st_]
+            self.assertEqual(len(by("PENDING")), 3)
+            self.assertTrue(any("발신 확인 불가" in r["reason"] for r in by("PENDING")))
+            self.assertTrue(any("청구액과 맞지" in r["reason"] for r in by("PENDING")))
+            self.assertEqual(len(by("FAILED")), 1)
+            # 원문은 저장하지 않는다
+            dump = json.dumps([x.model_dump() for x in mailpay.MailIntake.find(lessor_id=Lessor.for_branch("main").id)], ensure_ascii=False)
+            for secret_bit in ("월세", "전자금융", "거래후잔액", "1,230,000", "351-"):
+                self.assertNotIn(secret_bit, dump, secret_bit)
+            # 알림
+            lk = notices()
+            self.assertEqual(lk["mail_pending"]["count"], 3)
+            self.assertIn("tab=mail", lk["mail_pending"]["link"])
+            self.assertEqual(lk["mail_failed"]["count"], 1)
+            # 무시 / 처리
+            wrong = next(r for r in by("PENDING") if "청구액" in r["reason"])
+            self.assertEqual(c.post(f"{LS}/mail/{wrong['id']}/dismiss", headers=chic, json={"branch": "main"}).status_code, 200)
+            self.assertEqual(c.post(f"{LS}/mail/{wrong['id']}/apply", headers=chic, json={"branch": "main"}).status_code, 400)       # 이미 처리됨
+            okp = next(r for r in by("PENDING") if r["reason"] == "확인 후 처리로 설정되어 있습니다")
+            self.assertEqual(c.post(f"{LS}/mail/{okp['id']}/apply", headers=sunho, json={"branch": "main"}).status_code, 403)    # 타 지점
+            ap = c.post(f"{LS}/mail/{okp['id']}/apply", headers=chic, json={"branch": "main"})
+            self.assertEqual(ap.status_code, 200, ap.text)
+            pays = [x for x in Pay.find(id_contract=ct0.id) if x.method == "BANK_MAIL"]
+            self.assertEqual(len(pays), 1)
+            self.assertEqual(pays[0].total_amount, monthly)
+            self.assertEqual(send(token, A, mid="mail-A").json()["status"], "DUPLICATE")             # 처리 뒤 다시 와도 중복
+            self.assertEqual(notices()["mail_pending"]["count"], 1)                                  # 처리하면 줄어든다
+            # 해석 실패 알림은 '확인함' 뒤 다시 안 뜬다
+            c.post(LS + "/notifications/seen", headers=chic, json={"branch": "main", "kind": "mail_failed"})
+            self.assertNotIn("mail_failed", notices())
+
+            # ── 달 선택 필요(밀린 달 2개 이상 + 일부 입금) → 확인 대기, 처리 때 달을 골라야 한다 ──
+            y, m = int(current_ym()[:4]), int(current_ym()[5:7]) - 2
+            if m <= 0:
+                y, m = y - 1, m + 12
+            ct = reset_pays(f"{y:04d}-{m:02d}-01")
+            rows_unpaid = [r for r in ct.ledger()["months"] if r["unpaid"] > 0 and r.get("phase") == "OVERDUE"]
+            self.assertGreaterEqual(len(rows_unpaid), 2)
+            self.assertEqual(send(token, nh(monthly, name)).json()["status"], "PENDING")
+            pk = next(r for r in intakes() if r["status"] == "PENDING" and "달에 넣을지" in r["reason"])
+            need = c.post(f"{LS}/mail/{pk['id']}/apply", headers=chic, json={"branch": "main"}).json()
+            self.assertTrue(need["needs_month_pick"] and len(need["unpaid_months"]) >= 2)
+            pick_ym = need["unpaid_months"][-1]["ym"]
+            okp2 = c.post(f"{LS}/mail/{pk['id']}/apply", headers=chic, json={"branch": "main", "target_months": [pick_ym]})
+            self.assertEqual(okp2.status_code, 200, okp2.text)
+            self.assertEqual([x.billing_month for x in Pay.find(id_contract=ct0.id) if x.method == "BANK_MAIL"], [pick_ym])
+
+            # ── 자동 처리: 검증된 은행에서만 켜지고, 모든 조건이 맞을 때만 수납 ──
+            mailparse.BANKS["nonghyup"]["verified"] = True
+            try:
+                ct = reset_pays()
+                self.assertEqual(c.post(LS + "/mail/enable", headers=chic, json={**base, "consent": True, "auto": True}).status_code, 200)
+                self.assertEqual(send(token, nh(monthly, name), mid="auto-1").json()["status"], "AUTO_APPLIED")
+                self.assertEqual(len([x for x in Pay.find(id_contract=ct0.id) if x.method == "BANK_MAIL"]), 1)
+                self.assertEqual(send(token, nh(monthly, name), mid="auto-1").json()["status"], "DUPLICATE")
+                self.assertEqual(notices()["mail_auto"]["count"], 1)
+                c.post(LS + "/notifications/seen", headers=chic, json={"branch": "main", "kind": "mail_auto"})
+                self.assertNotIn("mail_auto", notices())
+                # 자동이어도 서명 확인 불가·오래된 입금일·완납 뒤 추가 입금은 확인 대기
+                self.assertEqual(send(token, nh(monthly, name), dkim=()).json()["status"], "PENDING")
+                self.assertEqual(send(token, nh(monthly, name, day=date_today() - timedelta(days=10))).json()["status"], "PENDING")
+                self.assertEqual(send(token, nh(monthly, name)).json()["status"], "PENDING")
+                self.assertEqual(len([x for x in Pay.find(id_contract=ct0.id) if x.method == "BANK_MAIL"]), 1)
+            finally:
+                mailparse.BANKS["nonghyup"]["verified"] = bank_verified
+            # 토큰 재발급: 옛 주소는 폐기
+            rot = c.post(LS + "/mail/rotate-token", headers=chic, json={"branch": "main"}).json()
+            new_token = rot["address"].split("@")[0][4:]
+            self.assertNotEqual(new_token, token)
+            self.assertEqual(send(token, nh(monthly, name)).json()["status"], "REJECTED")
+            # 보관 만료 삭제
+            old_it = mailpay.MailIntake(lessor_id=Lessor.for_branch("main").id, branch="main", msg_hash="old", status="IGNORED", purge_at="2000-01-01")
+            old_it.save(action="t")
+            mailpay.purge_due()
+            self.assertIsNone(mailpay.MailIntake.get(old_it.id))
+            # ── 철회: 보관 자료 즉시 삭제 + 주소 폐기 ──
+            self.assertTrue(len(intakes()) > 0)
+            dis = c.post(LS + "/mail/disable", headers=chic, json={"branch": "main"}).json()
+            self.assertGreater(dis["deleted"], 0)
+            self.assertFalse(dis["active"] or dis["address"])
+            self.assertEqual(intakes(), [])
+            self.assertEqual(send(new_token, nh(monthly, name)).json()["status"], "REJECTED")
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            mailparse.BANKS["nonghyup"]["verified"] = bank_verified
+            lsr = Lessor.for_branch("main")
+            for x in mailpay.MailIntake.find(lessor_id=lsr.id):
+                x.delete(action="t")
+            lsr.mail_opt = keep_opt; lsr.notice_seen = {}; lsr.save(action="t")
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            for d in olds:
+                Pay(**d).save(action="t")
+            cc = Contract.get(ct0.id); cc.move_in_date = keep_in; cc.pay_timing = keep_timing; cc.save(action="t")
+        # 화면: 메뉴·탭·설정 카드(동의·은행·계좌 끝자리·자동 처리 잠금·철회)
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ('tab: "mail"', "renderMailTab", "/mail/enable", "/mail/disable", "/mail/rotate-token", "needs_month_pick", "수신 동의"):
+            self.assertIn(needle, fe, needle)
 
 
 if __name__ == "__main__":

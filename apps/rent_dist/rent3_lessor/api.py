@@ -663,6 +663,72 @@ def lessor_notice_seen(req: NoticeSeenReq):
     return {"success": True, **nf.summary("lessor", lsr, lsr.branch, use_cache=False)}
 
 
+# ── 입금 메일 자동 정리(선택, 기본 꺼짐): 동의·설정·확인 대기 처리. 수신은 /api/rent3/inbound/mail (서명 웹훅) ──
+class MailEnableReq(BaseModel):
+    branch: str = "main"
+    consent: bool = False
+    bank: str = ""
+    acct_tail: str = ""
+    auto: bool = False
+
+
+class MailBranchReq(BaseModel):
+    branch: str = "main"
+
+
+class MailApplyReq(BaseModel):
+    branch: str = "main"
+    room_no: str = ""
+    target_months: Optional[List[str]] = None
+
+
+@router.get("/mail/settings")
+def mail_settings(branch: str = "main"):
+    from apps.rent_dist._rent3_core import mailpay
+    return {"success": True, **mailpay.settings_view(_my_lessor(branch))}
+
+
+@router.post("/mail/enable")
+def mail_enable(req: MailEnableReq):
+    from apps.rent_dist._rent3_core import mailpay
+    lsr = mailpay.enable(_my_lessor(req.branch), req.consent, req.bank, req.acct_tail, req.auto)
+    return {"success": True, **mailpay.settings_view(lsr)}
+
+
+@router.post("/mail/rotate-token")
+def mail_rotate(req: MailBranchReq):
+    from apps.rent_dist._rent3_core import mailpay
+    lsr = mailpay.rotate_token(_my_lessor(req.branch))
+    return {"success": True, **mailpay.settings_view(lsr)}
+
+
+@router.post("/mail/disable")
+def mail_disable(req: MailBranchReq):
+    from apps.rent_dist._rent3_core import mailpay
+    lsr = _my_lessor(req.branch)
+    n = mailpay.disable(lsr)
+    return {"success": True, "deleted": n, **mailpay.settings_view(lsr)}
+
+
+@router.get("/mail/intakes")
+def mail_intakes(branch: str = "main"):
+    from apps.rent_dist._rent3_core import mailpay
+    return {"success": True, "items": mailpay.list_intakes(_my_lessor(branch))}
+
+
+@router.post("/mail/{intake_id}/apply")
+def mail_apply(intake_id: str, req: MailApplyReq):
+    from apps.rent_dist._rent3_core import mailpay
+    return mailpay.apply_pending(_my_lessor(req.branch), intake_id, req.room_no, req.target_months)
+
+
+@router.post("/mail/{intake_id}/dismiss")
+def mail_dismiss(intake_id: str, req: MailBranchReq):
+    from apps.rent_dist._rent3_core import mailpay
+    mailpay.dismiss(_my_lessor(req.branch), intake_id)
+    return {"success": True}
+
+
 @router.get("/rooms/{room_id}/promo")
 def get_room_promo(room_id: str, request: Request):
     """호실의 5대 채널(당근, 피터팬, 에타, 블로그, 카톡) 멀티채널 원클릭 홍보 텍스트 생성."""

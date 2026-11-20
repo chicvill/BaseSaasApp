@@ -169,6 +169,7 @@ class Lessor(PoolObj):
     applied_at: str = ""                     # 가맹 신청 제출 시각 (심사 대기열 진입)
     notice_seen: Dict[str, str] = Field(default_factory=dict)   # 안내성 알림을 확인한 시각(종류별). notifications.py
     acq: Dict[str, Any] = Field(default_factory=dict)   # 유입 귀속: 가입 때 처음 닿은 링크의 표식(ref·campaign·from_tenant). acquisition.py
+    mail_opt: Dict[str, Any] = Field(default_factory=dict)   # 입금 메일 자동 정리(선택·기본 꺼짐): 동의 기록·은행·계좌 끝 4자리·수신 토큰. mailpay.py
     franchise_ai_calls: int = 0              # 가맹 신청 중 Gemini 읽기 호출 수 (남용 방지)
     consents: Dict[str, Any] = Field(default_factory=dict)       # 개인정보 동의·관리인 원격 지원 동의 기록(consent.py)
     pin_hash: str = ""                       # 간편 비밀번호(4자리) 해시 — 스마트폰 바로가기 로그인(quicklogin.py, RENT3_LESSOR_PIN 켠 뒤에만 사용)
@@ -182,7 +183,7 @@ class Lessor(PoolObj):
     password_remind_sent_at: str = ""        # 관리인이 마지막으로 새 암호 설정 권유를 보낸 시각
     password: str = "1212"
 
-    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash", "login_devices")
+    SECRET_FIELDS: ClassVar[tuple] = ("pin_hash", "quick_devices", "invite_hash", "login_devices", "mail_opt")
 
     def safe_dump(self) -> Dict[str, Any]:
         """화면·API 로 내려보낼 때 쓰는 model_dump — 간편 비밀번호 해시와 바로가기 키 해시는 뺀다."""

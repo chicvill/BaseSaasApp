@@ -26,6 +26,7 @@ from .models import (
 )
 from .support import SupportAccessLog, SupportMessage  # noqa: F401 (풀 객체 등록)
 from .feebilling import FranchiseFee  # noqa: F401 (풀 객체 등록)
+from .mailpay import MailIntake  # noqa: F401 (풀 객체 등록)
 from .poolsearch import PoolEditLog  # noqa: F401 (풀 객체 등록)
 from .ops import (
     CheckOutSettlement,

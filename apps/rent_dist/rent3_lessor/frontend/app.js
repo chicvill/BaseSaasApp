@@ -39,7 +39,7 @@
 
   // ☰ 메뉴: 첫 화면(수납 현황) 외의 모든 기능은 여기서 들어간다. 항목을 빼면 기능에 닿을 수 없으니 test_52 가 목록을 점검한다.
   const LESSOR_MENU = [
-    { items: [{ label: "💰 수납 현황", tab: "ledger" }, { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" }] },
+    { items: [{ label: "💰 수납 현황", tab: "ledger" }, { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" }, { label: "📧 입금 메일 자동 정리 (선택)", tab: "mail" }] },
     { title: "계약 · 매물", items: [
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
@@ -89,7 +89,7 @@
   R3Shell.watchSupport();
   // 🔔 알림 센터: 메시지·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
   if (window.R3Notify && !VIA_PIN) R3Notify.start({ url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
-  const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정" };
+  const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정", mail: "입금 메일 자동 정리" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
@@ -371,6 +371,7 @@
     else if (currentTab === "notice") renderNoticeTab();
     else if (currentTab === "messages") renderMessagesTab();
     else if (currentTab === "bldgtax") renderBldgTaxTab();
+    else if (currentTab === "mail") renderMailTab();
     else if (currentTab === "rooms") renderRoomsTab();
     else if (currentTab === "registry") { regOpen = true; renderRoomsTab(); const rc = document.getElementById("regCard"); if (rc) rc.scrollIntoView({ block: "start" }); }   // 호실별 등기부 카드를 열어 그 자리로
     pinLimit(elTabContent);
@@ -2820,6 +2821,100 @@
         closeModal();
         await refresh();
       });
+    });
+  }
+
+  // ── 입금 메일 자동 정리(선택, 기본 꺼짐): 동의 → 은행·계좌 끝 4자리 → 전용 수신 주소로 자동 전달. 확인 대기 메일은 [처리]/[무시]. ──
+  async function renderMailTab() {
+    elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    const q = `?branch=${encodeURIComponent(currentBranch)}`;
+    let st, it;
+    try {
+      st = await Bass.api(APP_ID, `/mail/settings${q}`);
+      it = st.active ? await Bass.api(APP_ID, `/mail/intakes${q}`) : { items: [] };
+    } catch (e) { Bass.showError(e); return; }
+    if (currentTab !== "mail") return;
+    const E = Bass.escapeHtml;
+    const post = (path, body) => Bass.api(APP_ID, path, { method: "POST", body: { branch: currentBranch, ...(body || {}) } });
+    const card = (inner) => `<div class="bass-card" style="margin-bottom:12px;">${inner}</div>`;
+    let html = "";
+    if (!st.active) {
+      html += card(`
+        <h3 style="margin:0 0 6px;">📧 입금 메일 자동 정리 <span class="bass-badge">꺼짐</span></h3>
+        <div class="bass-muted" style="font-size:13px;line-height:1.6;margin-bottom:10px;">은행이 보내는 입금 알림 메일을 전용 주소로 자동 전달해 두면, 조건이 맞는 입금만 골라 수납 처리하고 결과를 알림으로 알려 드립니다.
+          맞지 않는 메일은 처리하지 않고 [확인 대기]에 둡니다. 쓰지 않아도 다른 기능은 그대로입니다.</div>
+        <label style="display:flex;gap:8px;align-items:flex-start;min-height:44px;font-size:13px;line-height:1.55;margin-bottom:10px;"><input id="mlConsent" type="checkbox" style="margin-top:4px;"><span><strong>수신 동의</strong> — ${E(st.consent_text)}</span></label>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+          <select id="mlBank" class="bass-select" style="min-height:44px;" aria-label="은행">${st.banks.map((b) => `<option value="${E(b.id)}">${E(b.label)}</option>`).join("")}</select>
+          <input id="mlTail" class="bass-input" inputmode="numeric" maxlength="4" placeholder="입금 계좌 끝 4자리" style="width:170px;" aria-label="입금 계좌 끝 4자리">
+        </div>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">${st.banks.map((b) => (b.verified ? "" : `${E(b.label)}: ${E(b.note)}`)).join("")}</div>
+        <label style="display:flex;gap:8px;align-items:center;min-height:44px;font-size:13px;"><input id="mlAuto" type="checkbox" disabled><span>일치하면 자동 처리 <span class="bass-muted">(검증된 은행에서만 선택할 수 있습니다. 기본은 '확인 후 처리')</span></span></label>
+        <button id="mlEnable" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;margin-top:8px;">켜기</button>`);
+    } else {
+      html += card(`
+        <h3 style="margin:0 0 6px;">📧 입금 메일 자동 정리 <span class="bass-badge bass-badge--ok">켜짐</span></h3>
+        <div style="font-size:13px;line-height:1.7;">은행: <strong>${E(st.bank_label)}</strong> · 입금 계좌 끝 4자리 <strong>${E(st.acct_tail)}</strong> · 처리 방식 <strong>${st.auto ? "일치하면 자동 처리" : "확인 후 처리"}</strong></div>
+        <div style="margin:10px 0;padding:10px;border-radius:10px;background:var(--surface-2,#f1f5f9);">
+          <div style="font-size:12.5px;" class="bass-muted">내 전용 수신 주소</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><code id="mlAddr" style="font-size:13px;word-break:break-all;">${st.address ? E(st.address) : "(수신 도메인이 아직 설정되지 않았습니다 — 관리인에게 문의)"}</code>
+            ${st.address ? '<button id="mlCopy" class="bass-btn bass-btn--sm" type="button" style="min-height:40px;">복사</button>' : ""}</div>
+        </div>
+        <ol style="margin:0 0 10px;padding-left:20px;font-size:13px;line-height:1.7;"><li>쓰시는 메일(네이버·지메일 등) 설정에서 <strong>자동 전달</strong>을 엽니다.</li><li>위 주소를 전달 받는 주소로 등록합니다.</li><li>은행 입금 알림 메일만 자동 전달되도록 조건(보낸 사람)을 지정합니다.</li></ol>
+        <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+          <button id="mlRotate" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">🔄 주소 새로 받기</button>
+          <button id="mlDisable" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;border-color:var(--err);color:var(--err);">동의 철회 · 끄기 (보관 자료 삭제)</button>
+        </div>`);
+      const pend = it.items.filter((x) => x.status === "PENDING");
+      const done = it.items.filter((x) => x.status !== "PENDING");
+      const money = (x) => fmtWon(x.amount);
+      html += card(`<h3 style="margin:0 0 8px;">확인 대기 ${pend.length}건</h3>` + (pend.length ? pend.map((x) => `
+        <div class="ml-row" data-id="${E(x.id)}" style="padding:10px 0;border-top:1px solid var(--border);">
+          <div><strong>${E(x.room_no ? x.room_no + "호 " : "호실 미확인 ")}${E(x.payer_name)}</strong> · ${money(x)} · <span class="bass-muted">${E(dotDate(x.paid_date))}</span></div>
+          ${x.reason ? `<div class="bass-muted" style="font-size:12.5px;margin:2px 0 6px;">⚠️ ${E(x.reason)}</div>` : ""}
+          <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+            ${x.room_no ? "" : `<input class="bass-input ml-room" placeholder="호실" style="width:90px;" aria-label="호실">`}
+            <button class="bass-btn bass-btn--sm bass-btn--primary ml-apply" type="button" style="min-height:44px;">✅ 처리</button>
+            <button class="bass-btn bass-btn--sm ml-dismiss" type="button" style="min-height:44px;">무시</button></div>
+        </div>`).join("") : '<div class="bass-muted" style="font-size:13px;">확인할 메일이 없습니다.</div>'));
+      html += card(`<h3 style="margin:0 0 8px;">처리 내역 <span class="bass-muted" style="font-size:12.5px;font-weight:500;">(${st.retention_days}일 보관)</span></h3>` + (done.length ? done.slice(0, 30).map((x) => `
+        <div style="padding:6px 0;border-top:1px solid var(--border);font-size:13px;"><span class="bass-badge ${x.status === "AUTO_APPLIED" || x.status === "USER_APPLIED" ? "bass-badge--ok" : ""}" style="font-size:12px;">${E(x.status_ko)}</span>
+          ${x.amount ? ` ${E(x.room_no ? x.room_no + "호 " : "")}${E(x.payer_name)} · ${money(x)}` : ""}<span class="bass-muted"> ${x.reason ? "· " + E(x.reason) : ""}</span></div>`).join("") : '<div class="bass-muted" style="font-size:13px;">아직 없습니다.</div>'));
+    }
+    elTabContent.innerHTML = html;
+    const done = async (fn) => { try { await fn(); } catch (e) { Bass.showError(e); } };
+    const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener("click", function () { Bass.withLock(this, () => done(fn)); }); };
+    on("mlEnable", async () => {
+      await post("/mail/enable", { consent: document.getElementById("mlConsent").checked, bank: document.getElementById("mlBank").value, acct_tail: document.getElementById("mlTail").value, auto: false });
+      Bass.updateAppAlert("ok", "입금 메일 자동 정리를 켰습니다. 안내에 따라 자동 전달을 설정해 주세요."); renderMailTab();
+    });
+    on("mlCopy", async () => { R3.copyText(st.address); });
+    on("mlRotate", async () => { if (!window.confirm("새 주소를 받으면 지금 주소로 오는 메일은 더 이상 처리되지 않습니다. 계속할까요?")) return; await post("/mail/rotate-token"); renderMailTab(); });
+    on("mlDisable", async () => {
+      if (!window.confirm("동의를 철회하면 수신 주소가 폐기되고, 보관된 입금 메일 처리 기록이 모두 삭제됩니다. 계속할까요?")) return;
+      const r = await post("/mail/disable"); Bass.updateAppAlert("ok", `철회했습니다. 보관 자료 ${r.deleted}건을 삭제했습니다.`); renderMailTab();
+    });
+    elTabContent.querySelectorAll(".ml-row").forEach((row) => {
+      const id = row.dataset.id;
+      const apply = async (targets) => {
+        const room = row.querySelector(".ml-room");
+        const r = await post(`/mail/${id}/apply`, { room_no: room ? room.value.trim() : "", target_months: targets || null });
+        if (r.needs_month_pick) {
+          const body = R3.openModal("어느 달 입금으로 처리할까요?", "");
+          body.innerHTML = `<div class="bass-muted" style="font-size:13px;margin-bottom:8px;">${E(r.room_no)}호 — 밀린 달이 여러 개입니다. 반영할 달을 체크해 주세요.</div>` +
+            r.unpaid_months.map((m) => `<label style="display:flex;gap:8px;align-items:center;min-height:42px;"><input type="checkbox" class="ml-ym" value="${E(m.ym)}"> <span>${E(m.ym)}분 · ${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</span></label>`).join("") +
+            '<button id="mlPickGo" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;margin-top:8px;width:100%;">✅ 선택한 달로 처리</button>';
+          body.querySelector("#mlPickGo").addEventListener("click", function () {
+            const picked = Array.from(body.querySelectorAll(".ml-ym:checked")).map((el) => el.value);
+            if (!picked.length) { Bass.updateAppAlert("warning", "반영할 달을 하나 이상 체크해 주세요."); return; }
+            Bass.withLock(this, () => done(async () => { await apply(picked); R3.closeModal(); }));
+          });
+          return;
+        }
+        Bass.updateAppAlert("ok", "수납 처리했습니다."); renderMailTab();
+      };
+      row.querySelector(".ml-apply").addEventListener("click", function () { Bass.withLock(this, () => done(() => apply(null))); });
+      row.querySelector(".ml-dismiss").addEventListener("click", function () { Bass.withLock(this, () => done(async () => { await post(`/mail/${id}/dismiss`); renderMailTab(); })); });
     });
   }
 

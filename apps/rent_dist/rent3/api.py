@@ -10,8 +10,10 @@
 from fastapi import APIRouter
 
 from .routers.pool_hub import router as pool_hub_router
+from .routers.inbound import router as inbound_router
 
 router = APIRouter(tags=["rent3"])
 router.include_router(pool_hub_router)
+router.include_router(inbound_router)
 
 __all__ = ["router", "pool_hub_router"]

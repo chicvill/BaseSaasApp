@@ -194,7 +194,22 @@ def _l_franchise(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     ]
 
 
-LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid]
+def _l_mail(l: Lessor) -> List[Optional[Dict[str, Any]]]:
+    """입금 메일 자동 정리: 확인 대기(처리하면 사라짐)·자동 수납 결과·해석 실패(안내성, 확인함 뒤 다시 안 뜸). 꺼져 있으면 없음."""
+    if not (l.mail_opt or {}).get("active"):
+        return []
+    from .mailpay import MailIntake
+    rows = MailIntake.find(lessor_id=l.id)
+    link = _l_base(l) + "&tab=mail"
+    seen_a, seen_f = _seen(l, "mail_auto"), _seen(l, "mail_failed")
+    return [
+        _item("mail_pending", "확인 대기 입금 메일", sum(1 for x in rows if x.status == "PENDING"), link, "normal"),
+        _item("mail_auto", "입금 메일 자동 수납", sum(1 for x in rows if x.status == "AUTO_APPLIED" and (x.received_at or "") > seen_a), link, "info", detail="확인하면 사라집니다"),
+        _item("mail_failed", "입금 메일 처리 실패", sum(1 for x in rows if x.status == "FAILED" and (x.received_at or "") > seen_f), link, "normal", detail="확인하면 사라집니다"),
+    ]
+
+
+LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_mail, _l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid]
 
 
 # ───────────────────────── 관리인 ─────────────────────────
@@ -260,7 +275,7 @@ def summary(role: str, ctx: Any, key: str, use_cache: bool = True) -> Dict[str, 
 
 def mark_seen(user: Any, kind: str) -> None:
     """안내성 알림 '확인함'. 지금 시각 이후에 생긴 것만 다시 알린다."""
-    if kind not in ("transfer_rejected",) or not hasattr(user, "notice_seen"):
+    if kind not in ("transfer_rejected", "mail_auto", "mail_failed") or not hasattr(user, "notice_seen"):
         return
     seen = dict(user.notice_seen or {})
     seen[kind] = now_iso()
