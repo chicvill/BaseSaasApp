@@ -38,30 +38,38 @@
   const elTabContent = document.getElementById("tabContent");
 
   // ☰ 메뉴: 첫 화면(수납 현황) 외의 모든 기능은 여기서 들어간다. 항목을 빼면 기능에 닿을 수 없으니 test_52 가 목록을 점검한다.
+  // 단계별 메뉴: 처음에는 1단계(기본 업무)만 펼쳐 보이고, 나머지(more)는 '더 많은 기능'으로 접어 둔다(없애지 않고 접기만 — 검색하면 펼쳐진다).
   const LESSOR_MENU = [
-    { items: [{ label: "💰 수납 현황", tab: "ledger" }, { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" }, { label: "📧 입금 메일 자동 정리 (선택)", tab: "mail" }] },
-    { title: "계약 · 매물", items: [
-      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
+    { title: "1단계 · 기본 업무", items: [
+      { label: "💰 수납 현황 · 입금 문자 처리", tab: "ledger" },
+      { label: "💬 임차인 메시지", tab: "messages" },
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
+    ] },
+    { title: "2단계 · 매물 · 홍보", more: true, items: [
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
       { label: "📜 등기부 확인 (등기클린)", tab: "registry" },
     ] },
-    { title: "세무 · 경비", items: [{ label: "🧾 세무 허브", tab: "tax" }, { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" }] },
-    { title: "임차인 소통 · 시설", items: [
-      { label: "💬 메시지", tab: "messages" },
-      { label: "🔧 A/S 접수", tab: "ops" },
+    { title: "3단계 · 직거래 전자계약 · 세무", more: true, items: [
+      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
+      { label: "🧾 세무 허브", tab: "tax" },
+      { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" },
+      { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" },
     ] },
-    { title: "통보 · 안내", items: [
+    { title: "4단계 · 자동화 (준비 중)", more: true, items: [
+      { label: "📧 입금 메일 자동 정리 (선택)", tab: "mail" },
+    ] },
+    { title: "운영 · 통보", more: true, items: [
+      { label: "🔧 A/S 접수", tab: "ops" },
       { label: "🔔 일괄 납입 통보", tab: "notice" },
       { label: "⚖️ 만기 통보", tab: "expiry" },
       { label: "📨 임차인 앱 가입 안내 문자", id: "btnConnectMsg" },
     ] },
-    { title: "건물 설정", items: [
+    { title: "건물 설정", more: true, items: [
       { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
       { label: "📷 사업자등록증 촬영 · 홈택스 승인", id: "btnBizRegModal" },
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
-    { title: "내 설정", items: [
+    { title: "내 설정", more: true, items: [
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "🔓 아이디·비밀번호로 로그인", id: "btnFullLogin", pinOnly: true },
@@ -89,7 +97,7 @@
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), buildMenu());
   R3Shell.watchSupport();
   // 🔔 알림 센터: 메시지·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
-  if (window.R3Notify && !VIA_PIN) R3Notify.start({ url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
+  if (window.R3Notify && !VIA_PIN) R3Notify.start({ todayAfter: "#kpiGrid", url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
   const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정", mail: "입금 메일 자동 정리" };
 
   function fmtWon(n) {

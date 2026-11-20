@@ -8269,5 +8269,32 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, fe, needle)
 
 
+    def test_127_staged_lessor_menu_collapsible_and_today_strip(self):
+        """127. 임대인 ☰ 메뉴를 단계별로: 1단계 기본 업무(수납·메시지·중개 계약서)만 펼치고 나머지는 '더 많은 기능'으로 접는다(없애지 않음 — 기존 모든 화면이 메뉴에 그대로, 검색하면 펼침).
+        첫 화면에는 처리할 일이 있을 때만 '오늘 할 일' 한 줄 띠."""
+        import re
+        root = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        app = open(os.path.join(root, "app.js"), encoding="utf-8").read()
+        menu = app[app.index("const LESSOR_MENU"):app.index("R3Shell.renderMenu")]
+        groups = re.findall(r'\{ title: "([^"]+)"(, more: true)?, items', menu)
+        self.assertEqual(groups[0][0], "1단계 · 기본 업무")
+        self.assertFalse(groups[0][1])                                           # 1단계는 펼쳐 둔다
+        first = menu[menu.index('"1단계 · 기본 업무"'):menu.index('"2단계 · 매물 · 홍보"')]
+        self.assertEqual(sorted(re.findall(r'tab: "(\w+)"', first)), ["broker", "ledger", "messages"])
+        self.assertTrue(all(m for t, m in groups[1:6]))                           # 2~4단계·운영·건물 설정은 접는다
+        self.assertFalse([m for t, m in groups if t in ("도움말 · 문의",) and m])  # 도움말·문의는 늘 보인다
+        hb = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "hamburger.js"), encoding="utf-8").read()
+        for needle in ("r3-more-sec", "r3-more-toggle", "r3-more-open", "더 많은 기능 보기", "moreUser"):
+            self.assertIn(needle, hb, needle)
+        self.assertNotRegex(hb, r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        self.assertIn('data-more="1"', shell)
+        nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
+        for needle in ("r3Today", "todayAfter", "오늘 할 일", ".r3-today"):
+            self.assertIn(needle, nj, needle)
+        self.assertIn('todayAfter: "#kpiGrid"', app)
+        self.assertNotRegex(nj, r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+
+
 if __name__ == "__main__":
     unittest.main()

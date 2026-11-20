@@ -39,6 +39,10 @@
     ".r3-menu-search{width:100%;box-sizing:border-box;min-height:44px;padding:10px 14px;margin-bottom:14px;",
     "border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;color:#0f172a;font:inherit;font-size:14px;outline:none}",
     ".r3-menu-search:focus{border-color:var(--primary,#2563eb);background:#ffffff;box-shadow:0 0 0 3px rgba(37,99,235,.12)}",
+    ".r3-drawer:not(.r3-more-open) .r3-more-sec{display:none}",
+    ".r3-more-toggle{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;box-sizing:border-box;min-height:48px;margin:6px 0 10px;padding:10px 14px;border-radius:14px;",
+    "border:1px dashed #94a3b8;background:#f8fafc;color:#334155;font:inherit;font-size:14px;font-weight:700;cursor:pointer}",
+    ".r3-more-toggle .on{display:none}.r3-more-open .r3-more-toggle .on{display:inline}.r3-more-open .r3-more-toggle .off{display:none}",
     ".r3-menu-empty{text-align:center;padding:28px 12px;color:#64748b;font-size:14px;display:none}",
 
     ".r3-drawer__section{margin-bottom:16px}",
@@ -102,8 +106,32 @@
     el.appendChild(txt);
   }
 
+  // '더 많은 기능' 접기 단추: 접힌 그룹(.r3-more-sec)이 있을 때 첫 접힌 그룹 앞에 한 번만 둔다. DOM 은 그대로 두고 CSS 로만 감춘다(검색하면 펼쳐진다).
+  function ensureMoreToggle(drawer) {
+    var secs = drawer.querySelectorAll(".r3-more-sec");
+    var old = drawer.querySelector(".r3-more-toggle");
+    if (!secs.length) { if (old) old.remove(); return; }
+    if (old) return;
+    var n = 0;
+    Array.prototype.forEach.call(secs, function (sec) { n += sec.querySelectorAll("a, button.r3-item, .tab-btn").length; });
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "r3-more-toggle";
+    btn.innerHTML = '<span class="off">▾ 더 많은 기능 보기 (' + n + '개)</span><span class="on">▴ 접기</span>';
+    btn.addEventListener("click", function () {
+      var open = !drawer.classList.contains("r3-more-open");
+      drawer.classList.toggle("r3-more-open", open);
+      drawer.dataset.moreUser = open ? "1" : "";
+    });
+    drawer.insertBefore(btn, secs[0]);
+  }
+
   function layoutGrid(drawer, head, searchWrap, emptyMsg) {
     if (!drawer) return;
+    try { return layoutGridInner(drawer, head, searchWrap, emptyMsg); } finally { ensureMoreToggle(drawer); }
+  }
+
+  function layoutGridInner(drawer, head, searchWrap, emptyMsg) {
     // 이미 section으로 묶여 있고 바깥에 새로 추가된 아이템이 없으면 각 아이템 아이콘만 확인한다
     var loose = Array.prototype.slice.call(drawer.children).filter(function (c) {
       return c !== head && c !== searchWrap && c !== emptyMsg && !c.classList.contains("r3-drawer__section");
@@ -116,7 +144,7 @@
 
       function ensureSection(titleEl) {
         curSection = document.createElement("div");
-        curSection.className = "r3-drawer__section";
+        curSection.className = "r3-drawer__section" + (titleEl && titleEl.getAttribute("data-more") ? " r3-more-sec" : "");
         if (titleEl) {
           curSection.appendChild(titleEl);
         } else {
@@ -205,6 +233,7 @@
         sec.style.display = secVisible > 0 ? "" : "none";
       });
       emptyMsg.style.display = visibleTotal === 0 && q ? "block" : "none";
+      drawer.classList.toggle("r3-more-open", !!q || drawer.dataset.moreUser === "1");     // 검색 중에는 접힌 기능도 펼쳐서 보여 준다
     }
     searchInp.addEventListener("input", applyFilter);
 
@@ -214,6 +243,7 @@
       if (open) {
         layoutGrid(drawer, head, searchInp, emptyMsg);
         searchInp.value = "";
+        drawer.dataset.moreUser = "";
         applyFilter();
         drawer.scrollTop = 0;
       }

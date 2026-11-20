@@ -27,7 +27,10 @@
     ".r3-nitem__n{flex:none;min-width:30px;height:30px;border-radius:15px;background:#e11d48;color:#fff;font-weight:800;font-size:13px;line-height:30px;text-align:center}",
     ".r3-nitem--normal .r3-nitem__n{background:#2563eb}.r3-nitem--info .r3-nitem__n{background:#64748b}",
     ".r3-nitem__t{flex:1 1 auto;min-width:0;font-weight:700}.r3-nitem__d{display:block;font-weight:400;font-size:12.5px;color:#64748b}",
-    ".r3-nitem__go{flex:none;font-size:12.5px;color:#475569}"
+    ".r3-nitem__go{flex:none;font-size:12.5px;color:#475569}",
+    ".r3-today{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;padding:10px 12px;border-radius:12px;background:#fff7ed;border:1px solid #fed7aa;color:#7c2d12;font-size:14px;line-height:1.5}",
+    ".r3-today__t{flex:1 1 200px;min-width:0;font-weight:700}",
+    ".r3-today button{flex:none;min-height:44px;padding:8px 14px;border-radius:10px;border:1px solid #fb923c;background:#fff;color:#9a3412;font:inherit;font-size:14px;font-weight:700;cursor:pointer}"
   ].join("");
 
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
@@ -58,7 +61,28 @@
     return bell;
   }
 
+  // 첫 화면 '오늘 할 일' 한 줄 띠(opts.todayAfter 선택자 요소 바로 아래): 처리할 일이 있을 때만 보이고 0건이면 감춘다. 안내성(info)은 제외.
+  function renderToday() {
+    var o = state.opts;
+    if (!o || !o.todayAfter) return;
+    var host = document.querySelector(o.todayAfter);
+    if (!host) return;
+    var strip = document.getElementById("r3Today");
+    var todo = (state.data.items || []).filter(function (i) { return i.level !== "info"; });
+    if (!todo.length) { if (strip) strip.remove(); return; }
+    if (!strip) {
+      strip = document.createElement("div");
+      strip.id = "r3Today"; strip.className = "r3-today"; strip.setAttribute("role", "status");
+      host.insertAdjacentElement("afterend", strip);
+      strip.addEventListener("click", function (e) { if (e.target.closest("button")) openPanel(); });
+    }
+    var shown = todo.slice(0, 3).map(function (i) { return esc(i.title) + " " + i.count + "건"; }).join(" · ");
+    var more = todo.length > 3 ? " 외 " + (todo.length - 3) + "종" : "";
+    strip.innerHTML = '<span class="r3-today__t">🔔 오늘 할 일: ' + shown + more + '</span><button type="button">확인하기</button>';
+  }
+
   function render() {
+    renderToday();
     var d = state.data, urgent = d.urgent > 0;
     ensureBell();
     setBadge(state.bell, d.total, urgent);

@@ -58,7 +58,7 @@
     void keep;
     var html = "";
     groups.forEach(function (g) {
-      if (g.title) html += '<div class="r3-drawer__group">' + esc(g.title) + "</div>";
+      if (g.title) html += '<div class="r3-drawer__group"' + (g.more ? ' data-more="1"' : "") + ">" + esc(g.title) + "</div>";   // more: 처음엔 접어 두는 그룹(검색하면 펼쳐진다)
       g.items.forEach(function (it) { html += itemHtml(it); });
     });
     // 서랍 맨 아래: 어느 앱에서나 포털 홈으로 가거나 로그아웃할 수 있게 한다(공유 휴대폰에서 꼭 필요)
