@@ -25,15 +25,18 @@ export function dkimPassDomains(authResults) {
   return [...new Set(out)];
 }
 
-/** 파싱된 헤더 목록(위에서 아래 순서)에서 맨 위 Authentication-Results 를 고른다. AUTHSERV_ID 가 있으면 그 서버가 붙인 것 중 맨 위. */
+/**
+ * 파싱된 헤더 목록(위에서 아래 순서)에서 인증 결과를 고른다.
+ *  - AUTHSERV_ID 가 없으면 **어떤 헤더도 믿지 않는다**(value 비움 → 서버는 '발신 확인 불가'로 확인 대기 처리). 로그용으로 맨 위 헤더만 `seen` 에 돌려준다.
+ *  - AUTHSERV_ID 가 있으면 **맨 위** Authentication-Results 가 그 서버 것일 때만 믿는다(보낸 사람이 끼워 넣은 가짜는 그 아래에 있다).
+ */
 export function pickAuthResults(headers, authservId) {
   const list = (headers || []).filter((h) => String(h.key || "").toLowerCase() === "authentication-results");
-  if (!list.length) return { value: "", warn: "no-authentication-results" };
-  if (authservId) {
-    const hit = list.find((h) => String(h.value || "").trim().toLowerCase().startsWith(authservId.toLowerCase()));
-    return hit ? { value: hit.value } : { value: "", warn: "authserv-id-not-found" };
-  }
-  return { value: list[0].value, warn: "authserv-id-not-configured" };
+  if (!list.length) return { value: "", seen: "", warn: "no-authentication-results" };
+  const top = String(list[0].value || "");
+  if (!authservId) return { value: "", seen: top, warn: "authserv-id-not-configured(신뢰하지 않음)" };
+  if (top.trim().toLowerCase().startsWith(authservId.toLowerCase())) return { value: top, seen: top };
+  return { value: "", seen: top, warn: "top-header-not-from-authserv-id" };
 }
 
 async function hmacHex(secret, body) {
@@ -51,7 +54,7 @@ export default {
     const auth = pickAuthResults(mail.headers, env.AUTHSERV_ID);
     if (env.DEBUG_HEADERS === "1") {
       console.log("headers:", (mail.headers || []).map((h) => h.key).join(","));
-      console.log("auth-results:", String(auth.value || "").slice(0, 300), auth.warn || "");
+      console.log("auth-results(맨 위):", String(auth.seen || "").slice(0, 300), "| 사용:", auth.value ? "예" : "아니오", auth.warn || "");
     }
     const payload = {
       to: message.to,
