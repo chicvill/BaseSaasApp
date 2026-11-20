@@ -8028,5 +8028,100 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, fe, needle)
 
 
+    def test_124_bank_mail_test_domain_and_gmail_forward_code(self):
+        """124. 입금 메일 보완: ① 테스트 전용 허용 도메인(RENT3_MAIL_EXTRA_DOMAINS)은 RENT3_MAIL_TEST_BRANCHES 지점에만 적용되고, 그 메일은 항상 확인 대기([테스트])이며 자동 수납되지 않는다(테스트 모드 띠).
+        ② 지메일 전달 확인 메일은 구글 서명일 때만 숫자 코드만 1시간 보관해 설정 화면에 보이고(링크 미보관), 못 읽으면 오류 안내, 입력 뒤 삭제, 위조(서명 없음)는 무시."""
+        import hashlib, hmac, json, time
+        from apps.rent_dist._rent3_core import Contract, Lessor, Pay, current_ym, date_today, mailpay, mailparse
+        c = self.client
+        chic = self._login("chic")
+        LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
+        SECRET = "test-secret-124"
+        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES")
+        old_env = {k: os.environ.get(k) for k in keys}
+        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example"})
+        os.environ.pop("RENT3_MAIL_EXTRA_DOMAINS", None); os.environ.pop("RENT3_MAIL_TEST_BRANCHES", None)
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        keep_in, keep_timing = ct0.move_in_date, ct0.pay_timing
+        olds = [x.model_dump() for x in Pay.find(id_contract=ct0.id, include_voided=True)]
+        keep_opt = dict(Lessor.for_branch("main").mail_opt or {})
+        bank_verified = mailparse.BANKS["nonghyup"]["verified"]
+        n = [0]
+
+        def send(token, text, dkim, frm, subject="[NH농협은행] 입금 알림"):
+            n[0] += 1
+            body = json.dumps({"to": f"pay-{token}@in.rent3-test.example", "message_id": f"t124-{n[0]}-{time.time()}", "from_addr": frm,
+                               "dkim_pass_domains": list(dkim), "subject": subject, "text": text, "ts": time.time()}).encode("utf-8")
+            sig = hmac.new(SECRET.encode(), body, hashlib.sha256).hexdigest()
+            return c.post(IN, content=body, headers={"X-Rent3-Signature": sig, "Content-Type": "application/json"})
+
+        def settings():
+            return c.get(LS + "/mail/settings", headers=chic, params={"branch": "main"}).json()
+
+        try:
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            ct = Contract.get(ct0.id); ct.move_in_date = f"{current_ym()}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            monthly = int(ct.monthly_rent or 0) + int(ct.maintenance_fee or 0) + int(ct.compute_vat() or 0)
+            d = date_today().strftime("%Y/%m/%d")
+            text = chr(10).join(["거래일시 : " + d + " 10:00:00", "거래구분 : 입금", "입금계좌 : 351-****-4567-83", f"보낸분 : {ct.tenant_name}", f"입금금액 : {monthly:,}원", "메모 : 201호"])
+            en = c.post(LS + "/mail/enable", headers=chic, json={"branch": "main", "consent": True, "bank": "nonghyup", "acct_tail": "6783", "auto": False})
+            self.assertEqual(en.status_code, 200, en.text)
+            token = en.json()["address"].split("@")[0][4:]
+            # ── ① 테스트 도메인 ──
+            self.assertFalse(settings()["test_mode"])
+            self.assertEqual(send(token, text, ["gmail.com"], "me@gmail.com").json()["status"], "IGNORED")       # 변수 없음 → 일반 메일은 무시
+            os.environ["RENT3_MAIL_EXTRA_DOMAINS"] = "gmail.com"
+            self.assertEqual(send(token, text, ["gmail.com"], "me@gmail.com").json()["status"], "IGNORED")       # 테스트 지점이 아니면 여전히 무시
+            self.assertFalse(settings()["test_mode"])
+            os.environ["RENT3_MAIL_TEST_BRANCHES"] = "main"
+            self.assertTrue(settings()["test_mode"])
+            self.assertEqual(send(token, text, ["gmail.com"], "me@gmail.com").json()["status"], "PENDING")        # 테스트 지점 → 확인 대기
+            row = next(r for r in c.get(LS + "/mail/intakes", headers=chic, params={"branch": "main"}).json()["items"] if r["status"] == "PENDING")
+            self.assertTrue(row["is_test"] and "[테스트]" in row["reason"])
+            mailparse.BANKS["nonghyup"]["verified"] = True                                                          # 검증 은행 + 자동 처리여도 테스트 메일은 자동 수납 안 함
+            try:
+                c.post(LS + "/mail/enable", headers=chic, json={"branch": "main", "consent": True, "bank": "nonghyup", "acct_tail": "6783", "auto": True})
+                self.assertEqual(send(token, text, ["gmail.com"], "me@gmail.com").json()["status"], "PENDING")
+                self.assertEqual([x for x in Pay.find(id_contract=ct0.id) if x.method == "BANK_MAIL"], [])
+            finally:
+                mailparse.BANKS["nonghyup"]["verified"] = bank_verified
+            # ── ② 지메일 전달 확인 코드 ──
+            gm = "forwarding-noreply@google.com"
+            self.assertEqual(send(token, "코드 123456 입니다 https://mail-settings.google.com/mail/vf-secret", [], gm, "(#123456) Gmail 전달 확인").json()["status"], "IGNORED")   # 구글 서명 없음 → 위조
+            self.assertEqual(settings()["forward_code"], "")
+            self.assertEqual(send(token, "확인 링크: https://mail-settings.google.com/mail/vf-secret", ["google.com"], gm, "(#654321) Gmail 전달 확인").json()["status"], "FORWARD_CODE")
+            st = settings()
+            self.assertEqual(st["forward_code"], "654321")
+            self.assertNotIn("vf-secret", json.dumps(Lessor.for_branch("main").mail_opt))                          # 링크는 보관하지 않는다
+            self.assertEqual(c.post(LS + "/mail/forward-code/clear", headers=chic, json={"branch": "main"}).json()["forward_code"], "")
+            self.assertEqual(send(token, "코드를 찾을 수 없는 안내문", ["google.com"], gm, "Gmail 전달 확인").json()["status"], "FORWARD_CODE_ERROR")
+            self.assertTrue(settings()["forward_error"])
+            o = dict(Lessor.for_branch("main").mail_opt); o["forward_code_error"] = {"expires_at": "2000-01-01T00:00:00"}   # 1시간 뒤 저절로 사라짐
+            lsr = Lessor.for_branch("main"); lsr.mail_opt = o; lsr.save(action="t")
+            self.assertFalse(settings()["forward_error"])
+            # 구글 전달 확인 메일은 처리 내역(확인 대기)에 쌓이지 않는다
+            self.assertFalse([r for r in c.get(LS + "/mail/intakes", headers=chic, params={"branch": "main"}).json()["items"] if r["status"] == "FAILED"])
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            mailparse.BANKS["nonghyup"]["verified"] = bank_verified
+            lsr = Lessor.for_branch("main")
+            for x in mailpay.MailIntake.find(lessor_id=lsr.id):
+                x.delete(action="t")
+            lsr.mail_opt = keep_opt; lsr.save(action="t")
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            for dd in olds:
+                Pay(**dd).save(action="t")
+            cc = Contract.get(ct0.id); cc.move_in_date = keep_in; cc.pay_timing = keep_timing; cc.save(action="t")
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("테스트 모드", "forward_code", "mlCodeDone", "forward_error", "/mail/forward-code/clear"):
+            self.assertIn(needle, fe, needle)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,13 @@
+name = "rent3-mail-worker"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# 서버 웹훅 주소(수신 도메인이 아니라 서비스 주소). 새 도메인에 서비스를 옮기면 이 값만 바꾼다.
+WEBHOOK_URL = "https://saas.34.31.10.12.sslip.io/api/rent3/inbound/mail"
+# Cloudflare 가 붙이는 인증 결과 헤더(Authentication-Results)의 authserv-id. 첫 실제 메일의 헤더를 보고 확정한다(비우면 가장 위 헤더를 쓰되 로그에 경고).
+AUTHSERV_ID = ""
+# "1" 이면 수신한 메일의 헤더 '이름'과 Authentication-Results 한 줄을 로그(wrangler tail)에 남긴다. 값(본문·주소)은 남기지 않는다. 형식 확인이 끝나면 끈다.
+DEBUG_HEADERS = "1"
+
+# 비밀키는 여기에 쓰지 않는다:  npx wrangler secret put RENT3_MAIL_SECRET

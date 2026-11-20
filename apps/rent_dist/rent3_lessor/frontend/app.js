@@ -2837,7 +2837,7 @@
     const E = Bass.escapeHtml;
     const post = (path, body) => Bass.api(APP_ID, path, { method: "POST", body: { branch: currentBranch, ...(body || {}) } });
     const card = (inner) => `<div class="bass-card" style="margin-bottom:12px;">${inner}</div>`;
-    let html = "";
+    let html = st.test_mode ? '<div role="status" style="margin-bottom:10px;padding:8px 12px;border-radius:10px;background:#fef3c7;color:#78350f;font-size:13px;font-weight:700;">🧪 테스트 모드 — 테스트 도메인에서 온 메일은 자동 수납하지 않고 [확인 대기]에만 둡니다.</div>' : "";
     if (!st.active) {
       html += card(`
         <h3 style="margin:0 0 6px;">📧 입금 메일 자동 정리 <span class="bass-badge">꺼짐</span></h3>
@@ -2860,6 +2860,10 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><code id="mlAddr" style="font-size:13px;word-break:break-all;">${st.address ? E(st.address) : "(수신 도메인이 아직 설정되지 않았습니다 — 관리인에게 문의)"}</code>
             ${st.address ? '<button id="mlCopy" class="bass-btn bass-btn--sm" type="button" style="min-height:40px;">복사</button>' : ""}</div>
         </div>
+        ${st.forward_code ? `<div style="margin:0 0 10px;padding:10px;border-radius:10px;border:2px solid var(--primary,#2563eb);"><div style="font-size:13px;">📮 지메일 전달 확인 코드 <strong style="font-size:20px;letter-spacing:2px;">${E(st.forward_code)}</strong></div>
+          <div class="bass-muted" style="font-size:12.5px;margin:4px 0 6px;">지메일의 '전달' 설정 화면에 이 코드를 입력하세요. 1시간 뒤 저절로 사라집니다.</div>
+          <button id="mlCodeDone" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">입력했어요 (코드 지우기)</button></div>` : ""}
+        ${st.forward_error ? '<div role="alert" style="margin:0 0 10px;padding:10px;border-radius:10px;background:#fff1f2;font-size:13px;">⚠️ 지메일 확인 메일이 도착했으나 코드를 읽지 못했습니다. 지메일 전달 설정 화면의 안내에 따라 다시 시도하거나 관리인에게 문의해 주세요.</div>' : ""}
         <ol style="margin:0 0 10px;padding-left:20px;font-size:13px;line-height:1.7;"><li>쓰시는 메일(네이버·지메일 등) 설정에서 <strong>자동 전달</strong>을 엽니다.</li><li>위 주소를 전달 받는 주소로 등록합니다.</li><li>은행 입금 알림 메일만 자동 전달되도록 조건(보낸 사람)을 지정합니다.</li></ol>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
           <button id="mlRotate" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">🔄 주소 새로 받기</button>
@@ -2889,6 +2893,9 @@
       Bass.updateAppAlert("ok", "입금 메일 자동 정리를 켰습니다. 안내에 따라 자동 전달을 설정해 주세요."); renderMailTab();
     });
     on("mlCopy", async () => { R3.copyText(st.address); });
+    on("mlCodeDone", async () => { await post("/mail/forward-code/clear"); renderMailTab(); });
+    clearTimeout(window.__mlRefresh);     // 열려 있는 동안 15초마다 새로 불러온다(지메일 확인 코드·새 입금 메일). 입력 중이면 건너뛴다
+    if (st.active) window.__mlRefresh = setTimeout(() => { const ae = document.activeElement; if (currentTab === "mail" && !document.hidden && !(ae && ae.tagName === "INPUT")) renderMailTab(); }, 15000);
     on("mlRotate", async () => { if (!window.confirm("새 주소를 받으면 지금 주소로 오는 메일은 더 이상 처리되지 않습니다. 계속할까요?")) return; await post("/mail/rotate-token"); renderMailTab(); });
     on("mlDisable", async () => {
       if (!window.confirm("동의를 철회하면 수신 주소가 폐기되고, 보관된 입금 메일 처리 기록이 모두 삭제됩니다. 계속할까요?")) return;

@@ -716,6 +716,14 @@ def mail_intakes(branch: str = "main"):
     return {"success": True, "items": mailpay.list_intakes(_my_lessor(branch))}
 
 
+@router.post("/mail/forward-code/clear")
+def mail_forward_code_clear(req: MailBranchReq):
+    from apps.rent_dist._rent3_core import mailpay
+    lsr = _my_lessor(req.branch)
+    mailpay.clear_forward_code(lsr)
+    return {"success": True, **mailpay.settings_view(lsr)}
+
+
 @router.post("/mail/{intake_id}/apply")
 def mail_apply(intake_id: str, req: MailApplyReq):
     from apps.rent_dist._rent3_core import mailpay

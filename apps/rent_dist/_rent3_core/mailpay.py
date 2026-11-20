@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import uuid4
 
@@ -37,6 +38,8 @@ DAILY_CAP = 30          # 임대인별 하루 자동 수납 상한
 RECENT_DAYS = 3         # 자동 수납은 입금일이 이 일수 이내일 때만
 SIG_MAX_AGE_SEC = 600   # 웹훅 서명 시각 허용 오차
 
+FORWARD_CODE_MIN = 60   # 지메일 전달 확인 코드 보관 분(1시간)
+GMAIL_FORWARD_SENDER = "forwarding-noreply@google.com"
 STATUS_KO = {"AUTO_APPLIED": "자동 수납", "USER_APPLIED": "확인 후 수납", "PENDING": "확인 대기", "IGNORED": "무시됨", "FAILED": "해석 실패"}
 
 
@@ -52,6 +55,7 @@ class MailIntake(PoolObj):
     received_at: str = Field(default_factory=now_iso)
     from_domain: str = ""
     auth_ok: bool = False                # 원본 DKIM 도메인이 은행 도메인과 일치하고 통과
+    is_test: bool = False                # 테스트 도메인으로 받은 메일(테스트 지점 전용) — 자동 수납 금지
     status: str = "PENDING"              # AUTO_APPLIED | USER_APPLIED | PENDING | IGNORED | FAILED
     reason: str = ""                     # 확인 대기·무시·실패 사유(개인정보 없음)
     amount: int = 0
@@ -80,6 +84,17 @@ def purge_due() -> int:
     return n
 
 
+def _env_list(name: str) -> List[str]:
+    return [x.strip().lower() for x in (os.getenv(name) or "").split(",") if x.strip()]
+
+
+def test_domains_for(lsr: Lessor) -> List[str]:
+    """테스트 전용 허용 도메인(RENT3_MAIL_EXTRA_DOMAINS) — RENT3_MAIL_TEST_BRANCHES 에 든 지점에만 적용. 운영에서는 둘 다 비워 둔다."""
+    if not _env_list("RENT3_MAIL_EXTRA_DOMAINS"):
+        return []
+    return _env_list("RENT3_MAIL_EXTRA_DOMAINS") if (lsr.branch or "").lower() in _env_list("RENT3_MAIL_TEST_BRANCHES") else []
+
+
 def inbound_domain() -> str:
     return (os.getenv("RENT3_MAIL_DOMAIN") or "").strip().lower()
 
@@ -93,11 +108,21 @@ def _opt(lsr: Lessor) -> Dict[str, Any]:
     return dict(lsr.mail_opt or {})
 
 
+def _fresh(o: Dict[str, Any], key: str) -> Optional[Dict[str, Any]]:
+    v = o.get(key)
+    if isinstance(v, dict) and (v.get("expires_at") or "") > datetime.now().isoformat(timespec="seconds"):
+        return v
+    return None
+
+
 def settings_view(lsr: Lessor) -> Dict[str, Any]:
     purge_due()
     o = _opt(lsr)
     bank = o.get("bank") or ""
+    fc, fe = _fresh(o, "forward_code"), _fresh(o, "forward_code_error")
     return {
+        "test_mode": bool(test_domains_for(lsr)),
+        "forward_code": fc["code"] if fc else "", "forward_error": bool(fe),
         "active": bool(o.get("active")), "bank": bank, "bank_label": (mp.BANKS.get(bank) or {}).get("label", ""),
         "acct_tail": o.get("acct_tail", ""), "auto": bool(o.get("auto")),
         "address": address_for(o.get("token", "")) if o.get("active") else "", "domain_ready": bool(inbound_domain()),
@@ -186,6 +211,37 @@ def _in_domains(d: str, allowed) -> bool:
     return any(d == a or d.endswith("." + a) for a in allowed)
 
 
+def clear_forward_code(lsr: Lessor) -> None:
+    o = _opt(lsr)
+    o.pop("forward_code", None)
+    o.pop("forward_code_error", None)
+    lsr.mail_opt = o
+    lsr.save(action="mail_forward_code_cleared", app_source="rent3_mail")
+
+
+def _forward_confirmation(lsr: Lessor, payload: Dict[str, Any], from_dom: str, dkim: List[str]) -> Optional[Dict[str, Any]]:
+    """지메일 '전달 확인' 메일이면 숫자 코드만 뽑아 1시간 보관한다(링크·원문은 보관 안 함). 아니면 None."""
+    frm = str(payload.get("from_addr") or "").lower()
+    if GMAIL_FORWARD_SENDER not in frm:
+        return None
+    if not any(_in_domains(d, ("google.com",)) for d in dkim):
+        return {"status": "IGNORED"}                      # 구글 서명이 아니면 위조 가능 — 버린다
+    subj, body = str(payload.get("subject") or ""), mp.plain_text(str(payload.get("text") or payload.get("html") or ""))
+    m = re.search(r"\(#\s*(\d{6,9})\s*\)", subj) or re.search(r"(?<!\d)(\d{6,9})(?!\d)", subj + chr(10) + body)
+    o = _opt(lsr)
+    exp = (datetime.now() + timedelta(minutes=FORWARD_CODE_MIN)).isoformat(timespec="seconds")
+    if m:
+        o["forward_code"] = {"code": m.group(1), "expires_at": exp}
+        o.pop("forward_code_error", None)
+        status = "FORWARD_CODE"
+    else:
+        o["forward_code_error"] = {"expires_at": exp}
+        status = "FORWARD_CODE_ERROR"
+    lsr.mail_opt = o
+    lsr.save(action="mail_forward_code", app_source="rent3_mail")
+    return {"status": status}
+
+
 def _month_pick(ct: Contract, amount: int):
     """미납 달이 여러 개이고 일부만 입금되면 어느 달에 넣을지 사람이 정해야 한다(문자 수납과 같은 규칙)."""
     led = ct.ledger(up_to_ym=current_ym())
@@ -237,10 +293,15 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "DUPLICATE"}
     from_dom = _domain(str(payload.get("from_addr") or ""))
     dkim = [str(d).lower() for d in (payload.get("dkim_pass_domains") or [])]
+    fwd = _forward_confirmation(lsr, payload, from_dom, dkim)
+    if fwd is not None:
+        return fwd
     allowed = spec["domains"]
     auth_ok = any(_in_domains(d, allowed) for d in dkim)
-    base = {"msg_hash": msg_hash, "from_domain": from_dom, "auth_ok": auth_ok}
-    if not auth_ok and not _in_domains(from_dom, allowed):
+    tdoms = test_domains_for(lsr)
+    is_test = (not auth_ok and not _in_domains(from_dom, allowed)) and bool(tdoms) and (any(_in_domains(d, tdoms) for d in dkim) or _in_domains(from_dom, tdoms))
+    base = {"msg_hash": msg_hash, "from_domain": from_dom, "auth_ok": auth_ok, "is_test": is_test}
+    if not auth_ok and not is_test and not _in_domains(from_dom, allowed):
         _save(lsr, status="IGNORED", reason="허용된 은행 발신이 아닙니다", **base)
         return {"status": "IGNORED"}
     try:
@@ -261,7 +322,9 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     issues = chk["issues"]
     room_no = fields["room_no"] or (ct.room_no if ct else "")
     reasons: List[str] = []
-    if not auth_ok:
+    if is_test:
+        reasons.append("[테스트] 테스트 도메인으로 받은 메일 — 자동 수납하지 않습니다")
+    elif not auth_ok:
         reasons.append("발신 확인 불가(원본 서명을 확인하지 못했습니다)")
     reasons += [i["msg"] for i in issues]
     pick = _month_pick(ct, p["amount"]) if (ct and not issues) else []
@@ -272,7 +335,7 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     today_auto = sum(1 for x in MailIntake.find(lessor_id=lsr.id, status="AUTO_APPLIED") if (x.received_at or "")[:10] == _today_iso())
     if today_auto >= DAILY_CAP:
         reasons.append("하루 자동 수납 상한을 넘었습니다")
-    want_auto = bool(o.get("auto")) and spec["verified"]
+    want_auto = bool(o.get("auto")) and spec["verified"] and not is_test
     it = _save(lsr, status="PENDING", reason=" · ".join(reasons), **{**fields, "room_no": room_no}, **base)
     if want_auto and not reasons and ct is not None:
         try:
@@ -290,7 +353,7 @@ def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ───────────────────────── 임대인 화면용 ─────────────────────────
 def _row(x: MailIntake) -> Dict[str, Any]:
     return {"id": x.id, "status": x.status, "status_ko": STATUS_KO.get(x.status, x.status), "reason": x.reason, "amount": x.amount,
-            "payer_name": x.payer_name, "paid_date": x.paid_date, "room_no": x.room_no, "received_at": x.received_at, "auth_ok": x.auth_ok}
+            "payer_name": x.payer_name, "paid_date": x.paid_date, "room_no": x.room_no, "received_at": x.received_at, "auth_ok": x.auth_ok, "is_test": x.is_test}
 
 
 def list_intakes(lsr: Lessor, limit: int = 60) -> List[Dict[str, Any]]:

@@ -1,0 +1,9 @@
+{
+  "name": "rent3-mail-worker",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Cloudflare Email Worker: 은행 입금 알림 메일을 서명된 JSON 으로 Rent3 서버에 전달한다.",
+  "scripts": { "deploy": "wrangler deploy", "tail": "wrangler tail" },
+  "dependencies": { "postal-mime": "^2.4.3" },
+  "devDependencies": { "wrangler": "^3.90.0" }
+}
