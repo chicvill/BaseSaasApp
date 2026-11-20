@@ -196,9 +196,9 @@ def _l_franchise(l: Lessor) -> List[Optional[Dict[str, Any]]]:
 
 def _l_mail(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     """입금 메일 자동 정리: 확인 대기(처리하면 사라짐)·자동 수납 결과·해석 실패(안내성, 확인함 뒤 다시 안 뜸). 꺼져 있으면 없음."""
-    if not (l.mail_opt or {}).get("active"):
+    from .mailpay import MailIntake, feature_enabled
+    if not feature_enabled() or not (l.mail_opt or {}).get("active"):
         return []
-    from .mailpay import MailIntake
     rows = MailIntake.find(lessor_id=l.id)
     link = _l_base(l) + "&tab=mail"
     seen_a, seen_f = _seen(l, "mail_auto"), _seen(l, "mail_failed")

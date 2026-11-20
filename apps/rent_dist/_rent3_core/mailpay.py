@@ -95,6 +95,11 @@ def test_domains_for(lsr: Lessor) -> List[str]:
     return _env_list("RENT3_MAIL_EXTRA_DOMAINS") if (lsr.branch or "").lower() in _env_list("RENT3_MAIL_TEST_BRANCHES") else []
 
 
+def feature_enabled() -> bool:
+    """입금 메일 자동 정리 기능 스위치(RENT3_MAIL_ENABLED=1). 기본 꺼짐 — 완성되기 전에는 화면·알림·수신 모두 닫혀 있다(철회·삭제만 항상 가능)."""
+    return (os.getenv("RENT3_MAIL_ENABLED") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def inbound_domain() -> str:
     return (os.getenv("RENT3_MAIL_DOMAIN") or "").strip().lower()
 
@@ -153,6 +158,7 @@ def settings_view(lsr: Lessor) -> Dict[str, Any]:
     bank = accs[0]["bank"] if accs else ""
     fc, fe = _fresh(o, "forward_code"), _fresh(o, "forward_code_error")
     return {
+        "enabled": feature_enabled(),
         "accounts": [{"bank": a["bank"], "bank_label": (mp.BANKS.get(a["bank"]) or {}).get("label", a["bank"]), "tail": a["tail"],
                       "verified": bool((mp.BANKS.get(a["bank"]) or {}).get("verified")), "domains": list((mp.BANKS.get(a["bank"]) or {}).get("domains", ()))[:2]} for a in accs],
         "test_mode": bool(test_domains_for(lsr)),
@@ -324,6 +330,8 @@ def _apply(lsr: Lessor, it: MailIntake, room_no: str, target_months: Optional[Li
 
 def ingest(payload: Dict[str, Any]) -> Dict[str, Any]:
     """수신 서비스가 보낸 메일 1통을 판정한다. 반환: {status, reason?} — 호출자에게 개인정보는 돌려주지 않는다."""
+    if not feature_enabled():
+        return {"status": "REJECTED"}
     purge_due()
     to = payload.get("to") or ""
     if isinstance(to, list):

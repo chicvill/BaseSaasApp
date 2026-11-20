@@ -1,4 +1,4 @@
-# 입금 메일 자동 정리 — Cloudflare 연결 순서서
+# 입금 메일 자동 정리 — Cloudflare 연결 순서서 (⚠️ 기능은 현재 꺼져 있음: 서버 환경변수 RENT3_MAIL_ENABLED=1 일 때만 열림. 완성 후 켠다)
 
 은행 입금 알림 메일 → (임대인 메일의 자동 전달) → `pay-<토큰>@in.<내도메인>` → **Cloudflare Email Routing** → **이 Worker** → Rent3 서버 웹훅(`/api/rent3/inbound/mail`) → 확인 대기 / 자동 수납 → 임대인 알림.
 

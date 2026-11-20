@@ -499,6 +499,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         "branches": [{"branch": b.branch, "building_name": b.building_name} for b in buildings],
         "building": bldg.model_dump() if bldg else None,
         "lessor": lessor.safe_dump() if lessor else None,
+        "features": {"mail": __import__("apps.rent_dist._rent3_core.mailpay", fromlist=["feature_enabled"]).feature_enabled()},
         "target_ym": target_ym,
         "monthly_target": monthly_target,
         "monthly_collected": monthly_collected,
@@ -693,6 +694,12 @@ class MailApplyReq(BaseModel):
     target_months: Optional[List[str]] = None
 
 
+def _mail_on():
+    from apps.rent_dist._rent3_core import mailpay
+    if not mailpay.feature_enabled():
+        raise DomainError("입금 메일 자동 정리는 아직 준비 중입니다.", hint="준비가 끝나면 안내해 드립니다. 입금 문자 붙여넣기는 그대로 쓰실 수 있습니다.")
+
+
 @router.get("/mail/settings")
 def mail_settings(branch: str = "main"):
     from apps.rent_dist._rent3_core import mailpay
@@ -701,6 +708,7 @@ def mail_settings(branch: str = "main"):
 
 @router.post("/mail/enable")
 def mail_enable(req: MailEnableReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     lsr = mailpay.enable(_my_lessor(req.branch), req.consent, req.bank, req.acct_tail, req.auto,
                          accounts=[a.model_dump() for a in req.accounts] if req.accounts else None)
@@ -709,6 +717,7 @@ def mail_enable(req: MailEnableReq):
 
 @router.post("/mail/accounts")
 def mail_accounts(req: MailAccountsReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     lsr = mailpay.set_accounts(_my_lessor(req.branch), [a.model_dump() for a in req.accounts])
     return {"success": True, **mailpay.settings_view(lsr)}
@@ -716,6 +725,7 @@ def mail_accounts(req: MailAccountsReq):
 
 @router.post("/mail/rotate-token")
 def mail_rotate(req: MailBranchReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     lsr = mailpay.rotate_token(_my_lessor(req.branch))
     return {"success": True, **mailpay.settings_view(lsr)}
@@ -731,12 +741,14 @@ def mail_disable(req: MailBranchReq):
 
 @router.get("/mail/intakes")
 def mail_intakes(branch: str = "main"):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     return {"success": True, "items": mailpay.list_intakes(_my_lessor(branch))}
 
 
 @router.post("/mail/forward-code/clear")
 def mail_forward_code_clear(req: MailBranchReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     lsr = _my_lessor(req.branch)
     mailpay.clear_forward_code(lsr)
@@ -745,12 +757,14 @@ def mail_forward_code_clear(req: MailBranchReq):
 
 @router.post("/mail/{intake_id}/apply")
 def mail_apply(intake_id: str, req: MailApplyReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     return mailpay.apply_pending(_my_lessor(req.branch), intake_id, req.room_no, req.target_months)
 
 
 @router.post("/mail/{intake_id}/dismiss")
 def mail_dismiss(intake_id: str, req: MailBranchReq):
+    _mail_on()
     from apps.rent_dist._rent3_core import mailpay
     mailpay.dismiss(_my_lessor(req.branch), intake_id)
     return {"success": True}

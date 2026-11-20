@@ -84,8 +84,9 @@
   const VIA_PIN = R3Shell.isViaPin();
   const PIN_TABS = ["ledger", "messages", "ops"];
   const pinOk = (i) => i.pinOnly || i.id === "btnShortcut" || i.href === "manual.html" || PIN_TABS.includes(i.tab);
-  const MY_MENU = LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly) && (VIA_PIN ? pinOk(i) : !i.pinOnly)) })).filter((g) => g.items.length);
-  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
+  let MAIL_ON = false;     // 서버 스위치(RENT3_MAIL_ENABLED) — 꺼져 있으면 '입금 메일 자동 정리' 메뉴를 감춘다(dashboard.features.mail)
+  const buildMenu = () => LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (i.tab !== "mail" || MAIL_ON) && (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly) && (VIA_PIN ? pinOk(i) : !i.pinOnly)) })).filter((g) => g.items.length);
+  R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), buildMenu());
   R3Shell.watchSupport();
   // 🔔 알림 센터: 메시지·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
   if (window.R3Notify && !VIA_PIN) R3Notify.start({ url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
@@ -312,6 +313,8 @@
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
     dash = await Bass.api(APP_ID, `/dashboard?branch=${encodeURIComponent(currentBranch)}${qAsOf}`);
     document.getElementById("poolRevBadge").textContent = `JSON Pool v${dash.pool_revision}`;
+    const mailOn = !!(dash.features && dash.features.mail);
+    if (mailOn !== MAIL_ON) { MAIL_ON = mailOn; R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), buildMenu()); }
     renderFranchiseBanner();
     applyPinBar();
 
@@ -359,6 +362,7 @@
   function renderTab() {
     if (!dash) return;
     if (currentTab !== "ledger" && !TAB_TITLES[currentTab]) currentTab = "ledger";
+    if (currentTab === "mail" && !MAIL_ON) currentTab = "ledger";     // 준비 중인 기능은 주소로 직접 들어와도 열지 않는다
     if (VIA_PIN && !PIN_TABS.includes(currentTab)) currentTab = "ledger";   // 간편 비밀번호로는 허용된 화면만
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === currentTab));
     document.getElementById("backBar").hidden = currentTab === "ledger";

@@ -7850,8 +7850,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         chic, sunho = self._login("chic"), self._login("sunho")
         LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
         SECRET = "test-secret-123"
-        old_env = {k: os.environ.get(k) for k in ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN")}
-        os.environ["RENT3_MAIL_SECRET"], os.environ["RENT3_MAIL_DOMAIN"] = SECRET, "in.rent3-test.example"
+        old_env = {k: os.environ.get(k) for k in ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_ENABLED")}
+        os.environ["RENT3_MAIL_SECRET"], os.environ["RENT3_MAIL_DOMAIN"], os.environ["RENT3_MAIL_ENABLED"] = SECRET, "in.rent3-test.example", "1"
         ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
         keep_in, keep_timing = ct0.move_in_date, ct0.pay_timing
         olds = [x.model_dump() for x in Pay.find(id_contract=ct0.id, include_voided=True)]
@@ -8037,9 +8037,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         chic = self._login("chic")
         LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
         SECRET = "test-secret-124"
-        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES")
+        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES", "RENT3_MAIL_ENABLED")
         old_env = {k: os.environ.get(k) for k in keys}
-        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example"})
+        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example", "RENT3_MAIL_ENABLED": "1"})
         os.environ.pop("RENT3_MAIL_EXTRA_DOMAINS", None); os.environ.pop("RENT3_MAIL_TEST_BRANCHES", None)
         ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
         keep_in, keep_timing = ct0.move_in_date, ct0.pay_timing
@@ -8132,9 +8132,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         chic = self._login("chic")
         LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
         SECRET = "test-secret-125"
-        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES")
+        keys = ("RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN", "RENT3_MAIL_EXTRA_DOMAINS", "RENT3_MAIL_TEST_BRANCHES", "RENT3_MAIL_ENABLED")
         old_env = {k: os.environ.get(k) for k in keys}
-        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example"})
+        os.environ.update({"RENT3_MAIL_SECRET": SECRET, "RENT3_MAIL_DOMAIN": "in.rent3-test.example", "RENT3_MAIL_ENABLED": "1"})
         os.environ.pop("RENT3_MAIL_EXTRA_DOMAINS", None); os.environ.pop("RENT3_MAIL_TEST_BRANCHES", None)
         keep_opt = dict(Lessor.for_branch("main").mail_opt or {})
         had_fake = "tbank" in mailparse.BANKS
@@ -8205,6 +8205,67 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr.mail_opt = keep_opt; lsr.save(action="t")
         fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("mlAccAdd", "ml-acc-del", "/mail/accounts", "지메일(Gmail) 전용", "전달 및 POP/IMAP", "필터 및 차단된 주소"):
+            self.assertIn(needle, fe, needle)
+
+
+    def test_126_bank_mail_feature_switch_off_by_default(self):
+        """126. 입금 메일 자동 정리는 완성 전까지 꺼 둔다(RENT3_MAIL_ENABLED 없으면 꺼짐): 화면 메뉴 숨김(dashboard.features.mail=false)·설정/계좌/처리 API는 '준비 중'으로 거부·
+        수신 웹훅 503·알림 없음, 단 철회(끄기·보관 자료 삭제)는 항상 가능. 켜면(환경변수 1) 다시 열린다."""
+        import hashlib, hmac, json, time
+        from apps.rent_dist._rent3_core import Lessor, mailpay
+        c = self.client
+        chic = self._login("chic")
+        LS, IN = "/api/rent3_lessor", "/api/rent3/inbound/mail"
+        keys = ("RENT3_MAIL_ENABLED", "RENT3_MAIL_SECRET", "RENT3_MAIL_DOMAIN")
+        old_env = {k: os.environ.get(k) for k in keys}
+        keep_opt = dict(Lessor.for_branch("main").mail_opt or {})
+        try:
+            os.environ.pop("RENT3_MAIL_ENABLED", None)
+            os.environ["RENT3_MAIL_SECRET"] = "s126"
+            os.environ["RENT3_MAIL_DOMAIN"] = "in.rent3-test.example"
+            self.assertFalse(mailpay.feature_enabled())
+            d = c.get(LS + "/dashboard", headers=chic, params={"branch": "main"}).json()
+            self.assertFalse(d["features"]["mail"])
+            st = c.get(LS + "/mail/settings", headers=chic, params={"branch": "main"}).json()
+            self.assertFalse(st["enabled"])
+            body = {"branch": "main", "consent": True, "accounts": [{"bank": "nonghyup", "tail": "6783"}]}
+            for path, payload in (("/mail/enable", body), ("/mail/accounts", {"branch": "main", "accounts": body["accounts"]}), ("/mail/rotate-token", {"branch": "main"}),
+                                  ("/mail/forward-code/clear", {"branch": "main"}), ("/mail/x/apply", {"branch": "main"}), ("/mail/x/dismiss", {"branch": "main"})):
+                r = c.post(LS + path, headers=chic, json=payload)
+                self.assertEqual(r.status_code, 400, path)
+                self.assertIn("준비 중", r.text, path)
+            self.assertEqual(c.get(LS + "/mail/intakes", headers=chic, params={"branch": "main"}).status_code, 400)
+            # 수신 웹훅은 서명이 맞아도 닫혀 있다
+            raw = json.dumps({"to": "pay-x@in.rent3-test.example", "ts": time.time()}).encode("utf-8")
+            sig = hmac.new(b"s126", raw, hashlib.sha256).hexdigest()
+            self.assertEqual(c.post(IN, content=raw, headers={"X-Rent3-Signature": sig}).status_code, 503)
+            # 이미 켜 둔 임대인이 있어도(예전 설정) 알림은 나오지 않고, 철회는 가능하다
+            lsr = Lessor.for_branch("main")
+            lsr.mail_opt = {"active": True, "token": "abcd" * 5, "accounts": [{"bank": "nonghyup", "tail": "6783"}], "consented_at": "2026-11-20T00:00:00"}
+            lsr.save(action="t")
+            mailpay.MailIntake(lessor_id=lsr.id, branch="main", msg_hash="h126", status="PENDING", purge_at="2999-01-01").save(action="t")
+            kinds = {i["kind"] for i in c.get(LS + "/notifications", headers=chic, params={"branch": "main"}).json()["items"]}
+            self.assertFalse({k for k in kinds if k.startswith("mail_")})
+            self.assertEqual(mailpay.ingest({"to": "pay-" + "abcd" * 5 + "@x"}), {"status": "REJECTED"})
+            dis = c.post(LS + "/mail/disable", headers=chic, json={"branch": "main"})
+            self.assertEqual(dis.status_code, 200, dis.text)
+            self.assertEqual(dis.json()["deleted"], 1)
+            # 켜면 열린다
+            os.environ["RENT3_MAIL_ENABLED"] = "1"
+            self.assertTrue(c.get(LS + "/dashboard", headers=chic, params={"branch": "main"}).json()["features"]["mail"])
+            self.assertTrue(c.get(LS + "/mail/settings", headers=chic, params={"branch": "main"}).json()["enabled"])
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            lsr = Lessor.for_branch("main")
+            for x in mailpay.MailIntake.find(lessor_id=lsr.id):
+                x.delete(action="t")
+            lsr.mail_opt = keep_opt; lsr.save(action="t")
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("MAIL_ON", "buildMenu", "dash.features.mail", 'currentTab === "mail" && !MAIL_ON'):
             self.assertIn(needle, fe, needle)
 
 

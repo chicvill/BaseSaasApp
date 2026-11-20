@@ -20,7 +20,7 @@ router = APIRouter(prefix="/inbound", tags=["rent3-inbound"], dependencies=[Depe
 async def inbound_mail(request: Request):
     from apps.rent_dist._rent3_core import mailpay
     secret = os.getenv("RENT3_MAIL_SECRET", "")
-    if not secret:
+    if not mailpay.feature_enabled() or not secret:
         return JSONResponse({"success": False, "message": "입금 메일 수신이 설정되어 있지 않습니다."}, status_code=503)
     raw = await request.body()
     if len(raw) > 1_000_000 or not mailpay.verify_signature(secret, raw, request.headers.get("x-rent3-signature", "")):
