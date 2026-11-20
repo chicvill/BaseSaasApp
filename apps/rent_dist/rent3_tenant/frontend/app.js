@@ -314,7 +314,7 @@
     const monthRow = (m) => `
       <div style="display:flex;justify-content:space-between;padding:7px 10px;border-bottom:1px solid var(--border);font-size:13px;">
         <span><strong>${m.ym}</strong> · 청구 ${fmtWon(m.due)}</span>
-        <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${Bass.escapeHtml(m.note)}</span>
+        <span style="color:${m.unpaid > 0 ? (m.phase === "DUE_SOON" ? "var(--warn)" : "var(--err)") : "var(--ok)"};font-weight:700;">${m.phase === "DUE_SOON" ? "🕒 " : ""}${Bass.escapeHtml(m.note)}</span>
       </div>`;
     const allMonths = lg.months || [];
     const recentMonths = allMonths.slice(-12);
@@ -326,7 +326,10 @@
 
     // 할 일 배너: 미납 > 퇴실 정산 > 만기 확인 (해당할 때만, 최대 2줄)
     const todos = [];
-    if (lg.total_unpaid > 0) todos.push({ icon: "🚨", text: `미납 ${fmtWon(lg.total_unpaid)}이 있습니다`, label: "납부하기", go: "pay", hot: true });
+    const overdueAmt = lg.overdue_unpaid != null ? Number(lg.overdue_unpaid) : Number(lg.total_unpaid || 0);
+    const dueSoonAmt = Math.max(Number(lg.total_unpaid || 0) - overdueAmt, 0);
+    if (overdueAmt > 0) todos.push({ icon: "🚨", text: `미납 ${fmtWon(overdueAmt)}이 있습니다`, label: "납부하기", go: "pay", hot: true });
+    else if (dueSoonAmt > 0) todos.push({ icon: "🕒", text: `납부 예정 ${fmtWon(dueSoonAmt)} — 납입일까지 입금해 주세요`, label: "납부하기", go: "pay", hot: false });
     if (co && ["CALCULATED", "PAID"].includes(co.status)) todos.push({ icon: "🚪", text: co.status === "PAID" ? "보증금이 송금되었습니다 — 받으셨나요?" : "퇴실 정산서가 도착했습니다", label: co.status === "PAID" ? "수취 확인" : "확인·동의", go: "checkout", hot: true });
     if (ec && ec.status === "AWAITING_TENANT") todos.push({ icon: "📅", text: "만기 후 전출 계획을 알려 주세요", label: "답변하기", go: "expiry", hot: true });
     else if (ec && ec.status === "RENEWAL_PREVIEWED") todos.push({ icon: "📝", text: "연장 재계약 예고가 도착했습니다", label: "확인하기", go: "expiry", hot: true });
@@ -351,7 +354,7 @@
         <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
           <div><strong>${Bass.escapeHtml(t.name)}</strong> 님의 마이홈 · ${Bass.escapeHtml(b.building_name || "")} ${Bass.escapeHtml(r.room_no || "")}호</div>
           <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
-            <span class="bass-badge ${lg.total_unpaid > 0 ? "bass-badge--err" : "bass-badge--ok"}">${lg.total_unpaid > 0 ? `미납 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)"}</span>
+            <span class="bass-badge ${(lg.overdue_unpaid ?? lg.total_unpaid) > 0 ? "bass-badge--err" : (lg.total_unpaid > 0 ? "bass-badge--warn" : "bass-badge--ok")}">${(lg.overdue_unpaid ?? lg.total_unpaid) > 0 ? `미납 ${fmtWon(lg.overdue_unpaid ?? lg.total_unpaid)}` : (lg.total_unpaid > 0 ? `🕒 납부 예정 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)")}</span>
             ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
             <span class="bass-badge ${ew && ew.in_6_to_2_months_window ? "bass-badge--warn" : "bass-badge--info"}">만기 D-${lg.days_to_expiry ?? "-"}${ew && ew.in_6_to_2_months_window ? " (6~2개월 통지구간)" : ""}</span>
             ${(data.messages_unread || 0) > 0 ? `<span class="bass-badge bass-badge--info">✉️ 새 메시지 ${data.messages_unread}</span>` : ""}

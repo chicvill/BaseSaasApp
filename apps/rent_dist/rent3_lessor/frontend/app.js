@@ -327,11 +327,12 @@
     const mPaid = Number(dash.monthly_collected || 0);
     const mRate = Number(dash.monthly_collection_rate ?? (mTarget > 0 ? Math.round((mPaid * 100) / mTarget) : 0));
     const mUnpaid = Number(dash.monthly_unpaid || 0);
-    const totalUnpaid = Number(dash.total_unpaid_branch || 0);
+    const dueSoon = Number(dash.total_due_soon_branch || 0);
+    const totalUnpaid = dash.total_overdue_branch != null ? Number(dash.total_overdue_branch) : Number(dash.total_unpaid_branch || 0);   // 납입일이 지난 미납(연체)
     const unpaidColor = totalUnpaid > 0 ? "var(--err)" : "var(--ok)";
-    const unpaidExtra = totalUnpaid > mUnpaid
-      ? ` <span class="bass-muted" style="font-size:12.5px;">(당월 ${fmtWon(mUnpaid)})</span>`
-      : "";
+    const unpaidExtra = dueSoon > 0
+      ? ` <span class="bass-badge bass-badge--warn" style="font-size:12px;">납부 예정 ${fmtWon(dueSoon)}</span>`
+      : (totalUnpaid > mUnpaid ? ` <span class="bass-muted" style="font-size:12.5px;">(당월 ${fmtWon(mUnpaid)})</span>` : "");
     document.getElementById("kpiGrid").innerHTML =
       `<span>${ymMonth}월 목표액 <strong>${fmtWon(mTarget)}</strong></span>` +
       `<span>수납액 <strong style="color:var(--ok);">${fmtWon(mPaid)} (${mRate}%)</strong></span>` +
@@ -422,6 +423,11 @@
   const dotDate = (s) => String(s || "").replace(/-/g, ".");
   const bldgName = () => (dash.building && dash.building.building_name) || "";
 
+  // 납부 예정 금액 = 납입일 당일까지 아직 안 낸 달의 미입금(연체 아님)
+  function dueSoonOf(r) {
+    return r.ledger ? (r.ledger.months || []).filter((m) => m.phase === "DUE_SOON" && m.unpaid > 0).reduce((a, m) => a + Number(m.unpaid), 0) : 0;
+  }
+
   // 미납 횟수 = 납부일(매월 전입일)이 이미 지난 달 중 아직 못 낸 달 수
   function unpaidCount(r) {
     if (!r.ledger) return 0;
@@ -430,6 +436,7 @@
     const day = Number((dash.today || "").slice(8, 10)) || 0;
     return (r.ledger.months || []).filter((m) => {
       if (!(m.unpaid > 0)) return false;
+      if (m.phase) return m.phase === "OVERDUE";
       if (m.ym === cur && bs && bs.payment_day && day < bs.payment_day) return false;
       return true;
     }).length;
@@ -618,7 +625,7 @@
         <button type="button" class="bass-btn bass-btn--sm ls-del" style="min-height:40px;">삭제</button></div>`).join("")}
       ${(r.voided || []).length ? `<div class="r3-lbl" style="margin-top:10px;">무효 처리된 납부 (계산에서 제외 · 기록만 보관)</div>${(r.voided || []).map((v) => `<div class="bass-muted" style="font-size:12px;padding:3px 0;">${E(v.billing_month)} · ${fmtWon(v.total)} · 입금 ${E(v.paid_date)} — 사유: ${E(v.reason)} (${E(String(v.voided_at || "").slice(0, 16).replace("T", " "))})</div>`).join("")}` : ""}
       <div class="r3-lbl" style="margin-top:10px;">달별 상계 결과 (밀린 달부터 표시)</div>
-      ${(r.months || []).filter((m) => m.due > 0).slice().reverse().slice(0, 36).map((m) => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;${m.unpaid ? "color:var(--err);" : ""}"><span>${E(m.ym)}</span><span>청구 ${fmtWon(m.due)} · 상계 ${fmtWon(m.paid)}${m.unpaid ? ` · <strong>미납 ${fmtWon(m.unpaid)}</strong>` : ""}${m.labelled_total && m.labelled_total !== m.due ? ` · 이 달로 적힌 납부 ${fmtWon(m.labelled_total)}` : ""}</span></div>`).join("")}`);
+      ${(r.months || []).filter((m) => m.due > 0).slice().reverse().slice(0, 36).map((m) => `<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:12.5px;${m.unpaid ? (m.phase === "DUE_SOON" ? "color:var(--warn);" : "color:var(--err);") : ""}"><span>${E(m.ym)}</span><span>청구 ${fmtWon(m.due)} · 상계 ${fmtWon(m.paid)}${m.unpaid ? ` · <strong>${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</strong>` : ""}${m.labelled_total && m.labelled_total !== m.due ? ` · 이 달로 적힌 납부 ${fmtWon(m.labelled_total)}` : ""}</span></div>`).join("")}`);
     body.querySelectorAll(".ls-del").forEach((b) => b.addEventListener("click", function () {
       const id = this.closest("[data-pay]").dataset.pay;
       const reason = window.prompt("이 납부 건을 무효 처리합니다(기록은 남고 그 달은 미납으로 돌아갑니다). 사유를 적어 주세요:", "오입력");
@@ -649,7 +656,7 @@
     [...(lg.months || [])].reverse().forEach((m) => {
       if (m.ym < startYm) return;
       if (m.unpaid > 0) {
-        rows.push(`<div class="pr pr--un"><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">미납 ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}</span></div>`);
+        rows.push(`<div class="pr pr--un"${m.phase === "DUE_SOON" ? ' style="opacity:.85;"' : ""}><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">${m.phase === "DUE_SOON" ? "🕒 납부 예정" : "미납"} ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}${m.phase === "DUE_SOON" && m.note ? ` <span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(String(m.note).replace(/^납부 예정 /, ""))}</span>` : ""}</span></div>`);
       }
       const ps = byYm[m.ym] || [];
       ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}" data-total="${p.total}"><span class="pr__ym">${shortYm(m.ym)}</span>
@@ -685,7 +692,7 @@
       <div class="r3-subbox r3-subbox--direct">
         <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금 등 은행 문자가 없는 경우) <span class="bass-muted">— 비어 있는(미납) 달을 골라 채웁니다</span></label>
         ${unpaidMonths.length ? `<div class="bass-row" style="gap:6px;flex-wrap:wrap;">
-          <select id="pmYm" class="bass-select" style="min-height:44px;" aria-label="수납할 달">${unpaidMonths.map((m) => `<option value="${m.ym}">${shortYm(m.ym)} 미납 ${fmtWon(m.unpaid)}</option>`).join("")}</select>
+          <select id="pmYm" class="bass-select" style="min-height:44px;" aria-label="수납할 달">${unpaidMonths.map((m) => `<option value="${m.ym}">${shortYm(m.ym)} ${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</option>`).join("")}</select>
           <input id="pmAmt" class="bass-input" type="number" style="width:124px;" value="${unpaidMonths[0].unpaid}" aria-label="직접 수납액">
           <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
         </div>` : `<div class="bass-muted" style="font-size:13px;">✅ 비어 있는 달이 없습니다(밀린 청구 없음). 선수금은 받지 않습니다.</div>`}
@@ -1527,7 +1534,7 @@
         <button class="bass-btn bass-btn--sm" data-act="lostphone" type="button" style="min-height:44px;border-color:hsla(356,75%,62%,.4);">📵 분실 폰 해제</button>
         ${r.pre_moveout_notice ? `<button class="bass-btn bass-btn--sm btn-open-promo" data-id="${r.id}" data-room="${r.room_no}" type="button" style="min-height:44px;border-color:hsla(28,95%,50%,.4);">📢 홍보글 복사</button>` : ""}</div>
       <div class="rc-info">
-        <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : "완납"}</span><br>
+        <span class="rc-unpaid ${n > 0 ? "is-late" : ""}">${n > 0 ? `미납:${n}` : (dueSoonOf(r) > 0 ? `<span class="bass-badge bass-badge--warn" style="font-size:12px;">🕒 납부 예정 ${fmtWon(dueSoonOf(r))}</span>` : "완납")}</span><br>
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>

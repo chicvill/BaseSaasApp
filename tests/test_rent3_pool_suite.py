@@ -7828,6 +7828,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn('m.phase === "DUE_SOON"', fe)
         nf = open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", "notifications.py"), encoding="utf-8").read()
         self.assertIn("overdue_unpaid", nf)
+        # 배지: 임대인 원장·호실 카드·KPI, 임차인 마이홈 배너·헤더·월별 현황
+        for needle in ("dueSoonOf", "total_due_soon_branch", "🕒 납부 예정"):
+            self.assertIn(needle, fe, needle)
+        tfe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("dueSoonAmt", "overdue_unpaid", "🕒 납부 예정"):
+            self.assertIn(needle, tfe, needle)
+        d = self.client.get("/api/rent3_lessor/dashboard", headers=self._login("chic"), params={"branch": "main"})
+        if d.status_code == 200:
+            j = d.json()
+            self.assertEqual(j["total_overdue_branch"] + j["total_due_soon_branch"], j["total_unpaid_branch"])
 
 
 if __name__ == "__main__":

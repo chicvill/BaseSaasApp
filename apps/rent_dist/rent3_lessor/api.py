@@ -427,6 +427,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
     expiry_notice_rooms: List[Dict[str, Any]] = []
     target_ym = up_to_ym or date_today().isoformat()[:7]
     total_unpaid_branch = 0
+    total_overdue_branch = 0     # 납입일이 지난 미납(연체)
     monthly_target = 0
     monthly_collected = 0
     monthly_unpaid = 0
@@ -435,6 +436,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         ledger = ct.ledger(up_to_ym=up_to_ym) if ct else None
         if ledger:
             total_unpaid_branch += int(ledger["total_unpaid"])
+            total_overdue_branch += int(ledger.get("overdue_unpaid", 0))
             cur_row = next((m for m in ledger.get("months", []) if m.get("ym") == target_ym), None)
             if cur_row:
                 monthly_target += int(cur_row.get("due", 0))
@@ -503,6 +505,8 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         "monthly_unpaid": monthly_unpaid,
         "monthly_collection_rate": monthly_rate,
         "total_unpaid_branch": total_unpaid_branch,
+        "total_overdue_branch": total_overdue_branch,
+        "total_due_soon_branch": total_unpaid_branch - total_overdue_branch,
         "rooms": room_cards,
         "transfer_notices": [n.model_dump() for n in sorted(TransferNotice.find(branch=b_id), key=lambda x: x.created_at) if n.status == "PENDING"],
         "pin": _pin_info(request),
