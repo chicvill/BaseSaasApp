@@ -8486,5 +8486,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn('class="bass-input pr-fee"', app)
 
 
+    def test_133_more_toggle_never_swallowed_and_clock_above_bell(self):
+        """133. ☰ 메뉴의 '더 많은 기능 보기' 단추가 접힌 그룹 안에 끼어 사라지지 않는다(그러면 3단계 등이 영영 안 보인다) · 날짜·시각은 🔔 위 묶음에 둔다 · 관리비 산출근거 줄 레이아웃은 공용 스타일로 고정."""
+        hb = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "hamburger.js"), encoding="utf-8").read()
+        for needle in ("old.parentNode === drawer", "old.remove()", '!c.classList.contains("r3-more-toggle")'):
+            self.assertIn(needle, hb, needle)
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("placeClockAboveBell", "r3-hdr-right", ".r3-modal__body .mf-row { display: grid !important"):
+            self.assertIn(needle, app, needle)
+
+
 if __name__ == "__main__":
     unittest.main()

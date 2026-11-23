@@ -317,6 +317,27 @@
 
   // 머리글: 건물이름[아이디] 현재 일시 (1분마다 갱신)
   let hdrName = "";
+  // 날짜·시각을 🔔 바로 위(오른쪽 끝)에 둔다: ☰·🔔 이 있는 머리줄에 오른쪽 세로 묶음(시각 위, 🔔 아래)을 만든다. 🔔 은 나중에 만들어지므로 나타나면 옮긴다.
+  (function placeClockAboveBell() {
+    const put = () => {
+      const bell = document.querySelector(".r3-bell:not(.r3-bell--float)"), clk = document.getElementById("bldgClock");
+      if (!bell || !clk || !bell.parentNode) return !!(bell && bell.parentNode && bell.parentNode.classList.contains("r3-hdr-right"));
+      if (bell.parentNode.classList.contains("r3-hdr-right")) return true;
+      const col = document.createElement("div");
+      col.className = "r3-hdr-right";
+      col.style.cssText = "display:flex;flex-direction:column;align-items:flex-end;flex:none;margin-left:auto;";
+      bell.parentNode.insertBefore(col, bell);
+      bell.style.marginLeft = "0";
+      col.appendChild(clk);
+      col.appendChild(bell);
+      return true;
+    };
+    if (put()) return;
+    const hdr = document.querySelector("header.bass-card") || document.body;
+    const mo = new MutationObserver(() => { if (put()) mo.disconnect(); });
+    mo.observe(hdr, { childList: true, subtree: true });
+    setTimeout(() => mo.disconnect(), 15000);
+  })();
   const tickClock = R3Shell.startClock(document.getElementById("bldgTitle"), () => hdrName, document.getElementById("bldgClock"));
 
   async function refresh() {
@@ -412,6 +433,11 @@
     .rl-row--wait, .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active):hover { background: #fef08a !important; color: #111827 !important; }
     .rl-row--late, .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active):hover { background: #fecaca !important; color: #111827 !important; }
     .rl-row--vacant, .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active):hover { background: #e2e8f0 !important; color: #334155 !important; }
+    /* 🧮 관리비 산출근거 모달 */
+    .r3-modal__body .mf-row { display: grid !important; grid-template-columns: 26px minmax(0, 1fr) 40px 104px; gap: 6px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--border, #e2e8f0); font-size: 14px; cursor: pointer; }
+    .r3-modal__body .mf-row input[type=checkbox] { width: 20px; height: 20px; margin: 0; }
+    .mf-cnt { font-size: 12.5px; opacity: .7; text-align: right; } .mf-amt { text-align: right; white-space: nowrap; }
+    .mf-sum { padding: 10px 12px; border-radius: 12px; background: #eef2ff; margin: 10px 0; font-size: 14px; line-height: 1.7; } .mf-big { font-size: 18px; font-weight: 800; }
     .bass-btn.rl-row:active { filter: brightness(.92); transform: none !important; }
     /* 컴팩트 첫 화면: 머리말·KPI·문자 수납 카드·단추의 크기와 여백을 줄여 한 화면에 더 많이 보이게 한다 */
     .app-shell { padding: 8px 8px 60px !important; }
@@ -1539,8 +1565,6 @@
       <span class="mf-lbl">${E(i.label)}</span><span class="mf-cnt">${i.count ? i.count + "건" : "-"}</span><strong class="mf-amt" data-amt="${i.amount}">${fmtWon(i.amount)}</strong></label>`).join("");
     const yrs = [yr - 2, yr - 1, yr, yr + 1].filter((y) => y > 2000);
     const body = openModal(`🧮 ${E(d.year)}년 관리비 산출근거`, `
-      <style>.mf-row{display:grid;grid-template-columns:24px minmax(0,1fr) 44px 108px;gap:6px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border,#e2e8f0);font-size:14px}
-      .mf-cnt{font-size:12.5px;opacity:.7;text-align:right}.mf-amt{text-align:right;white-space:nowrap}.mf-sum{padding:10px 12px;border-radius:12px;background:#eef2ff;margin:10px 0;font-size:14px;line-height:1.7}.mf-big{font-size:18px;font-weight:800}</style>
       <div class="bass-row" style="gap:8px;margin-bottom:6px;"><label class="r3-fld" style="flex:1;">기준 연도<select id="mfYear" class="bass-select">${yrs.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select></label></div>
       <div style="font-size:12.5px;margin-bottom:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;">📌 참고자료입니다. 실제 관리비 청구·수납·세금 산출에는 반영되지 않고, 계약서에 적힌 월세·관리비 금액을 그대로 따릅니다.</div>
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">체크한 항목만 합계에 넣습니다. 금액은 세무 허브의 경비(지출) 등록에서 가져옵니다.</div>

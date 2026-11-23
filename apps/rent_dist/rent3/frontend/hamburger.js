@@ -111,7 +111,11 @@
     var secs = drawer.querySelectorAll(".r3-more-sec");
     var old = drawer.querySelector(".r3-more-toggle");
     if (!secs.length) { if (old) old.remove(); return; }
-    if (old) return;
+    if (old && old.parentNode === drawer) {          // 이미 서랍 바로 아래에 있으면 첫 접힌 그룹 앞으로 위치만 바로잡는다
+      if (old.nextElementSibling !== secs[0]) drawer.insertBefore(old, secs[0]);
+      return;
+    }
+    if (old) old.remove();                             // 다른 그룹 안에 끼어 들어간 단추는 지우고 새로 만든다
     var n = 0;
     Array.prototype.forEach.call(secs, function (sec) { n += sec.querySelectorAll("a, button.r3-item, .tab-btn").length; });
     var btn = document.createElement("button");
@@ -134,7 +138,7 @@
   function layoutGridInner(drawer, head, searchWrap, emptyMsg) {
     // 이미 section으로 묶여 있고 바깥에 새로 추가된 아이템이 없으면 각 아이템 아이콘만 확인한다
     var loose = Array.prototype.slice.call(drawer.children).filter(function (c) {
-      return c !== head && c !== searchWrap && c !== emptyMsg && !c.classList.contains("r3-drawer__section");
+      return c !== head && c !== searchWrap && c !== emptyMsg && !c.classList.contains("r3-drawer__section") && !c.classList.contains("r3-more-toggle");
     });
 
     if (loose.length) {
