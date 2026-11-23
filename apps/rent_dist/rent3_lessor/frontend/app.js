@@ -1637,7 +1637,7 @@
           <label class="r3-fld">증빙<select id="mfEv" class="bass-select"><option value="TAX_INVOICE">세금계산서</option><option value="CARD">카드·현금영수증</option><option value="NONE">증빙 없음(감가상각 등)</option></select></label>
         </div>
         <label class="r3-fld" style="margin-top:6px;">내용(메모)<input id="mfTitle" class="bass-input" type="text" placeholder="예: 5월 엘리베이터 점검"></label>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;"><input id="mfTax" type="checkbox" checked> 세무 경비(종소세·부가세)에 포함 <span class="bass-muted">— 기본 켜짐 · 끄면 이 화면의 참고용으로만 저장</span></label>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;"><input id="mfTax" type="checkbox" checked> 세무 경비(종소세·부가세)에 포함 <span class="bass-muted">— 기본 켜짐(감가상각비만 꺼짐) · 끄면 이 화면의 참고용으로만 저장</span></label>
         <button id="mfAdd" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:44px;margin-top:8px;">저장</button>
       </details>`);
     const sumEl = body.querySelector("#mfSum");
@@ -1655,7 +1655,10 @@
     body.querySelectorAll(".mf-chk").forEach((c) => c.addEventListener("change", recalc));
     recalc();
     body.querySelector("#mfYear").addEventListener("change", (e) => showMgmtFeeModal(e.target.value).catch(Bass.showError));
-    body.querySelector("#mfCat").addEventListener("change", (e) => { body.querySelector("#mfEv").value = evDefault(e.target.value); });
+    // 감가상각비는 세무사가 법정 내용연수로 따로 산정하는 경우가 많아 '세무 경비에 포함' 기본을 끈다(나머지 항목은 기본 켜짐)
+    const syncTaxDefault = () => { const c = body.querySelector("#mfCat").value; body.querySelector("#mfTax").checked = c !== "depreciation"; body.querySelector("#mfEv").value = evDefault(c); };
+    body.querySelector("#mfCat").addEventListener("change", syncTaxDefault);
+    syncTaxDefault();
     body.querySelector("#mfAdd").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const amount = Number(body.querySelector("#mfAmt").value || 0);
@@ -2637,7 +2640,7 @@
           </div>
         </details>
       </div>`,
-      invoice: monthRow + `<div class="bass-muted" style="font-size:12.5px;margin:0 0 8px;line-height:1.6;">정보미비로 표시된 건은 <strong>수납 현황 ▸ 해당 호실 ▸ 계약내용</strong>에서 사업자등록번호·상호·대표자명·이메일·사업자등록상 주소를 입력하면 발급 가능해집니다 (주거용·기숙사 호실 포함). 사업자등록증 사진이 있으면 <strong>☰ 메뉴 ▸ 사업자등록증 촬영 ▸ 임차인용</strong>에서 올려 자동으로 채울 수 있습니다.</div>` + `      <div class="bass-card" style="margin-bottom:12px;">
+      invoice: monthRow + `<div class="bass-muted" style="font-size:12.5px;margin:0 0 8px;line-height:1.6;">사업자번호가 없는 과세 호실은 아래에서 <strong>현금영수증</strong>을 기록합니다. 정보미비로 표시된 건은 <strong>수납 현황 ▸ 해당 호실 ▸ 계약내용</strong>에서 사업자등록번호·상호·대표자명·이메일·사업자등록상 주소를 입력하면 발급 가능해집니다 (주거용·기숙사 호실 포함). 사업자등록증 사진이 있으면 <strong>☰ 메뉴 ▸ 사업자등록증 촬영 ▸ 임차인용</strong>에서 올려 자동으로 채울 수 있습니다.</div>` + `      <div class="bass-card" style="margin-bottom:12px;">
         <div class="bass-row" style="justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
           <h3 style="margin:0;">📑 세금계산서 발급 리스트 (청구월 약정 지급일 기준 월 1건 · 5줄 스크롤)</h3>
           <button id="btnDlHometaxCsv2" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📥 홈택스 일괄발급 포맷(CSV)</button>

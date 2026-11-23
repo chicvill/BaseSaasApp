@@ -5935,6 +5935,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t = Tenant.get("tenant_201")
             self.assertEqual((t.business_number, t.company_name, t.ceo_name, t.email), (valid, "임차상사", "임차대표", "t@example.com"))
             self.assertTrue(any("사업자 정보 제출" in m.message for m in DirectChat.find(branch="main", room_no=t.room_no)))      # 임대인에게 알림
+            ct_sync = Contract.first(branch="main", room_no=t.room_no, status="ACTIVE")
+            self.assertEqual((ct_sync.tenant_business_number, ct_sync.tenant_company_name, ct_sync.tenant_ceo_name), (valid, "임차상사", "임차대표"))   # 계약에도 같이 반영(대장이 계약을 먼저 읽는다)
+            self.assertTrue(ct_sync.tax_invoice_requested)
             self.assertEqual(c.get(f"{TN}/myhome/tenant_201/business-registration", headers=tk).json()["business"]["business_number"], valid)
             self.assertEqual(c.post(f"{TN}/myhome/tenant_202/business-registration", headers=tk, json={"business_number": valid, "email": "x@e.com"}).status_code, 403)   # 남의 계정 불가
 

@@ -531,6 +531,15 @@ def submit_tenant_business_registration(tenant_id: str, req: TenantBizRegReq):
     t.biz_submitted_at = now_iso()
     t.save(action="tenant_business_registration_submitted", app_source=APP_SRC)
     room = Room.get(t.current_room_id) if t.current_room_id else Room.first(branch=t.branch, room_no=t.room_no)
+    # 세금계산서 대장은 계약 → 임차인 순으로 읽으므로, 계약에 이전 값이 남아 있으면 새로 낸 정보가 가려진다 → 활성 계약에도 같이 반영(부가세 청구 여부 vat_target 은 건드리지 않는다)
+    ct = (Contract.first(id_room=room.id, status="ACTIVE") if room else None) or Contract.first(branch=t.branch, room_no=t.room_no, status="ACTIVE")
+    if ct:
+        ct.tenant_business_number, ct.tenant_email = t.business_number, t.email
+        ct.tenant_company_name = t.company_name or ct.tenant_company_name
+        ct.tenant_ceo_name = t.ceo_name or ct.tenant_ceo_name
+        ct.tenant_business_address = t.business_address or ct.tenant_business_address
+        ct.tax_invoice_requested = True
+        ct.save(action="tenant_business_registration_submitted", app_source=APP_SRC)
     DirectChat(branch=t.branch, id_room=(room.id if room else ""), room_no=t.room_no, sender_role="tenant", sender_name=t.name,
                message=f"[🏢 사업자 정보 제출] {t.room_no}호 {t.name} 세입자가 사업자등록증 정보(사업자번호 {t.business_number}, 상호 {t.company_name or '-'})와 세금계산서 수신 이메일을 제출했습니다. "
                        "세금계산서 발급 시 홈택스에서 사업자 상태를 확인해 주세요.").save(action="chat_auto_sent", app_source=APP_SRC)
