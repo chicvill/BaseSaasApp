@@ -4,9 +4,10 @@
  */
 
 export class ApiClient {
-  constructor(appId = '', baseUrl = '') {
+  constructor(appId = '', baseUrl = '', { onMockWarning = null } = {}) {
     this.appId = appId;
     this.baseUrl = baseUrl;
+    this.onMockWarning = onMockWarning;
   }
 
   getToken() {
@@ -63,10 +64,28 @@ export class ApiClient {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: response.statusText }));
-      throw new Error(errorData.detail || `Request failed with status ${response.status}`);
+      throw new Error(
+        errorData.error_message ||
+        errorData.message ||
+        errorData.detail ||
+        `Request failed with status ${response.status}`
+      );
     }
 
-    return response.json();
+    const data = await response.json();
+    const nested = data && typeof data.result === 'object' ? data.result : null;
+    const isMock = Boolean(data && (data.is_mock || data.mock || (nested && (nested.is_mock || nested.mock))));
+    const errorMessage = (data && data.error_message) || (nested && nested.error_message) || '';
+
+    if (!options.silentMock && (isMock || errorMessage)) {
+      if (typeof this.onMockWarning === 'function') {
+        this.onMockWarning({ isMock, errorMessage, data });
+      } else if (typeof window !== 'undefined' && window.Bass && typeof window.Bass.notifyApiResult === 'function') {
+        window.Bass.notifyApiResult(data);
+      }
+    }
+
+    return data;
   }
 
   get(endpoint, options = {}) {

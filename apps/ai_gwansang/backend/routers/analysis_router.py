@@ -96,4 +96,9 @@ async def analyze_face(
     db.commit()
     db.refresh(analysis)
 
-    return {"analysis_id": analysis.id, "result": result}
+    return {
+        "analysis_id": analysis.id,
+        "result": result,
+        "is_mock": bool(result.get("is_mock", False)),
+        "error_message": result.get("error_message"),
+    }

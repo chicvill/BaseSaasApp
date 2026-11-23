@@ -23,11 +23,14 @@ class MockAIClient(BaseAIClient):
         return f"[Mock AI 이미지 분석] 프롬프트: '{prompt[:40]}', 이미지 크기: {len(image_base64)} bytes"
 
     async def generate_structured(self, prompt: str, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        msg = "API 키를 설정하면 실제 AI 모델 분석 결과가 반환됩니다."
         return {
             "mock": True,
+            "is_mock": True,
             "status": "success",
             "prompt": prompt[:50],
-            "message": "API 키를 설정하면 실제 AI 모델 분석 결과가 반환됩니다.",
+            "message": msg,
+            "error_message": msg,
         }
 
     async def generate_structured_with_image(
@@ -38,12 +41,15 @@ class MockAIClient(BaseAIClient):
         schema: Optional[Dict[str, Any]] = None,
         fallback_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
+        msg = "Mock 이미지 구조화 분석 응답입니다. GEMINI_API_KEY를 설정하세요."
         if fallback_data:
-            return fallback_data
+            return {**fallback_data, "is_mock": True, "error_message": msg}
         return {
             "mock": True,
+            "is_mock": True,
             "status": "success",
             "prompt": prompt[:50],
             "image_size": len(image_base64),
-            "message": "Mock 이미지 구조화 분석 응답입니다.",
+            "message": msg,
+            "error_message": msg,
         }

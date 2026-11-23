@@ -29,7 +29,27 @@
   function token() { return global.localStorage.getItem(TOKEN_KEY) || ""; }
   function setToken(t) { t ? global.localStorage.setItem(TOKEN_KEY, t) : global.localStorage.removeItem(TOKEN_KEY); }
 
-  async function request(url, { method = "GET", body, headers = {} } = {}) {
+  function notifyApiResult(data) {
+    if (!data || typeof data !== "object") return false;
+    const nested = (data.result && typeof data.result === "object") ? data.result : null;
+    const isMock = Boolean(data.is_mock || data.mock || (nested && (nested.is_mock || nested.mock)));
+    const errMsg = data.error_message || (nested && nested.error_message) || "";
+    if (isMock) {
+      updateAppAlert(
+        "warning",
+        "실제 AI/외부 API 호출에 실패하여 샘플(Mock) 결과가 표시되었습니다.",
+        errMsg || "API 키 설정 또는 크레딧/네트워크 상태를 확인해 주세요."
+      );
+      return true;
+    }
+    if (errMsg) {
+      updateAppAlert("warning", errMsg, data.hint || "");
+      return true;
+    }
+    return false;
+  }
+
+  async function request(url, { method = "GET", body, headers = {}, silentMock = false } = {}) {
     const h = { Accept: "application/json", ...headers };
     if (body !== undefined) h["Content-Type"] = "application/json";
     if (token()) h.Authorization = `Bearer ${token()}`;
@@ -45,9 +65,12 @@
     if (!res.ok || (data && data.success === false)) {
       throw new BassError({
         level: (data && data.level) || (res.status >= 500 ? "error" : "warning"),
-        message: (data && (data.message || data.detail)) || `요청이 실패했습니다 (HTTP ${res.status}).`,
+        message: (data && (data.error_message || data.message || data.detail)) || `요청이 실패했습니다 (HTTP ${res.status}).`,
         hint: (data && data.hint) || "", status: res.status, data,
       });
+    }
+    if (!silentMock) {
+      notifyApiResult(data);
     }
     return data;
   }
@@ -133,6 +156,6 @@
       return v;
     } catch (e) { return ""; }
   }
-  global.Bass = { apiBase, api, request, updateAppAlert, showError, withLock, token, setToken, escapeHtml, deviceId, BassError };
+  global.Bass = { apiBase, api, request, notifyApiResult, updateAppAlert, showError, withLock, token, setToken, escapeHtml, deviceId, BassError };
   global.updateAppAlert = updateAppAlert;
 })(window);

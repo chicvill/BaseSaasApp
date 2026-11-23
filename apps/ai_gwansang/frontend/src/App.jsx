@@ -357,7 +357,30 @@ export default function App() {
           {/* 결과 화면 */}
           {result && (
             <div style={{ marginTop: 30, background: '#111827', border: '1px solid #334155', borderRadius: 16, padding: 20 }}>
-              <h3 style={{ borderBottom: '1px solid #334155', paddingBottom: 10, marginTop: 0 }}>✨ AI 관상 분석 결과 ✨</h3>
+              {result.is_mock && (
+                <div style={{
+                  marginBottom: 16,
+                  padding: '12px 14px',
+                  background: '#451a03',
+                  border: '1px solid #f59e0b',
+                  borderRadius: 10,
+                  color: '#fde68a',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.5,
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                    ⚠️ 실제 AI 분석에 실패하여 샘플(Mock) 결과가 표시되었습니다.
+                  </div>
+                  {result.error_message && (
+                    <div style={{ color: '#fed7aa', fontSize: '0.85rem' }}>
+                      원인: {result.error_message}
+                    </div>
+                  )}
+                </div>
+              )}
+              <h3 style={{ borderBottom: '1px solid #334155', paddingBottom: 10, marginTop: 0 }}>
+                ✨ AI 관상 분석 결과 ✨ {result.is_mock && <span style={{ fontSize: '0.8rem', color: '#fbbf24' }}>(샘플)</span>}
+              </h3>
               <div style={{ marginTop: 16, display: 'grid', gap: 12, lineHeight: 1.6 }}>
                 <div><strong style={{ color: '#f59e0b' }}>동물상:</strong> {result.animalType} ({result.overallScore}점)</div>
                 <div><strong style={{ color: '#f59e0b' }}>인상 요약:</strong> {result.animalDescription}</div>

@@ -24,7 +24,10 @@ class GwansangAIService(GeminiClient):
     async def analyze_face(self, image_base64: str, user_name: str) -> dict:
         """얼굴 이미지 관상 분석"""
         if not self.is_available:
-            return self._mock_gwansang_result(user_name)
+            return self._mock_gwansang_result(
+                user_name,
+                error_message=self.last_error or "GEMINI_API_KEY가 설정되지 않았습니다.",
+            )
 
         prompt = f"""
 사용자 이름: {user_name}님
@@ -43,13 +46,16 @@ class GwansangAIService(GeminiClient):
 }}
         """
         fallback = self._mock_gwansang_result(user_name)
-        return await self.generate_structured_with_image(
+        result = await self.generate_structured_with_image(
             prompt=prompt,
             image_base64=image_base64,
             fallback_data=fallback,
         )
+        if result.get("is_mock") and not result.get("error_message"):
+            result["error_message"] = self.last_error or "Gemini API 호출에 실패하여 샘플 결과를 반환했습니다."
+        return result
 
-    def _mock_gwansang_result(self, user_name: str) -> dict:
+    def _mock_gwansang_result(self, user_name: str, error_message: str | None = None) -> dict:
         return {
             "animalType": "지혜로운 백조상",
             "animalDescription": "눈매가 차분하고 고요하며 얼굴선이 정돈되어 있어 신뢰감을 줍니다.",
@@ -60,4 +66,6 @@ class GwansangAIService(GeminiClient):
             "loveLuck": "인연을 천천히 바라보는 타입이라 깊고 믿음직한 관계를 만들어갑니다.",
             "healthLuck": "규칙적인 생활을 유지하면 건강을 잘 관리할 수 있습니다.",
             "advice": "오늘의 선택은 장기적인 흐름에 유리합니다. 차분하게 실행하세요.",
+            "is_mock": True,
+            "error_message": error_message,
         }

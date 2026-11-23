@@ -108,9 +108,25 @@ apps/{app_id}/backend/api.py — HTTP ↔ 도메인 변환 라우터.
 """
 from typing import Any, Dict
 from fastapi import APIRouter, Body
+from core import NotFound
 from .domain import Item
 
 router = APIRouter()
+
+
+def api_result(payload: Dict[str, Any], *, message: str = "") -> Dict[str, Any]:
+    """공통 API 응답 래퍼: AI/외부 API의 is_mock 및 error_message 를 최상위로 표준 전달합니다."""
+    is_mock = bool(payload.get("is_mock") or payload.get("mock"))
+    error_message = payload.get("error_message")
+    res: Dict[str, Any] = {{
+        "success": True,
+        "result": payload,
+        "is_mock": is_mock,
+        "error_message": error_message,
+    }}
+    if message:
+        res["message"] = message
+    return res
 
 
 @router.get("/status")
@@ -218,7 +234,9 @@ APP_JS_TEMPLATE = '''(() => {{
     const act = btn.dataset.act;
     await Bass.withLock(btn, async () => {{
       const res = await Bass.api(APP, `/items/${{code}}/${{act}}`, {{ method: "POST" }});
-      Bass.updateAppAlert("success", res.message);
+      if (!res.is_mock && !res.error_message && res.message) {{
+        Bass.updateAppAlert("success", res.message);
+      }}
       await load();
     }});
   }});

@@ -80,6 +80,7 @@ class GeminiClient(BaseAIClient):
         self.model = os.getenv("GEMINI_MODEL", model) or "gemini-3.5-flash"
         self.system_prompt = system_prompt
         self._client = None
+        self.last_error: Optional[str] = None
 
         if self.api_key:
             if genai is not None:
@@ -87,11 +88,26 @@ class GeminiClient(BaseAIClient):
                     self._client = genai.Client(api_key=self.api_key)
                     logger.info(f"Gemini AI 클라이언트 초기화 완료. 모델: {self.model}")
                 except Exception as e:
-                    logger.warning(f"Gemini 클라이언트 초기화 실패: {e}")
+                    self.last_error = f"Gemini 클라이언트 초기화 실패: {e}"
+                    logger.warning(self.last_error)
             else:
-                logger.warning("google-genai 패키지가 설치되지 않았습니다. (pip install google-genai 필요)")
+                self.last_error = "google-genai 패키지가 설치되지 않았습니다. (pip install google-genai 필요)"
+                logger.warning(self.last_error)
         else:
+            self.last_error = "GEMINI_API_KEY가 설정되지 않았습니다."
             logger.warning("GEMINI_API_KEY가 설정되지 않았습니다. Mock 모드로 실행됩니다.")
+
+    @staticmethod
+    def _format_api_error(exc: Exception) -> str:
+        msg = str(exc)
+        lower = msg.lower()
+        if "402" in msg or "prepayment credits are depleted" in lower or "payment required" in lower:
+            return "Gemini API 선불 크레딧 잔액이 소진되었습니다. AI Studio에서 크레딧을 충전하거나 무료 티어 API 키를 사용하세요. (402 Payment Required)"
+        if "429" in msg or "resource_exhausted" in lower or "quota" in lower:
+            return "Gemini API 요청 한도(Quota)를 초과했습니다. 잠시 후 다시 시도하거나 요금제를 확인하세요. (429 RESOURCE_EXHAUSTED)"
+        if "401" in msg or "403" in msg or "api_key_invalid" in lower or "permission_denied" in lower:
+            return "Gemini API 키가 유효하지 않거나 접근 권한이 없습니다. API 키 설정을 확인하세요."
+        return f"Gemini API 호출 실패: {msg[:200]}"
 
     @property
     def is_available(self) -> bool:
@@ -101,10 +117,14 @@ class GeminiClient(BaseAIClient):
     async def generate_text(self, prompt: str) -> str:
         """텍스트 기반 AI 생성 (쿼터 소진 시 가용 모델 자동 폴백)"""
         if not self._client:
-            return self._mock_text_response(prompt)
+            if not self.last_error:
+                self.last_error = "GEMINI_API_KEY가 설정되지 않았습니다."
+            return self._mock_text_response(prompt, self.last_error)
 
+        self.last_error = None
         full_prompt = f"{self.system_prompt}\n\n{prompt}" if self.system_prompt else prompt
         models_to_try = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+        last_exc: Optional[Exception] = None
 
         for model_name in models_to_try:
             try:
@@ -118,17 +138,26 @@ class GeminiClient(BaseAIClient):
                         self.model = model_name
                     return response.text
             except Exception as e:
+                last_exc = e
                 logger.warning(f"Gemini 모델({model_name}) 요청 실패, 다음 후보 시도: {e}")
                 continue
 
-        logger.error("모든 Gemini 모델의 요청이 실패하여 Mock 응답으로 전환합니다.")
-        return self._mock_text_response(prompt)
+        self.last_error = (
+            self._format_api_error(last_exc)
+            if last_exc is not None
+            else "Gemini API에서 빈 응답을 반환했습니다."
+        )
+        logger.error(f"모든 Gemini 텍스트 모델 요청 실패: {self.last_error}")
+        return self._mock_text_response(prompt, self.last_error)
 
     async def generate_with_image(self, prompt: str, image_base64: str, mime_type: str = "image/jpeg") -> str:
         """이미지 + 텍스트 기반 AI 생성 (관상 분석, 스마트팜 진단 등)"""
         if not self._client:
-            return self._mock_image_response()
+            if not self.last_error:
+                self.last_error = "GEMINI_API_KEY가 설정되지 않았습니다."
+            return self._mock_image_response(self.last_error)
 
+        self.last_error = None
         try:
             import base64
             clean_b64 = image_base64.split(",")[1] if "," in image_base64 else image_base64
@@ -136,10 +165,12 @@ class GeminiClient(BaseAIClient):
             full_prompt = f"{self.system_prompt}\n\n{prompt}" if self.system_prompt else prompt
 
             if types is None:
-                return self._mock_image_response()
+                self.last_error = "google-genai types 모듈을 불러올 수 없습니다."
+                return self._mock_image_response(self.last_error)
             image_part = types.Part.from_bytes(data=image_bytes, mime_type=mime_type)
 
             models_to_try = [self.model] + [m for m in FALLBACK_MODELS if m != self.model]
+            last_exc: Optional[Exception] = None
             for model_name in models_to_try:
                 try:
                     response = self._client.models.generate_content(
@@ -149,13 +180,21 @@ class GeminiClient(BaseAIClient):
                     if response and response.text:
                         return response.text
                 except Exception as e:
+                    last_exc = e
                     logger.warning(f"Gemini 이미지 분석 ({model_name}) 실패, 다음 후보 시도: {e}")
                     continue
 
-            return self._mock_image_response()
+            self.last_error = (
+                self._format_api_error(last_exc)
+                if last_exc is not None
+                else "Gemini API에서 빈 응답을 반환했습니다."
+            )
+            logger.error(f"모든 Gemini 이미지 모델 요청 실패: {self.last_error}")
+            return self._mock_image_response(self.last_error)
         except Exception as e:
+            self.last_error = self._format_api_error(e)
             logger.error(f"Gemini 이미지 분석 오류: {e}")
-            return self._mock_image_response()
+            return self._mock_image_response(self.last_error)
 
     async def generate_structured(
         self,
@@ -164,17 +203,33 @@ class GeminiClient(BaseAIClient):
         fallback_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """구조화된 JSON 응답 생성 (데이터 분석 등)"""
+        if not self.is_available:
+            err = self.last_error or "GEMINI_API_KEY가 설정되지 않았습니다."
+            if fallback_data:
+                return {**fallback_data, "is_mock": True, "error_message": err}
+            return {"mock": True, "is_mock": True, "error_message": err}
+
         json_prompt = f"{prompt}\n\n응답은 반드시 마크다운이나 부가 설명 없이 순수한 JSON 형식으로만 작성하세요."
         text = await self.generate_text(json_prompt)
 
+        if self.last_error:
+            if fallback_data:
+                return {**fallback_data, "is_mock": True, "error_message": self.last_error}
+            return {"raw": text, "mock": True, "is_mock": True, "error_message": self.last_error}
+
         try:
             clean = clean_json_markdown(text)
-            return json.loads(clean)
+            parsed = json.loads(clean)
+            if isinstance(parsed, dict):
+                parsed.setdefault("is_mock", False)
+            return parsed
         except Exception as e:
+            err = f"Gemini 응답 JSON 파싱 실패: {e}"
+            self.last_error = err
             logger.warning(f"JSON 파싱 실패 ({e}), fallback 또는 원본 반환")
             if fallback_data:
-                return fallback_data
-            return {"raw": text, "parse_error": True}
+                return {**fallback_data, "is_mock": True, "error_message": err}
+            return {"raw": text, "parse_error": True, "is_mock": True, "error_message": err}
 
     async def generate_structured_with_image(
         self,
@@ -186,7 +241,10 @@ class GeminiClient(BaseAIClient):
     ) -> Dict[str, Any]:
         """이미지 기반 구조화된 JSON 데이터 분석 및 생성 (관상, 얼굴분석, 작물진단 등)"""
         if not self.is_available:
-            return fallback_data or json.loads(self._mock_image_response())
+            err = self.last_error or "GEMINI_API_KEY가 설정되지 않았습니다."
+            if fallback_data:
+                return {**fallback_data, "is_mock": True, "error_message": err}
+            return json.loads(self._mock_image_response(err))
 
         b64_clean, detected_mime = extract_base64_data(image_base64, default_mime=mime_type)
         json_prompt = f"{prompt}\n\n응답은 반드시 마크다운(```json) 없이 순수한 JSON 형식으로만 작성하세요."
@@ -194,12 +252,21 @@ class GeminiClient(BaseAIClient):
         try:
             raw_text = await self.generate_with_image(json_prompt, b64_clean, mime_type=detected_mime)
             clean = clean_json_markdown(raw_text)
-            return json.loads(clean)
+            parsed = json.loads(clean)
+            if isinstance(parsed, dict) and parsed.get("mock") is True:
+                err = self.last_error or parsed.get("message") or "Gemini API 호출에 실패했습니다."
+                if fallback_data:
+                    return {**fallback_data, "is_mock": True, "error_message": err}
+                return {**parsed, "is_mock": True, "error_message": err}
+            if isinstance(parsed, dict):
+                parsed.setdefault("is_mock", False)
+            return parsed
         except Exception as e:
+            err = self.last_error or f"Gemini 응답 JSON 파싱 실패: {e}"
             logger.warning(f"Gemini 이미지 구조화 파싱 실패 ({e})")
             if fallback_data:
-                return fallback_data
-            return {"raw": raw_text, "parse_error": True}
+                return {**fallback_data, "is_mock": True, "error_message": err}
+            return {"raw": raw_text, "parse_error": True, "is_mock": True, "error_message": err}
 
     def generate_with_image_sync(
         self,
@@ -229,15 +296,22 @@ class GeminiClient(BaseAIClient):
                     self.generate_structured_with_image(prompt, image_base64, mime_type=mime_type, fallback_data=fallback_data)
                 )
         except Exception as e:
+            err = self._format_api_error(e)
+            self.last_error = err
             logger.warning(f"generate_with_image_sync 실행 오류: {e}")
-            return fallback_data
+            if fallback_data:
+                return {**fallback_data, "is_mock": True, "error_message": err}
+            return {"mock": True, "is_mock": True, "error_message": err}
 
-    # ─── Mock 응답 (API Key 없을 때) ──────────────────────────
-    def _mock_text_response(self, prompt: str) -> str:
-        return f"[Mock AI 응답] '{prompt[:30]}...' 에 대한 AI 분석 결과입니다. (실제 운영 시 GEMINI_API_KEY를 설정하세요)"
+    # ─── Mock 응답 (API Key 없을 때 / 호출 실패 시) ───────────
+    def _mock_text_response(self, prompt: str, reason: Optional[str] = None) -> str:
+        detail = reason or "실제 운영 시 GEMINI_API_KEY를 설정하세요"
+        return f"[Mock AI 응답] '{prompt[:30]}...' 에 대한 샘플 응답입니다. ({detail})"
 
-    def _mock_image_response(self) -> str:
+    def _mock_image_response(self, reason: Optional[str] = None) -> str:
         return json.dumps({
             "mock": True,
-            "message": "이미지 분석 Mock 응답입니다. GEMINI_API_KEY를 설정하세요.",
+            "is_mock": True,
+            "message": reason or "이미지 분석 Mock 응답입니다. GEMINI_API_KEY를 설정하세요.",
+            "error_message": reason or "GEMINI_API_KEY가 설정되지 않았습니다.",
         }, ensure_ascii=False)
