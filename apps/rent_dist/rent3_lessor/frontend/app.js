@@ -401,12 +401,17 @@
     .rc-title span { font-size: 15px; margin-left: 4px; }
     .rc-unpaid { font-weight: 800; font-size: 14px; color: var(--ok); }
     .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
-    .rl-list { display: grid; gap: 8px; margin-bottom: 12px; }
-    .rl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 10px 14px; text-align: left; border-radius: 14px; font-size: 15px; }
-    .rl-name { font-weight: 800; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rl-badge { display: inline-block; min-width: 58px; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 800; text-align: center; }
-    .rl-badge--ok { background: #dcfce7; color: #166534; } .rl-badge--wait { background: #fef08a; color: #854d0e; } .rl-badge--late { background: #fee2e2; color: #b91c1c; } .rl-badge--vacant { background: #e2e8f0; color: #475569; }
-    .rl-day { font-size: 13px; color: #475569; white-space: nowrap; min-width: 62px; text-align: right; }
+    /* 호실 단추: 가로 5칸(한 화면에 30호실 안팎), 수납 상태는 단추 전체 배경색 — 초록 완납 · 노랑 대기 · 빨강 미납 · 회색 공실 */
+    .rl-list { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-bottom: 12px; }
+    .rl-row { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; min-width: 0; min-height: 78px; padding: 6px 2px; text-align: center; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
+    .rl-no { font-size: 16px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 12px; font-weight: 700; }
+    .rl-who { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rl-st { font-size: 12px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 12px; opacity: .9; white-space: nowrap; }
+    .rl-row--ok { background: #15803d !important; color: #ffffff !important; }
+    .rl-row--wait { background: #fde047 !important; color: #422006 !important; }
+    .rl-row--late { background: #b91c1c !important; color: #ffffff !important; }
+    .rl-row--vacant { background: #e2e8f0 !important; color: #334155 !important; }
+    .rl-row:active { filter: brightness(.92); }
     .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
@@ -1586,10 +1591,11 @@
       const st = roomState(x);
       const day = x.billing_schedule && x.billing_schedule.payment_day;
       const who = x.is_occupied && x.contract ? ` ${x.contract.tenant_name || ""}` : "";
-      return `<button type="button" class="bass-btn rl-row" data-room="${Bass.escapeHtml(x.room_no)}" aria-label="${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)} ${Bass.escapeHtml(st.label)}">
-        <span class="rl-name">${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)}</span>
-        <span class="rl-badge rl-badge--${st.cls}">${Bass.escapeHtml(st.label)}</span>
-        <span class="rl-day">${day ? `매월 ${day}일` : "-"}</span></button>`;
+      return `<button type="button" class="bass-btn rl-row rl-row--${st.cls}" data-room="${Bass.escapeHtml(x.room_no)}" aria-label="${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)} ${Bass.escapeHtml(st.label)}${day ? ` 매월 ${day}일` : ""}">
+        <span class="rl-no">${Bass.escapeHtml(x.room_no)}<small>호</small></span>
+        <span class="rl-who">${Bass.escapeHtml((who || " 공실").trim())}</span>
+        <span class="rl-st">${Bass.escapeHtml(st.label)}</span>
+        <span class="rl-day">${day ? `${day}일` : "-"}</span></button>`;
     };
     // 지금 챙길 일: 임차인이 이체했다고 알린 건(바로 보임), 미납 호실(접어 두었다가 눌러 펼친다, 많이 밀린 순)
     const conn = dash.connect_requests || [];

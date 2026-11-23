@@ -4673,7 +4673,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertLess(i_sms, i_list)                                          # 문자 입력이 호실 목록보다 위
         for gone in ("roomPick", "lateHtml", "호실 선택</label>", "btn-late-sms"):
             self.assertNotIn(gone, app, gone)
-        for needle in ("rl-row", "rl-badge--ok", "rl-badge--wait", "rl-badge--late", "function openRoomModal", 'id="roomPanel"', 'id="roomModalClose"', "닫기", "openRoomModal(rn)", "📨 미납 안내 문자",
+        for needle in ("rl-row", "rl-row--ok", "rl-row--wait", "rl-row--late", "repeat(5, minmax(0, 1fr))", "function openRoomModal", 'id="roomPanel"', 'id="roomModalClose"', "닫기", "openRoomModal(rn)", "📨 미납 안내 문자",
                        "bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 메시지 복사"):
             self.assertIn(needle, app, needle)
         for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
