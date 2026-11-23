@@ -19,9 +19,13 @@
       layers[id] = closer;
       if (!pushed) { try { global.history.pushState({ r3layer: 1 }, ""); pushed = true; } catch (e) { /* 기록을 쌓지 못해도 열린다 */ } }
     }
-    function close(id) {
+    function close(id, skipBack) {
       if (!(id in layers)) return;
       delete layers[id];
+      if (skipBack) {
+        if (count() === 0) pushed = false;
+        return;
+      }
       if (pushed && count() === 0) {
         setTimeout(function () {
           if (pushed && count() === 0) {
@@ -324,6 +328,14 @@
     overlay.addEventListener("click", function () { setOpen(false); });
     document.addEventListener("keydown", function (e) { if (e.key === "Escape") setOpen(false); });
     drawer.addEventListener("click", function (e) {
+      var link = e.target.closest("a[href]");
+      if (link && (link.getAttribute("href") || "").charAt(0) !== "#" && (!link.target || link.target === "_self")) {
+        // 페이지 이동 링크(로그아웃·포털 홈 등)는 history.back() 이 내비게이션을 취소하지 않도록 기록만 정리한다
+        R3H.close("drawer", true);
+        drawer.classList.remove("is-open");
+        overlay.classList.remove("is-open");
+        return;
+      }
       if (e.target.closest("a, button.r3-item, .tab-btn")) setOpen(false);
     });
     window.Rent3Menu = { open: function () { setOpen(true); }, close: function () { setOpen(false); } };

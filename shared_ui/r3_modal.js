@@ -49,9 +49,13 @@
       layers[id] = closer;
       if (!pushed) { try { global.history.pushState({ r3layer: 1 }, ""); pushed = true; } catch (e) { /* 기록을 쌓지 못해도 열린다 */ } }
     }
-    function close(id) {
+    function close(id, skipBack) {
       if (!(id in layers)) return;
       delete layers[id];
+      if (skipBack) {
+        if (count() === 0) pushed = false;
+        return;
+      }
       if (pushed && count() === 0) {
         setTimeout(function () {
           if (pushed && count() === 0) {
