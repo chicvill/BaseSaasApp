@@ -316,7 +316,7 @@
 
   // 머리글: 건물이름[아이디] 현재 일시 (1분마다 갱신)
   let hdrName = "";
-  const tickClock = R3Shell.startClock(document.getElementById("bldgTitle"), () => hdrName);
+  const tickClock = R3Shell.startClock(document.getElementById("bldgTitle"), () => hdrName, document.getElementById("bldgClock"));
 
   async function refresh() {
     const qAsOf = selectedAsOfDate ? `&as_of_date=${encodeURIComponent(selectedAsOfDate)}` : "";
@@ -416,7 +416,15 @@
     .app-shell { padding: 8px 8px 60px !important; }
     .app-shell > header.bass-card, .app-shell header.bass-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
     #bldgTitle { font-size: 17px !important; margin: 0 !important; line-height: 1.25; }
-    #bldgSubtitle { font-size: 12px !important; }
+    #bldgClock { font-size: 12.5px; font-weight: 600; opacity: .75; white-space: nowrap; text-align: right; line-height: 1.2; margin-bottom: 3px; }
+    /* 호실 수납 창: 크게 열고, 창 전체를 가로·세로로 밀어 볼 수 있다(월별 납부 칸이 잘리지 않게 본문 최소 너비를 둔다) */
+    .r3-modal__box--wide { max-width: min(980px, 100vw) !important; width: 100% !important; max-height: 96vh !important; overflow: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 20px !important; }
+    .r3-modal__box--wide .r3-modal__head { position: sticky; top: 0; left: 0; z-index: 3; background: #fff; }
+    .r3-modal__box--wide .r3-modal__body { min-width: 640px; }
+    .r3-modal__box--wide .pr-list { max-height: none; overflow: visible; }
+    .r3-modal__box--wide .pr { grid-template-columns: 56px minmax(150px, 1.5fr) minmax(90px, 1fr) minmax(90px, 1fr) 64px; gap: 6px; font-size: 14px; }
+    .r3-modal__box--wide .pr .bass-input { font-size: 14px; padding: 6px 6px; }
+    .r3-modal__box--wide #roomModalClose { position: sticky; left: 0; width: calc(100vw - 48px) !important; max-width: 100%; }
     .app-shell [data-r3-burger] { width: 40px !important; height: 40px !important; min-height: 40px !important; min-width: 40px !important; padding: 0 !important; border-radius: 12px !important; font-size: 18px !important; }
     .app-shell .r3-bell { width: 40px !important; height: 40px !important; min-height: 40px !important; border-radius: 12px !important; font-size: 18px !important; }
     #kpiGrid.kpi-strip { display: grid !important; grid-template-columns: 1fr 1fr; gap: 2px 10px !important; margin: 6px 0 0 !important; font-size: 13px !important; }
@@ -444,13 +452,6 @@
     .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 52px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr .pr-del { padding: 4px; min-height: 40px; font-size: 12.5px; color: var(--err); width: 100%; }
-    /* 수납내역 표: 칸을 넓게(날짜·금액이 다 보이게) 하고, 화면보다 넓으면 좌우로 밀어 본다 */
-    .pr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
-    .pr-table { min-width: 500px; }
-    .pr-table .pr { grid-template-columns: 52px 168px 112px 104px 70px; gap: 8px; font-size: 14px; min-height: 52px; }
-    .pr-table .pr .bass-input { padding: 8px 8px; font-size: 15px; min-height: 44px; }
-    .pr-table .pr .pr-del { font-size: 14px; min-height: 44px; }
-    .pr-table .pr--un, .pr-table .pr--ok { grid-template-columns: 52px 1fr; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
     .pr--un, .pr--ok { grid-template-columns: 44px 1fr; padding-left: 6px; padding-right: 6px; border-radius: 6px; }
     .pr--un { background: hsla(356, 82%, 56%, .10); }
@@ -747,8 +748,8 @@
       </div>
       ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(239,68,68,.14);border:1px solid var(--err);font-size:13px;">⚠️ 오류: 청구액보다 ${fmtWon(lg.advance_credit)}을 더 받은 것으로 기록되어 있습니다(선수금은 받지 않습니다). 중복 수납일 수 있으니 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하고 잘못 들어간 건을 삭제하세요.</div>` : ""}
       <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
-      <div class="pr-scroll"><div class="pr-table"><div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
-      <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div></div></div>`;
+      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
+      <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
     const body = host;
     pinLimit(host);
 
@@ -1534,6 +1535,7 @@
     const r = roomOf(selRoomNo);
     const who = r && r.is_occupied && r.contract ? ` ${r.contract.tenant_name || ""}` : " 공실";
     const body = openModal(`🏠 ${Bass.escapeHtml(selRoomNo)}호${Bass.escapeHtml(who)}`, '<div id="roomPanel"></div><button type="button" id="roomModalClose" class="bass-btn" style="width:100%;min-height:48px;margin-top:12px;font-weight:800;">닫기</button>');
+    const box = body.closest(".r3-modal__box"); if (box) box.classList.add("r3-modal__box--wide");
     body.querySelector("#roomModalClose").addEventListener("click", closeModal);
     renderRoomPanel();
     return body;

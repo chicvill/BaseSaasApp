@@ -16,7 +16,7 @@
     ".r3-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}",
     ".r3-msg{width:100%;font-size:13px;line-height:1.5}",
     ".r3-modal{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center}",
-    ".r3-modal__box{width:100%;max-width:560px;max-height:92vh;overflow:auto;-webkit-overflow-scrolling:touch;background:#ffffff;color:#1e293b;",
+    ".r3-modal__box{width:100%;max-width:560px;max-height:92vh;overflow-y:auto;background:#ffffff;color:#1e293b;",
     "border:1px solid var(--border,#e2e8f0);border-radius:16px 16px 0 0;padding:14px 14px 22px;box-shadow:0 20px 48px rgba(0,0,0,.18)}",
     "@media (min-width:640px){.r3-modal{align-items:center}.r3-modal__box{border-radius:16px}}",
     ".r3-modal__head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:15px;color:#1e293b}",

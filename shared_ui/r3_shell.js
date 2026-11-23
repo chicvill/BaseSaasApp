@@ -74,13 +74,14 @@
     return out;
   }
 
-  function startClock(el, nameFn) {
+  function startClock(el, nameFn, timeEl) {   // timeEl 를 주면 날짜·시각은 그 요소(예: 알림 단추 위)에 따로 쓰고 제목에는 이름만 둔다
     function tick() {
       var n = new Date();
       var p = function (v) { return String(v).padStart(2, "0"); };
       var t = n.getFullYear() + "." + p(n.getMonth() + 1) + "." + p(n.getDate()) + " " + p(n.getHours()) + ":" + p(n.getMinutes());
       var name = nameFn();
       // 건물 이름은 한 줄(크게), 날짜·시각은 그 아래 작게 — 좁은 화면에서 제목이 두 줄로 갈라지지 않게
+      if (timeEl) { timeEl.textContent = t; if (el && name) el.innerHTML = '<span style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🏢 ' + esc(name) + '</span>'; return; }
       if (el && name) el.innerHTML = '<span style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">🏢 ' + esc(name) + '</span>' +
         '<small style="display:block;font-size:14px;font-weight:500;opacity:.7;letter-spacing:0;">' + t + "</small>";
     }

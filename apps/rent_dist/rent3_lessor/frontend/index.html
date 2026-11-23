@@ -2,7 +2,12 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="/rent3_lessor/manifest.json">
   <title>🏢 임대인 자산·수납 관제 — Rent3 Lessor</title>
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="/shared/ui/rent3_mobile.css">
@@ -32,13 +37,16 @@
 
         <header class="bass-card">
       <div class="bass-row" style="justify-content:space-between;">
-        <div>
+        <div style="min-width:0;">
           <h1 id="bldgTitle" style="font-size:19px;margin-bottom:2px;">🏢 불러오는 중...</h1>
           <div id="bldgSubtitle" class="bass-muted" style="font-size:13px;"></div>
         </div>
-        <div class="bass-row">
-          <span id="poolRevBadge" hidden></span>
-          <button type="button" data-r3-burger>☰ 더보기</button>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;flex:none;">
+          <div id="bldgClock" aria-live="off"></div>
+          <div class="bass-row">
+            <span id="poolRevBadge" hidden></span>
+            <button type="button" data-r3-burger>☰ 더보기</button>
+          </div>
         </div>
       </div>
 

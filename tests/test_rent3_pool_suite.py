@@ -8377,5 +8377,21 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, fe, needle)
 
 
+    def test_129_app_like_shell_clock_above_bell_and_wide_scrolling_room_modal(self):
+        """129. 앱처럼(홈 화면 설치 시 주소창 없음): 매니페스트·메타, 날짜·시각은 🔔 위, 호실 창은 크게 열고 가로·세로로 밀어 볼 수 있다."""
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+        for needle in ('rel="manifest"', "apple-mobile-web-app-capable", 'id="bldgClock"', "viewport-fit=cover"):
+            self.assertIn(needle, html, needle)
+        mf = self.client.get("/rent3_lessor/manifest.json")
+        self.assertEqual(mf.status_code, 200)
+        self.assertEqual(mf.json().get("display"), "standalone")
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        for needle in ("r3-modal__box--wide", "overflow: auto !important", "min-width: 640px", 'getElementById("bldgClock")'):
+            self.assertIn(needle, app, needle)
+        sh = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        self.assertIn("timeEl", sh)
+
+
 if __name__ == "__main__":
     unittest.main()
