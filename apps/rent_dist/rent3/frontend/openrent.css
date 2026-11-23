@@ -908,6 +908,9 @@ body.or-body {
   z-index: 99999 !important;
   pointer-events: none;
 }
+#app-alert.bass-alert-stack .bass-alert {
+  pointer-events: auto;
+}
 
 /* Responsive Breakpoints */
 @media (max-width: 960px) {
