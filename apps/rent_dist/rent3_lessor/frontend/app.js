@@ -407,9 +407,9 @@
     .rl-no { font-size: 17px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 13px; font-weight: 700; }
     .rl-who { font-size: 14px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rl-st { font-size: 14px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 13px; opacity: .9; white-space: nowrap; }
-    .rl-row--ok, .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active):hover { background: #15803d !important; color: #ffffff !important; }
-    .rl-row--wait, .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active):hover { background: #fde047 !important; color: #422006 !important; }
-    .rl-row--late, .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active):hover { background: #b91c1c !important; color: #ffffff !important; }
+    .rl-row--ok, .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active):hover { background: #bbf7d0 !important; color: #111827 !important; }
+    .rl-row--wait, .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active):hover { background: #fef08a !important; color: #111827 !important; }
+    .rl-row--late, .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active):hover { background: #fecaca !important; color: #111827 !important; }
     .rl-row--vacant, .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active):hover { background: #e2e8f0 !important; color: #334155 !important; }
     .bass-btn.rl-row:active { filter: brightness(.92); transform: none !important; }
     /* 컴팩트 첫 화면: 머리말·KPI·문자 수납 카드·단추의 크기와 여백을 줄여 한 화면에 더 많이 보이게 한다 */
