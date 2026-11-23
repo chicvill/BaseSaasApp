@@ -676,7 +676,7 @@
         <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
         <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
         <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비">
-        <span style="display:flex;flex-direction:column;gap:2px;"><button type="button" class="bass-btn bass-btn--sm pr-mv" data-grp="${Bass.escapeHtml(p.grp || "")}" data-grpn="${p.grp_n || 1}" aria-label="다른 달로 옮기기" style="padding:2px;min-height:36px;font-size:12.5px;">달 옮김</button><button type="button" class="bass-btn bass-btn--sm pr-del" data-grpn="${p.grp_n || 1}" aria-label="수납 내역 무효 처리">삭제</button></span></div>`));
+        <span style="display:flex;flex-direction:column;gap:2px;"><button type="button" class="bass-btn bass-btn--sm pr-del" data-grpn="${p.grp_n || 1}" aria-label="수납 내역 무효 처리">삭제</button></span></div>`));
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
       }
@@ -759,21 +759,6 @@
     if ($m("pmState")) $m("pmState").addEventListener("click", openState);
     if ($m("pmState2")) $m("pmState2").addEventListener("click", openState);
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
-      const mvBtn = row.querySelector(".pr-mv");
-      if (mvBtn) mvBtn.addEventListener("click", () => {
-        const cur = (r.pays || []).find((x) => x.id === row.dataset.pay) || {};
-        const free = unpaidMonths.map((m) => m.ym);
-        const to = window.prompt(`${no}호 ${cur.billing_month || ""}월 납부(${fmtWon(cur.total || 0)})를 어느 달로 옮길까요?\n비어 있는 달: ${free.length ? free.join(", ") : "없음"}\n옮길 달(YYYY-MM):`, free[0] || "");
-        if (!to || !to.trim()) return;
-        Bass.withLock(mvBtn, async () => {
-          const res = await Bass.api(APP_ID, "/payments/edit", { method: "POST", body: {
-            branch: currentBranch, pay_id: row.dataset.pay, billing_month: to.trim(),
-            paid_date: row.querySelector(".pr-date").value, rent_amount: Number(row.querySelector(".pr-rent").value || 0), maintenance_amount: Number(row.querySelector(".pr-fee").value || 0) } });
-          Bass.updateAppAlert("success", res.message);
-          delete receiptMsg[no];
-          await refresh();
-        });
-      });
       const delBtn = row.querySelector(".pr-del");
       if (delBtn) {
         delBtn.addEventListener("click", () => {

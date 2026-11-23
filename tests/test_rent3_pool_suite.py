@@ -6309,8 +6309,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual([r["ym"] for r in ct.ledger()["months"] if r["unpaid"] > 0 and r["ym"] in D[:3]], [D[2]])
             # 화면
             lj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-            for needle in ("pr-mv", "달 옮김", "무효 처리", "무효 처리된 납부", "billing_month: to.trim()", "reason: reason.trim()"):
+            for needle in ("무효 처리", "무효 처리된 납부", "reason: reason.trim()"):
                 self.assertIn(needle, lj, needle)
+            for gone in ("pr-mv", "달 옮김", "billing_month: to.trim()"):      # 화면의 '달 옮김' 단추는 없앴다(삭제 후 다시 등록하면 됨). 서버의 edit API 는 그대로
+                self.assertNotIn(gone, lj, gone)
         finally:
             for x in Pay.find(id_contract=ct.id, include_voided=True):
                 x.delete(action="t")
