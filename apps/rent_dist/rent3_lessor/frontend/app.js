@@ -402,10 +402,10 @@
     .rc-unpaid { font-weight: 800; font-size: 14px; color: var(--ok); }
     .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
     /* 호실 단추: 가로 5칸(한 화면에 30호실 안팎), 수납 상태는 단추 전체 배경색 — 초록 완납 · 노랑 대기 · 빨강 미납 · 회색 공실 */
-    .rl-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
-    .rl-row { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; width: 100%; min-width: 0; min-height: 92px; padding: 10px 6px; text-align: center; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
+    .rl-list { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .rl-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; min-height: 60px; padding: 8px 16px; text-align: left; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
     .rl-no { font-size: 20px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 14px; font-weight: 700; }
-    .rl-who { font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rl-who { font-size: 15px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rl-st { font-size: 16px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 14px; opacity: .9; white-space: nowrap; }
     .rl-row--ok { background: #15803d !important; color: #ffffff !important; }
     .rl-row--wait { background: #fde047 !important; color: #422006 !important; }
