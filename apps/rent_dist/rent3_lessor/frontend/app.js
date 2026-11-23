@@ -878,7 +878,7 @@
           Bass.updateAppAlert("success", res.message);
           delete receiptMsg[no];
           await refresh();
-        }).catch(() => {});
+        }).catch(() => { refresh().catch(() => {}); });   // 수정이 거부되면(선수금 초과 등) 화면의 고친 숫자를 원래 값으로 되돌린다
       }));
     });
   }
@@ -1579,6 +1579,7 @@
           <label class="r3-fld">증빙<select id="mfEv" class="bass-select"><option value="TAX_INVOICE">세금계산서</option><option value="CARD">카드·현금영수증</option><option value="NONE">증빙 없음(감가상각 등)</option></select></label>
         </div>
         <label class="r3-fld" style="margin-top:6px;">내용(메모)<input id="mfTitle" class="bass-input" type="text" placeholder="예: 5월 엘리베이터 점검"></label>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;"><input id="mfTax" type="checkbox"> 세무 경비(종소세·부가세)에도 등록 <span class="bass-muted">— 끄면 이 화면의 참고용으로만 저장</span></label>
         <button id="mfAdd" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:44px;margin-top:8px;">저장</button>
       </details>`);
     const sumEl = body.querySelector("#mfSum");
@@ -1605,7 +1606,7 @@
         const label = (cats.find((i) => i.category === cat) || {}).label || cat;
         const res = await Bass.api(APP_ID, "/outlays", { method: "POST", body: {
           branch: currentBranch, category: cat, title: body.querySelector("#mfTitle").value.trim() || label, amount,
-          expense_date: body.querySelector("#mfDate").value || undefined, evidence_type: body.querySelector("#mfEv").value } });
+          expense_date: body.querySelector("#mfDate").value || undefined, evidence_type: body.querySelector("#mfEv").value, reference_only: !body.querySelector("#mfTax").checked } });
         Bass.updateAppAlert("success", res.message);
         await showMgmtFeeModal(d.year);
       });

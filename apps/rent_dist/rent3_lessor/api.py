@@ -104,6 +104,7 @@ class OutlayCreateReq(BaseModel):
     vat_deductible: Optional[bool] = None
     evidence_type: str = "TAX_INVOICE"
     usage_scope: str = "COMMON"  # COMMON | TAXABLE_ONLY | EXEMPT_ONLY
+    reference_only: bool = False  # 관리비 산출근거용 참고 항목: 세무 경비 집계에 넣지 않음
 
 
 class TicketAssignReq(BaseModel):
@@ -478,7 +479,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
             })
 
     payments = sorted(Pay.find(branch=b_id), key=lambda p: (p.paid_date, p.created_at), reverse=True)
-    outlays = sorted(Outlay.find(branch=b_id), key=lambda o: o.expense_date, reverse=True)
+    outlays = sorted((o for o in Outlay.find(branch=b_id) if not o.reference_only), key=lambda o: o.expense_date, reverse=True)
     tickets = sorted(MaintenanceTicket.find(branch=b_id), key=lambda t: t.updated_at, reverse=True)
     CheckOutSettlement.auto_confirm_due(branch=b_id)      # 송금 표시 뒤 7일 동안 이의가 없으면 자동 확정
     checkouts = sorted(CheckOutSettlement.find(branch=b_id), key=lambda c: c.updated_at, reverse=True)
@@ -1580,6 +1581,7 @@ def create_outlay(req: OutlayCreateReq):
         vat_deductible=req.vat_deductible,
         evidence_type=req.evidence_type or "TAX_INVOICE",
         usage_scope=(req.usage_scope or "COMMON").strip().upper(),
+        reference_only=bool(req.reference_only),
         **({"expense_date": req.expense_date} if req.expense_date else {}),
     ).save(action="outlay_recorded", app_source=APP_SRC)
     return {
@@ -1644,7 +1646,7 @@ def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optiona
         and not TaxAndCertificateService.is_carryover_payment(p)
         and TaxAndCertificateService.payment_tax_ym(p).startswith(f"{yr:04d}")
     ]
-    outlays = sorted((o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")), key=lambda o: o.expense_date, reverse=True)
+    outlays = sorted((o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}") and not o.reference_only), key=lambda o: o.expense_date, reverse=True)
     periods = []
     for label, months in (("1기 (1~6월)", range(1, 7)), ("2기 (7~12월)", range(7, 13))):
         ps = [p for p in pays if int(TaxAndCertificateService.payment_tax_ym(p)[5:7]) in months]

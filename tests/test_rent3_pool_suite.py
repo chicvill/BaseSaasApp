@@ -8449,11 +8449,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         yr = 2031
         made = []
         try:
-            def add(cat, amount):
-                r = c.post(LS + "/outlays", headers=chic, json={"branch": "main", "category": cat, "title": "t132", "amount": amount, "expense_date": f"{yr}-03-05", "evidence_type": "NONE"})
+            def add(cat, amount, ref=False):
+                r = c.post(LS + "/outlays", headers=chic, json={"branch": "main", "category": cat, "title": "t132", "amount": amount, "expense_date": f"{yr}-03-05", "evidence_type": "NONE", "reference_only": ref})
                 self.assertEqual(r.status_code, 200, r.text)
                 made.append(r.json()["outlay"]["id"])
-            add("depreciation", 1200000)
+            add("depreciation", 1200000, ref=True)     # 참고용: 산출근거에는 들어가지만 세무 경비에는 넣지 않는다
             add("repair_maint", 300000)
             add("electric_common", 500000)
             add("water_common", 200000)
@@ -8470,6 +8470,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(d["room_count"], n)
             self.assertEqual(d["per_room_year"], round(d["total"] / n))
             self.assertEqual(d["per_room_month"], round(d["per_room_year"] / 12))
+            tx = c.get(LS + f"/tax/summary?branch=main&year={yr}", headers=chic).json()
+            titles = [(o["category"], o["amount"]) for o in tx["outlays"]]
+            self.assertNotIn(("depreciation", 1200000), titles)      # 참고용 항목은 세무 경비 목록·합계에서 빠진다
+            self.assertIn(("repair_maint", 300000), titles)
             # 항목을 직접 제외하면 합계에서 빠진다
             d2 = c.get(LS + f"/mgmt-fee/basis?branch=main&year={yr}&exclude=depreciation,platform_fee", headers=chic).json()
             self.assertEqual(d2["total"], 300000 + 500000 + 200000)
@@ -8480,7 +8484,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     o.delete(action="t")
         base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
         app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
-        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "참고자료입니다", "계약서에 적힌 월세:관리비 비율", "rows=\"3\""):
+        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "reference_only: !body.querySelector", "refresh().catch", "참고자료입니다", "계약서에 적힌 월세:관리비 비율", "rows=\"3\""):
             self.assertIn(needle, app, needle)
         self.assertNotIn('class="bass-input pr-rent"', app)
         self.assertNotIn('class="bass-input pr-fee"', app)

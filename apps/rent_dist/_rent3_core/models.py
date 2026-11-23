@@ -1004,6 +1004,7 @@ class Outlay(PoolObj):
     memo: str = ""
     vat_deductible: Optional[bool] = None    # True=매입세액 공제, False=불공제(경조비·면세 보험료·간이영수증 등), None=카테고리·증빙 규칙
     evidence_type: str = "TAX_INVOICE"       # TAX_INVOICE(세금계산서) / CARD(사업용카드·현금영수증) / EXEMPT_RECEIPT(면세·간이영수증) / NONE(증빙없음)
+    reference_only: bool = False             # True=관리비 산출근거용 참고 항목(세무 경비·부가세 집계에 넣지 않는다)
     usage_scope: str = "COMMON"              # COMMON(공통매입-과세비율안분) / TAXABLE_ONLY(과세호실전용-100%) / EXEMPT_ONLY(주거면세전용-0%)
 
     @property

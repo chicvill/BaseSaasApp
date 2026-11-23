@@ -518,7 +518,7 @@ class TaxAndCertificateService:
         ]
         outlays = [
             o for o in Outlay.find(branch=b_id)
-            if o.expense_date.startswith(yr_prefix)
+            if o.expense_date.startswith(yr_prefix) and not o.reference_only      # 관리비 산출근거용 참고 항목은 세무 경비에서 뺀다
         ]
 
         active_ct_by_room = {
@@ -872,7 +872,7 @@ class TaxAndCertificateService:
         yr = summary["year"]
         outlays = [
             o for o in Outlay.find(branch=b_id)
-            if o.expense_date.startswith(f"{yr:04d}")
+            if o.expense_date.startswith(f"{yr:04d}") and not o.reference_only
         ]
 
         buf = io.StringIO()
