@@ -1101,7 +1101,10 @@ def support_phone_intake(req: PhoneIntakeReq, request: Request):
     """전화로 요청받은 경우: 사유 분류와 접수 메모를 지원 채팅에 '[전화 요청 접수]'로 남긴다."""
     u = sup.user_by_thread(req.user)
     m = sup.phone_intake(u, _admin_name(request), req.category, req.memo)
-    return {"success": True, "message": "전화 요청 접수를 지원 채팅에 남겼습니다. 이제 입장할 수 있습니다.", "item": sup.public_message(m)}
+    ok = bool(cs.support_allowed(u))
+    return {"success": True, "allowed": ok, "item": sup.public_message(m),
+            "message": "전화 요청 접수를 지원 채팅에 남겼습니다. 이제 입장할 수 있습니다." if ok
+            else "전화 요청 접수를 지원 채팅에 남겼습니다. 입장하려면 사용자가 메뉴에서 원격 지원 허용을 켜야 합니다."}
 
 
 @router.post("/support/enter", dependencies=ADMIN_ONLY)

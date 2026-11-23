@@ -177,7 +177,7 @@
             <input id="spMemo" class="bass-input" style="flex:1;min-width:160px;" placeholder="접수 메모 (예: 수납 입력 방법을 모르심)">
             <button id="btnSpPhone" class="bass-btn bass-btn--sm" type="button">📞 전화 접수 남기기</button>
           </div>
-          <div class="bass-muted" style="font-size:12px;margin-top:4px;">남기면 사용자 지원 채팅에 “[전화 요청 접수] …”가 자동으로 생기고, 바로 입장할 수 있습니다.</div>
+          <div class="bass-muted" style="font-size:12px;margin-top:4px;">남기면 사용자 지원 채팅에 “[전화 요청 접수] …”로 대화 내용에 기록됩니다(사용자 허용 전에도 기록은 남습니다). 입장은 사용자가 원격 지원을 허용해야 할 수 있습니다.</div>
         </div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">

@@ -187,11 +187,12 @@ def admin_viewing(thread_user: str) -> Optional[str]:
 
 
 def phone_intake(user: Any, admin_name: str, category: str, memo: str) -> SupportMessage:
-    """전화로 요청받은 경우: 사유 분류와 접수 메모를 지원 채팅에 '[전화 요청 접수]' 글로 남긴다. 원격 지원 허용 필요."""
+    """전화로 요청받은 경우: 사유 분류와 접수 메모를 지원 채팅에 '[전화 요청 접수]' 글로 남겨 대화 내용으로 저장한다.
+    기록만 남기는 것이므로 원격 지원 허용 여부와 무관하다(사용자에게 글을 보내는 것과 같다). 입장은 여전히 사용자가 허용해야 한다(enter)."""
     if category not in CATEGORIES:
         raise DomainError("사유 분류를 골라 주세요.", hint=" / ".join(CATEGORIES))
-    if not cs.support_allowed(user):
-        raise Forbidden("이 사용자는 원격 지원을 허용하지 않았습니다.", hint="전화로 방법을 안내하거나, 사용자가 메뉴에서 원격 지원 허용을 켜도록 안내해 주세요.")
+    if not (memo or "").strip():
+        raise DomainError("접수 내용을 적어 주세요.", hint="전화로 요청받은 내용을 간단히 적으면 지원 채팅에 기록됩니다.")
     text = f"[전화 요청 접수] ({category}) {memo.strip()}".strip()
     return post_admin_message(user, admin_name, text, kind="phone_intake", category=category)
 

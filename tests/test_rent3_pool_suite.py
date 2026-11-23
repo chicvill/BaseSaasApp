@@ -3404,11 +3404,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         ev = open(os.path.join(self.temp_pool, "_events.jsonl"), encoding="utf-8").read()
         self.assertNotIn(secret, ev)
 
-        # 관리인: 대화 읽기, 원격 지원 허용 전에는 입장·전화 접수 모두 거부
+        # 관리인: 대화 읽기, 원격 지원 허용 전에는 입장 거부(전화 접수는 기록만 남기므로 허용 전에도 된다)
         thr = c.get("/api/rent3_admin/support/thread", params={"user": tkey}).json()
         self.assertEqual(thr["messages"][0]["body"], secret)
         self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
-        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "x"}).status_code, 403)
+        self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": ""}).status_code, 400)      # 내용 없음
+        pre = c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "전화로 로그인 오류 문의"})
+        self.assertEqual(pre.status_code, 200, pre.text)
+        self.assertFalse(pre.json()["allowed"])                                                                                                   # 기록은 남지만 입장은 아직 못 한다
+        self.assertIn("로그인 오류 문의", [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]][-1])        # 사용자 채팅에 대화로 저장
+        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
 
         # 허용하면 입장: 접속 기록 + 지원 채팅에 안내, 이동 주소는 보기 전용 표시(proxy) 포함
         cs.set_support_access(tenant, True)
