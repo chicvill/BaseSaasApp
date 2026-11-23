@@ -91,6 +91,7 @@
 
   // ── 임대인과 메시지 (내 호실 1:1 대화 + 접어 둔 계약 협상 기록). 관리인 지원 문의·계약방 대화는 섞지 않는다 ──
   let tnMsgTimer = null;
+  let tnMsgCount = -1;
   const tnTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
   async function loadTenantMessages(keepComposer) {
     const box = document.getElementById("tnMsgList");
@@ -100,11 +101,15 @@
     const bubble = (m) => m.kind === "system"
       ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${tnTime(m.created_at)}</span></div>`
       : `<div class="cm-b ${m.sender_role === "tenant" ? "is-mine" : ""}"><div><div class="cm-meta">${m.sender_role === "tenant" ? "나" : Bass.escapeHtml(m.sender_name || "임대인")} · ${tnTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
-    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-    box.innerHTML = d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다. 궁금한 점을 남겨 보세요.</div>';
-    if (atBottom || !keepComposer) box.scrollTop = box.scrollHeight;
+    const nextCount = (d.messages || []).length;
+    if (!keepComposer || nextCount !== tnMsgCount) {
+      tnMsgCount = nextCount;
+      const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+      box.innerHTML = d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다. 궁금한 점을 남겨 보세요.</div>';
+      if (atBottom || !keepComposer) box.scrollTop = box.scrollHeight;
+    }
     const negBox = document.getElementById("tnMsgNeg");
-    if (negBox) {
+    if (negBox && !keepComposer) {
       const digestLine = neg.purged ? (neg.purged_note || "보관 기간이 지나 삭제되었습니다.") : neg.digest_ok === true ? "✅ 체결 때 기록한 대화 기록 해시와 일치합니다" : neg.digest_ok === false ? "⚠️ 체결 때 기록한 해시와 달라졌습니다" : "";
       negBox.innerHTML = (neg.count || neg.purged) ? `<details style="margin-top:12px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.purged ? `(보관 기간 만료로 삭제됨 · 당시 ${neg.original_count}건)` : `${neg.count}건 보기`}</summary>
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
@@ -113,8 +118,9 @@
     clearInterval(tnMsgTimer);
     tnMsgTimer = setInterval(() => {
       if (svcView !== "messages" || !document.getElementById("tnMsgList")) { clearInterval(tnMsgTimer); return; }
+      if (document.visibilityState === "hidden") return;
       loadTenantMessages(true).catch(() => {});
-    }, 8000);
+    }, 2500);
   }
   function go(view) {
     svcView = SVC_TITLES[view] !== undefined ? view : "home";

@@ -109,6 +109,7 @@
   // ───────── 원격 지원 · 대리 접속 ─────────
   // 건물 → 호실 → 입장. 사용자가 원격 지원을 허용했고 지원 채팅(또는 전화 접수)이 있어야 입장하며, 입장하면 보기 전용이다.
   const sp = { branch: "", roomNo: "", user: "", cat: "사용법 문의" };
+  let spTimer = null;
   const spFmt = (iso) => (String(iso || "").length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
 
   async function renderSupportTab() {
@@ -190,6 +191,25 @@
       </div>`;
     const list = document.getElementById("spList");
     list.scrollTop = list.scrollHeight;
+    let spMsgs = msgs;
+    const renderSpRows = (arr) => arr.map((m) => `
+          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>';
+    clearInterval(spTimer);
+    spTimer = setInterval(async () => {
+      if (currentTab !== "support" || sp.user !== card.user || !document.getElementById("spList")) { clearInterval(spTimer); return; }
+      if (document.visibilityState === "hidden") return;
+      try {
+        const nt = await Bass.api(APP_ID, `/support/thread?user=${encodeURIComponent(card.user)}`);
+        const nm = nt.messages || [];
+        const boxNow = document.getElementById("spList");
+        if (boxNow && nm.length !== spMsgs.length) {
+          spMsgs = nm;
+          const atBottom = boxNow.scrollHeight - boxNow.scrollTop - boxNow.clientHeight < 40;
+          boxNow.innerHTML = renderSpRows(nm);
+          if (atBottom) boxNow.scrollTop = boxNow.scrollHeight;
+        }
+      } catch (_) { /* 다음에 다시 */ }
+    }, 2500);
     const reload = () => renderSupportTab().catch(Bass.showError);
     document.getElementById("spCat").addEventListener("change", (e) => { sp.cat = e.target.value; });
     document.getElementById("btnSpSend").addEventListener("click", function () {

@@ -506,6 +506,18 @@
   }
 
   function openSupportChat() {
+    var supTimer = null;
+    var lastCount = -1;
+    function renderRows(msgs) {
+      return (msgs || []).map(function (m) {
+        var who = m.sender_role === "user" ? "나" : (m.sender_role === "admin" ? "관리인" : "안내");
+        var mine = m.sender_role === "user";
+        return '<div style="margin:6px 0;text-align:' + (mine ? "right" : "left") + ';">' +
+          '<div style="display:inline-block;max-width:88%;text-align:left;padding:8px 10px;border-radius:12px;font-size:13.5px;line-height:1.5;background:' +
+          (m.sender_role === "system" ? "rgba(245,158,11,.18)" : (mine ? "rgba(99,102,241,.35)" : "rgba(148,163,184,.22)")) + ';">' +
+          '<div style="font-size:12.5px;opacity:.7;margin-bottom:2px;">' + esc(who) + " · " + esc(fmtMd(m.created_at)) + "</div>" + esc(m.body) + "</div></div>";
+      }).join("") || '<div style="opacity:.7;font-size:13px;padding:8px 0;">아직 대화가 없습니다. 도움이 필요한 내용을 남겨 주세요.</div>';
+    }
     function load() {
       fetch(SUPPORT_API + "/thread", { headers: authHeaders(false) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
@@ -514,15 +526,29 @@
           render(res.d);
         });
     }
+    function startPoll() {
+      clearInterval(supTimer);
+      supTimer = setInterval(function () {
+        if (document.visibilityState === "hidden") return;
+        var list = document.getElementById("r3SupList");
+        if (!list) { clearInterval(supTimer); return; }
+        fetch(SUPPORT_API + "/thread", { headers: authHeaders(false) })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (nd) {
+            if (!nd || !nd.messages) return;
+            var box = document.getElementById("r3SupList");
+            if (!box || nd.messages.length === lastCount) return;
+            lastCount = nd.messages.length;
+            var atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+            box.innerHTML = renderRows(nd.messages);
+            if (atBottom) box.scrollTop = box.scrollHeight;
+          })
+          .catch(function () {});
+      }, 2500);
+    }
     function render(d) {
-      var rows = (d.messages || []).map(function (m) {
-        var who = m.sender_role === "user" ? "나" : (m.sender_role === "admin" ? "관리인" : "안내");
-        var mine = m.sender_role === "user";
-        return '<div style="margin:6px 0;text-align:' + (mine ? "right" : "left") + ';">' +
-          '<div style="display:inline-block;max-width:88%;text-align:left;padding:8px 10px;border-radius:12px;font-size:13.5px;line-height:1.5;background:' +
-          (m.sender_role === "system" ? "rgba(245,158,11,.18)" : (mine ? "rgba(99,102,241,.35)" : "rgba(148,163,184,.22)")) + ';">' +
-          '<div style="font-size:12.5px;opacity:.7;margin-bottom:2px;">' + esc(who) + " · " + esc(fmtMd(m.created_at)) + "</div>" + esc(m.body) + "</div></div>";
-      }).join("") || '<div style="opacity:.7;font-size:13px;padding:8px 0;">아직 대화가 없습니다. 도움이 필요한 내용을 남겨 주세요.</div>';
+      lastCount = (d.messages || []).length;
+      var rows = renderRows(d.messages);
       var body = global.R3.openModal("💬 관리인에게 문의",
         '<div id="r3SupList" style="max-height:44vh;overflow-y:auto;padding:2px 2px 6px;">' + rows + "</div>" +
         '<textarea id="r3SupMsg" class="bass-input" rows="3" placeholder="도움이 필요한 내용을 적어 주세요" style="width:100%;margin-top:6px;"></textarea>' +
@@ -533,6 +559,7 @@
           : '<p style="font-size:12px;margin:8px 0 0;opacity:.8;">관리인이 화면을 보며 도우려면 메뉴의 <strong>원격 지원 허용 설정</strong>을 켜 주세요.</p>'));
       var list = body.querySelector("#r3SupList");
       list.scrollTop = list.scrollHeight;
+      startPoll();
       body.querySelector("#r3SupSend").addEventListener("click", function () {
         var ta = body.querySelector("#r3SupMsg");
         var text = ta.value.trim();

@@ -8550,5 +8550,20 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, app, needle)
 
 
+    def test_135_open_chat_threads_auto_refresh_without_sending_reply(self):
+        """135. 열린 채팅창(관리인 지원 채팅 · 임대인/임차인 호실 대화)은 답장을 보내지 않아도 2.5초 주기로 새 메시지를 자동 반영한다."""
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        for needle in ("function startPoll()", "r3SupList", "lastCount", "2500"):
+            self.assertIn(needle, shell, needle)
+        admin = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("spTimer", "spList", "/support/thread?user=", "2500"):
+            self.assertIn(needle, admin, needle)
+        lessor = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn("2500", lessor)
+        tenant = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("tnMsgCount", "tnMsgList", "2500"):
+            self.assertIn(needle, tenant, needle)
+
+
 if __name__ == "__main__":
     unittest.main()

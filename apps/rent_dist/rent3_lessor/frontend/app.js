@@ -3248,6 +3248,7 @@
     // 열어 둔 동안 새 글만 가져온다(입력 중인 글은 건드리지 않는다)
     msgTimer = setInterval(async () => {
       if (currentTab !== "messages" || msgRoom !== room || !document.getElementById("msgList")) { clearInterval(msgTimer); return; }
+      if (document.visibilityState === "hidden") return;
       try {
         const nd = await Bass.api(APP_ID, `/messages/rooms/${encodeURIComponent(room)}?branch=${encodeURIComponent(currentBranch)}`);
         const box = document.getElementById("msgList");
@@ -3258,7 +3259,7 @@
           if (atBottom) box.scrollTop = box.scrollHeight;
         }
       } catch (_) { /* 다음에 다시 */ }
-    }, 8000);
+    }, 2500);
   }
 
   function renderOpsTab() {
