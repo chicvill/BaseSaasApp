@@ -30,6 +30,14 @@ from .models import (
 from .pool import now_iso
 
 
+def _names_of(ct: Any) -> set:
+    """이 계약에서 입금자로 인정하는 이름: 임차인명 + 송금자명(다른 이름으로 입금되는 경우)."""
+    names = {(ct.tenant_name or "").strip()}
+    names.update((x or "").strip() for x in (getattr(ct, "payer_names", None) or []))
+    names.discard("")
+    return names
+
+
 class SmsDepositParser:
     """은행 입금 알림 문자에서 [호실번호, 입금자명, 금액, 입금일]을 추출하는 순수 파서 객체."""
 
@@ -276,7 +284,7 @@ class FifoPaymentEngine:
         """문자에서 읽은 호실·입금자명·금액을 장부와 맞춰 본다. 어긋난 곳은 issues, 입금자명 기준으로 반영할 때의 대상 계약은 by_name."""
         room_no, name, amount = parsed["room_no"], parsed["payer_name"], parsed["amount"]
         name_known = name != "입금자"
-        by_name_all = [c for c in Contract.all() if c.branch == b_id and c.status == "ACTIVE" and name_known and (c.tenant_name or "").strip() == name]
+        by_name_all = [c for c in Contract.all() if c.branch == b_id and c.status == "ACTIVE" and name_known and name in _names_of(c)]
         by_name = None
         if by_name_all:
             by_name = next((c for c in by_name_all if c.room_no == room_no), None) or (by_name_all[0] if len(by_name_all) == 1 else None)
@@ -298,8 +306,9 @@ class FifoPaymentEngine:
         if ct:
             if not name_known:
                 issues.append({"field": "name", "msg": f"입금자명을 읽지 못했습니다. ({ct.room_no}호 임차인은 '{ct.tenant_name}')"})
-            elif (ct.tenant_name or "").strip() != name:
-                issues.append({"field": "name", "msg": f"입금자명 '{name}'이(가) {ct.room_no}호 임차인 '{ct.tenant_name}'과 다릅니다."})
+            elif name not in _names_of(ct):
+                alias = (", 송금자명 " + "·".join(ct.payer_names)) if getattr(ct, "payer_names", None) else ""
+                issues.append({"field": "name", "msg": f"입금자명 '{name}'이(가) {ct.room_no}호 임차인 '{ct.tenant_name}'{alias}과 다릅니다."})
             exp = cls._expected_amounts(ct, up_to_ym)
             if amount not in exp["ok"]:
                 extra = f"월 청구액 {exp['monthly']:,}원" + (f", 밀린 금액 {exp['total_unpaid']:,}원" if exp["total_unpaid"] else "")

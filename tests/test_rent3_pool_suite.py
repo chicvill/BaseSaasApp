@@ -8393,5 +8393,35 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("timeEl", sh)
 
 
+    def test_130_payer_names_alias_matches_sms_to_room(self):
+        """130. 임차인 이름과 다른 이름으로 입금돼도(송금자명 등록) 문자 수납이 그 호실을 찾는다. 송금자명은 계약내용에서 최대 3개, 임차인명과 같은 건 무시."""
+        from apps.rent_dist._rent3_core import Contract
+        from apps.rent_dist._rent3_core.billing import FifoPaymentEngine
+        c = self.client
+        chic = self._login("chic")
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        keep = list(ct0.payer_names or [])
+        try:
+            def edit(names):
+                return c.post("/api/rent3_lessor/contracts/edit", headers=chic, json={"branch": "main", "contract_id": ct0.id, "deposit": ct0.deposit,
+                              "monthly_rent": ct0.monthly_rent, "maintenance_fee": ct0.maintenance_fee, "tenant_phone": ct0.tenant_phone or "", "payer_names": names})
+            r = edit(["홍길순", "홍길순", " 박철수 ", ct0.tenant_name, ""])
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertEqual(Contract.get(ct0.id).payer_names, ["홍길순", "박철수"])
+            self.assertEqual(edit(["가", "나", "다", "라"]).status_code, 400)
+            Contract.get(ct0.id)  # 실패한 수정은 저장되지 않는다
+            self.assertEqual(Contract.get(ct0.id).payer_names, ["홍길순", "박철수"])
+            base = {"room_no": "201", "amount": 1}
+            has_name_issue = lambda parsed: any(i["field"] == "name" for i in FifoPaymentEngine.check_sms("main", parsed)["issues"])
+            self.assertFalse(has_name_issue({**base, "payer_name": "홍길순"}))
+            self.assertFalse(has_name_issue({**base, "payer_name": ct0.tenant_name}))
+            self.assertTrue(has_name_issue({**base, "payer_name": "김아무개"}))
+            # 호실 번호가 없는 문자: 송금자명으로 계약을 찾는다
+            chk = FifoPaymentEngine.check_sms("main", {"room_no": "", "payer_name": "박철수", "amount": 1})
+            self.assertEqual(chk["room_contract"].room_no, "201")
+        finally:
+            ct = Contract.get(ct0.id); ct.payer_names = keep; ct.save(action="t")
+
+
 if __name__ == "__main__":
     unittest.main()

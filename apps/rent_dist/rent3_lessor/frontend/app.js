@@ -896,7 +896,9 @@
         ${f("cmRent", "월세(원)", ct.monthly_rent, "number")}
         ${f("cmFee", "관리비(원)", ct.maintenance_fee, "number")}
         ${f("cmTel", "임차인 전화번호", ct.tenant_phone || (r.tenant && r.tenant.phone) || "", "tel")}
+        ${f("cmPayers", "송금자명 (임차인 이름과 다르게 입금될 때 · 쉼표로 구분, 최대 3개)", (ct.payer_names || []).join(", "), "text", "예: 홍길순, (주)시크디자인")}
       </div>
+      <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">입금 문자의 이름이 임차인 이름 <strong>또는 송금자명</strong>과 같으면 이 호실로 수납됩니다. 보증금 반환은 계약자(임차인) 명의로 합니다.</div>
       <div class="bass-card" style="margin-top:10px;padding:10px;background:var(--surface-2, #f8fafc);">
         <label style="display:flex;align-items:center;gap:6px;font-weight:700;font-size:13.5px;cursor:pointer;">
           <input id="cmTaxInvReq" type="checkbox" ${taxReq ? "checked" : ""}>
@@ -941,7 +943,8 @@
           body: {
             branch: currentBranch, contract_id: ct.id,
             deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
-            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, memo: $m("cmMemo").value,
+            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、
+]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
             tax_invoice_requested: reqInv,
             vat_target: reqInv,
             tenant_business_number: reqInv ? $m("cmBizNo").value.trim() : "",

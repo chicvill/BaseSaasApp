@@ -1040,6 +1040,7 @@ class ContractEditReq(BaseModel):
     move_in_date: str = ""
     expiry_date: str = ""
     tenant_phone: str = ""
+    payer_names: Optional[List[str]] = None
     memo: str = ""
     tenant_business_number: Optional[str] = None
     tenant_company_name: Optional[str] = None
@@ -1071,6 +1072,15 @@ def edit_contract(req: ContractEditReq):
     if req.expiry_date:
         ct.expiry_date = req.expiry_date
     ct.tenant_phone = req.tenant_phone.strip()
+    if req.payer_names is not None:
+        pn: List[str] = []
+        for x in req.payer_names:
+            x = (x or "").strip()
+            if x and x != (ct.tenant_name or "").strip() and x not in pn:
+                pn.append(x)
+        if len(pn) > 3:
+            raise DomainError("송금자명은 최대 3개까지 등록할 수 있습니다.")
+        ct.payer_names = pn
     ct.lessor_memo = req.memo.strip()
     if req.tenant_business_number is not None:
         ct.tenant_business_number = req.tenant_business_number.strip()
