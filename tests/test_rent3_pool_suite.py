@@ -8392,7 +8392,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         sh = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         self.assertIn("timeEl", sh)
         md = open(os.path.join(ROOT, "shared_ui", "r3_modal.js"), encoding="utf-8").read()
-        for needle in ("pushState", "popstate", "histPushed", "history.back"):
+        for needle in ("R3Hist", "pushState", "popstate", 'R3H.open("modal"', 'R3H.close("modal")', "history.back"):
             self.assertIn(needle, md, needle)   # 스마트폰 뒤로가기는 창만 닫는다
 
 
@@ -8484,7 +8484,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     o.delete(action="t")
         base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
         app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
-        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "reference_only: !body.querySelector", "refresh().catch", "참고자료입니다", "계약서에 적힌 월세:관리비 비율", "rows=\"3\""):
+        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "reference_only: !body.querySelector", "refresh().catch", "호실별 관리비 청구·수납에 반영되지 않습니다", 'id="mfTax" type="checkbox" checked', "계약서에 적힌 월세:관리비 비율", "rows=\"3\""):
             self.assertIn(needle, app, needle)
         self.assertNotIn('class="bass-input pr-rent"', app)
         self.assertNotIn('class="bass-input pr-fee"', app)
@@ -8493,7 +8493,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_133_more_toggle_never_swallowed_and_clock_above_bell(self):
         """133. ☰ 메뉴의 '더 많은 기능 보기' 단추가 접힌 그룹 안에 끼어 사라지지 않는다(그러면 3단계 등이 영영 안 보인다) · 날짜·시각은 🔔 위 묶음에 둔다 · 관리비 산출근거 줄 레이아웃은 공용 스타일로 고정."""
         hb = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "hamburger.js"), encoding="utf-8").read()
-        for needle in ("old.parentNode === drawer", "old.remove()", '!c.classList.contains("r3-more-toggle")'):
+        for needle in ('R3H.open("drawer"', 'R3H.close("drawer")', "histSync(isOpen)", "old.parentNode === drawer", "old.remove()", '!c.classList.contains("r3-more-toggle")'):
             self.assertIn(needle, hb, needle)
         app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("placeClockAboveBell", "r3-hdr-right", ".r3-modal__body .mf-row { display: grid !important"):

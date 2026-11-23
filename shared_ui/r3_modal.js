@@ -39,30 +39,42 @@
     document.head.appendChild(st);
   }
 
-  // 스마트폰 뒤로가기( < ): 창이 열려 있으면 페이지를 떠나지 않고 창만 닫는다.
-  // 창을 열 때 기록 한 칸(pushState)을 쌓고, 뒤로가기(popstate)가 오면 창을 닫는다. 창을 단추로 닫으면 쌓아 둔 한 칸을 되돌린다.
-  // 창 안에서 다른 창으로 바뀌는 경우(닫고 곧바로 열기)에는 기록을 다시 쌓지 않는다.
-  var histPushed = false, histSuppress = false;
+  // 공용 '뒤로가기' 관리자(창·☰ 서랍이 함께 쓴다): 겹침이 하나라도 열려 있으면 기록 한 칸(pushState)을 쌓아 두고,
+  // 스마트폰 뒤로가기( < )가 오면(popstate) 열린 것을 모두 닫아 페이지를 떠나지 않게 한다. 단추로 모두 닫으면 쌓아 둔 한 칸을 되돌린다.
+  // 닫고 곧바로 다른 것을 여는 경우(서랍 → 창)에는 기록을 다시 쌓지 않는다(setTimeout 0 으로 판단).
+  var R3H = global.R3Hist || (global.R3Hist = (function () {
+    var layers = {}, pushed = false, suppress = false;
+    function count() { return Object.keys(layers).length; }
+    function open(id, closer) {
+      layers[id] = closer;
+      if (!pushed) { try { global.history.pushState({ r3layer: 1 }, ""); pushed = true; } catch (e) { /* 기록을 쌓지 못해도 열린다 */ } }
+    }
+    function close(id) {
+      if (!(id in layers)) return;
+      delete layers[id];
+      if (pushed && count() === 0) {
+        setTimeout(function () {
+          if (pushed && count() === 0) {
+            pushed = false; suppress = true;
+            try { global.history.back(); } catch (e) { suppress = false; }
+          }
+        }, 0);
+      }
+    }
+    global.addEventListener("popstate", function () {
+      if (suppress) { suppress = false; return; }
+      if (!pushed) return;
+      pushed = false;
+      var cs = layers; layers = {};
+      Object.keys(cs).forEach(function (k) { try { cs[k](); } catch (e) { /* 하나가 실패해도 나머지는 닫는다 */ } });
+    });
+    return { open: open, close: close };
+  })());
   function closeModal() {
     var m = document.getElementById("r3Modal");
     if (m) m.remove();
-    if (histPushed) {
-      setTimeout(function () {
-        if (histPushed && !document.getElementById("r3Modal")) {
-          histPushed = false; histSuppress = true;
-          try { global.history.back(); } catch (e) { histSuppress = false; }
-        }
-      }, 0);
-    }
+    R3H.close("modal");
   }
-  global.addEventListener("popstate", function () {
-    if (histSuppress) { histSuppress = false; return; }
-    if (histPushed) {
-      histPushed = false;
-      var m = document.getElementById("r3Modal");
-      if (m) m.remove();
-    }
-  });
 
   function openModal(title, html) {
     ensureStyle();
@@ -77,7 +89,7 @@
     bg.addEventListener("mousedown", function (e) { if (e.target === bg) closeModal(); });
     bg.querySelector(".r3-modal__x").addEventListener("click", closeModal);
     document.body.appendChild(bg);
-    if (!histPushed) { try { global.history.pushState({ r3modal: 1 }, ""); histPushed = true; } catch (e) { /* 기록을 쌓지 못해도 창은 열린다 */ } }
+    R3H.open("modal", function () { var mm = document.getElementById("r3Modal"); if (mm) mm.remove(); });
     return bg.querySelector(".r3-modal__body");
   }
 

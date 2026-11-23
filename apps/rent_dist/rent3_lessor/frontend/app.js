@@ -1566,7 +1566,7 @@
     const yrs = [yr - 2, yr - 1, yr, yr + 1].filter((y) => y > 2000);
     const body = openModal(`🧮 ${E(d.year)}년 관리비 산출근거`, `
       <div class="bass-row" style="gap:8px;margin-bottom:6px;"><label class="r3-fld" style="flex:1;">기준 연도<select id="mfYear" class="bass-select">${yrs.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select></label></div>
-      <div style="font-size:12.5px;margin-bottom:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;">📌 참고자료입니다. 실제 관리비 청구·수납·세금 산출에는 반영되지 않고, 계약서에 적힌 월세·관리비 금액을 그대로 따릅니다.</div>
+      <div style="font-size:12.5px;margin-bottom:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;">📌 이 산출 결과는 호실별 관리비 청구·수납에 반영되지 않습니다(계약서에 적힌 월세·관리비 금액을 그대로 따름). 여기서 등록한 항목은 세무 경비(종소세·부가세)에 자동으로 포함됩니다.</div>
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">체크한 항목만 합계에 넣습니다. 금액은 세무 허브의 경비(지출) 등록에서 가져옵니다.</div>
       <div>${rowsHtml}</div>
       <div class="mf-sum" id="mfSum"></div>
@@ -1579,7 +1579,7 @@
           <label class="r3-fld">증빙<select id="mfEv" class="bass-select"><option value="TAX_INVOICE">세금계산서</option><option value="CARD">카드·현금영수증</option><option value="NONE">증빙 없음(감가상각 등)</option></select></label>
         </div>
         <label class="r3-fld" style="margin-top:6px;">내용(메모)<input id="mfTitle" class="bass-input" type="text" placeholder="예: 5월 엘리베이터 점검"></label>
-        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;"><input id="mfTax" type="checkbox"> 세무 경비(종소세·부가세)에도 등록 <span class="bass-muted">— 끄면 이 화면의 참고용으로만 저장</span></label>
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;"><input id="mfTax" type="checkbox" checked> 세무 경비(종소세·부가세)에 포함 <span class="bass-muted">— 기본 켜짐 · 끄면 이 화면의 참고용으로만 저장</span></label>
         <button id="mfAdd" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:44px;margin-top:8px;">저장</button>
       </details>`);
     const sumEl = body.querySelector("#mfSum");
