@@ -2,7 +2,7 @@
 (function () {
   "use strict";
   if (window.__authFetchPatched) return;
-  window.BASS_ERROR_TIMEOUT = 4000; // Rent3: 오류·경고 알림은 4초 뒤 자동으로 닫힌다(마우스를 올리거나 터치하는 동안은 유지)
+  // Rent3: 오류·경고 알림은 자동으로 닫히지 않고 [확인]을 눌러야 닫힌다(bass.js). 예전 BASS_ERROR_TIMEOUT 설정은 더 쓰지 않는다.
   window.__authFetchPatched = true;
   var orig = window.fetch.bind(window);
   window.fetch = function (input, init) {

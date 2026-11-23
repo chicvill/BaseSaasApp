@@ -79,6 +79,7 @@ class CollectPaymentReq(BaseModel):
     method: str = "TRANSFER"
     up_to_ym: Optional[str] = None
     target_ym: Optional[str] = None  # 채울 달(미납으로 표시된 달). 비우면 가장 오래된 미납 달부터
+    target_months: Optional[List[str]] = None   # 여러 달을 체크해 수납할 때(체크한 달의 미납 합계 이하만 받는다)
 
 
 class SmsPasteReq(BaseModel):
@@ -900,6 +901,7 @@ def collect_payment(req: CollectPaymentReq, request: Request):
         up_to_ym=req.up_to_ym,
         app_source="rent3_lessor_pin" if pc else APP_SRC,
         target_ym=req.target_ym,
+        target_months=req.target_months,
     )
     _pin_pay_record(pc, res)
     return {"success": True, **res}

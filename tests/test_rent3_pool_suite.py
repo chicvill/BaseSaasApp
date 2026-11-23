@@ -4672,7 +4672,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         i_sms, i_pick = app.index('id="bankSms"'), app.index('id="roomPick"')
         self.assertLess(i_sms, i_pick)                                          # 문자 입력이 호실 선택보다 위
         self.assertLess(app.index('<div id="roomPanel">'), app.index('${lateHtml}'))              # 미납 목록은 맨 아래
-        for needle in ("bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금 등", "수납확인 메시지 복사"):
+        for needle in ("bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 메시지 복사"):
             self.assertIn(needle, app, needle)
         for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
             self.assertNotIn(gone, app, gone)
@@ -6776,15 +6776,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if o is not None:
                     o.delete(action="t")
 
-    def test_104_error_alert_auto_close_is_4_seconds_everywhere(self):
-        """104. 오류·경고 알림은 4초 뒤 닫힌다 — 값을 지정하는 두 파일(auth_fetch.js·rent3_session_guard.js)이 같은 값이고, 알림 코드는 그 값을 오류·경고에 쓴다."""
+    def test_104_error_alert_needs_confirm_button_no_auto_close(self):
+        """104. 오류·경고 알림은 자동으로 닫히지 않고 [확인]을 눌러야 닫힌다(읽을 시간 확보). 예전 4초 자동 닫힘 설정(BASS_ERROR_TIMEOUT)은 없어졌고, 같은 글은 하나로 합친다."""
         rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
         for f in ("auth_fetch.js", "rent3_session_guard.js"):
-            self.assertIn("window.BASS_ERROR_TIMEOUT = 4000;", rd("shared_ui", f), f)
-            self.assertNotIn("BASS_ERROR_TIMEOUT = 2000", rd("shared_ui", f), f)
+            self.assertNotIn("window.BASS_ERROR_TIMEOUT", rd("shared_ui", f), f)
         bass = rd("shared_ui", "bass.js")
-        self.assertIn("BASS_ERROR_TIMEOUT", bass)
-        self.assertIn('(lv === "error" || lv === "warning") && errMs ? errMs', bass)
+        for needle in ("const sticky = lv === \"error\" || lv === \"warning\"", "bass-alert__ok", ">확인</button>", "sticky ? 0"):
+            self.assertIn(needle, bass, needle)
+        self.assertNotIn("BASS_ERROR_TIMEOUT", bass)
 
     def test_106_no_forward_reference_annotations(self):
         """106. 함수 타입 표기가 아래쪽에서 정의된 이름을 쓰면 운영(Python 3.11)에서 NameError 로 앱이 격리된다 — 정적으로 점검."""
@@ -8296,6 +8296,83 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, nj, needle)
         self.assertIn('todayAfter: "#kpiGrid"', app)
         self.assertNotRegex(nj, r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+
+
+    def test_128_sms_amount_differs_from_monthly_goes_to_manual_direct_pay(self):
+        """128. 입금 문자 금액이 월 납부액과 다르면(여러 달분·일부 입금) 자동 처리하지 않고 '수작업 안내'(needs_manual) → [직접 수납]에서 미납 달을 여러 개 체크해 처리. 초과 입금·밀린 청구 없음은 처리 불가.
+        직접 수납은 체크한 달의 미납 합계 이하만 받고, 문자에서 넘어온 입금일·입금자는 그대로 기록한다."""
+        from apps.rent_dist._rent3_core import Contract, Pay, current_ym
+        c = self.client
+        chic = self._login("chic")
+        LS = "/api/rent3_lessor"
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        olds = [x.model_dump() for x in Pay.find(id_contract=ct0.id, include_voided=True)]
+        keep_in, keep_timing = ct0.move_in_date, ct0.pay_timing
+        try:
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            y, m = int(current_ym()[:4]), int(current_ym()[5:7]) - 3
+            while m <= 0:
+                y, m = y - 1, m + 12
+            ct = Contract.get(ct0.id); ct.move_in_date = f"{y:04d}-{m:02d}-01"; ct.pay_timing = "선불"; ct.save(action="t")
+            monthly = int(ct.monthly_rent or 0) + int(ct.maintenance_fee or 0) + int(ct.compute_vat() or 0)
+            name = ct.tenant_name
+            rows = [r for r in ct.ledger()["months"] if r["unpaid"] > 0]
+            self.assertGreaterEqual(len(rows), 3)
+            total = sum(r["unpaid"] for r in rows)
+
+            def sms(amount, day="11/13", extra=None):
+                return c.post(LS + "/payments/sms-paste", headers=chic, json={"branch": "main", "sms_text": f"[신한] {day} 201호 {name} {amount:,}원 입금", "pick_if_multi": True, **(extra or {})})
+
+            n0 = len(Pay.find(id_contract=ct0.id))
+            # 3개월분 → 수작업 안내(저장 안 함)
+            r = sms(monthly * 3)
+            self.assertEqual(r.status_code, 200, r.text)
+            d = r.json()
+            self.assertTrue(d["needs_manual"] and d["needs_confirm"] and not d["success"])
+            self.assertEqual((d["monthly"], d["total_unpaid"]), (monthly, total))
+            self.assertGreaterEqual(len(d["unpaid_months"]), 3)
+            self.assertIn("직접 수납", d["message"])
+            # 일부 입금도 수작업 안내, 금액이 청구 합계와 안 맞아도 '문자 수정' 단계 없이 안내
+            self.assertTrue(sms(monthly // 2).json()["needs_manual"])
+            self.assertTrue(sms(monthly * 2 + 1234).json()["needs_manual"])
+            self.assertEqual(len(Pay.find(id_contract=ct0.id)), n0)
+            # 초과 입금은 처리 불가(오류)
+            ov = sms(total + monthly)
+            self.assertEqual(ov.status_code, 400)
+            self.assertIn("많아 처리할 수 없습니다", ov.text)
+            # 직접 수납: 체크한 달의 미납 합계보다 많으면 거부, 이하이면 그 달들에 반영(입금일·입금자 기록)
+            pick = [r["ym"] for r in rows[:3]]
+            tooMuch = c.post(LS + "/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": monthly * 3 + 1, "target_months": pick})
+            self.assertEqual(tooMuch.status_code, 400)
+            ok = c.post(LS + "/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": monthly * 3, "target_months": pick, "paid_date": "2026-11-13", "payer_name": name})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            got = sorted(x.billing_month for x in Pay.find(id_contract=ct0.id))
+            self.assertEqual(got, sorted(pick))
+            self.assertTrue(all(x.paid_date == "2026-11-13" for x in Pay.find(id_contract=ct0.id)))
+            # 월 납부액과 같은 금액은 이전처럼(자동 또는 달 선택) — 수작업 안내가 아니다
+            ct = Contract.get(ct0.id)
+            left = [r for r in ct.ledger()["months"] if r["unpaid"] > 0]
+            if left:
+                r1 = sms(monthly, "11/14").json()
+                self.assertFalse(r1.get("needs_manual"))
+            # 모두 낸 뒤 더 들어온 입금은 처리 불가
+            for x in Pay.find(id_contract=ct0.id):
+                x.created_at = "2020-01-01T00:00:00"; x.save(action="t")
+            allm = [r["ym"] for r in Contract.get(ct0.id).ledger()["months"] if r["unpaid"] > 0]
+            if allm:
+                rest = sum(r["unpaid"] for r in Contract.get(ct0.id).ledger()["months"] if r["unpaid"] > 0)
+                self.assertEqual(c.post(LS + "/payments/collect", headers=chic, json={"branch": "main", "room_no": "201", "amount": rest, "target_months": allm}).status_code, 200)
+            self.assertEqual(sms(monthly, "11/15").status_code, 400)
+        finally:
+            for x in Pay.find(id_contract=ct0.id, include_voided=True):
+                x.delete(action="t")
+            for d0 in olds:
+                Pay(**d0).save(action="t")
+            cc = Contract.get(ct0.id); cc.move_in_date = keep_in; cc.pay_timing = keep_timing; cc.save(action="t")
+        fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("needs_manual", "smsGoDirect", "smsManualHint", "pm-chk", "target_months: months", "수작업이 필요합니다", "직접 수납에서 월 선택하기"):
+            self.assertIn(needle, fe, needle)
 
 
 if __name__ == "__main__":

@@ -76,16 +76,18 @@
     const stack = alertStack();
     const node = document.createElement("div");
     node.className = `bass-alert bass-alert--${lv}`;
+    // 오류·경고는 읽을 시간이 필요하므로 자동으로 닫지 않고 [확인]을 눌러야 닫힌다(같은 글이 이미 떠 있으면 하나로 합친다).
+    const sticky = lv === "error" || lv === "warning";
     node.innerHTML = `<span class="bass-alert__icon">${ICONS[lv]}</span>
       <div><div class="bass-alert__msg">${escapeHtml(message)}</div>${hint ? `<div class="bass-alert__hint">${escapeHtml(hint)}</div>` : ""}</div>
-      <button class="bass-alert__close" aria-label="닫기">×</button>`;
+      ${sticky ? '<button class="bass-alert__close bass-alert__ok" type="button" style="min-width:64px;min-height:44px;padding:6px 14px;font-size:14px;font-weight:800;border-radius:10px;border:1px solid currentColor;background:#fff;cursor:pointer;">확인</button>' : '<button class="bass-alert__close" aria-label="닫기">×</button>'}`;
     const close = () => { node.classList.add("is-leaving"); setTimeout(() => node.remove(), 300); };
     node.querySelector(".bass-alert__close").addEventListener("click", close);
+    if (sticky) Array.from(stack.children).forEach((c) => { const m = c.querySelector(".bass-alert__msg"); if (m && m.textContent === String(message)) c.remove(); });
     while (stack.children.length >= 3) stack.firstElementChild.remove();
     stack.append(node);
-    // 기본: 성공 5초 · 경고/기타 9초 · 오류는 닫을 때까지. 앱이 window.BASS_ERROR_TIMEOUT(ms)을 지정하면 오류·경고에 그 시간을 쓴다.
-    const errMs = Number(global.BASS_ERROR_TIMEOUT) || 0;
-    const ms = timeout ?? (lv === "success" ? 5000 : (lv === "error" || lv === "warning") && errMs ? errMs : lv === "error" ? 0 : 9000);
+    // 성공 5초 · 그 밖(차이 등) 9초. 오류·경고는 [확인]을 누를 때까지 유지.
+    const ms = timeout ?? (sticky ? 0 : lv === "success" ? 5000 : 9000);
     if (ms) {
       // 읽는 동안(마우스를 올리거나 터치하는 동안)에는 닫히지 않고, 손을 떼면 다시 센다
       let timer = setTimeout(close, ms);

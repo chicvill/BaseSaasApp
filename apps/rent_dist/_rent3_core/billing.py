@@ -323,6 +323,9 @@ class FifoPaymentEngine:
         b_id = normalize_branch_id(branch)
         chk = cls.check_sms(b_id, parsed, up_to_ym)
         issues, by_name = chk["issues"], chk["by_name"]
+        # 호실·입금자는 맞고 금액만 다르면(예: 3개월분) 문자 수정이 아니라 '수작업 안내'로 보낸다(아래)
+        if pick_if_multi and issues and all(i["field"] == "amount" for i in issues) and chk["room_contract"] is not None:
+            issues = []
         if issues:
             if not by_name:
                 if not parsed["room_no"]:
@@ -349,11 +352,38 @@ class FifoPaymentEngine:
             target_ct = chk["room_contract"]
             room_no = parsed["room_no"] or (target_ct.room_no if target_ct else "")
 
-        # 미납 달이 2개 이상이고 입금액이 전체 미납액보다 적으면(일부 입금), 임의로 앞 달부터 채우지 않고 사용자에게 체크 선택을 요청
+        # 입금액이 '월 납부액'과 다르면(여러 달분·일부 입금 등) 자동으로 달을 정하지 않고 [직접 수납]에서 미납 월을 골라 처리하도록 안내한다.
+        # 초과 입금(밀린 금액보다 많음)·밀린 청구 없음은 처리하지 않는다(선수금 불가).
         if pick_if_multi and not target_months and target_ct:
             led = target_ct.ledger(up_to_ym=up_to_ym or current_ym())
             unpaid_rows = [r for r in led["months"] if r["unpaid"] > 0]
             total_unpaid = sum(r["unpaid"] for r in unpaid_rows)
+            monthly = cls._expected_amounts(target_ct, up_to_ym)["monthly"]
+            if not unpaid_rows:
+                raise DomainError(
+                    f"{room_no}호는 밀린 청구가 없습니다. {parsed['amount']:,}원은 받을 수 없습니다(선수금은 받지 않습니다).",
+                    hint="이미 받은 입금을 또 기록하려는 것은 아닌지 수납 내역(🔍 원장 상태)을 확인해 주세요.",
+                    code="NO_UNPAID",
+                )
+            if parsed["amount"] > total_unpaid:
+                raise DomainError(
+                    f"입금액 {parsed['amount']:,}원이 {room_no}호의 밀린 금액 {total_unpaid:,}원보다 많아 처리할 수 없습니다(선수금은 받지 않습니다).",
+                    hint=f"밀린 금액 {total_unpaid:,}원 이하인지, 문자 금액이 맞는지 확인해 주세요.",
+                    code="OVER_UNPAID",
+                )
+            if monthly > 0 and parsed["amount"] != monthly:
+                return {
+                    "needs_confirm": True,
+                    "needs_manual": True,
+                    "level": "warning",
+                    "message": f"입금액 {parsed['amount']:,}원이 월 납부액 {monthly:,}원과 다릅니다. 자동으로 처리하지 않았습니다. [직접 수납]에서 미납 월을 선택해 처리해 주세요.",
+                    "parsed": parsed,
+                    "room_no": room_no,
+                    "tenant_name": target_ct.tenant_name,
+                    "monthly": monthly,
+                    "total_unpaid": total_unpaid,
+                    "unpaid_months": [{"ym": r["ym"], "unpaid": r["unpaid"], "due": r.get("due", 0), "phase": r.get("phase", "OVERDUE")} for r in unpaid_rows],
+                }
             overdue_n = sum(1 for r in unpaid_rows if r.get("phase") == "OVERDUE")     # 납부 예정(납입일 전) 달은 '미납 달 수'에 세지 않는다
             if unpaid_rows and parsed["amount"] < total_unpaid and overdue_n >= 2:
                 return {

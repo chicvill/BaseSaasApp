@@ -14,6 +14,7 @@
   let currentTab = params.get("tab") || "ledger";
   let dash = null;
   let brokerTargetRoomNo = "";
+  let smsManualHint = null;        // 입금 문자가 월 납부액과 달라 [직접 수납]으로 넘긴 건: 입금액·입금일·입금자(직접 수납 때 그대로 기록)
   let regOpen = false;              // 등기부 확인 카드: 읽기·확정 뒤 다시 그려도 열린 채로 둔다
   const REG_FRESH_DAYS = 90;        // 서버(roomregistry.FRESH_DAYS)와 같게
   let brokerPhotoDataUrl = "";
@@ -703,10 +704,10 @@
       ${flashHtml}
       ${noticeHtml}
       <div class="r3-subbox r3-subbox--direct">
-        <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금 등 은행 문자가 없는 경우) <span class="bass-muted">— 비어 있는(미납) 달을 골라 채웁니다</span></label>
-        ${unpaidMonths.length ? `<div class="bass-row" style="gap:6px;flex-wrap:wrap;">
-          <select id="pmYm" class="bass-select" style="min-height:44px;" aria-label="수납할 달">${unpaidMonths.map((m) => `<option value="${m.ym}">${shortYm(m.ym)} ${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</option>`).join("")}</select>
-          <input id="pmAmt" class="bass-input" type="number" style="width:124px;" value="${unpaidMonths[0].unpaid}" aria-label="직접 수납액">
+        <label class="r3-lbl" style="margin:0 0 6px;">직접 수납 (현금·여러 달분 입금 등) <span class="bass-muted">— 처리할 미납 달을 체크하세요(여러 달 가능). 금액은 체크한 달의 미납 합계 이하만 받습니다.</span></label>
+        ${unpaidMonths.length ? `<div id="pmYm" role="group" aria-label="수납할 달" style="display:grid;gap:4px;margin-bottom:8px;">${unpaidMonths.map((m, i) => `<label class="check-row" style="display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px;border-radius:8px;border:1px solid var(--border,#e2e8f0);background:#fff;cursor:pointer;"><input type="checkbox" class="pm-chk" value="${m.ym}" data-unpaid="${m.unpaid}" ${i === 0 ? "checked" : ""}><span>${shortYm(m.ym)} ${m.phase === "DUE_SOON" ? "납부 예정" : "미납"} ${fmtWon(m.unpaid)}</span></label>`).join("")}</div>
+        <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+          <input id="pmAmt" class="bass-input" type="number" style="width:140px;" value="${unpaidMonths[0].unpaid}" aria-label="직접 수납액">
           <button id="pmDirect" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💰 직접 수납</button>
         </div>` : `<div class="bass-muted" style="font-size:13px;">✅ 비어 있는 달이 없습니다(밀린 청구 없음). 선수금은 받지 않습니다.</div>`}
       </div>
@@ -748,10 +749,18 @@
       });
     });
     if ($m("pmYm")) {
-      $m("pmYm").addEventListener("change", () => { const m = unpaidMonths.find((x) => x.ym === $m("pmYm").value); if (m) $m("pmAmt").value = m.unpaid; });     // 달을 바꾸면 그 달의 미납액이 기본값
+      const pmPicked = () => Array.from(body.querySelectorAll(".pm-chk:checked"));
+      body.querySelectorAll(".pm-chk").forEach((el) => el.addEventListener("change", () => { $m("pmAmt").value = pmPicked().reduce((a, x) => a + Number(x.dataset.unpaid || 0), 0); }));     // 체크한 달의 미납 합계가 기본 금액
       $m("pmDirect").addEventListener("click", function () {
+        const months = pmPicked().map((x) => x.value);
+        if (!months.length) { Bass.updateAppAlert("warning", "처리할 미납 달을 하나 이상 체크해 주세요."); return; }
         Bass.withLock(this, async () => {
-          await after(await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount: Number($m("pmAmt").value || 0), target_ym: $m("pmYm").value } }));
+          const amount = Number($m("pmAmt").value || 0);
+          const hint = smsManualHint && smsManualHint.room_no === no && Number(smsManualHint.amount) === amount ? smsManualHint : null;     // 문자에서 넘어온 건이면 입금일·입금자를 그대로 기록
+          const res = await Bass.api(APP_ID, "/payments/collect", { method: "POST", body: { branch: currentBranch, room_no: no, amount,
+            ...(months.length === 1 ? { target_ym: months[0] } : { target_months: months }), ...(hint ? { paid_date: hint.paid_date, payer_name: hint.payer_name } : {}) } });
+          if (hint) smsManualHint = null;
+          await after(res);
         });
       });
     }
@@ -1653,6 +1662,26 @@
           target_months: targetMonths || null,
         },
       });
+      if (res.needs_manual) {
+        const p = res.parsed || {};
+        smsWarn.innerHTML = `
+          <div role="alert" style="margin-top:10px;padding:12px;border-radius:12px;border:1px solid var(--warn,#f59e0b);background:rgba(245,158,11,.12);font-size:14px;line-height:1.6;">
+            <div style="font-weight:800;margin-bottom:4px;">✋ ${Bass.escapeHtml(res.room_no)}호 ${Bass.escapeHtml(res.tenant_name || "")} — 수작업이 필요합니다</div>
+            <div>입금액 <strong>${fmtWon(p.amount || 0)}</strong> (${Bass.escapeHtml(dotDate(p.paid_date || ""))})이 월 납부액 <strong>${fmtWon(res.monthly)}</strong>과 다릅니다. 여러 달분이거나 일부 입금일 수 있어 <strong>자동으로 처리하지 않았습니다.</strong></div>
+            <div class="bass-muted" style="font-size:13px;margin:4px 0 8px;">아래 <strong>[직접 수납]</strong>에서 처리할 미납 달을 체크하고 금액을 확인한 뒤 수납하세요. (밀린 금액 ${fmtWon(res.total_unpaid)}보다 많은 입금은 받을 수 없습니다.)</div>
+            <button id="smsGoDirect" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;width:100%;">💰 직접 수납에서 월 선택하기</button>
+          </div>`;
+        Bass.updateAppAlert("warning", res.message);
+        document.getElementById("smsGoDirect").addEventListener("click", async () => {
+          smsManualHint = { amount: Number(p.amount || 0), paid_date: p.paid_date || "", payer_name: p.payer_name || "", room_no: String(res.room_no) };
+          if (String(selRoomNo) !== String(res.room_no)) { selRoomNo = String(res.room_no); await refresh(); }
+          let left = smsManualHint.amount;      // 오래된 미납 달부터 입금액이 닿는 만큼 미리 체크해 둔다(고칠 수 있음)
+          Array.from(document.querySelectorAll(".pm-chk")).forEach((el) => { el.checked = left > 0; if (left > 0) left -= Math.min(left, Number(el.dataset.unpaid || 0)); });
+          const amt = document.getElementById("pmAmt"); if (amt) amt.value = smsManualHint.amount;
+          const box = document.querySelector(".r3-subbox--direct"); if (box) box.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        return;
+      }
       if (res.needs_month_pick) {
         const p = res.parsed || {};
         const ms = res.unpaid_months || [];
