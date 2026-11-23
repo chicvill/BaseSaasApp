@@ -8423,5 +8423,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             ct = Contract.get(ct0.id); ct.payer_names = keep; ct.save(action="t")
 
 
+    def test_131_frontend_scripts_have_valid_syntax(self):
+        """131. 화면 스크립트에 문법 오류가 없다(오류가 있으면 임대인 창이 통째로 열리지 않는다). node 가 없으면 건너뛴다."""
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node 없음")
+        files = [os.path.join(ROOT, "apps", "rent_dist", d, "frontend", "app.js") for d in ("rent3_lessor", "rent3_tenant")]
+        files += [os.path.join(ROOT, "shared_ui", n) for n in ("bass.js", "r3_shell.js", "r3_notify.js", "r3_modal.js")]
+        files.append(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "hamburger.js"))
+        for f in files:
+            if os.path.exists(f):
+                r = subprocess.run([node, "--check", f], capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, f + " :: " + r.stderr[:400])
+
+
 if __name__ == "__main__":
     unittest.main()

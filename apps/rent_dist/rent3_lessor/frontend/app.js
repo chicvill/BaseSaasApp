@@ -943,8 +943,7 @@
           body: {
             branch: currentBranch, contract_id: ct.id,
             deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
-            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、
-]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
+            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
             tax_invoice_requested: reqInv,
             vat_target: reqInv,
             tenant_business_number: reqInv ? $m("cmBizNo").value.trim() : "",
