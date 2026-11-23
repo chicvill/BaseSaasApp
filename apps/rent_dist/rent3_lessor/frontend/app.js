@@ -402,16 +402,31 @@
     .rc-unpaid { font-weight: 800; font-size: 14px; color: var(--ok); }
     .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
     /* 호실 단추: 가로 5칸(한 화면에 30호실 안팎), 수납 상태는 단추 전체 배경색 — 초록 완납 · 노랑 대기 · 빨강 미납 · 회색 공실 */
-    .rl-list { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
-    .rl-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-width: 0; min-height: 60px; padding: 8px 16px; text-align: left; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
-    .rl-no { font-size: 20px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 14px; font-weight: 700; }
-    .rl-who { font-size: 15px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rl-st { font-size: 16px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 14px; opacity: .9; white-space: nowrap; }
+    .rl-list { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+    .rl-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; min-height: 46px; padding: 5px 12px; text-align: left; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
+    .rl-no { font-size: 17px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 13px; font-weight: 700; }
+    .rl-who { font-size: 14px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rl-st { font-size: 14px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 13px; opacity: .9; white-space: nowrap; }
     .rl-row--ok { background: #15803d !important; color: #ffffff !important; }
     .rl-row--wait { background: #fde047 !important; color: #422006 !important; }
     .rl-row--late { background: #b91c1c !important; color: #ffffff !important; }
     .rl-row--vacant { background: #e2e8f0 !important; color: #334155 !important; }
     .rl-row:active { filter: brightness(.92); }
+    /* 컴팩트 첫 화면: 머리말·KPI·문자 수납 카드·단추의 크기와 여백을 줄여 한 화면에 더 많이 보이게 한다 */
+    .app-shell { padding: 8px 8px 60px !important; }
+    .app-shell > header.bass-card, .app-shell header.bass-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
+    #bldgTitle { font-size: 17px !important; margin: 0 !important; line-height: 1.25; }
+    #bldgSubtitle { font-size: 12px !important; }
+    .app-shell [data-r3-burger] { width: 40px !important; height: 40px !important; min-height: 40px !important; min-width: 40px !important; padding: 0 !important; border-radius: 12px !important; font-size: 18px !important; }
+    .app-shell .r3-bell { width: 40px !important; height: 40px !important; min-height: 40px !important; border-radius: 12px !important; font-size: 18px !important; }
+    #kpiGrid.kpi-strip { display: grid !important; grid-template-columns: 1fr 1fr; gap: 2px 10px !important; margin: 6px 0 0 !important; font-size: 13px !important; }
+    #kpiGrid.kpi-strip strong { font-size: 14.5px !important; }
+    #kpiGrid.kpi-strip span { white-space: normal !important; }
+    #kpiGrid.kpi-strip .bass-badge { font-size: 12px !important; padding: 1px 6px !important; }
+    .r3-zone--sms { padding: 8px 10px !important; margin-bottom: 8px !important; }
+    .r3-zone--sms .r3-lbl { font-size: 13.5px !important; margin-bottom: 4px !important; }
+    .r3-zone--sms textarea { min-height: 0 !important; padding: 6px 8px !important; font-size: 14px !important; }
+    .r3-zone--sms .bass-btn { min-height: 40px !important; font-size: 15px !important; margin-top: 6px !important; }
     .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
     .rc-warn { background: hsl(46 96% 56%) !important; color: #2b2300 !important; border-color: hsl(46 96% 40%) !important; font-weight: 800; }
@@ -1623,10 +1638,10 @@
         ${pend.map((n) => `<button type="button" class="bass-btn todo-row" data-room="${Bass.escapeHtml(n.room_no)}" style="width:100%;min-height:48px;text-align:left;margin-bottom:6px;border-color:var(--warn);">${Bass.escapeHtml(n.room_no)}호 ${Bass.escapeHtml(n.tenant_name)} · ${fmtWon(n.amount)} 이체했다고 알림 → 확인하기</button>`).join("")}
       </div>` : "";
     elTabContent.innerHTML = `
-      <div class="bass-card r3-zone r3-zone--sms" style="padding:12px;margin-bottom:12px;">
+      <div class="bass-card r3-zone r3-zone--sms" style="padding:8px 10px;margin-bottom:8px;">
         <label class="r3-lbl" for="bankSms" style="margin:0 0 6px;font-weight:800;">🏦 은행 입금 문자 붙여넣기 <span class="bass-muted" style="font-weight:500;">— 호실·입금자 이름으로 호실을 자동으로 찾습니다</span></label>
         <textarea id="bankSms" class="bass-input" rows="2" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
-        <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:48px;margin-top:8px;">⚡ 문자 읽고 수납 처리</button>
+        <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:40px;margin-top:6px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>
       ${coHtml}
