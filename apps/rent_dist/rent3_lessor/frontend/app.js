@@ -825,11 +825,14 @@
           });
         });
       }
-      // 월임차료 = 월세 + 관리비(은행에 입금되는 금액). 고친 금액은 원래의 월세:관리비 비율대로 나눠 저장한다(부가세는 그대로).
-      // 월세·관리비를 따로 보여 주는 곳은 계약서·세금 산출·연말정산 자료뿐이다.
+      // 월임차료 = 월세 + 관리비(은행에 입금되는 금액). 고친 금액은 계약서에 적힌 월세:관리비 비율대로 나눠 저장한다(부가세는 그대로).
+      // 수납과 세금 산출은 계약서의 월세·관리비 금액을 따른다. 월세·관리비를 따로 보여 주는 곳은 계약서·세금 산출·연말정산 자료뿐이다.
       const splitTotal = () => {
-        const t0 = Number(row.dataset.total || 0), r0 = Number(row.dataset.rent || 0), f0 = Number(row.dataset.fee || 0);
-        const vat0 = Math.max(0, t0 - r0 - f0);
+        const t0 = Number(row.dataset.total || 0);
+        const cR = Number(ct.monthly_rent || 0), cF = Number(ct.maintenance_fee || 0);
+        const hasC = cR + cF > 0;                       // 계약서 금액이 있으면 그 비율, 없으면 이 건의 원래 비율
+        const r0 = hasC ? cR : Number(row.dataset.rent || 0), f0 = hasC ? cF : Number(row.dataset.fee || 0);
+        const vat0 = Math.max(0, t0 - Number(row.dataset.rent || 0) - Number(row.dataset.fee || 0));
         const base = Math.max(0, Number(row.querySelector(".pr-total").value || 0) - vat0);
         const rent = r0 + f0 > 0 ? Math.round((base * r0) / (r0 + f0)) : base;
         return { rent, fee: base - rent };
@@ -1539,6 +1542,7 @@
       <style>.mf-row{display:grid;grid-template-columns:24px minmax(0,1fr) 44px 108px;gap:6px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border,#e2e8f0);font-size:14px}
       .mf-cnt{font-size:12.5px;opacity:.7;text-align:right}.mf-amt{text-align:right;white-space:nowrap}.mf-sum{padding:10px 12px;border-radius:12px;background:#eef2ff;margin:10px 0;font-size:14px;line-height:1.7}.mf-big{font-size:18px;font-weight:800}</style>
       <div class="bass-row" style="gap:8px;margin-bottom:6px;"><label class="r3-fld" style="flex:1;">기준 연도<select id="mfYear" class="bass-select">${yrs.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select></label></div>
+      <div style="font-size:12.5px;margin-bottom:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;">📌 참고자료입니다. 실제 관리비 청구·수납·세금 산출에는 반영되지 않고, 계약서에 적힌 월세·관리비 금액을 그대로 따릅니다.</div>
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">체크한 항목만 합계에 넣습니다. 금액은 세무 허브의 경비(지출) 등록에서 가져옵니다.</div>
       <div>${rowsHtml}</div>
       <div class="mf-sum" id="mfSum"></div>

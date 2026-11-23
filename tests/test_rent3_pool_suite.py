@@ -8480,7 +8480,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     o.delete(action="t")
         base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
         app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
-        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "rows=\"3\""):
+        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "참고자료입니다", "계약서에 적힌 월세:관리비 비율", "rows=\"3\""):
             self.assertIn(needle, app, needle)
         self.assertNotIn('class="bass-input pr-rent"', app)
         self.assertNotIn('class="bass-input pr-fee"', app)
