@@ -3407,6 +3407,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 관리인: 대화 읽기, 원격 지원 허용 전에는 입장 거부(전화 접수는 기록만 남기므로 허용 전에도 된다)
         thr = c.get("/api/rent3_admin/support/thread", params={"user": tkey}).json()
         self.assertEqual(thr["messages"][0]["body"], secret)
+        self.assertIn("phone", thr["user"])            # 전화 접수 칸의 전화 걸기 단추용(선택한 사용자 한 명)
         self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
         self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": ""}).status_code, 400)      # 내용 없음
         pre = c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "전화로 로그인 오류 문의"})

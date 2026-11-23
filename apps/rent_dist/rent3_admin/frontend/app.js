@@ -158,6 +158,8 @@
     if (!card || !box) return;
     const t = await Bass.api(APP_ID, `/support/thread?user=${encodeURIComponent(card.user)}`);
     const msgs = t.messages || [];
+    const callDigits = String((t.user && t.user.phone) || "").replace(/\D/g, "");
+    const callPhone = callDigits.length === 11 ? `${callDigits.slice(0, 3)}-${callDigits.slice(3, 7)}-${callDigits.slice(7)}` : callDigits.length === 10 ? `${callDigits.slice(0, 3)}-${callDigits.slice(3, 6)}-${callDigits.slice(6)}` : callDigits;
     const can = card.support_allowed && msgs.length > 0;
     const sessions = card.role === "lessor" ? rooms_sessions(d) : (room ? room.sessions : []);
     const why = !card.support_allowed ? "이 사용자는 원격 지원을 허용하지 않았습니다. 전화로 방법을 안내하거나, 사용자가 메뉴에서 허용을 켜도록 안내해 주세요."
@@ -171,7 +173,9 @@
         <div class="bass-muted" style="font-size:12px;margin-top:4px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
-          <strong style="font-size:13.5px;">📞 전화 접수 (전화로 요청받은 경우)</strong>
+          <div class="bass-row" style="justify-content:space-between;gap:8px;"><strong style="font-size:13.5px;">📞 전화 접수 (전화로 요청받은 경우)</strong>
+            ${callPhone ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${Bass.escapeHtml(callDigits)}" style="min-height:40px;">📞 ${Bass.escapeHtml(callPhone)} 전화 걸기</a>` : '<span class="bass-muted" style="font-size:12.5px;">등록된 전화번호가 없습니다</span>'}</div>
+          <div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;font-size:12.5px;">💡 통화로 받은 요청 사항, 안내한 방법 등 <strong>중요한 통화 내용은 아래 접수 메모나 채팅창에 남겨 주세요.</strong></div>
           <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
             <select id="spCat" class="bass-select" style="width:auto;">${d.categories.map((c) => `<option ${c === sp.cat ? "selected" : ""}>${Bass.escapeHtml(c)}</option>`).join("")}</select>
             <input id="spMemo" class="bass-input" style="flex:1;min-width:160px;" placeholder="접수 메모 (예: 수납 입력 방법을 모르심)">

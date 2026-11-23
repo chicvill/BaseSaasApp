@@ -1085,7 +1085,8 @@ def support_thread(user: str):
     sup.purge_expired()
     u = sup.user_by_thread(user)
     sup.mark_read(user, "admin")
-    return {"success": True, "user": _user_card(u), "messages": [sup.public_message(m) for m in sup.thread_messages(user)],
+    return {"success": True, "user": {**_user_card(u), "phone": (u.phone or "").strip()},      # 전화 접수 칸에서 바로 걸 수 있도록 선택한 사용자 한 명의 번호만 내려 준다
+            "messages": [sup.public_message(m) for m in sup.thread_messages(user)],
             "retention_days": sup.SUPPORT_CHAT_DAYS}
 
 
