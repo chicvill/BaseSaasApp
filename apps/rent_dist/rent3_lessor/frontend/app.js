@@ -403,15 +403,15 @@
     .rc-unpaid.is-late { color: var(--err); font-size: 16px; }
     /* 호실 단추: 가로 5칸(한 화면에 30호실 안팎), 수납 상태는 단추 전체 배경색 — 초록 완납 · 노랑 대기 · 빨강 미납 · 회색 공실 */
     .rl-list { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
-    .rl-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; min-height: 46px; padding: 5px 12px; text-align: left; border-radius: 12px; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
+    .rl-row, .bass-btn.rl-row:not(.bass-btn--primary):not(.is-active) { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; min-height: 46px; padding: 5px 12px !important; text-align: left; border-radius: 12px !important; border: 0 !important; box-shadow: none !important; line-height: 1.25; overflow: hidden; }
     .rl-no { font-size: 17px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 13px; font-weight: 700; }
     .rl-who { font-size: 14px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .rl-st { font-size: 14px; font-weight: 800; white-space: nowrap; } .rl-day { font-size: 13px; opacity: .9; white-space: nowrap; }
-    .rl-row--ok { background: #15803d !important; color: #ffffff !important; }
-    .rl-row--wait { background: #fde047 !important; color: #422006 !important; }
-    .rl-row--late { background: #b91c1c !important; color: #ffffff !important; }
-    .rl-row--vacant { background: #e2e8f0 !important; color: #334155 !important; }
-    .rl-row:active { filter: brightness(.92); }
+    .rl-row--ok, .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--ok:not(.bass-btn--primary):not(.is-active):hover { background: #15803d !important; color: #ffffff !important; }
+    .rl-row--wait, .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--wait:not(.bass-btn--primary):not(.is-active):hover { background: #fde047 !important; color: #422006 !important; }
+    .rl-row--late, .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--late:not(.bass-btn--primary):not(.is-active):hover { background: #b91c1c !important; color: #ffffff !important; }
+    .rl-row--vacant, .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active), .bass-btn.rl-row.rl-row--vacant:not(.bass-btn--primary):not(.is-active):hover { background: #e2e8f0 !important; color: #334155 !important; }
+    .bass-btn.rl-row:active { filter: brightness(.92); transform: none !important; }
     /* 컴팩트 첫 화면: 머리말·KPI·문자 수납 카드·단추의 크기와 여백을 줄여 한 화면에 더 많이 보이게 한다 */
     .app-shell { padding: 8px 8px 60px !important; }
     .app-shell > header.bass-card, .app-shell header.bass-card { padding: 8px 10px !important; margin-bottom: 8px !important; }
@@ -420,7 +420,7 @@
     /* 호실 수납 창: 크게 열고, 창 전체를 가로·세로로 밀어 볼 수 있다(월별 납부 칸이 잘리지 않게 본문 최소 너비를 둔다) */
     .r3-modal__box--wide { max-width: min(980px, 100vw) !important; width: 100% !important; max-height: 96vh !important; overflow: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 20px !important; }
     .r3-modal__box--wide .r3-modal__head { position: sticky; top: 0; left: 0; z-index: 3; background: #fff; }
-    .r3-modal__box--wide .r3-modal__x { min-width: 76px; min-height: 40px; padding: 0 12px; font-size: 15px; font-weight: 800; background: #dc2626 !important; border-color: #dc2626 !important; color: #fff !important; }
+    .r3-modal__box--wide .r3-modal__x, .r3-modal__box--wide .r3-modal__head .bass-btn.r3-modal__x:not(.bass-btn--primary):not(.is-active), .r3-modal__box--wide .r3-modal__head .bass-btn.r3-modal__x:not(.bass-btn--primary):not(.is-active):hover { min-width: 76px; min-height: 40px; padding: 0 12px; font-size: 15px; font-weight: 800; background: #dc2626 !important; border-color: #dc2626 !important; color: #fff !important; }
     .r3-modal__box--wide .r3-modal__body { min-width: 440px; }
     .r3-modal__box--wide .pr-list { max-height: none; overflow: visible; }
     .r3-modal__box--wide .pr { grid-template-columns: 44px 136px 84px 84px 52px; justify-content: start; gap: 5px; font-size: 13px; min-height: 36px; padding: 2px 0; }
