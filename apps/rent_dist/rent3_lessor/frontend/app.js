@@ -444,6 +444,13 @@
     .pr { display: grid; grid-template-columns: 40px minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr) 52px; gap: 4px; align-items: center; padding: 3px 0; border-bottom: 1px solid var(--border); font-size: 12.5px; min-height: 44px; }
     .pr .bass-input { padding: 6px 4px; font-size: 12.5px; min-width: 0; width: 100%; }
     .pr .pr-del { padding: 4px; min-height: 40px; font-size: 12.5px; color: var(--err); width: 100%; }
+    /* 수납내역 표: 칸을 넓게(날짜·금액이 다 보이게) 하고, 화면보다 넓으면 좌우로 밀어 본다 */
+    .pr-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -4px; padding: 0 4px; }
+    .pr-table { min-width: 500px; }
+    .pr-table .pr { grid-template-columns: 52px 168px 112px 104px 70px; gap: 8px; font-size: 14px; min-height: 52px; }
+    .pr-table .pr .bass-input { padding: 8px 8px; font-size: 15px; min-height: 44px; }
+    .pr-table .pr .pr-del { font-size: 14px; min-height: 44px; }
+    .pr-table .pr--un, .pr-table .pr--ok { grid-template-columns: 52px 1fr; }
     .pr--head { font-weight: 700; min-height: 0; border-bottom: 2px solid var(--border); }
     .pr--un, .pr--ok { grid-template-columns: 44px 1fr; padding-left: 6px; padding-right: 6px; border-radius: 6px; }
     .pr--un { background: hsla(356, 82%, 56%, .10); }
@@ -740,8 +747,8 @@
       </div>
       ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(239,68,68,.14);border:1px solid var(--err);font-size:13px;">⚠️ 오류: 청구액보다 ${fmtWon(lg.advance_credit)}을 더 받은 것으로 기록되어 있습니다(선수금은 받지 않습니다). 중복 수납일 수 있으니 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하고 잘못 들어간 건을 삭제하세요.</div>` : ""}
       <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
-      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
-      <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
+      <div class="pr-scroll"><div class="pr-table"><div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
+      <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div></div></div>`;
     const body = host;
     pinLimit(host);
 
