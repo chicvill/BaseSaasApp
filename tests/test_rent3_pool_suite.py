@@ -8500,5 +8500,50 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, app, needle)
 
 
+    def test_134_lessor_registers_tenant_business_info_and_menu_has_invoice_entry(self):
+        """134. 임대인이 임차인용 사업자등록증 정보를 올리면 그 호실 계약·임차인의 세금계산서 발급 정보(기존 필드)에 저장되고 부가세 청구 여부(vat_target)는 건드리지 않는다. ☰ 메뉴에 세금계산서·현금영수증 발행 항목이 있다."""
+        from apps.rent_dist._rent3_core import Contract, Tenant
+        c = self.client
+        chic = self._login("chic")
+        ct0 = Contract.first(branch="main", room_no="201", status="ACTIVE")
+        tn0 = Tenant.get(ct0.id_tenant) if ct0.id_tenant else None
+        keep_ct = {k: getattr(ct0, k) for k in ("tenant_business_number", "tenant_company_name", "tenant_ceo_name", "tenant_business_address", "tenant_email", "tax_invoice_requested", "vat_target")}
+        keep_tn = {k: getattr(tn0, k) for k in ("business_number", "company_name", "ceo_name", "business_address", "email")} if tn0 else {}
+        try:
+            url = "/api/rent3_lessor/contracts/tenant-bizreg"
+            bad = c.post(url, headers=chic, json={"branch": "main", "room_no": "201", "business_number": "123-45-67890"})
+            self.assertEqual(bad.status_code, 400, bad.text)
+            none = c.post(url, headers=chic, json={"branch": "main", "room_no": "201"})
+            self.assertEqual(none.status_code, 400, none.text)             # 사진도 번호도 없으면 거부
+            self.assertEqual(c.post(url, headers=chic, json={"branch": "main", "room_no": "999", "business_number": "220-81-62517"}).status_code, 400)
+            vat_before = Contract.get(ct0.id).vat_target
+            r = c.post(url, headers=chic, json={"branch": "main", "room_no": "201", "business_number": "2208162517", "company_name": "(주)시크디자인",
+                                                "ceo_name": "홍길동", "email": "tax@chic.co.kr", "business_address": "서울 강남구 1"})
+            self.assertEqual(r.status_code, 200, r.text)
+            d = r.json()
+            self.assertEqual(d["business"]["business_number"], "220-81-62517")
+            ct = Contract.get(ct0.id)
+            self.assertEqual((ct.tenant_business_number, ct.tenant_company_name, ct.tenant_ceo_name, ct.tenant_email), ("220-81-62517", "(주)시크디자인", "홍길동", "tax@chic.co.kr"))
+            self.assertTrue(ct.tax_invoice_requested)
+            self.assertEqual(ct.vat_target, vat_before)                    # 청구액이 달라지는 부가세 설정은 그대로
+            if tn0:
+                self.assertEqual(Tenant.get(tn0.id).business_number, "220-81-62517")
+            bad_mail = c.post(url, headers=chic, json={"branch": "main", "room_no": "201", "business_number": "220-81-62517", "email": "not-an-email"})
+            self.assertEqual(bad_mail.status_code, 400, bad_mail.text)
+        finally:
+            ct = Contract.get(ct0.id)
+            for k, v in keep_ct.items():
+                setattr(ct, k, v)
+            ct.save(action="t")
+            if tn0:
+                tn = Tenant.get(tn0.id)
+                for k, v in keep_tn.items():
+                    setattr(tn, k, v)
+                tn.save(action="t")
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ('id: "btnTaxInvoice"', "function goTaxView", "showTenantBizRegModal", "/contracts/tenant-bizreg", "임차인용 (세금계산서 발급)", "임대인용 (내 사업자)"):
+            self.assertIn(needle, app, needle)
+
+
 if __name__ == "__main__":
     unittest.main()

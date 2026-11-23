@@ -53,6 +53,7 @@
     { title: "3단계 · 직거래 전자계약 · 세무", more: true, items: [
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
       { label: "🧾 세무 허브", tab: "tax" },
+      { label: "🧾 세금계산서 · 현금영수증 발행", id: "btnTaxInvoice" },
       { label: "🧮 관리비 산출근거", id: "btnMgmtFee" },
       { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" },
       { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" },
@@ -68,7 +69,7 @@
     ] },
     { title: "건물 설정", more: true, items: [
       { label: "🏢 건물 정보 수정", id: "btnEditBuilding" },
-      { label: "📷 사업자등록증 촬영 · 홈택스 승인", id: "btnBizRegModal" },
+      { label: "📷 사업자등록증 촬영 (임대인용 · 임차인용)", id: "btnBizRegModal" },
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
     { title: "내 설정", more: true, items: [
@@ -1469,11 +1470,13 @@
     });
   }
 
-  async function showBizRegModal() {
+  async function showBizRegModal(mode) {
+    if (mode === "tenant") return showTenantBizRegModal();
     const data = await Bass.api(APP_ID, `/franchise/application?branch=${encodeURIComponent(currentBranch)}`);
     const a = data.application || {}, biz = a.bizreg || {}, bchk = biz.check, bver = biz.verification;
     const esc = Bass.escapeHtml;
     openModal("📷 사업자등록증 촬영 · 국세청 홈택스 확인 승인", `
+      <div class="bass-row" style="gap:6px;margin-bottom:8px;"><button type="button" class="bass-btn bass-btn--sm bass-btn--primary" disabled>임대인용 (내 사업자)</button><button type="button" id="mbizToTenant" class="bass-btn bass-btn--sm">임차인용 (세금계산서 발급)</button></div>
       <div style="font-size:13px;line-height:1.6;">
         <div class="bass-muted">사업자등록증(또는 임대사업자등록증)을 촬영해 올리시면 10자리 유효성·대표자 대조 후 관리인이 <strong>국세청 홈택스</strong>에서 사업자 상태를 확인해 승인합니다.</div>
         <div style="margin-top:8px;">현재 승인된 사업자번호: <code>${esc(biz.approved_business_number || "미등록")}</code></div>
@@ -1499,6 +1502,7 @@
         <button id="mbizSubmit" class="bass-btn bass-btn--primary" type="button" style="margin-top:8px;">📷 사업자등록증 제출 (홈택스 확인 요청)</button>
       </div>`);
     bindBizPicker("mbiz");
+    $m("mbizToTenant").addEventListener("click", () => showTenantBizRegModal().catch(Bass.showError));
     $m("mbizSubmit").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const dataUrl = await bizDataUrl("mbiz");
@@ -1517,6 +1521,60 @@
         });
         Bass.updateAppAlert(r.level === "success" ? "success" : "warning", r.message);
         await showBizRegModal();
+        await refresh();
+      });
+    });
+  }
+
+  // 세무 허브의 한 화면(예: 세금계산서)으로 곧장 간다. 메뉴·창에서 쓴다.
+  function goTaxView(view) {
+    msgRoom = "";
+    taxView = view; taxMonth = 0;
+    currentTab = "tax";
+    renderTab();
+    window.scrollTo(0, 0);
+  }
+
+  // 📷 임차인용 사업자등록증: 법인·사업자 임차인의 사업자등록증을 촬영해 그 호실 계약의 세금계산서 발급 정보에 반영한다(별도 보관소 없이 계약·임차인의 사업자 필드에 저장).
+  async function showTenantBizRegModal() {
+    const E = Bass.escapeHtml;
+    const occ = (dash.rooms || []).filter((r) => r.is_occupied && r.contract);
+    const opt = (r) => `<option value="${E(r.room_no)}">${E(r.room_no)}호 ${E(r.contract.tenant_name || "")}${r.contract.tenant_business_number ? " · 등록됨" : ""}</option>`;
+    openModal("📷 임차인 사업자등록증 (세금계산서 발급용)", `
+      <div class="bass-row" style="gap:6px;margin-bottom:8px;"><button type="button" id="tbizToLessor" class="bass-btn bass-btn--sm">임대인용 (내 사업자)</button><button type="button" class="bass-btn bass-btn--sm bass-btn--primary" disabled>임차인용 (세금계산서 발급)</button></div>
+      <div style="font-size:13px;line-height:1.6;">
+        <div class="bass-muted">회사(법인·사업자)가 임차한 호실의 사업자등록증을 올리면 사업자등록번호·상호·대표자·주소를 읽어 <strong>그 호실 계약의 세금계산서 발급 정보</strong>에 저장합니다. 사업자가 아닌 임차인은 아무것도 저장되지 않으며, 번호가 없으면 현금영수증을 발행합니다.</div>
+        <label class="r3-fld" style="margin-top:8px;">호실<select id="tbizRoom" class="bass-select">${occ.map(opt).join("") || '<option value="">입주 중인 호실이 없습니다</option>'}</select></label>
+        <label class="r3-fld" style="margin-top:8px;">📷 사업자등록증 사진 촬영 또는 파일(JPG·PNG·PDF) 선택${bizPickerHtml("tbiz")}</label>
+        <label class="check-row" style="margin:6px 0;"><span style="font-size:12px;">사업자등록증을 AI로 읽어 아래 칸을 채우는 것에 동의합니다. (사진 없이 직접 입력해도 됩니다)</span><input id="tbizConsent" type="checkbox" checked></label>
+        <div class="r3-grid">
+          <label class="r3-fld">사업자등록번호<input id="tbizNo" class="bass-input" placeholder="예: 123-45-67890"></label>
+          <label class="r3-fld">상호<input id="tbizComp" class="bass-input"></label>
+          <label class="r3-fld">대표자<input id="tbizCeo" class="bass-input"></label>
+          <label class="r3-fld">세금계산서 받을 이메일<input id="tbizEmail" class="bass-input" type="email"></label>
+        </div>
+        <label class="r3-fld" style="margin-top:6px;">사업장 주소 (비우면 호실 주소)<input id="tbizAddr" class="bass-input"></label>
+        <button id="tbizSubmit" class="bass-btn bass-btn--primary" type="button" style="width:100%;margin-top:10px;min-height:46px;">저장 (세금계산서 발급 정보에 반영)</button>
+        <div id="tbizDone"></div>
+      </div>`);
+    bindBizPicker("tbiz");
+    $m("tbizToLessor").addEventListener("click", () => showBizRegModal().catch(Bass.showError));
+    $m("tbizSubmit").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const room_no = $m("tbizRoom").value;
+        if (!room_no) { Bass.updateAppAlert("warning", "호실을 골라 주세요."); return; }
+        const dataUrl = await bizDataUrl("tbiz");
+        const r = await Bass.api(APP_ID, "/contracts/tenant-bizreg", { method: "POST", body: {
+          branch: currentBranch, room_no, attachment_data_url: dataUrl || "", consent: $m("tbizConsent").checked && !!dataUrl,
+          business_number: $m("tbizNo").value.trim(), company_name: $m("tbizComp").value.trim(), ceo_name: $m("tbizCeo").value.trim(),
+          business_address: $m("tbizAddr").value.trim(), email: $m("tbizEmail").value.trim() } });
+        Bass.updateAppAlert("success", r.message);
+        const b = r.business || {};
+        $m("tbizNo").value = b.business_number || ""; $m("tbizComp").value = b.company_name || ""; $m("tbizCeo").value = b.ceo_name || "";
+        $m("tbizAddr").value = b.business_address || ""; $m("tbizEmail").value = b.email || "";
+        $m("tbizDone").innerHTML = `<div style="margin-top:10px;padding:8px 10px;border-radius:10px;background:#dcfce7;color:#14532d;font-size:13px;">✅ ${E(r.room_no)}호 사업자 정보 저장 완료 — ${E(b.company_name || "")} ${E(b.business_number || "")}</div>
+          <button id="tbizGoInv" class="bass-btn bass-btn--sm" type="button" style="margin-top:8px;width:100%;min-height:44px;">🧾 세금계산서 발행 화면으로</button>`;
+        $m("tbizGoInv").addEventListener("click", () => { closeModal(); goTaxView("invoice"); });
         await refresh();
       });
     });
@@ -1610,6 +1668,14 @@
         Bass.updateAppAlert("success", res.message);
         await showMgmtFeeModal(d.year);
       });
+    });
+  }
+  const btnTaxInvoice = document.getElementById("btnTaxInvoice");
+  if (btnTaxInvoice) {
+    btnTaxInvoice.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      goTaxView("invoice");
     });
   }
   const btnMgmtFee = document.getElementById("btnMgmtFee");
@@ -2571,7 +2637,7 @@
           </div>
         </details>
       </div>`,
-      invoice: monthRow + `<div class="bass-muted" style="font-size:12.5px;margin:0 0 8px;line-height:1.6;">정보미비로 표시된 건은 <strong>수납 현황 ▸ 해당 호실 ▸ 계약내용</strong>에서 사업자등록번호·상호·대표자명·이메일·사업자등록상 주소를 입력하면 발급 가능해집니다 (주거용·기숙사 호실 포함).</div>` + `      <div class="bass-card" style="margin-bottom:12px;">
+      invoice: monthRow + `<div class="bass-muted" style="font-size:12.5px;margin:0 0 8px;line-height:1.6;">정보미비로 표시된 건은 <strong>수납 현황 ▸ 해당 호실 ▸ 계약내용</strong>에서 사업자등록번호·상호·대표자명·이메일·사업자등록상 주소를 입력하면 발급 가능해집니다 (주거용·기숙사 호실 포함). 사업자등록증 사진이 있으면 <strong>☰ 메뉴 ▸ 사업자등록증 촬영 ▸ 임차인용</strong>에서 올려 자동으로 채울 수 있습니다.</div>` + `      <div class="bass-card" style="margin-bottom:12px;">
         <div class="bass-row" style="justify-content:space-between;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
           <h3 style="margin:0;">📑 세금계산서 발급 리스트 (청구월 약정 지급일 기준 월 1건 · 5줄 스크롤)</h3>
           <button id="btnDlHometaxCsv2" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📥 홈택스 일괄발급 포맷(CSV)</button>

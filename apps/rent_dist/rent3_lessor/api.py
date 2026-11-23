@@ -1127,6 +1127,84 @@ def edit_contract(req: ContractEditReq):
     return {"success": True, "message": f"{ct.room_no}호 계약 내용을 저장했습니다.", "contract": ct.model_dump()}
 
 
+class TenantBizRegReq(BaseModel):
+    branch: str = "main"
+    room_no: str
+    attachment_data_url: str = ""
+    consent: bool = False                 # AI 로 사업자등록증 읽기 동의
+    business_number: str = ""
+    company_name: str = ""
+    ceo_name: str = ""
+    business_address: str = ""
+    email: str = ""
+
+
+@router.post("/contracts/tenant-bizreg")
+def tenant_bizreg(req: TenantBizRegReq):
+    """임대인이 임차인(법인·사업자)의 사업자등록증을 촬영·선택해 올리면(동의 시 AI 가 읽어 채움) 그 호실 계약·임차인의 세금계산서 발급 정보에 반영한다.
+    임차인 정보에 따로 보관하는 곳은 없다: 이미 세금계산서 대장이 읽는 계약(`tenant_*`)·임차인(`business_*`) 필드에 쓴다(사업자인 임차인만 값이 생긴다).
+    부가세 청구 여부(vat_target)는 바꾸지 않는다 — 청구액이 달라지므로 계약내용에서 따로 정한다."""
+    from apps.rent_dist._rent3_core import validate_email_format
+    from apps.rent_dist._rent3_core.billing import validate_kr_business_number
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(req.branch)
+    room = Room.first(branch=b_id, room_no=req.room_no.strip())
+    if not room:
+        raise DomainError(f"'{req.room_no}호'는 이 건물에 없는 호실입니다.")
+    ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+    ct = ct or Contract.first(id_room=room.id, status="ACTIVE")
+    if not ct:
+        raise DomainError(f"{room.room_no}호는 현재 계약이 없는 공실입니다.", hint="입주 중인 호실의 사업자등록증만 올릴 수 있습니다.")
+    tenant = Tenant.get(ct.id_tenant) if ct.id_tenant else None
+    ex: Dict[str, Any] = {}
+    saved = None
+    if (req.attachment_data_url or "").strip():
+        owner_id = tenant.id if tenant else ct.id
+        saved = fr.save_bizreg_file(owner_id, req.attachment_data_url)
+        if req.consent:
+            used = int(getattr(tenant, "biz_ai_calls", 0) or 0) if tenant else 0
+            if used >= 6:
+                raise DomainError("AI 읽기 횟수 한도를 넘었습니다.", hint="사업자등록번호·상호·대표자를 직접 입력해 주세요.")
+            binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
+            ai = registry_ai.analyze_bizreg(binary, mime)
+            if ai["status"] == "ok":
+                ex = ai.get("extracted") or {}
+                if tenant:
+                    tenant.biz_ai_calls = used + 1
+    num = (req.business_number or ex.get("business_number") or "").strip()
+    if not num:
+        raise DomainError("사업자등록번호를 읽지 못했습니다.", hint="사진이 선명한지 확인하거나 사업자등록번호 10자리를 직접 입력해 주세요.")
+    val = validate_kr_business_number(num, strict_checksum=True)
+    if not val["valid"]:
+        raise DomainError(f"사업자등록번호({num})가 올바르지 않습니다: {val['reason']}", hint="번호를 다시 확인해 주세요. 번호가 없으면 세금계산서 대신 현금영수증을 발행합니다.")
+    d = val["digits"]
+    number = f"{d[:3]}-{d[3:5]}-{d[5:]}"
+    company = (req.company_name or ex.get("company_name") or "").strip()
+    ceo = (req.ceo_name or ex.get("representative_name") or "").strip()
+    addr = (req.business_address or ex.get("business_address") or "").strip()
+    email = (req.email or ct.tenant_email or (tenant.email if tenant else "") or "").strip()
+    if email and not validate_email_format(email):
+        raise DomainError("이메일 형식이 올바르지 않습니다.", hint="세금계산서를 받을 이메일을 정확히 입력해 주세요(예: name@example.com).")
+    ct.tenant_business_number, ct.tenant_company_name = number, company or ct.tenant_company_name
+    ct.tenant_ceo_name, ct.tenant_business_address = ceo or ct.tenant_ceo_name, addr or ct.tenant_business_address
+    if email:
+        ct.tenant_email = email
+    ct.tax_invoice_requested = True
+    ct.save(action="tenant_bizreg_by_lessor", app_source=APP_SRC)
+    if tenant:
+        tenant.business_number, tenant.company_name = number, company or tenant.company_name
+        tenant.ceo_name, tenant.business_address = ceo or tenant.ceo_name, addr or tenant.business_address
+        if email:
+            tenant.email = email
+        tenant.biz_submitted_at = now_iso()
+        tenant.save(action="tenant_bizreg_by_lessor", app_source=APP_SRC)
+    missing = [k for k, v in (("상호", ct.tenant_company_name), ("대표자", ct.tenant_ceo_name), ("이메일", ct.tenant_email)) if not v]
+    return {"success": True, "room_no": room.room_no,
+            "message": f"{room.room_no}호 임차인의 사업자 정보를 저장했습니다. 세무 허브 ▸ 세금계산서에서 발행할 수 있습니다." + (f" (비어 있는 항목: {', '.join(missing)} — 계약내용에서 입력)" if missing else ""),
+            "business": {"business_number": number, "company_name": ct.tenant_company_name, "ceo_name": ct.tenant_ceo_name, "business_address": ct.tenant_business_address, "email": ct.tenant_email},
+            "vat_target": bool(ct.vat_target), "file_saved": bool(saved)}
+
+
 def _parse_room_list(raw: Any) -> List[str]:
     if raw is None:
         return []
