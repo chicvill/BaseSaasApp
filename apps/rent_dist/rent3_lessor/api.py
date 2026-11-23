@@ -1595,6 +1595,40 @@ def create_outlay(req: OutlayCreateReq):
     }
 
 
+# 관리비 산출근거에서 기본으로 빼는 항목(건물 운영비가 아니라 가맹비·접대성 경비)
+MGMT_FEE_EXCLUDED = ("platform_fee", "congrat_condol")
+
+
+@router.get("/mgmt-fee/basis")
+def mgmt_fee_basis(branch: str = "main", year: Optional[int] = None, exclude: str = ""):
+    """건물별 관리비 산출근거: 연간 공용 비용(감가상각·수리·공동 전기·수도·승강기·청소 등) 항목별 합계 ÷ 종합소득세 적용 호실 수 = 호실당 금액.
+    exclude(쉼표로 구분한 항목 코드)로 뺀 항목은 합계에 넣지 않는다. 기본은 가맹비·경조사비만 뺀다."""
+    ensure_pool_seeded()
+    b_id = normalize_branch_id(branch)
+    yr = year or date_today().year
+    bldg = Building.first(branch=b_id)
+    excluded = {x.strip() for x in (exclude or "").split(",") if x.strip()} if exclude else set(MGMT_FEE_EXCLUDED)
+    outs = [o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")]
+    items = []
+    for code, label in EXPENSE_CATEGORIES.items():
+        rows = [o for o in outs if o.category == code]
+        items.append({"category": code, "label": label, "amount": sum(int(o.amount or 0) for o in rows), "count": len(rows), "included": code not in excluded})
+    total = sum(i["amount"] for i in items if i["included"])
+    all_rooms = [r for r in (bldg.rooms() if bldg else [])]
+    tax_rooms = [r for r in all_rooms if bldg.is_income_tax_room(r.room_no)]
+    n = len(tax_rooms)
+    per_year = int(round(total / n)) if n else 0
+    fees = [int(r.maintenance_fee or 0) for r in tax_rooms]
+    return {
+        "success": True, "year": yr, "items": items, "total": total,
+        "rooms": [r.room_no for r in tax_rooms], "room_count": n, "all_room_count": len(all_rooms),
+        "tax_rooms_configured": bool(bldg and bldg.clean_income_tax_rooms()),
+        "per_room_year": per_year, "per_room_month": int(round(per_year / 12)),
+        "charged_fee_avg": int(round(sum(fees) / len(fees))) if fees else 0,
+        "note": "계산식: 포함한 항목의 연 합계 ÷ 종합소득세 적용 호실 수 = 호실당 연 금액, 그것을 12로 나누면 월 금액입니다. 참고용 자료이며 세무 신고는 세무사와 확인하세요.",
+    }
+
+
 @router.get("/tax/summary")
 def tax_summary(branch: str = "main", year: Optional[int] = None, month: Optional[int] = None):
     """부가세·종합소득세·면세사업장현황신고 자료, 세금계산서 발행 대장 및 경비 지출 목록 (더보기 ▸ 부가세·종소세·경비)."""

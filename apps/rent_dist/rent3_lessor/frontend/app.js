@@ -53,6 +53,7 @@
     { title: "3단계 · 직거래 전자계약 · 세무", more: true, items: [
       { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
       { label: "🧾 세무 허브", tab: "tax" },
+      { label: "🧮 관리비 산출근거", id: "btnMgmtFee" },
       { label: "📥 납부현황 엑셀(CSV)", id: "btnLedgerCsv" },
       { label: "💳 가맹비 납부 · 세금계산서", id: "btnFeeEvidence" },
     ] },
@@ -421,9 +422,9 @@
     .r3-modal__box--wide { max-width: min(980px, 100vw) !important; width: 100% !important; max-height: 96vh !important; overflow: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 20px !important; }
     .r3-modal__box--wide .r3-modal__head { position: sticky; top: 0; left: 0; z-index: 3; background: #fff; }
     .r3-modal__box--wide .r3-modal__x, .r3-modal__box--wide .r3-modal__head .bass-btn.r3-modal__x:not(.bass-btn--primary):not(.is-active), .r3-modal__box--wide .r3-modal__head .bass-btn.r3-modal__x:not(.bass-btn--primary):not(.is-active):hover { min-width: 76px; min-height: 40px; padding: 0 12px; font-size: 15px; font-weight: 800; background: #dc2626 !important; border-color: #dc2626 !important; color: #fff !important; }
-    .r3-modal__box--wide .r3-modal__body { min-width: 440px; }
+    .r3-modal__box--wide .r3-modal__body { min-width: 380px; }
     .r3-modal__box--wide .pr-list { max-height: none; overflow: visible; }
-    .r3-modal__box--wide .pr { grid-template-columns: 44px 136px 84px 84px 52px; justify-content: start; gap: 5px; font-size: 13px; min-height: 36px; padding: 2px 0; }
+    .r3-modal__box--wide .pr { grid-template-columns: 44px 136px 112px 52px; justify-content: start; gap: 5px; font-size: 13px; min-height: 36px; padding: 2px 0; }
     .r3-modal__box--wide .pr .bass-input { font-size: 13px; padding: 2px 4px; min-height: 30px !important; height: 30px; border-radius: 8px; }
     .r3-modal__box--wide .pr .pr-del { min-height: 30px; height: 30px; padding: 0; font-size: 12.5px; }
     .r3-modal__box--wide #roomModalClose { position: sticky; left: 0; width: calc(100vw - 48px) !important; max-width: 100%; }
@@ -435,7 +436,7 @@
     #kpiGrid.kpi-strip .bass-badge { font-size: 12px !important; padding: 1px 6px !important; }
     .r3-zone--sms { padding: 8px 10px !important; margin-bottom: 8px !important; }
     .r3-zone--sms .r3-lbl { font-size: 13.5px !important; margin-bottom: 4px !important; }
-    .r3-zone--sms textarea { min-height: 0 !important; padding: 6px 8px !important; font-size: 14px !important; }
+    .r3-zone--sms textarea { min-height: 84px !important; padding: 6px 8px !important; font-size: 14px !important; }
     .r3-zone--sms .bass-btn { min-height: 40px !important; font-size: 15px !important; margin-top: 6px !important; }
     .rc-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
     .rc-btns .bass-btn { padding-left: 4px; padding-right: 4px; white-space: nowrap; }
@@ -710,10 +711,9 @@
         rows.push(`<div class="pr pr--un"${m.phase === "DUE_SOON" ? ' style="opacity:.85;"' : ""}><span class="pr__ym">${shortYm(m.ym)}</span><span class="pr__un">${m.phase === "DUE_SOON" ? "🕒 납부 예정" : "미납"} ${fmtWon(m.unpaid)}${m.status === "PARTIAL" ? " (일부 납부)" : ""}${m.phase === "DUE_SOON" && m.note ? ` <span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(String(m.note).replace(/^납부 예정 /, ""))}</span>` : ""}</span></div>`);
       }
       const ps = byYm[m.ym] || [];
-      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}" data-total="${p.total}"><span class="pr__ym">${shortYm(m.ym)}</span>
+      ps.forEach((p) => rows.push(`<div class="pr" data-pay="${p.id}" data-total="${p.total}" data-rent="${p.rent}" data-fee="${p.fee}"><span class="pr__ym">${shortYm(m.ym)}</span>
         <input type="date" class="bass-input pr-date" value="${Bass.escapeHtml(p.paid_date)}" aria-label="납부일">
-        <input type="number" class="bass-input pr-rent" value="${p.rent}" aria-label="월세">
-        <input type="number" class="bass-input pr-fee" value="${p.fee}" aria-label="관리비">
+        <input type="number" class="bass-input pr-total" value="${p.total}" aria-label="월임차료(입금액)">
         <span style="display:flex;flex-direction:column;gap:2px;"><button type="button" class="bass-btn bass-btn--sm pr-del" data-grpn="${p.grp_n || 1}" aria-label="수납 내역 무효 처리">삭제</button></span></div>`));
       if (!ps.length && !(m.unpaid > 0)) {
         rows.push(`<div class="pr pr--ok"><span class="pr__ym">${shortYm(m.ym)}</span><span class="bass-muted">${m.status === "EXEMPT_POSTPAID" ? "입주월(후불) — 익월부터 청구" : "완납"}</span></div>`);
@@ -750,7 +750,7 @@
       </div>
       ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(239,68,68,.14);border:1px solid var(--err);font-size:13px;">⚠️ 오류: 청구액보다 ${fmtWon(lg.advance_credit)}을 더 받은 것으로 기록되어 있습니다(선수금은 받지 않습니다). 중복 수납일 수 있으니 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하고 잘못 들어간 건을 삭제하세요.</div>` : ""}
       <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
-      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
+      <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월임차료</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
     const body = host;
     pinLimit(host);
@@ -809,7 +809,7 @@
       if (delBtn) {
         delBtn.addEventListener("click", () => {
           const dt = row.querySelector(".pr-date").value;
-          const tot = Number(row.dataset.total || (Number(row.querySelector(".pr-rent").value || 0) + Number(row.querySelector(".pr-fee").value || 0)));
+          const tot = Number(row.dataset.total || row.querySelector(".pr-total").value || 0);
           const grpN = Number(delBtn.dataset.grpn || 1);
           const reason = window.prompt(`${no}호 ${dt} (${fmtWon(tot)}) 수납 내역을 무효 처리합니다.\n기록은 사유와 함께 남고, 그 달은 미납으로 돌아갑니다.${grpN > 1 ? `\n(같은 입금에서 나뉜 다른 달 ${grpN - 1}건은 그대로 남습니다)` : ""}\n\n사유를 적어 주세요:`, "오입력");
           if (reason === null) return;
@@ -825,15 +825,25 @@
           });
         });
       }
+      // 월임차료 = 월세 + 관리비(은행에 입금되는 금액). 고친 금액은 원래의 월세:관리비 비율대로 나눠 저장한다(부가세는 그대로).
+      // 월세·관리비를 따로 보여 주는 곳은 계약서·세금 산출·연말정산 자료뿐이다.
+      const splitTotal = () => {
+        const t0 = Number(row.dataset.total || 0), r0 = Number(row.dataset.rent || 0), f0 = Number(row.dataset.fee || 0);
+        const vat0 = Math.max(0, t0 - r0 - f0);
+        const base = Math.max(0, Number(row.querySelector(".pr-total").value || 0) - vat0);
+        const rent = r0 + f0 > 0 ? Math.round((base * r0) / (r0 + f0)) : base;
+        return { rent, fee: base - rent };
+      };
       row.querySelectorAll("input").forEach((inp) => inp.addEventListener("change", () => {
         Bass.withLock(inp, async () => {
+          const sp = splitTotal();
           const res = await Bass.api(APP_ID, "/payments/edit", {
             method: "POST",
             body: {
               branch: currentBranch, pay_id: row.dataset.pay,
               paid_date: row.querySelector(".pr-date").value,
-              rent_amount: Number(row.querySelector(".pr-rent").value || 0),
-              maintenance_amount: Number(row.querySelector(".pr-fee").value || 0),
+              rent_amount: sp.rent,
+              maintenance_amount: sp.fee,
             },
           });
           Bass.updateAppAlert("success", res.message);
@@ -1515,6 +1525,73 @@
     body.querySelector("#feeCsvDl").addEventListener("click", () => downloadWithAuth(`/franchise-fees/export-csv?branch=${encodeURIComponent(currentBranch)}&year=${yr}`, `franchise_fee_evidence_${yr}.csv`));
     body.querySelector("#feePrint").addEventListener("click", () => window.print());
   }
+  // 🧮 관리비 산출근거: 연간 공용 비용(감가상각·수리·공동 전기·수도·승강기·청소 등) 항목별 합계 ÷ 종합소득세 적용 호실 수 = 호실당 금액
+  async function showMgmtFeeModal(year) {
+    const yr = Number(year) || Number((dash.today || "").slice(0, 4)) || new Date().getFullYear();
+    const d = await Bass.api(APP_ID, `/mgmt-fee/basis?branch=${encodeURIComponent(currentBranch)}&year=${yr}`);
+    const E = Bass.escapeHtml;
+    const cats = d.items || [];
+    const evDefault = (c) => (c === "depreciation" ? "NONE" : "TAX_INVOICE");
+    const rowsHtml = cats.map((i) => `<label class="mf-row"><input type="checkbox" class="mf-chk" data-cat="${E(i.category)}" ${i.included ? "checked" : ""}>
+      <span class="mf-lbl">${E(i.label)}</span><span class="mf-cnt">${i.count ? i.count + "건" : "-"}</span><strong class="mf-amt" data-amt="${i.amount}">${fmtWon(i.amount)}</strong></label>`).join("");
+    const yrs = [yr - 2, yr - 1, yr, yr + 1].filter((y) => y > 2000);
+    const body = openModal(`🧮 ${E(d.year)}년 관리비 산출근거`, `
+      <style>.mf-row{display:grid;grid-template-columns:24px minmax(0,1fr) 44px 108px;gap:6px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--border,#e2e8f0);font-size:14px}
+      .mf-cnt{font-size:12.5px;opacity:.7;text-align:right}.mf-amt{text-align:right;white-space:nowrap}.mf-sum{padding:10px 12px;border-radius:12px;background:#eef2ff;margin:10px 0;font-size:14px;line-height:1.7}.mf-big{font-size:18px;font-weight:800}</style>
+      <div class="bass-row" style="gap:8px;margin-bottom:6px;"><label class="r3-fld" style="flex:1;">기준 연도<select id="mfYear" class="bass-select">${yrs.map((y) => `<option value="${y}" ${y === d.year ? "selected" : ""}>${y}년</option>`).join("")}</select></label></div>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:4px;">체크한 항목만 합계에 넣습니다. 금액은 세무 허브의 경비(지출) 등록에서 가져옵니다.</div>
+      <div>${rowsHtml}</div>
+      <div class="mf-sum" id="mfSum"></div>
+      <div class="bass-muted" style="font-size:12.5px;">${E(d.note || "")}</div>
+      <details style="margin-top:10px;"><summary style="font-weight:700;cursor:pointer;">➕ 항목 금액 추가</summary>
+        <div class="r3-grid" style="margin-top:8px;">
+          <label class="r3-fld">항목<select id="mfCat" class="bass-select">${cats.map((i) => `<option value="${E(i.category)}">${E(i.label)}</option>`).join("")}</select></label>
+          <label class="r3-fld">날짜<input id="mfDate" class="bass-input" type="date" value="${E(dash.today || "")}"></label>
+          <label class="r3-fld">금액(원)<input id="mfAmt" class="bass-input" type="number" inputmode="numeric" placeholder="예: 1200000"></label>
+          <label class="r3-fld">증빙<select id="mfEv" class="bass-select"><option value="TAX_INVOICE">세금계산서</option><option value="CARD">카드·현금영수증</option><option value="NONE">증빙 없음(감가상각 등)</option></select></label>
+        </div>
+        <label class="r3-fld" style="margin-top:6px;">내용(메모)<input id="mfTitle" class="bass-input" type="text" placeholder="예: 5월 엘리베이터 점검"></label>
+        <button id="mfAdd" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:44px;margin-top:8px;">저장</button>
+      </details>`);
+    const sumEl = body.querySelector("#mfSum");
+    const recalc = () => {
+      let total = 0;
+      body.querySelectorAll(".mf-row").forEach((row) => { if (row.querySelector(".mf-chk").checked) total += Number(row.querySelector(".mf-amt").dataset.amt || 0); });
+      const n = d.room_count || 0;
+      const py = n ? Math.round(total / n) : 0;
+      const pm = Math.round(py / 12);
+      sumEl.innerHTML = `포함 항목 합계 <strong>${fmtWon(total)}</strong><br>
+        ÷ 종합소득세 적용 호실 <strong>${n}실</strong>${d.tax_rooms_configured ? "" : ` <span class="bass-muted">(호실을 따로 정하지 않아 전체 ${d.all_room_count}실 기준)</span>`}<br>
+        = 호실당 연 <span class="mf-big">${fmtWon(py)}</span> · 월 <span class="mf-big">${fmtWon(pm)}</span><br>
+        <span class="bass-muted" style="font-size:12.5px;">지금 청구 중인 관리비 평균: 월 ${fmtWon(d.charged_fee_avg)} ${pm > 0 ? (d.charged_fee_avg >= pm ? "(산출액 이상)" : `(산출액보다 ${fmtWon(pm - d.charged_fee_avg)} 적음)`) : ""}</span>`;
+    };
+    body.querySelectorAll(".mf-chk").forEach((c) => c.addEventListener("change", recalc));
+    recalc();
+    body.querySelector("#mfYear").addEventListener("change", (e) => showMgmtFeeModal(e.target.value).catch(Bass.showError));
+    body.querySelector("#mfCat").addEventListener("change", (e) => { body.querySelector("#mfEv").value = evDefault(e.target.value); });
+    body.querySelector("#mfAdd").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const amount = Number(body.querySelector("#mfAmt").value || 0);
+        if (!(amount > 0)) { Bass.updateAppAlert("warning", "금액을 입력해 주세요."); return; }
+        const cat = body.querySelector("#mfCat").value;
+        const label = (cats.find((i) => i.category === cat) || {}).label || cat;
+        const res = await Bass.api(APP_ID, "/outlays", { method: "POST", body: {
+          branch: currentBranch, category: cat, title: body.querySelector("#mfTitle").value.trim() || label, amount,
+          expense_date: body.querySelector("#mfDate").value || undefined, evidence_type: body.querySelector("#mfEv").value } });
+        Bass.updateAppAlert("success", res.message);
+        await showMgmtFeeModal(d.year);
+      });
+    });
+  }
+  const btnMgmtFee = document.getElementById("btnMgmtFee");
+  if (btnMgmtFee) {
+    btnMgmtFee.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      showMgmtFeeModal().catch(Bass.showError);
+    });
+  }
+
   const btnFeeEvidence = document.getElementById("btnFeeEvidence");
   if (btnFeeEvidence) {
     btnFeeEvidence.addEventListener("click", () => {
@@ -1653,7 +1730,7 @@
     elTabContent.innerHTML = `
       <div class="bass-card r3-zone r3-zone--sms" style="padding:8px 10px;margin-bottom:8px;">
         <label class="r3-lbl" for="bankSms" style="margin:0 0 6px;font-weight:800;">🏦 은행 입금 문자 붙여넣기 <span class="bass-muted" style="font-weight:500;">— 호실·입금자 이름으로 호실을 자동으로 찾습니다</span></label>
-        <textarea id="bankSms" class="bass-input" rows="2" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
+        <textarea id="bankSms" class="bass-input" rows="3" placeholder="[은행] 11/13 201호 홍길동 440,000원 입금"></textarea>
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:40px;margin-top:6px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>

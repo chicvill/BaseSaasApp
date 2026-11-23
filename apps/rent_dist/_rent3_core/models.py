@@ -41,6 +41,9 @@ BRANCH_ALIASES = {
 }
 
 EXPENSE_CATEGORIES = {
+    "depreciation": "건물·기물 감가상각비",
+    "electric_common": "공동 전기료",
+    "water_common": "공동 수도료",
     "cleaning": "계단·공용부 정기 청소비",
     "elevator": "승강기(엘리베이터) 유지관리",
     "utility_common": "공용 전기·수도·가스료",

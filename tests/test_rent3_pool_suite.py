@@ -8387,7 +8387,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(mf.status_code, 200)
         self.assertEqual(mf.json().get("display"), "standalone")
         app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
-        for needle in ("r3-modal__box--wide", "overflow: auto !important", "min-width: 440px", 'xb.textContent = "✕ 닫기"', "min-height: 30px !important", 'getElementById("bldgClock")'):
+        for needle in ("r3-modal__box--wide", "overflow: auto !important", "min-width: 380px", 'xb.textContent = "✕ 닫기"', "min-height: 30px !important", 'getElementById("bldgClock")'):
             self.assertIn(needle, app, needle)
         sh = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         self.assertIn("timeEl", sh)
@@ -8438,6 +8438,52 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             if os.path.exists(f):
                 r = subprocess.run([node, "--check", f], capture_output=True, text=True)
                 self.assertEqual(r.returncode, 0, f + " :: " + r.stderr[:400])
+
+
+    def test_132_mgmt_fee_basis_divides_common_costs_by_income_tax_rooms(self):
+        """132. 관리비 산출근거: 공용 비용 항목별 합계(가맹비·경조사비 제외, 체크한 항목만) ÷ 종합소득세 적용 호실 수 = 호실당 연·월 금액. 월별 납부 내역은 월세+관리비를 합친 '월임차료' 한 칸이다."""
+        from apps.rent_dist._rent3_core import Building, Outlay
+        c = self.client
+        chic = self._login("chic")
+        LS = "/api/rent3_lessor"
+        yr = 2031
+        made = []
+        try:
+            def add(cat, amount):
+                r = c.post(LS + "/outlays", headers=chic, json={"branch": "main", "category": cat, "title": "t132", "amount": amount, "expense_date": f"{yr}-03-05", "evidence_type": "NONE"})
+                self.assertEqual(r.status_code, 200, r.text)
+                made.append(r.json()["outlay"]["id"])
+            add("depreciation", 1200000)
+            add("repair_maint", 300000)
+            add("electric_common", 500000)
+            add("water_common", 200000)
+            add("platform_fee", 99000)      # 기본 제외 항목
+            d = c.get(LS + f"/mgmt-fee/basis?branch=main&year={yr}", headers=chic).json()
+            self.assertTrue(d["success"])
+            by = {i["category"]: i for i in d["items"]}
+            self.assertEqual(by["depreciation"]["amount"], 1200000)
+            self.assertEqual(by["electric_common"]["amount"], 500000)
+            self.assertFalse(by["platform_fee"]["included"])
+            self.assertEqual(d["total"], 1200000 + 300000 + 500000 + 200000)
+            bldg = Building.first(branch="main")
+            n = len([r for r in bldg.rooms() if bldg.is_income_tax_room(r.room_no)])
+            self.assertEqual(d["room_count"], n)
+            self.assertEqual(d["per_room_year"], round(d["total"] / n))
+            self.assertEqual(d["per_room_month"], round(d["per_room_year"] / 12))
+            # 항목을 직접 제외하면 합계에서 빠진다
+            d2 = c.get(LS + f"/mgmt-fee/basis?branch=main&year={yr}&exclude=depreciation,platform_fee", headers=chic).json()
+            self.assertEqual(d2["total"], 300000 + 500000 + 200000)
+        finally:
+            for oid in made:
+                o = Outlay.get(oid)
+                if o:
+                    o.delete(action="t")
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        for needle in ('id: "btnMgmtFee"', "showMgmtFeeModal", "/mgmt-fee/basis", 'class="bass-input pr-total"', "월임차료", "rows=\"3\""):
+            self.assertIn(needle, app, needle)
+        self.assertNotIn('class="bass-input pr-rent"', app)
+        self.assertNotIn('class="bass-input pr-fee"', app)
 
 
 if __name__ == "__main__":
