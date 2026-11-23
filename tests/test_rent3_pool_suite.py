@@ -4667,12 +4667,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         ct.save(action="t")
 
     def test_75_lessor_first_screen_bank_sms_flow(self):
-        """75. 임대인 첫 화면: 은행 문자 입력창이 호실 선택 밖에 있고(호실·이름으로 자동 매칭), 선택한 호실의 수납 내용이 펼쳐진 채로 열리며, 미납 호실은 접혀 있다가 눌러서 펼친다."""
+        """75. 임대인 첫 화면(단순화): 은행 문자 입력창 아래에 호실 단추 목록([호실·이름] [완납 초록/대기 노랑/미납 빨강] [매월 납부일])만 보이고, 호실을 누르거나 문자로 수납하면 수납내역이 창(닫기 단추)으로 열린다. 풀다운·호실 카드·미납 접이 목록은 첫 화면에서 없어졌다."""
         app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-        i_sms, i_pick = app.index('id="bankSms"'), app.index('id="roomPick"')
-        self.assertLess(i_sms, i_pick)                                          # 문자 입력이 호실 선택보다 위
-        self.assertLess(app.index('<div id="roomPanel">'), app.index('${lateHtml}'))              # 미납 목록은 맨 아래
-        for needle in ("bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 메시지 복사"):
+        i_sms, i_list = app.index('id="bankSms"'), app.index('id="roomList"')
+        self.assertLess(i_sms, i_list)                                          # 문자 입력이 호실 목록보다 위
+        for gone in ("roomPick", "lateHtml", "호실 선택</label>", "btn-late-sms"):
+            self.assertNotIn(gone, app, gone)
+        for needle in ("rl-row", "rl-badge--ok", "rl-badge--wait", "rl-badge--late", "function openRoomModal", 'id="roomPanel"', 'id="roomModalClose"', "닫기", "openRoomModal(rn)", "📨 미납 안내 문자",
+                       "bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 메시지 복사"):
             self.assertIn(needle, app, needle)
         for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
             self.assertNotIn(gone, app, gone)
