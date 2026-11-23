@@ -540,6 +540,13 @@ def _support_user(request: Request) -> Any:
     return user
 
 
+def _admin_phone() -> str:
+    """사용자가 관리인에게 전화할 번호: 번호가 있는 총괄 관리인(superadmin) 계정의 연락처."""
+    from apps.rent_dist._rent3_core.models import Admin
+    admins = sorted(Admin.all(), key=lambda a: (a.role != "superadmin", a.created_at))
+    return next(((a.phone or "").strip() for a in admins if (a.phone or "").strip()), "")
+
+
 @router.get("/support/thread")
 def support_my_thread(request: Request) -> Dict[str, Any]:
     """내 지원 채팅(관리인과의 대화). 읽으면 관리인 글이 읽음 처리된다."""
@@ -552,6 +559,7 @@ def support_my_thread(request: Request) -> Dict[str, Any]:
         "messages": [sup.public_message(m) for m in sup.thread_messages(key)],
         "support_access": cs.support_allowed(user),
         "retention_days": sup.SUPPORT_CHAT_DAYS,
+        "admin_phone": _admin_phone(),          # '관리인에게 전화' 단추용(본인이 문의하는 상대의 연락처)
     }
 
 

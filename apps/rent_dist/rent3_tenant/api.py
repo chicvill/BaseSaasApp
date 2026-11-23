@@ -274,7 +274,9 @@ def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
     c = claims_from(request)
     if mark_read and not (c and is_admin(c)):
         room_messages.mark_read(msgs, "tenant")
+    lessor = Lessor.first(branch=t.branch)
     return {"success": True, "room_no": t.room_no, "unread": unread, "messages": [room_messages.public(m) for m in msgs],
+            "lessor_name": (lessor.name if lessor else "") or "임대인", "lessor_phone": ((lessor.phone if lessor else "") or "").strip(),    # 임대인에게 전화 단추용
             "negotiation": room_messages.negotiation_history(ct)}
 
 

@@ -549,8 +549,12 @@
     function render(d) {
       lastCount = (d.messages || []).length;
       var rows = renderRows(d.messages);
+      var adminDigits = String(d.admin_phone || "").replace(/\D/g, "");
+      var callRow = adminDigits.length >= 9
+        ? '<div style="margin-bottom:8px;"><a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:' + adminDigits + '" style="min-height:40px;">📞 관리인에게 전화 ' + esc(d.admin_phone) + "</a></div>"
+        : "";
       var body = global.R3.openModal("💬 관리인에게 문의",
-        '<div id="r3SupList" style="max-height:44vh;overflow-y:auto;padding:2px 2px 6px;">' + rows + "</div>" +
+        callRow + '<div id="r3SupList" style="max-height:44vh;overflow-y:auto;padding:2px 2px 6px;">' + rows + "</div>" +
         '<textarea id="r3SupMsg" class="bass-input" rows="3" placeholder="도움이 필요한 내용을 적어 주세요" style="width:100%;margin-top:6px;"></textarea>' +
         '<div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">' +
         '<button type="button" id="r3SupSend" class="bass-btn bass-btn--primary">보내기</button>' +

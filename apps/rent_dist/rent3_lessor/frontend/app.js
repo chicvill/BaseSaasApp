@@ -3213,6 +3213,7 @@
     elTabContent.querySelectorAll(".msg-room").forEach((b) => b.addEventListener("click", () => { msgRoom = b.dataset.room; renderMessagesTab(); }));
   }
 
+const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g, ""); if (dg.length < 9) return ""; const pretty = dg.length === 11 ? `${dg.slice(0, 3)}-${dg.slice(3, 7)}-${dg.slice(7)}` : dg.length === 10 ? `${dg.slice(0, 3)}-${dg.slice(3, 6)}-${dg.slice(6)}` : dg; return `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${dg}" style="min-height:40px;white-space:nowrap;">📞 ${label} ${pretty}</a>`; };
   async function renderMessageThread() {
     const room = msgRoom;
     let d;
@@ -3226,7 +3227,7 @@
       ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${fmtMsgTime(m.created_at)}</span></div>`
       : `<div class="cm-b ${m.sender_role === "lessor" ? "is-mine" : ""}"><div><div class="cm-meta">${Bass.escapeHtml(m.sender_role === "lessor" ? "나" : m.sender_name || "임차인")} · ${fmtMsgTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
     elTabContent.innerHTML = `
-      <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong></div>
+      <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong>${callBtn(d.tenant_phone, "임차인 전화")}</div>
       <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
       <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
       <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>

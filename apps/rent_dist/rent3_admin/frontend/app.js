@@ -133,7 +133,7 @@
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
         <h3 style="margin:0 0 4px;">🎯 원격 지원 · 대리 접속</h3>
-        <p class="bass-muted" style="font-size:12.5px;margin:0 0 10px;">사용자가 <strong>원격 지원을 허용</strong>했고 <strong>지원 채팅</strong>(전화로 받았다면 전화 접수)이 있어야 입장할 수 있습니다. 입장하면 <strong>보기 전용</strong>이며 접속 기록이 남습니다.</p>
+        <p class="bass-muted" style="font-size:12.5px;margin:0 0 10px;">사용자가 <strong>원격 지원을 허용</strong>했고 <strong>지원 채팅</strong>(전화로 받았다면 사용자에게 먼저 글을 보내 시작)이 있어야 입장할 수 있습니다. 입장하면 <strong>보기 전용</strong>이며 접속 기록이 남습니다.</p>
         <div class="field-grid">
           <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">① 건물<select id="spBranch" class="bass-select">${d.branches.map((b) => `<option value="${Bass.escapeHtml(b.branch)}" ${b.branch === sp.branch ? "selected" : ""}>${Bass.escapeHtml(b.building_name)} (${Bass.escapeHtml(b.branch)})</option>`).join("")}</select></label>
           <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">② 호실<select id="spRoom" class="bass-select"><option value="">건물 전체 (임대인)</option>${rooms.map((r) => `<option value="${Bass.escapeHtml(r.room_no)}" ${r.room_no === sp.roomNo ? "selected" : ""}>${Bass.escapeHtml(r.room_no)}호 ${r.tenant ? Bass.escapeHtml(r.tenant.name) : "공실"}${r.sessions.length ? ` · 계약방 ${r.sessions.length}` : ""}</option>`).join("")}</select></label>
@@ -163,7 +163,7 @@
     const can = card.support_allowed && msgs.length > 0;
     const sessions = card.role === "lessor" ? rooms_sessions(d) : (room ? room.sessions : []);
     const why = !card.support_allowed ? "이 사용자는 원격 지원을 허용하지 않았습니다. 전화로 방법을 안내하거나, 사용자가 메뉴에서 허용을 켜도록 안내해 주세요."
-      : (!msgs.length ? "지원 채팅이 없습니다. 아래 ‘전화 접수’를 남기거나 사용자에게 먼저 글을 보내 주세요." : "");
+      : (!msgs.length ? "지원 채팅이 없습니다. 사용자에게 먼저 글을 보내 주세요." : "");
     box.innerHTML = `
       <div class="bass-card">
         <h3 style="margin:0 0 6px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
@@ -173,19 +173,13 @@
         <div class="bass-muted" style="font-size:12px;margin-top:4px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
-          <div class="bass-row" style="justify-content:space-between;gap:8px;"><strong style="font-size:13.5px;">📞 전화 접수 (전화로 요청받은 경우)</strong>
-            ${callPhone ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${Bass.escapeHtml(callDigits)}" style="min-height:40px;">📞 ${Bass.escapeHtml(callPhone)} 전화 걸기</a>` : '<span class="bass-muted" style="font-size:12.5px;">등록된 전화번호가 없습니다</span>'}</div>
-          <div style="margin-top:6px;padding:6px 10px;border-radius:8px;background:#fef9c3;color:#713f12;font-size:12.5px;">💡 통화로 받은 요청 사항, 안내한 방법 등 <strong>중요한 통화 내용은 아래 접수 메모나 채팅창에 남겨 주세요.</strong></div>
-          <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
-            <select id="spCat" class="bass-select" style="width:auto;">${d.categories.map((c) => `<option ${c === sp.cat ? "selected" : ""}>${Bass.escapeHtml(c)}</option>`).join("")}</select>
-            <input id="spMemo" class="bass-input" style="flex:1;min-width:160px;" placeholder="접수 메모 (예: 수납 입력 방법을 모르심)">
-            <button id="btnSpPhone" class="bass-btn bass-btn--sm" type="button">📞 전화 접수 남기기</button>
-          </div>
-          <div class="bass-muted" style="font-size:12px;margin-top:4px;">남기면 사용자 지원 채팅에 “[전화 요청 접수] …”로 대화 내용에 기록됩니다(사용자 허용 전에도 기록은 남습니다). 입장은 사용자가 원격 지원을 허용해야 할 수 있습니다.</div>
+          <div class="bass-row" style="gap:8px;align-items:center;flex-wrap:wrap;"><strong style="font-size:13.5px;">📞 ${Bass.escapeHtml(card.title)}에게 전화 :</strong>
+            ${callPhone ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${Bass.escapeHtml(callDigits)}" style="min-height:40px;">${Bass.escapeHtml(callPhone)}</a>` : '<span class="bass-muted" style="font-size:12.5px;">등록된 전화번호가 없습니다</span>'}</div>
         </div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
-          <strong style="font-size:13.5px;">🛡️ 입장 (보기 전용)</strong>
+          <div class="bass-row" style="justify-content:space-between;gap:8px;"><strong style="font-size:13.5px;">🛡️ 입장 (보기 전용)</strong>
+            <label class="bass-muted" style="font-size:12.5px;display:flex;align-items:center;gap:6px;">사유 <select id="spCat" class="bass-select" style="width:auto;">${d.categories.map((c) => `<option ${c === sp.cat ? "selected" : ""}>${Bass.escapeHtml(c)}</option>`).join("")}</select></label></div>
           ${why ? `<div style="font-size:12.5px;color:var(--warn);margin:6px 0;">${Bass.escapeHtml(why)}</div>` : ""}
           <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
             ${card.role === "lessor" ? `<button class="bass-btn bass-btn--sm bass-btn--primary btn-sp-enter" data-view="lessor" type="button" ${can ? "" : "disabled"}>🏢 임대인 입장</button>` : `<button class="bass-btn bass-btn--sm bass-btn--primary btn-sp-enter" data-view="tenant" type="button" ${can ? "" : "disabled"}>🏠 임차인 입장</button>`}
@@ -221,13 +215,6 @@
         const body = document.getElementById("spMsg").value.trim();
         if (!body) return;
         await Bass.api(APP_ID, "/support/messages", { method: "POST", body: { user: card.user, body } });
-        await reload();
-      });
-    });
-    document.getElementById("btnSpPhone").addEventListener("click", function () {
-      Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/support/phone-intake", { method: "POST", body: { user: card.user, category: document.getElementById("spCat").value, memo: document.getElementById("spMemo").value } });
-        Bass.updateAppAlert("success", res.message);
         await reload();
       });
     });

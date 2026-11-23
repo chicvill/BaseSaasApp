@@ -2064,6 +2064,7 @@ def messages_room(room_no: str, request: Request, branch: str = "main", mark_rea
     tenant = Tenant.get(room.id_tenant) if room.id_tenant else None
     return {
         "success": True, "room_no": room_no, "tenant_name": tenant.name if tenant else "", "unread": unread,
+        "tenant_phone": ((tenant.phone if tenant else "") or "").strip(),          # 임차인에게 전화 단추용
         "messages": [room_messages.public(m) for m in msgs],
         "negotiation": room_messages.negotiation_history(room_messages.active_contract(room)),
     }

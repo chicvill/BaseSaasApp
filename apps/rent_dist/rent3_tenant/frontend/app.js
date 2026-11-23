@@ -98,6 +98,9 @@
     if (!box || !selectedTenantId) return;
     const d = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/messages`);
     const neg = d.negotiation || { count: 0, items: [] };
+    const callEl = document.getElementById("tnMsgCall");
+    const lessorDigits = String(d.lessor_phone || "").replace(/\D/g, "");
+    if (callEl) callEl.innerHTML = lessorDigits.length >= 9 ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${lessorDigits}" style="min-height:40px;">📞 ${Bass.escapeHtml(d.lessor_name || "임대인")}에게 전화 ${Bass.escapeHtml(d.lessor_phone)}</a>` : "";
     const bubble = (m) => m.kind === "system"
       ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${tnTime(m.created_at)}</span></div>`
       : `<div class="cm-b ${m.sender_role === "tenant" ? "is-mine" : ""}"><div><div class="cm-meta">${m.sender_role === "tenant" ? "나" : Bass.escapeHtml(m.sender_name || "임대인")} · ${tnTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
@@ -595,6 +598,7 @@
         <div class="bass-card no-print">
           <h3 style="margin:0 0 6px;">✉️ 임대인과 메시지</h3>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">내 호실의 임대인과 주고받는 앱 안 대화입니다. 관리인에게 도움을 청할 때는 메뉴의 ‘관리인에게 문의’를 쓰세요.</div>
+          <div id="tnMsgCall" style="margin-bottom:8px;"></div>
           <div id="tnMsgList" class="cm-list" style="max-height:50vh;"></div>
           <div id="tnMsgComposer"${R3Shell.isAdminSession() ? " hidden" : ""}>
             <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>

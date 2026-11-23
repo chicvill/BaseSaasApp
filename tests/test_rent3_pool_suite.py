@@ -3413,7 +3413,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         pre = c.post("/api/rent3_admin/support/phone-intake", json={"user": tkey, "category": "오류 신고", "memo": "전화로 로그인 오류 문의"})
         self.assertEqual(pre.status_code, 200, pre.text)
         self.assertFalse(pre.json()["allowed"])                                                                                                   # 기록은 남지만 입장은 아직 못 한다
-        self.assertIn("로그인 오류 문의", [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]][-1])        # 사용자 채팅에 대화로 저장
+        self.assertTrue(any("로그인 오류 문의" in m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=th).json()["messages"]))        # 사용자 채팅에 대화로 저장
         self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": tkey, "view": "tenant", "category": "오류 신고"}).status_code, 403)
 
         # 허용하면 입장: 접속 기록 + 지원 채팅에 안내, 이동 주소는 보기 전용 표시(proxy) 포함
@@ -8569,6 +8569,30 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         tenant = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("tnMsgCount", "tnMsgList", "2500"):
             self.assertIn(needle, tenant, needle)
+
+
+    def test_136_call_buttons_admin_lessor_tenant_phone_numbers(self):
+        """136. 통화 단추용 전화번호: 사용자의 '관리인에게 문의'에 관리인 번호, 임대인 메시지에 임차인 번호, 임차인 메시지에 임대인 번호. 관리인 앱 전화 접수 칸은 '○○에게 전화 : 번호' 한 줄(메모 입력·접수 단추 없음)."""
+        c = self.client
+        chic, ten = self._login("chic"), self._login("tenant_201")
+        sup = c.get("/api/rent3/pool/support/thread", headers=chic).json()
+        self.assertEqual(sup["admin_phone"], "010-1212-3434")
+        tsup = c.get("/api/rent3/pool/support/thread", headers=ten).json()
+        self.assertEqual(tsup["admin_phone"], "010-1212-3434")
+        room = c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic).json()
+        self.assertIn("tenant_phone", room)
+        self.assertTrue(room["tenant_phone"])
+        tm = c.get("/api/rent3_tenant/myhome/tenant_201/messages?mark_read=false", headers=ten).json()
+        self.assertTrue(tm["lessor_phone"])
+        base = os.path.join(ROOT, "apps", "rent_dist")
+        adm = open(os.path.join(base, "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("에게 전화 :", 'href="tel:${Bass.escapeHtml(callDigits)}"', 'id="spCat"'):
+            self.assertIn(needle, adm, needle)
+        for gone in ('id="btnSpPhone"', 'id="spMemo"', "전화 접수 남기기", "중요한 통화 내용"):
+            self.assertNotIn(gone, adm, gone)
+        self.assertIn("관리인에게 전화", open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read())
+        self.assertIn('callBtn(d.tenant_phone, "임차인 전화")', open(os.path.join(base, "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read())
+        self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
 
 
 if __name__ == "__main__":
