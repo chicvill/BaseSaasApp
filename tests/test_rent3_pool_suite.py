@@ -8387,7 +8387,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(mf.status_code, 200)
         self.assertEqual(mf.json().get("display"), "standalone")
         app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
-        for needle in ("r3-modal__box--wide", "overflow: auto !important", "min-width: 640px", 'getElementById("bldgClock")'):
+        for needle in ("r3-modal__box--wide", "overflow: auto !important", "min-width: 440px", 'id="pmClose"', "min-height: 30px !important", 'getElementById("bldgClock")'):
             self.assertIn(needle, app, needle)
         sh = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         self.assertIn("timeEl", sh)
