@@ -8296,7 +8296,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
         for needle in ("r3Today", "todayAfter", "오늘 할 일", ".r3-today"):
             self.assertIn(needle, nj, needle)
-        self.assertIn('todayAfter: "#kpiGrid"', app)
+        self.assertNotIn('todayAfter', app)  # 알림 🔔과 같은 내용이라 첫 화면 띠는 쓰지 않는다
         self.assertNotRegex(nj, r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
 
 
