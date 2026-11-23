@@ -420,6 +420,7 @@
     /* 호실 수납 창: 크게 열고, 창 전체를 가로·세로로 밀어 볼 수 있다(월별 납부 칸이 잘리지 않게 본문 최소 너비를 둔다) */
     .r3-modal__box--wide { max-width: min(980px, 100vw) !important; width: 100% !important; max-height: 96vh !important; overflow: auto !important; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 10px 12px 20px !important; }
     .r3-modal__box--wide .r3-modal__head { position: sticky; top: 0; left: 0; z-index: 3; background: #fff; }
+    .r3-modal__box--wide .r3-modal__x { min-width: 76px; min-height: 40px; padding: 0 12px; font-size: 15px; font-weight: 800; background: #dc2626 !important; border-color: #dc2626 !important; color: #fff !important; }
     .r3-modal__box--wide .r3-modal__body { min-width: 440px; }
     .r3-modal__box--wide .pr-list { max-height: none; overflow: visible; }
     .r3-modal__box--wide .pr { grid-template-columns: 44px 136px 84px 84px 52px; justify-content: start; gap: 5px; font-size: 13px; min-height: 36px; padding: 2px 0; }
@@ -748,7 +749,7 @@
         </div>` : `<div class="bass-muted" style="font-size:13px;">✅ 비어 있는 달이 없습니다(밀린 청구 없음). 선수금은 받지 않습니다.</div>`}
       </div>
       ${Number(lg.advance_credit || 0) > 0 ? `<div style="padding:8px 10px;margin-bottom:8px;border-radius:10px;background:rgba(239,68,68,.14);border:1px solid var(--err);font-size:13px;">⚠️ 오류: 청구액보다 ${fmtWon(lg.advance_credit)}을 더 받은 것으로 기록되어 있습니다(선수금은 받지 않습니다). 중복 수납일 수 있으니 <button id="pmState2" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button>에서 확인하고 잘못 들어간 건을 삭제하세요.</div>` : ""}
-      <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <span style="display:flex;gap:6px;"><button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button><button id="pmClose" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;background:#dc2626 !important;border-color:#dc2626 !important;color:#fff !important;font-weight:800;">✕ 닫기</button></span></div>
+      <div class="r3-lbl" style="display:flex;justify-content:space-between;align-items:center;gap:8px;">월별 납부 내역 <span class="bass-muted">(날짜·금액을 고치면 바로 저장)</span> <button id="pmState" type="button" class="bass-btn bass-btn--sm" style="min-height:40px;">🔍 원장 상태</button></div>
       <div class="pr pr--head"><span class="pr__ym">월</span><span>납부일</span><span>월세</span><span>관리비</span><span></span></div>
       <div class="pr-list">${rows.join("") || '<div class="bass-muted" style="padding:10px;">내역이 없습니다.</div>'}</div>`;
     const body = host;
@@ -803,7 +804,6 @@
     const openState = () => showLedgerStateModal(no).catch(Bass.showError);
     if ($m("pmState")) $m("pmState").addEventListener("click", openState);
     if ($m("pmState2")) $m("pmState2").addEventListener("click", openState);
-    if ($m("pmClose")) $m("pmClose").addEventListener("click", closeModal);   // 수납내역 위쪽의 붉은 닫기(맨 아래까지 내려가지 않아도 닫힌다)
     body.querySelectorAll(".pr[data-pay]").forEach((row) => {
       const delBtn = row.querySelector(".pr-del");
       if (delBtn) {
@@ -1539,7 +1539,7 @@
     const r = roomOf(selRoomNo);
     const who = r && r.is_occupied && r.contract ? ` ${r.contract.tenant_name || ""}` : " 공실";
     const body = openModal(`🏠 ${Bass.escapeHtml(selRoomNo)}호${Bass.escapeHtml(who)}`, '<div id="roomPanel"></div><button type="button" id="roomModalClose" class="bass-btn" style="width:100%;min-height:48px;margin-top:12px;font-weight:800;">닫기</button>');
-    const box = body.closest(".r3-modal__box"); if (box) box.classList.add("r3-modal__box--wide");
+    const box = body.closest(".r3-modal__box"); if (box) { box.classList.add("r3-modal__box--wide"); const xb = box.querySelector(".r3-modal__x"); if (xb) xb.textContent = "✕ 닫기"; }   // 상단바의 X 를 붉은 [닫기]로
     body.querySelector("#roomModalClose").addEventListener("click", closeModal);
     renderRoomPanel();
     return body;
