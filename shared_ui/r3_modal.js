@@ -39,10 +39,30 @@
     document.head.appendChild(st);
   }
 
+  // 스마트폰 뒤로가기( < ): 창이 열려 있으면 페이지를 떠나지 않고 창만 닫는다.
+  // 창을 열 때 기록 한 칸(pushState)을 쌓고, 뒤로가기(popstate)가 오면 창을 닫는다. 창을 단추로 닫으면 쌓아 둔 한 칸을 되돌린다.
+  // 창 안에서 다른 창으로 바뀌는 경우(닫고 곧바로 열기)에는 기록을 다시 쌓지 않는다.
+  var histPushed = false, histSuppress = false;
   function closeModal() {
     var m = document.getElementById("r3Modal");
     if (m) m.remove();
+    if (histPushed) {
+      setTimeout(function () {
+        if (histPushed && !document.getElementById("r3Modal")) {
+          histPushed = false; histSuppress = true;
+          try { global.history.back(); } catch (e) { histSuppress = false; }
+        }
+      }, 0);
+    }
   }
+  global.addEventListener("popstate", function () {
+    if (histSuppress) { histSuppress = false; return; }
+    if (histPushed) {
+      histPushed = false;
+      var m = document.getElementById("r3Modal");
+      if (m) m.remove();
+    }
+  });
 
   function openModal(title, html) {
     ensureStyle();
@@ -57,6 +77,7 @@
     bg.addEventListener("mousedown", function (e) { if (e.target === bg) closeModal(); });
     bg.querySelector(".r3-modal__x").addEventListener("click", closeModal);
     document.body.appendChild(bg);
+    if (!histPushed) { try { global.history.pushState({ r3modal: 1 }, ""); histPushed = true; } catch (e) { /* 기록을 쌓지 못해도 창은 열린다 */ } }
     return bg.querySelector(".r3-modal__body");
   }
 

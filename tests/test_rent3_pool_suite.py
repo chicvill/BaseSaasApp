@@ -8391,6 +8391,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, app, needle)
         sh = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         self.assertIn("timeEl", sh)
+        md = open(os.path.join(ROOT, "shared_ui", "r3_modal.js"), encoding="utf-8").read()
+        for needle in ("pushState", "popstate", "histPushed", "history.back"):
+            self.assertIn(needle, md, needle)   # 스마트폰 뒤로가기는 창만 닫는다
 
 
     def test_130_payer_names_alias_matches_sms_to_room(self):
