@@ -975,7 +975,8 @@
         <button id="cmSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
         ${hasPhoto ? `<button id="cmViewPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 보기</button>` : ""}
         <button id="cmPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 ${hasPhoto ? "다시 " : ""}등록</button>
-        <a class="bass-btn bass-btn--sm" href="/rent3_contract/?role=lessor">🤝 서식 계약</a>
+        <button id="cmNewContract" class="bass-btn bass-btn--sm" type="button">🤝 신규 계약</button>
+        <button id="cmRenew" class="bass-btn bass-btn--sm" type="button">🔁 연장 계약</button>
       </div>
       ${ct.keys_released === false ? `<div class="bass-card" style="margin-top:12px;padding:10px;">
         <div style="font-size:13px;margin-bottom:6px;">🔑 잔금 입금 확인 전입니다. 내 은행 앱에서 직접 확인한 뒤 도어락 정보를 열어 주세요.</div>
@@ -989,30 +990,138 @@
         downloadWithAuth(`/contracts/${encodeURIComponent(ct.id)}/photo`, `contract_${ct.room_no}.png`, true);
       });
     }
+    const saveContractEdits = async () => {
+      const reqInv = Boolean($m("cmTaxInvReq").checked);
+      return await Bass.api(APP_ID, "/contracts/edit", {
+        method: "POST",
+        body: {
+          branch: currentBranch, contract_id: ct.id,
+          deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0), cleaning_fee: Number($m("cmClean").value || 0),
+          move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
+          tax_invoice_requested: reqInv,
+          vat_target: reqInv,
+          tenant_business_number: reqInv ? $m("cmBizNo").value.trim() : "",
+          tenant_company_name: reqInv ? $m("cmComp").value.trim() : "",
+          tenant_ceo_name: reqInv ? $m("cmCeo").value.trim() : "",
+          tenant_email: reqInv ? $m("cmEmail").value.trim() : "",
+          tenant_business_address: reqInv && $m("cmBizAddr") ? $m("cmBizAddr").value.trim() : "",
+        },
+      });
+    };
     $m("cmSave").addEventListener("click", function () {
       Bass.withLock(this, async () => {
-        const reqInv = Boolean($m("cmTaxInvReq").checked);
-        const res = await Bass.api(APP_ID, "/contracts/edit", {
-          method: "POST",
-          body: {
-            branch: currentBranch, contract_id: ct.id,
-            deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0), cleaning_fee: Number($m("cmClean").value || 0),
-            move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
-            tax_invoice_requested: reqInv,
-            vat_target: reqInv,
-            tenant_business_number: reqInv ? $m("cmBizNo").value.trim() : "",
-            tenant_company_name: reqInv ? $m("cmComp").value.trim() : "",
-            tenant_ceo_name: reqInv ? $m("cmCeo").value.trim() : "",
-            tenant_email: reqInv ? $m("cmEmail").value.trim() : "",
-            tenant_business_address: reqInv && $m("cmBizAddr") ? $m("cmBizAddr").value.trim() : "",
-          },
-        });
+        const res = await saveContractEdits();
         Bass.updateAppAlert("success", res.message);
         await refresh();
         showContractModal(no);
       });
     });
     $m("cmPhoto").addEventListener("click", () => { closeModal(); brokerTargetRoomNo = no; switchTab("broker"); });
+    const btnNewCt = $m("cmNewContract");
+    if (btnNewCt) {
+      btnNewCt.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          await saveContractEdits();
+          const dep = Number($m("cmDep").value || 0);
+          const rent = Number($m("cmRent").value || 0);
+          const fee = Number($m("cmFee").value || 0);
+          const clean = Number($m("cmClean").value || 0);
+          const moveIn = $m("cmIn").value;
+          const tName = (ct.tenant_name || "").trim();
+          const tPhone = $m("cmTel").value.trim();
+          const created = await Bass.api("rent3_contract", "/sessions", {
+            method: "POST",
+            body: { branch: currentBranch, room_no: no, tenant_name: tName, tenant_phone: tPhone, mode: "NEW", initiated_by_role: "lessor" },
+          });
+          const sess = created.session;
+          if (sess && sess.id) {
+            const bundle = { deposit: dep, monthly_rent: rent, maintenance_fee: fee, cleaning_fee: clean };
+            if (moveIn) bundle.move_in_date = moveIn;
+            try {
+              await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sess.id)}/terms`, {
+                method: "POST",
+                body: { role: "lessor", updates: bundle, expected_revision: sess.revision },
+              });
+              await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sess.id)}/messages`, {
+                method: "POST",
+                body: { kind: "bundle", body: "수정된 신규 계약 조건을 제시합니다.", bundle },
+              });
+            } catch (_) {}
+            window.location.href = `/rent3_contract/?session=${encodeURIComponent(sess.id)}&role=lessor&chat=1`;
+          }
+        });
+      });
+    }
+    const btnRenew = $m("cmRenew");
+    if (btnRenew) {
+      btnRenew.addEventListener("click", () => {
+        const editedDep = Number($m("cmDep").value || 0);
+        const editedRent = Number($m("cmRent").value || 0);
+        const editedFee = Number($m("cmFee").value || 0);
+        const editedClean = Number($m("cmClean").value || 0);
+        const maxDep = Math.round(Number(ct.deposit || 0) * 1.05);
+        const maxRent = Math.round(Number(ct.monthly_rent || 0) * 1.05);
+        const rentDefault = editedRent !== Number(ct.monthly_rent || 0)
+          ? editedRent
+          : Math.max(Number(ct.monthly_rent || 0), Math.floor(Number(ct.monthly_rent || 0) * 1.05 / 1000) * 1000);
+        openModal(`🔁 ${Bass.escapeHtml(no)}호 연장 계약 (5% 상한 범위)`, `
+          <div class="bass-muted" style="font-size:13px;margin-bottom:10px;">
+            현재 계약 조건에서 주택임대차보호법 제7조(<strong>5% 상한</strong>) 범위로 수정하여 재계약방을 엽니다. (본인·등기부·옵션 확인은 건너뛰고 바로 조건 승인·서명으로 진행됩니다.)
+          </div>
+          <div class="r3-grid">
+            <label class="r3-fld">보증금(원) <span class="bass-muted">최대 ${fmtWon(maxDep)}</span><input id="rnDep" class="bass-input" type="number" value="${editedDep}"></label>
+            <label class="r3-fld">월세(원) <span class="bass-muted">최대 ${fmtWon(maxRent)}</span><input id="rnRent" class="bass-input" type="number" value="${rentDefault}"></label>
+            <label class="r3-fld">관리비(원)<input id="rnFee" class="bass-input" type="number" value="${editedFee}"></label>
+            <label class="r3-fld">퇴실 청소비(원)<input id="rnClean" class="bass-input" type="number" value="${editedClean}"></label>
+            <label class="r3-fld">연장 개월<input id="rnTerm" class="bass-input" type="number" value="12"></label>
+          </div>
+          <div class="bass-row" style="gap:8px;margin-top:12px;">
+            <button id="rnGo" class="bass-btn bass-btn--primary" type="button" style="flex:1;">🔁 재계약 채팅방 열기 (5% 이내)</button>
+            <button id="rnBack" class="bass-btn" type="button">← 돌아가기</button>
+          </div>`);
+        $m("rnBack").addEventListener("click", () => showContractModal(no));
+        $m("rnGo").addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const pDep = Number($m("rnDep").value || 0);
+            const pRent = Number($m("rnRent").value || 0);
+            const pFee = Number($m("rnFee").value || 0);
+            const pClean = Number($m("rnClean").value || 0);
+            const pTerm = Math.max(1, Number($m("rnTerm").value || 12));
+            const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
+              method: "POST",
+              body: {
+                branch: currentBranch,
+                room_no: no,
+                proposed_deposit: pDep,
+                proposed_monthly_rent: pRent,
+                proposed_maintenance_fee: pFee,
+                proposed_term_months: pTerm,
+                open_cosign_session: true,
+              },
+            });
+            Bass.updateAppAlert("success", res.message || "연장 재계약방이 열렸습니다.");
+            const sid = res.check && res.check.cosign_session_id;
+            if (sid) {
+              try {
+                await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sid)}/messages`, {
+                  method: "POST",
+                  body: {
+                    kind: "bundle",
+                    body: "연장 재계약 조건을 제시합니다.",
+                    bundle: { deposit: pDep, monthly_rent: pRent, maintenance_fee: pFee, cleaning_fee: pClean, lease_term_months: pTerm },
+                  },
+                });
+              } catch (_) {}
+              await refresh();
+              window.location.href = `/rent3_contract/?session=${encodeURIComponent(sid)}&role=lessor&chat=1`;
+            } else {
+              await refresh();
+              closeModal();
+            }
+          });
+        });
+      });
+    }
     const kb = $m("cmKeys");
     if (kb) {
       kb.addEventListener("click", function () {

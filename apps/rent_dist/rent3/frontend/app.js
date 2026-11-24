@@ -86,6 +86,7 @@
     openAuthModal({ tab: "login", preset: "cosign", targetHint: hint });
   }
 
+  let portalNotifyStarted = false;
   function renderSessionUI() {
     const user = getSession();
     const btnSignIn = $("btnNavSignIn");
@@ -100,6 +101,10 @@
       $("navGoWorkspace").href = user.redirect_url;
       const bnavAcc = $("bnavAccountLabel");
       if (bnavAcc) bnavAcc.textContent = "내 페이지";
+      if (!portalNotifyStarted && window.R3Notify && Bass.token()) {
+        portalNotifyStarted = true;
+        R3Notify.start({ url: "/api/rent3_contract/notifications", seenUrl: "/api/rent3_contract/notifications/seen", bellHost: "#portalBellSlot" });
+      }
 
       strip.style.display = "none";    // '다른 계정으로 전환' 안내는 두지 않는다 — 로그아웃 후 다른 아이디로 로그인
       $("activeSessionText").innerHTML =

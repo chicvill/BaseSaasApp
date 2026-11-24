@@ -1009,11 +1009,16 @@
     } else {
       btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="5">🔏 최종 체결 모달 열기</button>`;
     }
+    const tm = s.terms || {};
+    const termsSummary = `<div class="bass-muted" style="font-size:12.5px;margin-top:6px;line-height:1.5;background:#f8fafc;padding:6px 10px;border-radius:10px;">
+      보증금 <strong>${fmtWon(tm.deposit)}</strong> · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · 입주 ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)
+    </div>`;
     bar.innerHTML = `
       <div class="ws-action-card__head">
         <strong style="font-size:14px;">${esc(prog.label)}</strong>
         <span class="bass-badge ${t.mine ? "bass-badge--warn" : "bass-badge--info"}">${esc(t.text)}</span>
       </div>
+      ${termsSummary}
       <div class="ws-action-card__btns">${btns}</div>`;
 
     bar.querySelectorAll(".js-ws-step").forEach((b) => {

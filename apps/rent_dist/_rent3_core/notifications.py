@@ -118,6 +118,9 @@ def _contract_rooms(role: str, user: Any) -> List[Optional[Dict[str, Any]]]:
         if s.status != "IN_PROGRESS":
             continue
         link = f"/rent3_contract/?session={quote(str(s.id))}&chat=1"
+        if s.call_status == "CALLING" and s.initiated_by_role != role:
+            kind_label = "연장 재계약" if s.mode == "RENEWAL" else "신규 계약"
+            out.append(_item(f"contract_call:{s.id}", f"{s.room_no}호 계약 요청 — 확인하기", 1, link, "urgent", detail=f"{s.building_name} {s.room_no}호 ({kind_label})"))
         sm = cc.summary_for(s, role)
         waiting = sum(1 for m in cc.open_items(s.id) if m.sender_role != role)       # 내가 답해야 하는 것(내가 보낸 것은 제외)
         out.append(_item(f"contract_chat:{s.id}", f"{s.room_no}호 계약방 채팅", int(sm["unread"]), link, "normal", detail=f"{s.room_no}호 계약방"))
