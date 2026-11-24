@@ -213,10 +213,7 @@ def enter(admin_user: str, user: Any, view: str, session_id: str = "", category:
     if not cs.support_allowed(user):
         raise Forbidden("이 사용자는 원격 지원을 허용하지 않았습니다.",
                         hint="전화로 방법을 안내하거나, 사용자가 메뉴에서 원격 지원 허용을 켜도록 안내해 주세요.")
-    key = thread_key(user)
-    if not thread_messages(key):
-        raise DomainError("먼저 사용자의 지원 채팅을 열거나 전화 접수를 남겨 주세요.",
-                          hint="접속 사유는 지원 채팅에 남습니다. 전화로 요청받았다면 '전화 접수'를 먼저 입력하세요.")
+    key = thread_key(user)          # 지원 채팅이 아직 없어도 입장할 수 있다: 사용자가 원격 지원을 허용했고, 입장하면 접속 기록과 채팅 안내가 자동으로 남는다
     if category not in CATEGORIES:
         category = "기타"
     branch = user.branch

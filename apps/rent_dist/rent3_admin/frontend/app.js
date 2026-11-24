@@ -160,10 +160,10 @@
     const msgs = t.messages || [];
     const callDigits = String((t.user && t.user.phone) || "").replace(/\D/g, "");
     const callPhone = callDigits.length === 11 ? `${callDigits.slice(0, 3)}-${callDigits.slice(3, 7)}-${callDigits.slice(7)}` : callDigits.length === 10 ? `${callDigits.slice(0, 3)}-${callDigits.slice(3, 6)}-${callDigits.slice(6)}` : callDigits;
-    const can = card.support_allowed && msgs.length > 0;
+    const can = !!card.support_allowed;                        // 허용만 되어 있으면 지원 채팅이 없어도 입장할 수 있다
     const sessions = card.role === "lessor" ? rooms_sessions(d) : (room ? room.sessions : []);
-    const why = !card.support_allowed ? "이 사용자는 원격 지원을 허용하지 않았습니다. 전화로 방법을 안내하거나, 사용자가 메뉴에서 허용을 켜도록 안내해 주세요."
-      : (!msgs.length ? "지원 채팅이 없습니다. 사용자에게 먼저 글을 보내 주세요." : "");
+    const who = card.role === "lessor" ? "임대인" : "임차인";
+    const why = !card.support_allowed ? `이 ${who}(${card.name || ""})는 원격 지원을 허용하지 않았습니다. ${who} 본인이 문의 창의 ‘원격 지원 허용’을 켜야 합니다(다른 사람의 허용으로는 열 수 없습니다). 전화로 방법을 안내해 주세요.` : "";
     box.innerHTML = `
       <div class="bass-card">
         <h3 style="margin:0 0 6px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
@@ -200,6 +200,11 @@
       try {
         const nt = await Bass.api(APP_ID, `/support/thread?user=${encodeURIComponent(card.user)}`);
         const nm = nt.messages || [];
+        if (nt.user && Boolean(nt.user.support_allowed) !== Boolean(card.support_allowed)) {      // 사용자가 허용을 켜거나 끄면 바로 화면(허용 표시·입장 단추)에 반영
+          clearInterval(spTimer);
+          renderSupportTab().catch(() => {});
+          return;
+        }
         const boxNow = document.getElementById("spList");
         if (boxNow && nm.length !== spMsgs.length) {
           spMsgs = nm;

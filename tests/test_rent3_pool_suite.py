@@ -3434,12 +3434,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 전화 접수: 채팅이 없던 임대인도 '[전화 요청 접수]' 글이 생기며 입장 가능
         self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 403)   # 허용 전
         cs.set_support_access(lessor, True)
-        self.assertEqual(c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"}).status_code, 400)    # 채팅 없음
+        first = c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor"})
+        self.assertEqual(first.status_code, 200, first.text)          # 허용했다면 지원 채팅이 아직 없어도 입장 가능(입장 안내가 채팅에 남는다)
+        self.assertTrue(any(m["kind"] == "access_start" for m in c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"]))
         self.assertEqual(c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "없는분류", "memo": "x"}).status_code, 400)
         r = c.post("/api/rent3_admin/support/phone-intake", json={"user": lkey, "category": "사용법 문의", "memo": "수납 입력 방법을 모르심"})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertTrue(r.json()["item"]["body"].startswith("[전화 요청 접수]"))
-        self.assertIn("수납 입력 방법", [m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"]][0])
+        self.assertTrue(any("수납 입력 방법" in m["body"] for m in c.get("/api/rent3/pool/support/thread", headers=lh).json()["messages"]))
         r = c.post("/api/rent3_admin/support/enter", json={"user": lkey, "view": "lessor", "room_no": "201", "category": "사용법 문의"})
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["redirect_url"], f"/rent3_lessor/?branch={lessor.branch}&proxy=lessor&room=201")
