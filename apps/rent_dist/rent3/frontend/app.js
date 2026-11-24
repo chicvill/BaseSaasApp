@@ -602,7 +602,11 @@
       if (!$("loginPassword").value) $("loginPassword").value = "1212";
       if (!$("regPassword").value) $("regPassword").value = "1212";
     }
-    if (!demoOn) $("loginIdentifier").placeholder = "아이디, 이메일 또는 휴대폰 번호";   // 운영: 성명 로그인·시연 계정 안내 없음
+    if (!demoOn) {   // 운영: 성명 로그인·시연 계정 안내 없음(이름만으로는 로그인되지 않는다)
+      $("loginIdentifier").placeholder = "아이디, 이메일 또는 휴대폰 번호";
+      const lb = document.querySelector('label[for="loginIdentifier"]');
+      if (lb) lb.textContent = "아이디 / 휴대폰 번호 / 이메일";
+    }
     const demoBox = $("demoAccountGrid") && $("demoAccountGrid").parentElement;
     if (demoBox) demoBox.style.display = demoOn ? "" : "none";
 
@@ -733,7 +737,7 @@
         if (alertBox) {
           const isNotFound = (err.message || "").includes("찾을 수 없습니다");
           let quickBtnHtml = "";
-          if (isNotFound && (rawDigits.length >= 8 || rawIdent)) {
+          if (isNotFound && rawDigits.length >= 8) {          // 번호를 넣었을 때만 번호 간편가입을 권한다(이름만 넣은 경우는 제외)
             quickBtnHtml = `
               <div style="margin-top:10px; padding-top:8px; border-top:1px dashed #fca5a5;">
                 <div style="font-size:12px; color:#991b1b; margin-bottom:6px; font-weight:600;">

@@ -8828,6 +8828,29 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("btnTiCheck", "btnTiApply", "/accounts/test-identity", "시험 예비임차인 본인인증 처리"):
             self.assertIn(needle, adm, needle)
 
+    def test_143_login_by_name_is_explained_in_production(self):
+        """143. 운영 접속에서는 이름(성명)만으로 로그인되지 않으며, 오류 안내가 그 사실을 알리고 '번호로 간편가입' 제안은 번호를 넣었을 때만 나온다. 휴대폰 번호로는 로그인된다."""
+        c, NA = self.client, self.NOAUTH
+        remote = {**NA, "X-Forwarded-For": "203.0.113.9"}
+        reg = c.post("/api/rent3/pool/auth/register", headers=NA, json={"role": "prospect", "name": "홍길동", "phone": "010-1111-2222", "password": "Pw123456"})
+        self.assertEqual(reg.status_code, 200, reg.text)
+        try:
+            by_name = c.post("/api/rent3/pool/auth/login", headers=remote, json={"login_mode": "account", "identifier": "홍길동", "password": "Pw123456"})
+            self.assertEqual(by_name.status_code, 401)
+            self.assertIn("이름(성명)만으로는 로그인할 수 없습니다", by_name.json().get("hint", ""))
+            self.assertNotIn("휴대폰 번호·성명", by_name.json().get("hint", ""))
+            by_phone = c.post("/api/rent3/pool/auth/login", headers=remote, json={"login_mode": "account", "identifier": "010-1111-2222", "password": "Pw123456"})
+            self.assertEqual(by_phone.status_code, 200, by_phone.text)
+        finally:
+            from apps.rent_dist._rent3_core import Tenant
+            t = next((x for x in Tenant.all() if x.phone == "010-1111-2222"), None)
+            if t:
+                t.delete(action="t")
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn('lb.textContent = "아이디 / 휴대폰 번호 / 이메일"', app)
+        self.assertIn("isNotFound && rawDigits.length >= 8", app)
+        self.assertNotIn("isNotFound && (rawDigits.length >= 8 || rawIdent)", app)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

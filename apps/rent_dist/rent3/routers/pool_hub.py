@@ -1055,7 +1055,7 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     demo = demo_login_allowed(request)
 
     if not ident or not pw:
-        raise DomainError("아이디(또는 휴대폰 번호/성명)와 비밀번호를 모두 입력해 주세요.")
+        raise DomainError("아이디(또는 휴대폰 번호·이메일)와 비밀번호를 모두 입력해 주세요.")
 
     # (A) 총괄 관리인 (Admin) 매칭
     matched_admin = next(
@@ -1222,7 +1222,7 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
 
     raise Unauthorized(
         "일치하는 사용자 계정을 찾을 수 없습니다.",
-        hint="아이디·휴대폰 번호·성명을 다시 확인하거나 '회원가입' 탭에서 간편 본인인증 가입 후 이용해 주세요.",
+        hint="아이디·휴대폰 번호·이메일을 다시 확인하거나 '회원가입' 탭에서 간편 본인인증 가입 후 이용해 주세요." + ("" if demo else " 이름(성명)만으로는 로그인할 수 없습니다."),
     )
 
 
