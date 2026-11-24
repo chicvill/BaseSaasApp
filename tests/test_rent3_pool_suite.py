@@ -8759,6 +8759,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, app, needle)
         self.assertNotIn("affordPanel", app)
 
+    def test_141_portal_menu_public_items_only_ops_items_in_admin_menu(self):
+        """141. 포털 ☰는 로그인 없이 볼 수 있는 것(임차인·임대인 안내, 월세 적정 예산 계산기)과 임대인 가맹 가입 안내·MQnet 연락처만 둔다. 매뉴얼·PDF·Data Pool 관제·게이트웨이 같은 운영 항목은 관리인 앱 ☰ 로 옮겼다."""
+        base = os.path.join(ROOT, "apps", "rent_dist")
+        portal = open(os.path.join(base, "rent3", "frontend", "index.html"), encoding="utf-8").read()
+        drawer = portal[portal.index("data-r3-drawer"):portal.index("</aside>")]
+        for needle in ("menuForTenants", "menuForLandlords", "btnToggleAfford", "/rent3/lessor-intro.html",
+                       "https://saas.34.31.10.12.sslip.io/", "tel:01032693343", "010-3269-3343", "민흥식", "mailto:", "MQnet"):
+            self.assertIn(needle, drawer, needle)
+        for gone in ("manual.html", "Rent3_통합_사용자_매뉴얼.pdf", "Rent3_QA_Test_Checklist.pdf", "pool.html", "BaseSaasApp 게이트웨이"):
+            self.assertNotIn(gone, drawer, gone)
+        self.assertEqual(drawer.count('data-r3-plain'), 2)                  # 연락처 링크는 타일로 만들지 않는다(번호·이메일이 잘리지 않게)
+        hb = open(os.path.join(base, "rent3", "frontend", "hamburger.js"), encoding="utf-8").read()
+        self.assertIn("a:not([data-r3-plain])", hb)
+        admin = open(os.path.join(base, "rent3_admin", "frontend", "index.html"), encoding="utf-8").read()
+        adrawer = admin[admin.index("data-r3-drawer"):admin.index("</aside>")]
+        for needle in ("/rent3/manual.html", "Rent3_통합_사용자_매뉴얼.pdf", "Rent3_QA_Test_Checklist.pdf", "/rent3/pool.html", 'href="/"'):
+            self.assertIn(needle, adrawer, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

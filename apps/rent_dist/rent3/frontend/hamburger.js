@@ -88,15 +88,15 @@
     "@media (max-width:540px){.r3-drawer{padding:0 12px 20px;border-radius:18px}.r3-drawer__grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}}",
 
     /* 개별 아이콘 타일 카드 */
-    ".r3-drawer a,.r3-drawer button.r3-item,.r3-drawer .tab-btn{",
+    ".r3-drawer a:not([data-r3-plain]),.r3-drawer button.r3-item,.r3-drawer .tab-btn{",
     "display:flex!important;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px;",
     "width:100%;min-height:92px;padding:12px 6px 10px;border-radius:14px;text-align:center;",
     "text-decoration:none;color:#1e293b;font:inherit;font-size:12.5px;font-weight:700;line-height:1.35;",
     "border:1px solid #e2e8f0;background:#ffffff;cursor:pointer;white-space:normal;word-break:keep-all;",
     "transition:transform .12s ease,background .12s ease,border-color .12s ease,box-shadow .12s ease}",
-    ".r3-drawer a:hover,.r3-drawer button.r3-item:hover,.r3-drawer .tab-btn:hover{",
+    ".r3-drawer a:not([data-r3-plain]):hover,.r3-drawer button.r3-item:hover,.r3-drawer .tab-btn:hover{",
     "background:#f8fafc;border-color:#93c5fd;transform:translateY(-2px);box-shadow:0 6px 14px -6px rgba(37,99,235,.22)}",
-    ".r3-drawer a:active,.r3-drawer button.r3-item:active,.r3-drawer .tab-btn:active{transform:scale(.97)}",
+    ".r3-drawer a:not([data-r3-plain]):active,.r3-drawer button.r3-item:active,.r3-drawer .tab-btn:active{transform:scale(.97)}",
     ".r3-drawer .tab-btn.is-active{border:2px solid var(--primary,#2563eb);background:#eff6ff;color:#1d4ed8}",
 
     ".r3-tile-ico{display:inline-flex;align-items:center;justify-content:center;width:46px;height:46px;border-radius:14px;",
@@ -126,7 +126,7 @@
   }
 
   function decorateItem(el, colorIdx) {
-    if (!el || el.querySelector(".r3-tile-ico")) return;
+    if (!el || el.hasAttribute("data-r3-plain") || el.querySelector(".r3-tile-ico")) return;   // data-r3-plain: 안내 글 속 링크는 타일로 만들지 않는다
     var parsed = splitIconLabel(el.textContent);
     var bg = PALETTE[colorIdx % PALETTE.length];
     el.setAttribute("data-r3-label", (parsed.ico + " " + parsed.txt).toLowerCase());
@@ -214,7 +214,7 @@
         }
       });
     } else {
-      var tiles = drawer.querySelectorAll("a, button.r3-item, .tab-btn");
+      var tiles = drawer.querySelectorAll("a:not([data-r3-plain]), button.r3-item, .tab-btn");
       Array.prototype.forEach.call(tiles, function (el, i) { decorateItem(el, i); });
     }
   }
@@ -263,7 +263,7 @@
       var sections = drawer.querySelectorAll(".r3-drawer__section");
       var visibleTotal = 0;
       Array.prototype.forEach.call(sections, function (sec) {
-        var tiles = sec.querySelectorAll("a, button.r3-item, .tab-btn");
+        var tiles = sec.querySelectorAll("a:not([data-r3-plain]), button.r3-item, .tab-btn");
         var secVisible = 0;
         Array.prototype.forEach.call(tiles, function (t) {
           var txt = (t.getAttribute("data-r3-label") || t.textContent || "").toLowerCase();
