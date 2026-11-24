@@ -601,9 +601,11 @@
       <div id="cmList" class="cm-list"></div>
       <div id="cmNote" class="bass-muted" style="font-size:12px;margin:4px 0;"></div>
       <div id="cmComposer">
-        <textarea id="cmMsg" class="bass-input" rows="2" placeholder="궁금한 점을 적어 주세요" style="width:100%;"></textarea>
-        <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+        <div class="r3-chat-compose">
+          <textarea id="cmMsg" class="bass-input" rows="2" placeholder="궁금한 점을 적어 주세요"></textarea>
           <button id="cmSend" type="button" class="bass-btn bass-btn--sm bass-btn--primary">보내기</button>
+        </div>
+        <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
           <button type="button" class="bass-btn bass-btn--sm cm-quick" data-t="확인했습니다">확인했습니다</button>
           <button type="button" class="bass-btn bass-btn--sm cm-quick" data-t="나중에 얘기해요">나중에 얘기해요</button>
         </div>

@@ -81,20 +81,36 @@
     const kpi = ov.kpi || {};
     document.getElementById("poolBadge").textContent = `JSON Pool v${meta.total_revision} (${meta.total_objects} 객체)`;
 
+    const occPct = kpi.total_rooms > 0 ? Math.round((Number(kpi.occupied_rooms || 0) * 100) / Number(kpi.total_rooms)) : 0;
     document.getElementById("kpiGrid").innerHTML =
-      `<span>가맹 ${kpi.total_buildings}채 · ${kpi.occupied_rooms}/${kpi.total_rooms}실</span>` +
-      `<span class="bass-muted">월 이용료 ${fmtWon(kpi.monthly_saas_mrr)}</span>`;
+      `<div class="r3-kpi r3-kpi--info"><span class="r3-kpi__lbl">🏢 가맹 건물</span><strong class="r3-kpi__val">${kpi.total_buildings}채</strong></div>` +
+      `<div class="r3-kpi r3-kpi--ok"><span class="r3-kpi__lbl">🏠 호실 가동</span><strong class="r3-kpi__val">${kpi.occupied_rooms}/${kpi.total_rooms}실 (${occPct}%)</strong><div class="r3-kpi__bar"><i style="width:${occPct}%;"></i></div></div>` +
+      `<div class="r3-kpi"><span class="r3-kpi__lbl">💳 월 이용료</span><strong class="r3-kpi__val">${fmtWon(kpi.monthly_saas_mrr)}</strong></div>` +
+      `<div class="r3-kpi"><span class="r3-kpi__lbl">📂 Pool 버전</span><strong class="r3-kpi__val">v${meta.total_revision} (${meta.total_objects})</strong></div>`;
 
+    renderTab();
+  }
+
+  function switchAdminTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === tab));
+    document.querySelectorAll("#adminBottomNav [data-atab]").forEach((b) => b.classList.toggle("is-active", b.dataset.atab === tab));
     renderTab();
   }
 
   document.getElementById("tabBar").addEventListener("click", (e) => {
     const btn = e.target.closest(".tab-btn");
     if (!btn) return;
-    currentTab = btn.dataset.tab;
-    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b === btn));
-    renderTab();
+    switchAdminTab(btn.dataset.tab);
   });
+
+  const adminBNav = document.getElementById("adminBottomNav");
+  if (adminBNav) {
+    adminBNav.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-atab]");
+      if (btn) switchAdminTab(btn.dataset.atab);
+    });
+  }
 
   function renderTab() {
     if (!ov) return;
@@ -174,13 +190,15 @@
     const sessions = card.role === "lessor" ? rooms_sessions(d) : (room ? room.sessions : []);
     const who = card.role === "lessor" ? "임대인" : "임차인";
     const why = !card.support_allowed ? `이 ${who}(${card.name || ""})는 원격 지원을 허용하지 않았습니다. ${who} 본인이 문의 창의 ‘원격 지원 허용’을 켜야 합니다(다른 사람의 허용으로는 열 수 없습니다). 전화로 방법을 안내해 주세요.` : "";
+    const renderSpRows = (arr) => arr.map((m) => m.sender_role === "system"
+      ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${Bass.escapeHtml(spFmt(m.created_at))}</span></div>`
+      : `<div class="cm-b ${m.sender_role === "admin" ? "is-mine" : ""}"><div><div class="cm-meta">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : "관리인"}</div>${Bass.escapeHtml(m.body)}</div></div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>';
     box.innerHTML = `
       <div class="bass-card">
-        <h3 style="margin:0 0 6px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
-        <div id="spList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px;padding:6px 8px;">${msgs.map((m) => `
-          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>'}</div>
-        <div class="bass-row" style="gap:6px;margin-top:8px;"><input id="spMsg" class="bass-input" style="flex:1;" placeholder="사용자에게 보낼 글"><button id="btnSpSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">보내기</button></div>
-        <div class="bass-muted" style="font-size:12px;margin-top:4px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
+        <h3 style="margin:0 0 8px;">💬 ${Bass.escapeHtml(card.title)} · 지원 채팅</h3>
+        <div id="spList" class="cm-list" style="max-height:280px;">${renderSpRows(msgs)}</div>
+        <div class="r3-chat-compose"><textarea id="spMsg" class="bass-input" rows="2" placeholder="사용자에게 보낼 글"></textarea><button id="btnSpSend" class="bass-btn bass-btn--sm bass-btn--primary" type="button">보내기</button></div>
+        <div class="bass-muted" style="font-size:12px;margin-top:6px;">대화는 ${t.retention_days}일 뒤 삭제됩니다. 접속 기록(사유 분류 포함)은 1년 보관됩니다.</div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
           <div class="bass-row" style="gap:8px;align-items:center;flex-wrap:wrap;"><strong style="font-size:13.5px;">📞 ${Bass.escapeHtml(card.title)}에게 전화 :</strong>
