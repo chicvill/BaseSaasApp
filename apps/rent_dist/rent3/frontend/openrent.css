@@ -302,11 +302,19 @@ body.or-body {
 
 /* ── 4. Hero Section & The Floating Pill Search Bar (Airbnb Centerpiece) ── */
 .or-hero {
-  background: radial-gradient(circle at 50% 0%, #FFF5F6 0%, #FFFFFF 65%);
+  background:
+    linear-gradient(95deg, rgba(255, 255, 255, 0.97) 0%, rgba(255, 255, 255, 0.90) 44%, rgba(255, 255, 255, 0.28) 100%),
+    url("hero-living.jpg") right center / cover no-repeat;
   color: var(--ab-charcoal);
-  padding: 64px 0 52px;
+  padding: 36px 0 32px;
   position: relative;
   border-bottom: 1px solid var(--ab-border);
+}
+
+.or-hero__content {
+  text-align: left;
+  max-width: 560px;
+  margin-bottom: 20px;
 }
 
 .or-hero__eyebrow {
@@ -325,29 +333,31 @@ body.or-body {
 }
 
 .or-hero h1 {
-  font-size: 40px;
+  font-size: 36px;
   font-weight: 800;
   line-height: 1.25;
-  margin: 0 0 14px;
+  margin: 0 0 10px;
   letter-spacing: -0.03em;
   color: var(--ab-charcoal);
 }
 
 .or-hero__sub {
-  font-size: 17px;
+  font-size: 15.5px;
   color: var(--ab-text-secondary);
-  max-width: 720px;
-  margin: 0 auto 34px;
-  line-height: 1.5;
+  max-width: 520px;
+  margin: 0;
+  line-height: 1.55;
 }
 
 /* Airbnb Signature Capsule / Pill Floating Search Card */
 .or-search-card {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   color: var(--ab-charcoal);
-  border-radius: var(--ab-radius-pill);
-  padding: 8px 10px 8px 24px;
-  max-width: 920px;
+  border-radius: 24px;
+  padding: 10px 12px 10px 18px;
+  max-width: 100%;
   margin: 0 auto;
   border: 1px solid var(--ab-border);
   box-shadow: var(--ab-shadow-search);
@@ -912,15 +922,29 @@ body.or-body {
   pointer-events: auto;
 }
 
+/* ── Mobile Bottom Nav (shown <= 640px) ── */
+.or-bottom-nav {
+  display: none;
+}
+
 /* Responsive Breakpoints */
 @media (max-width: 960px) {
   .or-search-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
   }
+  .or-search-kw {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--ab-border);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .or-search-submit {
+    grid-column: 1 / -1;
+  }
   .or-search-card {
-    border-radius: var(--ab-radius-lg);
-    padding: 16px;
+    border-radius: 20px;
+    padding: 12px;
   }
   .or-trust-grid,
   .or-role-grid {
@@ -931,7 +955,159 @@ body.or-body {
     grid-template-columns: 1fr;
   }
   .or-hero h1 {
-    font-size: 30px;
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 640px) {
+  body.or-body {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+  }
+  .or-container {
+    padding: 0 14px;
+  }
+  .or-navbar__inner {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  .or-brand__logo {
+    width: 34px;
+    height: 34px;
+    font-size: 18px;
+  }
+  .or-brand__title {
+    font-size: 17px;
+  }
+  .or-navlinks,
+  #btnNavAddListing {
+    display: none;
+  }
+  .or-hero {
+    padding: 20px 0 18px;
+    background:
+      linear-gradient(100deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.88) 46%, rgba(255, 255, 255, 0.25) 100%),
+      url("hero-living.jpg") right top / cover no-repeat;
+  }
+  .or-hero h1 {
+    font-size: 23px;
+    margin-bottom: 6px;
+  }
+  .or-hero__sub {
+    font-size: 13.5px;
+  }
+  .or-hero__content {
+    margin-bottom: 14px;
+  }
+  .or-search-grid {
+    grid-template-columns: 1fr 1fr auto;
+    gap: 6px;
+  }
+  .or-search-kw {
+    grid-column: 1 / -1;
+    background: var(--ab-subtle-bg);
+    font-size: 14px;
+  }
+  .or-select {
+    font-size: 12.5px;
+    padding: 8px 6px;
+    border: 1px solid var(--ab-border);
+    border-radius: 12px;
+    background: #fff;
+  }
+  .or-search-submit {
+    grid-column: auto;
+    padding: 9px 14px !important;
+    font-size: 13px !important;
+    white-space: nowrap;
+  }
+  .or-filter-bar {
+    margin-top: 12px;
+    gap: 8px;
+  }
+  .or-chip {
+    padding: 7px 14px;
+    font-size: 12.5px;
+  }
+  .or-listings-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .or-prop-card {
+    border-radius: 16px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  }
+  .or-prop-main {
+    display: grid;
+    grid-template-columns: 136px 1fr;
+    gap: 10px;
+    padding: 10px 10px 6px;
+    align-items: start;
+  }
+  .or-prop-media {
+    aspect-ratio: 4 / 3;
+    border-radius: 12px;
+  }
+  .or-prop-badges {
+    top: 6px;
+    left: 6px;
+    gap: 4px;
+  }
+  .or-pill {
+    font-size: 12px;
+    padding: 2px 7px;
+  }
+  .or-prop-body {
+    padding: 0;
+  }
+  .or-prop-price {
+    font-size: 16px;
+    margin: 2px 0 4px;
+  }
+  .or-prop-price span {
+    font-size: 12px;
+  }
+  .or-prop-meta {
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .or-tag-list {
+    margin-bottom: 4px;
+  }
+  .or-prop-actions {
+    padding: 0 10px 10px;
+  }
+  .or-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 130;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid var(--ab-border);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.06);
+  }
+  .or-bottom-nav__item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: none;
+    color: var(--ab-text-secondary);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 2px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .or-bottom-nav__item.is-active {
+    color: var(--ab-coral);
   }
 }
 
@@ -943,8 +1119,5 @@ body.or-body {
   }
   .or-tabs {
     grid-template-columns: 1fr;
-  }
-  .or-hero h1 {
-    font-size: 26px;
   }
 }

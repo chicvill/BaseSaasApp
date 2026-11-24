@@ -98,6 +98,8 @@
       loggedBox.style.display = "inline-flex";
       $("navUserBadge").textContent = `${roleIcon(user.role)} ${user.name} · 본인인증됨`;
       $("navGoWorkspace").href = user.redirect_url;
+      const bnavAcc = $("bnavAccountLabel");
+      if (bnavAcc) bnavAcc.textContent = "내 페이지";
 
       strip.style.display = "none";    // '다른 계정으로 전환' 안내는 두지 않는다 — 로그아웃 후 다른 아이디로 로그인
       $("activeSessionText").innerHTML =
@@ -115,6 +117,8 @@
       btnSignIn.style.display = "inline-flex";
       loggedBox.style.display = "none";
       strip.style.display = "none";
+      const bnavAcc = $("bnavAccountLabel");
+      if (bnavAcc) bnavAcc.textContent = "로그인";
       if (quickAuth) {
         quickAuth.style.background = "#f8fafc";
         quickAuth.style.borderColor = "var(--or-border)";
@@ -256,47 +260,48 @@
 
     grid.innerHTML = list.map((l) => `
       <article class="or-prop-card" data-room-id="${esc(l.id)}" data-room-no="${esc(l.room_no)}">
-        <div class="or-prop-media">
-          <img src="${esc(l.image)}" alt="${esc(l.building_name)} ${esc(l.room_no)}호">
-          <div class="or-prop-badges">
-            <span class="or-pill or-pill--green">복비 0원</span>
-            ${l.pre_moveout_notice
-              ? `<span class="or-pill or-pill--amber">📦 만기전출 사전공개 (${esc(l.available_from)})</span>`
-              : `<span class="or-pill or-pill--navy">⚡ ${esc(l.available_from || "즉시입주")}</span>`}
-            ${l.clean_title ? `<span class="or-pill or-pill--navy">🛡️ 등기클린</span>` : ""}
+        <div class="or-prop-main">
+          <div class="or-prop-media">
+            <img src="${esc(l.image)}" alt="${esc(l.building_name)} ${esc(l.room_no)}호">
+            <div class="or-prop-badges">
+              <span class="or-pill or-pill--green">복비 0원</span>
+              ${l.pre_moveout_notice
+                ? `<span class="or-pill or-pill--amber">📦 만기전출 사전공개 (${esc(l.available_from)})</span>`
+                : `<span class="or-pill or-pill--navy">⚡ ${esc(l.available_from || "즉시입주")}</span>`}
+              ${l.clean_title ? `<span class="or-pill or-pill--navy">🛡️ 등기클린</span>` : ""}
+            </div>
+          </div>
+          <div class="or-prop-body">
+            <div>
+              <div style="font-size:12px; font-weight:700; color:var(--or-muted);">
+                ${esc(l.building_name)} · ${esc(l.room_category)} · ${l.floor}${l.total_floors ? `/${l.total_floors}` : ""}층 · 전용 ${l.area_sqm}㎡${l.direction ? ` · ${esc(l.direction)}` : ""}
+              </div>
+              <h3 style="margin:4px 0 2px; font-size:17px; color:var(--or-navy);">
+                [${esc(l.building_name)}] ${esc(l.name)}
+              </h3>
+              <div class="or-prop-price">
+                보증금 ${fmtMan(l.deposit)} / 월 ${fmtMan(l.monthly_rent)}
+                <span style="font-size:12.5px; font-weight:600; color:var(--or-muted);"> (관리비 ${fmtMan(l.maintenance_fee)})</span>
+              </div>
+              <div class="or-prop-meta">
+                📍 ${esc(l.address || "주소 정보 등록됨")} · ${esc(l.pay_timing)} · 소유주 ${esc(l.lessor_name)}
+              </div>
+              <div class="or-tag-list">
+                ${(l.options || []).slice(0, 5).map((opt) => `<span class="or-tag">${esc(opt)}</span>`).join("")}
+              </div>
+            </div>
           </div>
         </div>
-        <div class="or-prop-body">
-          <div>
-            <div style="font-size:12px; font-weight:700; color:var(--or-muted);">
-              ${esc(l.building_name)} · ${esc(l.room_category)} · ${l.floor}${l.total_floors ? `/${l.total_floors}` : ""}층 · 전용 ${l.area_sqm}㎡${l.direction ? ` · ${esc(l.direction)}` : ""}
-            </div>
-            <h3 style="margin:4px 0 2px; font-size:17px; color:var(--or-navy);">
-              [${esc(l.building_name)}] ${esc(l.name)}
-            </h3>
-            <div class="or-prop-price">
-              보증금 ${fmtMan(l.deposit)} / 월 ${fmtMan(l.monthly_rent)}
-              <span style="font-size:12.5px; font-weight:600; color:var(--or-muted);"> (관리비 ${fmtMan(l.maintenance_fee)})</span>
-            </div>
-            <div class="or-prop-meta">
-              📍 ${esc(l.address || "주소 정보 등록됨")} · ${esc(l.pay_timing)} · 소유주 ${esc(l.lessor_name)}
-            </div>
-            <div class="or-tag-list">
-              ${(l.options || []).slice(0, 5).map((opt) => `<span class="or-tag">${esc(opt)}</span>`).join("")}
-            </div>
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-            <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-inquiry"
-              data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
-              💬 1:1 방문문의
-            </button>
-            <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
-              data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}"
-              ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
-              ${l.contract_in_progress ? "🔒 계약 진행 중" : "📞 공동계약 호출"}
-            </button>
-          </div>
+        <div class="or-prop-actions" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:0 20px 18px;">
+          <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-inquiry"
+            data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
+            💬 1:1 방문문의
+          </button>
+          <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
+            data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}"
+            ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
+            ${l.contract_in_progress ? "🔒 계약 진행 중" : "📞 공동계약 호출"}
+          </button>
         </div>
       </article>
     `).join("");
@@ -984,6 +989,30 @@
 
   renderSessionUI();
   bindPasswordReset();
+  document.querySelectorAll(".or-bottom-nav__item[data-bnav]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".or-bottom-nav__item").forEach((b) => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      const act = btn.dataset.bnav;
+      if (act === "listings") {
+        const sec = $("listingsSection");
+        if (sec) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (act === "search") {
+        const kw = $("searchKeyword");
+        const frm = $("heroSearchForm");
+        if (frm) frm.scrollIntoView({ behavior: "smooth", block: "center" });
+        if (kw) setTimeout(() => kw.focus(), 200);
+      } else if (act === "cosign") {
+        const rn = $("rentNowSection");
+        if (rn) rn.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (act === "account") {
+        const u = getSession();
+        if (u && u.redirect_url) window.location.href = u.redirect_url;
+        else openAuthModal({ tab: "login" });
+      }
+    });
+  });
+
   bindConnect();
   // 세입자가 보낸 '안심계약 제안' 링크(?invite=lessor): 임대인 가입 화면을 바로 연다(표식은 captureAcq 가 보관)
   if (urlParams.get("invite") === "lessor") {

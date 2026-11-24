@@ -82,14 +82,16 @@
 
   <!-- 2. OpenRent Hero & Central Property Search Fold -->
   <section class="or-hero">
-    <div class="or-container" style="text-align:center;">
-            <h1>집주인과 직접, 수수료 없이 계약하세요</h1>
-      <p class="or-hero__sub">빈 집을 찾고, 그 자리에서 계약하고, 월세 납부까지 한곳에서 확인합니다.</p>
+    <div class="or-container">
+      <div class="or-hero__content">
+        <h1>집주인과 직접,<br>수수료 없이 계약하세요</h1>
+        <p class="or-hero__sub">빈 집을 찾고, 그 자리에서 계약하고,<br>월세 납부까지 한곳에서 확인합니다.</p>
+      </div>
 
       <!-- Main Search Box -->
       <form id="heroSearchForm" class="or-search-card" autocomplete="off" style="scroll-margin-top:90px;">
         <div class="or-search-grid">
-          <input id="searchKeyword" type="search" class="or-input" placeholder="지역, 건물명, 호실, 옵션 검색 (예: 관악구, 마포, 시크빌, 복층, 에어컨)">
+          <input id="searchKeyword" type="search" class="or-input or-search-kw" placeholder="지역, 건물명, 호실, 옵션 검색 (예: 관악구, 마포, 시크빌)">
           <select id="searchBranch" class="or-select" aria-label="건물 지점 필터">
             <option value="">전체 건물 지점</option>
           </select>
@@ -99,13 +101,13 @@
             <option value="오피스텔">오피스텔</option>
             <option value="상가/사무실">상가/사무실</option>
           </select>
-          <button type="submit" class="or-btn or-btn--blue" style="padding:11px 22px;">🔍 매물 검색</button>
+          <button type="submit" class="or-btn or-btn--blue or-search-submit">🔍 매물 검색</button>
         </div>
       </form>
 
-      <!-- OpenRent Signature Quick Filter Pills & Affordability Calculator Trigger -->
+      <!-- OpenRent Signature Quick Filter Pills -->
       <div class="or-filter-bar" id="quickFilterBar">
-        <button type="button" class="or-chip is-active" data-filter="all">전체 공개 매물</button>
+        <button type="button" class="or-chip is-active" data-filter="all">🏠 전체 공개 매물</button>
         <button type="button" class="or-chip" data-filter="instant">⚡ 즉시입주 가능</button>
       </div>
     </div>
@@ -505,6 +507,14 @@
       </form>
     </div>
   </div>
+
+  <!-- 모바일 하단 빠른 이동 바 -->
+  <nav class="or-bottom-nav" aria-label="빠른 이동">
+    <button type="button" class="or-bottom-nav__item is-active" data-bnav="listings"><span>🏠</span><span>매물</span></button>
+    <button type="button" class="or-bottom-nav__item" data-bnav="search"><span>🔍</span><span>검색</span></button>
+    <button type="button" class="or-bottom-nav__item" data-bnav="cosign"><span>🤝</span><span>직거래 계약</span></button>
+    <button type="button" class="or-bottom-nav__item" id="bnavAccount" data-bnav="account"><span>🔐</span><span id="bnavAccountLabel">로그인</span></button>
+  </nav>
 
   <script src="/shared/ui/bass.js"></script>
   <script src="hamburger.js"></script>
