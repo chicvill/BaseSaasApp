@@ -469,6 +469,49 @@ def _chat_actor(request: Request, s) -> Dict[str, str]:
     return {"role": "tenant", "name": str((s.terms or {}).get("tenant_name") or "임차인")}
 
 
+class NoticeSeenReq(BaseModel):
+    kind: str = ""
+
+
+def _notice_owner(request: Request):
+    """알림 대상: ('lessor'|'tenant', 사용자 객체) — 관리인·알 수 없는 계정은 None(알림 없음)."""
+    from apps.rent_dist._rent3_core.authz import need_claims, LESSOR_ROLES
+    from apps.rent_dist._rent3_core.models import Lessor, Tenant
+    c = need_claims(request)
+    if is_admin(c):
+        return None
+    if c.get("r") in LESSOR_ROLES:
+        me = Lessor.for_branch(c.get("b"))
+        return ("lessor", me) if me else None
+    t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+    return ("tenant", t) if t else None
+
+
+_NO_NOTICE = {"success": True, "total": 0, "urgent": 0, "items": [], "recent_chats": []}
+
+
+@router.get("/notifications")
+def contract_notifications(request: Request):
+    """전자계약 앱의 🔔: 임대인·임차인 앱과 같은 알림 요약(내 계약방 채팅·답할 제안 + 최근 대화)."""
+    from apps.rent_dist._rent3_core import notifications as nf
+    who = _notice_owner(request)
+    if not who:
+        return dict(_NO_NOTICE)
+    role, u = who
+    return {"success": True, **nf.summary(role, u, u.branch if role == "lessor" else u.id)}
+
+
+@router.post("/notifications/seen")
+def contract_notice_seen(req: NoticeSeenReq, request: Request):
+    from apps.rent_dist._rent3_core import notifications as nf
+    who = _notice_owner(request)
+    if not who:
+        return dict(_NO_NOTICE)
+    role, u = who
+    nf.mark_seen(u, req.kind)
+    return {"success": True, **nf.summary(role, u, u.branch if role == "lessor" else u.id, use_cache=False)}
+
+
 def _touch_chat_session(s, role: str, request: Request) -> None:
     from apps.rent_dist._rent3_core import chatsessions as chat_sessions
     from apps.rent_dist._rent3_core.models import Lessor, Tenant

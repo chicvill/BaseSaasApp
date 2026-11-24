@@ -465,6 +465,7 @@
     elCard.classList.remove("is-open", "is-closing");
     elHome.hidden = true;
     elContract.hidden = false;
+    if (window.R3Notify) R3Notify.placeBell("#bellCvSlot");        // 🔔 은 계약 화면 머리말로
     window.scrollTo(0, 0);
     await fetchActiveSession(true);
   }
@@ -477,6 +478,7 @@
     elModal.hidden = true;
     elContract.hidden = true;
     elHome.hidden = false;
+    if (window.R3Notify) { R3Notify.placeBell("#bellHomeSlot"); R3Notify.refresh(); }     // 🔔 은 홈으로(채팅을 읽었으니 새로 확인)
     loadRoleExtras().then(() => loadSessionList()).catch(Bass.showError);
   }
   document.getElementById("btnBackHome").addEventListener("click", goHome);
@@ -855,6 +857,7 @@
     if (!activeSession) return;
     elHome.hidden = true;
     elContract.hidden = false;
+    if (window.R3Notify) R3Notify.placeBell("#bellCvSlot");
     const s = activeSession;
     document.getElementById("wsTitle").textContent = `${s.building_name} ${s.room_no}호`;
     R3Shell.proxyBanner(`${s.building_name} ${s.room_no}호 (${ROLE_KO[currentRole]} 입장 · 계약방)`);   // 관리인 대리 접속 때만 보인다
@@ -2313,6 +2316,11 @@
     `;
     document.getElementById("btnPrintContract").addEventListener("click", () => window.print());
     document.getElementById("btnSealedHome").addEventListener("click", goHome);
+  }
+
+  // 🔔 알림창(임대인·임차인 앱과 같은 것): 홈에서는 위 줄 오른쪽, 계약 화면에서는 머리말 오른쪽. 관리인 대리 접속(보기 전용)에서는 달지 않는다.
+  if (window.R3Notify && !adminProxy) {
+    R3Notify.start({ url: "/api/rent3_contract/notifications", seenUrl: "/api/rent3_contract/notifications/seen", bellHost: "#bellHomeSlot", openSupport: () => R3Shell.openSupportChat() });
   }
 
   (async function init() {

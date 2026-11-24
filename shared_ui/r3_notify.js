@@ -4,6 +4,7 @@
  *   R3Notify.start({ url, seenUrl, seenBody, openSupport })
  *     url      알림 요약 API 주소(GET). 응답: { total, urgent, items:[{kind,title,count,link,level,action,detail}] }
  *     seenUrl  안내성 알림 '확인함' 기록 주소(POST, 선택). seenBody = 같이 보낼 값(예: {branch}).
+ *     bellHost     🔔 을 달 자리의 선택자(☰ 가 없는 앱용, 선택). placeBell(선택자|요소) 로 나중에 옮길 수 있다.
  *     openSupport  action==="support" 항목을 눌렀을 때 실행할 함수(관리인 문의 창 열기).
  * 하는 일: 30초마다(화면이 보일 때만) 요약을 불러 🔔 버튼(☰ 와 같은 줄 오른쪽 끝)에만 건수 배지를 달고, 🔔 를 누르면 종류별 알림 목록(건수·[확인하기] 링크)을 연다.
  * 앱을 열지 않은 동안 생긴 일은 서버의 원본 데이터에 남아 있다가 이때 한꺼번에 보인다. 메시지 본문·계좌 같은 개인정보는 요약에 없다.
@@ -55,8 +56,10 @@
     var bell = document.createElement("button");
     bell.type = "button"; bell.className = "r3-bell"; bell.setAttribute("aria-label", "알림"); bell.textContent = "🔔";
     bell.addEventListener("click", openFresh);
+    var host = state.opts && state.opts.bellHost ? document.querySelector(state.opts.bellHost) : null;   // ☰ 가 없는 앱(전자계약)은 지정한 자리에 단다
     var burger = document.querySelector("[data-r3-burger]");
-    if (burger && burger.parentNode) { bell.style.marginLeft = "auto"; burger.parentNode.appendChild(bell); }   // ☰ 와 같은 줄의 오른쪽 끝(건수는 🔔 에만 단다)
+    if (host) { host.appendChild(bell); }
+    else if (burger && burger.parentNode) { bell.style.marginLeft = "auto"; burger.parentNode.appendChild(bell); }   // ☰ 와 같은 줄의 오른쪽 끝(건수는 🔔 에만 단다)
     else { bell.classList.add("r3-bell--float"); document.body.appendChild(bell); }
     state.bell = bell;
     return bell;
@@ -177,5 +180,11 @@
     document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
   }
 
-  global.R3Notify = { start: start, refresh: poll, open: openPanel };
+  // 화면이 바뀌어 🔔 자리가 달라질 때(전자계약: 홈 ↔ 계약 화면) 같은 단추를 새 자리로 옮긴다
+  function placeBell(host) {
+    if (typeof host === "string") host = document.querySelector(host);
+    if (host && state.bell) host.appendChild(state.bell);
+  }
+
+  global.R3Notify = { start: start, refresh: poll, open: openPanel, placeBell: placeBell };
 })(window);

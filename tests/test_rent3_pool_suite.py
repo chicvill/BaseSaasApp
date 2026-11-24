@@ -8697,6 +8697,50 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn("계약방 대화", app)
         self.assertNotIn("대화 열기", app)
 
+    def test_139_contract_app_has_notification_bell(self):
+        """139. 전자계약 앱에도 🔔 알림창이 있다: 내 계약방의 안 읽은 채팅·답할 제안(내가 보낸 제안은 제외)이 알림에 오고 누르면 그 계약방 채팅이 열린다. 관리인은 알림 없음, 비로그인은 401. 화면은 홈↔계약 화면에서 같은 🔔을 옮겨 단다."""
+        from apps.rent_dist._rent3_core import chatsessions as cht
+        c = self.client
+        cht._last_seen.clear()
+        sid = self._policy_session("963", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        lh, th = self._party_headers(sid)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        note = "/api/rent3_contract/notifications"
+        self.assertEqual(c.get(note, headers=self.NOAUTH).status_code, 401)
+        a = c.get(note).json()                                               # admin 기본 토큰: 알림 없음(읽기 전용 관리인)
+        self.assertEqual((a["total"], a["items"], a["recent_chats"]), (0, [], []))
+        secret = "t139 비밀 문의 7730"
+        c.post(url, headers=th, json={"kind": "question", "body": secret})
+        c.post(url, headers=th, json={"kind": "proposal", "field": "monthly_rent", "new_value": 280000})
+        l = c.get(note, headers=lh).json()
+        by = {i["kind"]: i for i in l["items"]}
+        self.assertEqual(by[f"contract_chat:{sid}"]["count"], 2)                    # 임차인이 보낸 글 2개가 안 읽음
+        self.assertEqual(by[f"contract_open:{sid}"]["count"], 1)                    # 임대인이 답할 제안 1건
+        self.assertEqual(by[f"contract_open:{sid}"]["level"], "urgent")
+        self.assertEqual(by[f"contract_open:{sid}"]["link"], f"/rent3_contract/?session={sid}&chat=1")
+        self.assertNotIn(secret, json.dumps(l, ensure_ascii=False))                # 알림에 내용 없음
+        t = c.get(note, headers=th).json()                                          # 제안을 보낸 임차인 자신에게는 '답할 제안'이 없다
+        self.assertNotIn(f"contract_open:{sid}", [i["kind"] for i in t["items"]])
+        c.get(url, headers=lh)                                                      # 임대인이 채팅을 열어 읽으면 안 읽음은 사라지고 답할 제안은 남는다
+        l2 = {i["kind"]: i for i in c.get(note, headers=lh).json()["items"]}
+        self.assertNotIn(f"contract_chat:{sid}", l2)
+        self.assertIn(f"contract_open:{sid}", l2)
+        self.assertEqual(c.post(note + "/seen", headers=lh, json={"kind": "x"}).status_code, 200)
+        other = self._login("sunho")                                                # 다른 지점 임대인에게는 이 계약방 알림이 없다
+        self.assertNotIn(f"contract_open:{sid}", [i["kind"] for i in c.get(note, headers=other).json()["items"]])
+        # 화면: 홈↔계약 화면에서 🔔을 옮기고, 관리인 대리 접속에서는 달지 않는다
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend")
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+        for needle in ('R3Notify.start({ url: "/api/rent3_contract/notifications"', "!adminProxy", 'placeBell("#bellCvSlot")', 'placeBell("#bellHomeSlot")'):
+            self.assertIn(needle, app, needle)
+        for needle in ("r3_notify.js", 'id="bellHomeSlot"', 'id="bellCvSlot"'):
+            self.assertIn(needle, html, needle)
+        nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
+        for needle in ("bellHost", "placeBell"):
+            self.assertIn(needle, nj, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

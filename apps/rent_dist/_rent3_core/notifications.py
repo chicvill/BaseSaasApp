@@ -101,7 +101,39 @@ def _t_tickets(t: Tenant) -> Optional[Dict[str, Any]]:
     return _item("as_completed", "A/S 수리 완료 — 확인해 주세요", n, f"/rent3_tenant/?tenant={t.id}&svc=as", "info")
 
 
-TENANT_COLLECTORS: List[Callable[[Tenant], Any]] = [_t_checkout, _t_expiry, _t_unpaid, _t_keys, _t_messages, _t_support, _t_billing, _t_transfer_rejected, _t_tickets]
+def _contract_rooms(role: str, user: Any) -> List[Optional[Dict[str, Any]]]:
+    """내가 당사자인 진행 중 계약방마다: 안 읽은 채팅 수, 상대가 보내 내가 답할 제안·수정 요청 수. 누르면 그 계약방 채팅이 바로 열린다."""
+    import re
+    from urllib.parse import quote
+    from . import contract_chat as cc
+    from .cosign import CoSignSession
+    digits = lambda v: re.sub(r"\D", "", str(v or ""))
+    out: List[Optional[Dict[str, Any]]] = []
+    if role == "lessor":
+        mine = [s for s in CoSignSession.find(branch=user.branch)]
+    else:
+        mine = [s for s in CoSignSession.all()
+                if (s.id_tenant and s.id_tenant == user.id) or (digits(user.phone) and digits((s.terms or {}).get("tenant_phone")) == digits(user.phone))]
+    for s in mine:
+        if s.status != "IN_PROGRESS":
+            continue
+        link = f"/rent3_contract/?session={quote(str(s.id))}&chat=1"
+        sm = cc.summary_for(s, role)
+        waiting = sum(1 for m in cc.open_items(s.id) if m.sender_role != role)       # 내가 답해야 하는 것(내가 보낸 것은 제외)
+        out.append(_item(f"contract_chat:{s.id}", f"{s.room_no}호 계약방 채팅", int(sm["unread"]), link, "normal", detail=f"{s.room_no}호 계약방"))
+        out.append(_item(f"contract_open:{s.id}", f"{s.room_no}호 계약방 — 답할 제안·수정 요청", waiting, link, "urgent", detail=f"{s.room_no}호 계약방"))
+    return out
+
+
+def _t_contract(t: Tenant) -> List[Optional[Dict[str, Any]]]:
+    return _contract_rooms("tenant", t)
+
+
+def _l_contract(l: Lessor) -> List[Optional[Dict[str, Any]]]:
+    return _contract_rooms("lessor", l)
+
+
+TENANT_COLLECTORS: List[Callable[[Tenant], Any]] = [_t_checkout, _t_expiry, _t_unpaid, _t_keys, _t_messages, _t_support, _t_billing, _t_transfer_rejected, _t_tickets, _t_contract]
 
 
 # ───────────────────────── 임대인 ─────────────────────────
@@ -209,7 +241,7 @@ def _l_mail(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     ]
 
 
-LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_mail, _l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid]
+LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_mail, _l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid, _l_contract]
 
 
 # ───────────────────────── 관리인 ─────────────────────────
