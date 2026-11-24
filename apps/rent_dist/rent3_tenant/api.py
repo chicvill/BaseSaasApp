@@ -283,7 +283,10 @@ def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
     if not (c and is_admin(c)):                                              # 채팅 세션(제목·시작 시각만 기록)
         bldg = Building.first(branch=t.branch)
         chat_sessions.touch(f"tenant:{t.id}", "room", t.room_no, f"{(bldg.building_name if bldg else '')} 임대인".strip(), t.branch)
+    cos = sorted((x for x in CheckOutSettlement.find(id_tenant=t.id) if x.status != "COMPLETED"), key=lambda x: x.updated_at, reverse=True)
+    checkout = next((card for card in (x.chat_card("tenant") for x in cos) if card), None)          # 채팅창 위 정산 카드(게시 전 초안은 없는 것과 같다)
     return {"success": True, "room_no": t.room_no, "unread": unread, "messages": [room_messages.public(m) for m in msgs],
+            "tenant_name": t.name, "checkout": checkout,
             "lessor_name": (lessor.name if lessor else "") or "임대인", "lessor_phone": ((lessor.phone if lessor else "") or "").strip(),    # 임대인에게 전화 단추용
             "negotiation": room_messages.negotiation_history(ct)}
 

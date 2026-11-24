@@ -3330,6 +3330,46 @@
   }
 
 const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g, ""); if (dg.length < 9) return ""; const pretty = dg.length === 11 ? `${dg.slice(0, 3)}-${dg.slice(3, 7)}-${dg.slice(7)}` : dg.length === 10 ? `${dg.slice(0, 3)}-${dg.slice(3, 6)}-${dg.slice(6)}` : dg; return `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${dg}" style="min-height:40px;white-space:nowrap;">📞 ${label} ${pretty}</a>`; };
+  // 채팅창 위 '퇴실 정산' 카드: 임차인이 채팅창에서 제출한 반환 계좌를 보고 송금한 뒤 [송금 완료 표시]
+  let msgCoSig = "";
+  function drawLessorCheckoutCard(room, co) {
+    const box = document.getElementById("msgCo");
+    if (!box) return;
+    const sig = co ? [co.id, co.status, co.tenant_checked_at || "", co.refund_amount, co.refund_bank_account || ""].join("|") : "";
+    if (box.dataset.drawn === "1" && sig === msgCoSig) return;
+    msgCoSig = sig; box.dataset.drawn = "1";
+    if (!co) { box.innerHTML = ""; return; }
+    const E = Bass.escapeHtml, W = (n) => fmtWon(Number(n || 0));
+    const open = `<button id="msgCoOpen" class="bass-btn bass-btn--sm" type="button" style="min-height:40px;">📦 전출 창 열기</button>`;
+    let body = "";
+    if (co.status === "REQUESTED") body = `<strong>🚪 임차인이 퇴실을 신청했습니다</strong>${co.desired_date ? ` (희망일 ${E(co.desired_date)})` : ""}<br>점검 후 정산서를 작성해 게시해 주세요. ${open}`;
+    else if (co.status === "DRAFT") body = `<strong>💾 정산서 작성 중</strong> · 반환 예정액 ${W(co.refund_amount)}<br>임차인에게는 아직 보이지 않습니다. 마치면 '임차인에게 게시'에 체크해 보내세요. ${open}`;
+    else if (co.status === "CALCULATED") body = `<strong>📤 정산서를 게시했습니다</strong> · 반환 예정액 ${W(co.refund_amount)}<br>${co.tenant_checked_at ? "✅ 임차인이 정산 내역을 확인했습니다. 반환 계좌 입력을 기다리는 중입니다." : "임차인이 확인하고 반환 계좌를 입력하기를 기다리는 중입니다."}`;
+    else if (co.status === "AGREED") body = `<strong>💳 임차인이 반환 계좌를 보냈습니다</strong><br>예금주 <strong>${E(co.account_holder || "")}</strong> · 계좌 <strong id="msgCoAcct">${E(co.refund_bank_account || "")}</strong> <button id="msgCoCopy" class="bass-btn bass-btn--sm" type="button" style="min-height:36px;">📋 계좌 복사</button><br>반환액 <strong>${W(co.refund_amount)}</strong> — 내 은행 앱에서 이 계좌로 송금한 뒤 아래를 눌러 주세요.
+      <div class="bass-row" style="margin-top:8px;"><button id="msgCoPaid" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">💸 송금 완료 표시</button></div>`;
+    else if (co.status === "PAID") body = `<strong>💸 송금 완료로 표시했습니다</strong> · ${W(co.refund_amount)}<br>임차인이 받았다고 확인하면(또는 7일 안에 이의가 없으면) 퇴실이 확정되고 공실 매물로 복귀합니다.`;
+    else if (co.status === "DISPUTED") body = `<strong>⚠️ 임차인이 이의를 제기했습니다</strong><br>채팅·통화로 협의한 뒤 정산서를 고쳐 다시 게시해 주세요. ${open}`;
+    box.innerHTML = body ? `<div class="bass-card" style="padding:12px 14px;font-size:13.5px;line-height:1.7;border-color:var(--warn);">${body}</div>` : "";
+    const o = box.querySelector("#msgCoOpen");
+    if (o) o.addEventListener("click", () => showMoveOutModal(room));
+    const cp = box.querySelector("#msgCoCopy");
+    if (cp) cp.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(co.refund_bank_account || ""); Bass.updateAppAlert("success", "계좌번호를 복사했습니다."); }
+      catch (_) { Bass.updateAppAlert("warning", "복사하지 못했습니다. 계좌번호를 직접 선택해 복사해 주세요."); }
+    });
+    const pd = box.querySelector("#msgCoPaid");
+    if (pd) pd.addEventListener("click", function () {
+      if (!window.confirm(`${co.account_holder || ""} 님 계좌로 ${fmtWon(co.refund_amount)}을 실제로 송금한 뒤 눌러 주세요. 표시하면 임차인에게 수취 확인 요청이 갑니다.`)) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/checkout/${co.id}/mark-paid`, { method: "POST", body: { branch: currentBranch } });
+        Bass.updateAppAlert("success", res.message);
+        msgCoSig = ""; box.dataset.drawn = "";
+        await refresh();
+        await renderMessageThread();
+      });
+    });
+  }
+
   async function renderMessageThread() {
     const room = msgRoom;
     let d;
@@ -3344,6 +3384,7 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
       : `<div class="cm-b ${m.sender_role === "lessor" ? "is-mine" : ""}"><div><div class="cm-meta">${Bass.escapeHtml(m.sender_role === "lessor" ? "나" : m.sender_name || "임차인")} · ${fmtMsgTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
     elTabContent.innerHTML = `
       <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong>${callBtn(d.tenant_phone, "임차인 전화")}</div>
+      <div id="msgCo" style="margin:0 0 10px;"></div>
       <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
       <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>
       <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
@@ -3351,6 +3392,7 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
         ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "임차인" : "안내")}: ${Bass.escapeHtml(m.body)}${m.status ? ` <span class="bass-badge">${Bass.escapeHtml(({ open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" })[m.status] || m.status)}</span>` : ""}</div>`).join("")}
       </details>`;
+    drawLessorCheckoutCard(room, d.checkout);
     const list = document.getElementById("msgList");
     list.scrollTop = list.scrollHeight;
     document.getElementById("btnMsgBack").addEventListener("click", () => { msgRoom = ""; renderMessagesTab(); });
@@ -3368,6 +3410,7 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
       if (document.visibilityState === "hidden") return;
       try {
         const nd = await Bass.api(APP_ID, `/messages/rooms/${encodeURIComponent(room)}?branch=${encodeURIComponent(currentBranch)}`);
+        drawLessorCheckoutCard(room, nd.checkout);
         const box = document.getElementById("msgList");
         if (box && nd.messages.length !== d.messages.length) {
           d = nd;

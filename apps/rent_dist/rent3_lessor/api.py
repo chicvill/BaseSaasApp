@@ -2171,6 +2171,7 @@ def messages_room(room_no: str, request: Request, branch: str = "main", mark_rea
     return {
         "success": True, "room_no": room_no, "tenant_name": tenant.name if tenant else "", "unread": unread,
         "tenant_phone": ((tenant.phone if tenant else "") or "").strip(),          # 임차인에게 전화 단추용
+        "checkout": next((x.chat_card("lessor") for x in sorted(CheckOutSettlement.find(id_room=room.id), key=lambda x: x.updated_at, reverse=True) if x.status != "COMPLETED"), None),   # 채팅창 위 정산 카드(계좌·송금 완료 표시)
         "messages": [room_messages.public(m) for m in msgs],
         "negotiation": room_messages.negotiation_history(room_messages.active_contract(room)),
     }

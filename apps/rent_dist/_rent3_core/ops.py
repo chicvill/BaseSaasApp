@@ -334,7 +334,7 @@ class CheckOutSettlement(PoolObj):
             sender_role="system",
             sender_name="퇴실정산 안내",
             message=(f"[보증금 정산 명세서 도착] 원보증금 {ct.deposit:,}원 중 공제 {total_deduct:,}원을 제외한 실반환 예정액은 {refund:,}원입니다. {extra_note}"
-                     "임차인 앱에서 내용을 확인하고, 이의가 있으면 [이의 제기]로 채팅·통화 협의를 요청하세요. 이의가 없으면 반환받을 계좌(예금주는 계약자 본인)를 입력하고 동의 서명을 해 주세요.\n"
+                     "이 채팅창 위의 정산 카드(또는 임차인 앱의 퇴실 정산)에서 내용을 확인하고, 이의가 있으면 [이의 제기]로 채팅·통화 협의를 요청하세요. 이의가 없으면 [정산 내역 확인] 뒤 같은 카드에서 반환받을 본인 명의 계좌(예금주는 계약자 본인)를 입력하고 동의 서명을 하면, 임대인이 그 계좌로 보증금을 송금합니다.\n"
                      "📄 퇴실하면 로그인 수단이 정리되니 연말정산 납부확인서를 미리 내려받아 두세요."),
             quick_action_label="정산서 확인·연말정산 자료 받기",
             quick_action_url=f"/rent3_tenant/?tenant={ct.id_tenant}&svc=checkout",
@@ -401,6 +401,26 @@ class CheckOutSettlement(PoolObj):
         keep = ("id", "branch", "id_room", "room_no", "id_contract", "id_tenant", "tenant_name", "requested_at", "desired_date", "created_at", "updated_at")
         return {**{k: getattr(self, k) for k in keep}, "status": status, "deposit_original": self.deposit_original}
 
+    def chat_card(self, viewer: str) -> Optional[Dict[str, Any]]:
+        """채팅창 위에 보여 줄 정산 진행 카드(viewer: 'tenant' | 'lessor'). 임차인에게는 게시 전 금액·계좌를 주지 않고, 계좌 전체는 임대인에게만 준다."""
+        if self.status == "COMPLETED":
+            return None
+        if viewer == "tenant":
+            v = self.tenant_view()
+            if v is None:
+                return None
+            out: Dict[str, Any] = {"id": self.id, "status": v["status"], "tenant_name": self.tenant_name}
+            if v["status"] in ("CALCULATED", "AGREED", "PAID", "DISPUTED"):
+                out.update({"refund_amount": self.refund_amount, "shortfall_amount": self.shortfall_amount, "tenant_checked_at": self.tenant_checked_at,
+                            "account_masked": self._mask_account(self.refund_bank_account) if self.refund_bank_account else "", "confirm_due": self.confirm_due})
+            return out
+        out = {"id": self.id, "status": self.status, "room_no": self.room_no, "tenant_name": self.tenant_name, "refund_amount": self.refund_amount,
+               "shortfall_amount": self.shortfall_amount, "tenant_checked_at": self.tenant_checked_at, "desired_date": self.desired_date,
+               "paid_at": self.paid_at, "confirm_due": self.confirm_due}
+        if self.status in ("AGREED", "PAID"):
+            out.update({"account_holder": self.account_holder, "refund_bank_account": self.refund_bank_account})
+        return out
+
     def tenant_confirm_checked(self, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
         """임차인이 임대인이 보낸 정산 내역(항목별 공제)을 확인했다고 표시한다. 임대인 채팅에 알림이 가고, 이어서 반환 계좌 입력·동의를 한다."""
         if self.status != "CALCULATED":
@@ -410,6 +430,9 @@ class CheckOutSettlement(PoolObj):
             self.save(action="checkout_checked_by_tenant", app_source=app_source)
             self._chat("tenant", self.tenant_name, f"[✅ 정산 내역 확인] {self.tenant_name} 세입자가 정산 내역을 확인했습니다. 반환 예정액 {self.refund_amount:,}원. "
                        "이의가 없으면 이어서 반환 계좌를 입력하고 동의 서명을 합니다.", app_source=app_source)
+            self._chat("system", "퇴실정산 안내", f"[💳 반환 계좌 입력 안내] 정산 내역을 확인하셨습니다. 이 채팅창 위의 정산 카드에서 반환받을 본인 명의 계좌와 동의 서명을 입력해 주세요. "
+                       f"제출하면 임대인이 그 계좌로 {self.refund_amount:,}원을 송금합니다. 예금주는 계약자({self.tenant_name}) 본인이어야 합니다.",
+                       "계좌 입력하기", f"/rent3_tenant/?tenant={self.id_tenant}&svc=messages", app_source=app_source)
         return self
 
     def tenant_agree(self, bank_account: str, signature: str, account_holder: str = "", app_source: str = "rent3_tenant") -> "CheckOutSettlement":
@@ -427,7 +450,7 @@ class CheckOutSettlement(PoolObj):
         self.status = "AGREED"
         self.save(action="checkout_agreed_by_tenant", app_source=app_source)
         self._chat("tenant", self.tenant_name, f"[✍️ 정산 동의·반환 계좌 접수] 반환액 {self.refund_amount:,}원 · 예금주 {self.account_holder} · 계좌 {self._mask_account(bank_account)}. "
-                   "계좌 전체는 정산서에서만 보입니다. 확인 후 송금해 주세요.", app_source=app_source)
+                   "계좌 전체는 임대인 화면에서만 보입니다. 임대인은 이 채팅창 위의 정산 카드(또는 [전출] 창)에서 계좌를 확인하고 송금한 뒤 [송금 완료 표시]를 눌러 주세요.", app_source=app_source)
         return self
 
     def mark_paid(self, memo: str = "", app_source: str = "rent3_lessor") -> "CheckOutSettlement":

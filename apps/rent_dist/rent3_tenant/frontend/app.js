@@ -114,6 +114,50 @@
   let tnMsgTimer = null;
   let tnMsgCount = -1;
   const tnTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
+  // 채팅창 위 '퇴실 정산' 카드: 정산 내역 확인 → 반환받을 본인 명의 계좌·동의 서명 입력 → 송금 대기 → 수취 확인. (임대인이 게시한 정산서만 나온다)
+  let tnCoSig = "";
+  function drawTenantCheckoutCard(d) {
+    const box = document.getElementById("tnMsgCo");
+    if (!box) return;
+    const co = d.checkout || null;
+    const sig = co ? [co.id, co.status, co.tenant_checked_at || "", co.refund_amount, co.account_masked || ""].join("|") : "";
+    if (box.dataset.drawn === "1" && sig === tnCoSig) return;          // 바뀐 게 없으면 다시 그리지 않는다(입력 중인 계좌번호를 지우지 않게)
+    tnCoSig = sig; box.dataset.drawn = "1";
+    if (!co) { box.innerHTML = ""; return; }
+    const E = Bass.escapeHtml, W = (n) => fmtWon(Number(n || 0));
+    const pin = Boolean(window.R3Shell && R3Shell.isViaPin && R3Shell.isViaPin());
+    const detail = `<a href="?tenant=${encodeURIComponent(selectedTenantId)}&svc=checkout">📄 정산 내역 자세히 보기</a>`;
+    const pinNote = '<div class="bass-muted" style="font-size:12.5px;margin-top:6px;">🔐 간편 비밀번호로 들어온 상태에서는 제출할 수 없습니다. 아이디·비밀번호로 다시 로그인해 주세요.</div>';
+    let body = "";
+    if (co.status === "REQUESTED") body = "<strong>🚪 퇴실 신청이 접수되었습니다</strong><br>임대인이 정산서를 작성해 게시하면 여기에 정산 카드가 나타납니다.";
+    else if (co.status === "REVISING") body = "<strong>✏️ 정산서를 수정하고 있습니다</strong><br>임대인이 정산서를 수정하는 중이라 내용을 잠시 숨겼습니다. 게시되면 알려 드립니다.";
+    else if (co.status === "CALCULATED" && !co.tenant_checked_at) body = `<strong>🚪 퇴실 정산서가 도착했습니다</strong> · 반환 예정액 <strong>${W(co.refund_amount)}</strong><br>${detail}<br>내용이 맞으면 확인해 주세요. 다르면 <strong>이의 제기</strong>로 협의할 수 있습니다.
+      <div class="bass-row" style="gap:8px;margin-top:8px;flex-wrap:wrap;"><button id="tnCoCheck" class="bass-btn bass-btn--primary" type="button" ${pin ? "disabled" : ""} style="min-height:44px;">✅ 정산 내역 확인</button><button id="tnCoDispute" class="bass-btn" type="button" ${pin ? "disabled" : ""} style="min-height:44px;">⚠️ 이의 제기</button></div>${pin ? pinNote : ""}`;
+    else if (co.status === "CALCULATED") body = `<strong>💳 반환 계좌를 입력해 주세요</strong> · 반환 예정액 <strong>${W(co.refund_amount)}</strong><br>정산 내역을 확인하셨습니다. 보증금을 돌려받을 <strong>본인(${E(d.tenant_name || "계약자")}) 명의 계좌</strong>를 입력하고 동의 서명을 하면, 임대인이 그 계좌로 송금합니다. ${detail}
+      ${pin ? pinNote : `<div class="field-grid" style="margin-top:8px;">
+        <input id="tnCoBank" class="bass-input" placeholder="반환받을 은행 + 계좌번호 (예: 토스 1000-22-334455)" autocomplete="off">
+        <input id="tnCoHolder" class="bass-input" placeholder="예금주 (계약자 본인 ${E(d.tenant_name || "")})" autocomplete="off">
+        <input id="tnCoSig" class="bass-input" value="${E(d.tenant_name || "")} (동의서명)" placeholder="동의 전자서명">
+        <button id="tnCoAgree" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✍️ 계좌 제출 · 동의 서명</button>
+      </div><div class="bass-row" style="margin-top:6px;"><button id="tnCoDispute" class="bass-btn bass-btn--sm" type="button">⚠️ 이의 제기</button></div>`}`;
+    else if (co.status === "AGREED") body = `<strong>✅ 반환 계좌를 제출했습니다</strong>${co.account_masked ? ` (${E(co.account_masked)})` : ""}<br>임대인이 반환액 <strong>${W(co.refund_amount)}</strong>을 송금하면 알려 드립니다. 그동안 ${detail}`;
+    else if (co.status === "PAID") body = `<strong>💸 임대인이 ${W(co.refund_amount)}을 송금했다고 표시했습니다</strong><br>계좌에 입금되었는지 확인해 주세요. 표시 후 7일 안에 이의가 없으면 자동으로 확정됩니다.
+      <div class="bass-row" style="gap:8px;margin-top:8px;flex-wrap:wrap;"><button id="tnCoReceived" class="bass-btn bass-btn--primary" type="button" ${pin ? "disabled" : ""} style="min-height:44px;">✅ 받았습니다</button><button id="tnCoDispute" class="bass-btn" type="button" ${pin ? "disabled" : ""} style="min-height:44px;">⚠️ 못 받았습니다</button></div>${pin ? pinNote : ""}`;
+    else if (co.status === "DISPUTED") body = `<strong>⚠️ 이의가 접수되었습니다</strong><br>임대인과 이 채팅·통화로 협의해 주세요. 임대인이 정산서를 고쳐 다시 게시하면 알려 드립니다.`;
+    box.innerHTML = body ? `<div class="bass-card" style="padding:12px 14px;font-size:13.5px;line-height:1.7;border-color:var(--warn);">${body}</div>` : "";
+    const act = (id, fn) => { const b = box.querySelector("#" + id); if (b) b.addEventListener("click", function () { Bass.withLock(this, fn); }); };
+    const done = async (res) => { Bass.updateAppAlert("success", res.message); tnCoSig = ""; box.dataset.drawn = ""; await loadTenantMessages(); };
+    act("tnCoCheck", async () => done(await Bass.api(APP_ID, `/checkout/${co.id}/confirm-checked`, { method: "POST", body: {} })));
+    act("tnCoAgree", async () => done(await Bass.api(APP_ID, `/checkout/${co.id}/agree`, { method: "POST", body: {
+      bank_account: box.querySelector("#tnCoBank").value, account_holder: box.querySelector("#tnCoHolder").value, signature: box.querySelector("#tnCoSig").value } })));
+    act("tnCoReceived", async () => done(await Bass.api(APP_ID, `/checkout/${co.id}/confirm-received`, { method: "POST", body: {} })));
+    act("tnCoDispute", async () => {
+      const note = window.prompt(co.status === "PAID" ? "입금을 받지 못한 이유를 적어 주세요." : "이의 내용을 적어 주세요(예: 청소비가 과하다 / 금액이 다르다).");
+      if (!note) return;
+      done(await Bass.api(APP_ID, `/checkout/${co.id}/dispute`, { method: "POST", body: { note } }));
+    });
+  }
+
   async function loadTenantMessages(keepComposer) {
     const box = document.getElementById("tnMsgList");
     if (!box || !selectedTenantId) return;
@@ -122,6 +166,7 @@
     const callEl = document.getElementById("tnMsgCall");
     const lessorDigits = String(d.lessor_phone || "").replace(/\D/g, "");
     if (callEl) callEl.innerHTML = lessorDigits.length >= 9 ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${lessorDigits}" style="min-height:40px;">📞 ${Bass.escapeHtml(d.lessor_name || "임대인")}에게 전화 ${Bass.escapeHtml(d.lessor_phone)}</a>` : "";
+    drawTenantCheckoutCard(d);
     const bubble = (m) => m.kind === "system"
       ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${tnTime(m.created_at)}</span></div>`
       : `<div class="cm-b ${m.sender_role === "tenant" ? "is-mine" : ""}"><div><div class="cm-meta">${m.sender_role === "tenant" ? "나" : Bass.escapeHtml(m.sender_name || "임대인")} · ${tnTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
@@ -631,6 +676,7 @@
           <h3 style="margin:0 0 6px;">💬 임대인과 채팅</h3>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">내 호실의 임대인과 주고받는 앱 안 대화입니다. 관리인에게 도움을 청할 때는 메뉴의 ‘관리인과 채팅’를 쓰세요.</div>
           <div id="tnMsgCall" style="margin-bottom:8px;"></div>
+          <div id="tnMsgCo" style="margin-bottom:8px;"></div>
           <div id="tnMsgList" class="cm-list" style="max-height:50vh;"></div>
           <div id="tnMsgComposer"${R3Shell.isAdminSession() ? " hidden" : ""}>
             <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>

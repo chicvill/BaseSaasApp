@@ -9819,6 +9819,84 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("임차인에게 게시", rd("rent3_lessor", "frontend", "manual.html"))
         self.assertIn("게시", rd("rent3_tenant", "frontend", "manual.html"))
 
+    def test_156_chat_card_guides_account_entry_and_remittance(self):
+        """156. 전출 정산 뒤 채팅창에서 반환 계좌를 입력받아 송금하도록 안내한다: 게시된 정산서가 있으면 채팅창 위 카드가 단계별로 바뀌고(확인 → 계좌·동의 제출 → 송금 대기 → 수취 확인), 채팅에 계좌 입력 안내 문구가 남는다. 임차인에게는 게시 전 금액·계좌 전체가 안 가고, 임대인에게만 계좌 전체와 송금 완료 표시가 간다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, DirectChat
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        c = self.client
+        chic = self._login("chic")
+        calc = lambda **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "780", **kw})
+        try:
+            c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})
+            self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "780", "is_published": True, "deposit": 5000000, "monthly_rent": 300000, "maintenance_fee": 30000}).status_code, 200)
+            t = self._new_prospect("계좌안내", "010-7777-0780")
+            self._complete_contract(None, None, t.id, "780", "계좌안내", "010-7777-0780")
+            room = Room.first(branch="main", room_no="780")
+            th = {"Authorization": f"Bearer {tenant_token(Tenant.get(t.id))}"}
+            tmsg = lambda: c.get(f"/api/rent3_tenant/myhome/{t.id}/messages?mark_read=false", headers=th).json()
+            lmsg = lambda: c.get("/api/rent3_lessor/messages/rooms/780?branch=main&mark_read=false", headers=chic).json()
+            chats = lambda: [m.message or "" for m in DirectChat.find(id_room=room.id)]
+            # 1) 정산서가 없으면 카드도 없다
+            self.assertEqual((tmsg()["checkout"], lmsg()["checkout"]), (None, None))
+            self.assertEqual(tmsg()["tenant_name"], "계좌안내")
+            # 2) 임시 저장(초안): 임차인에게는 카드 없음, 임대인에게는 '작성 중' 카드(계좌 없음)
+            calc(cleaning_fee=0, unpaid_rent=800000)
+            self.assertIsNone(tmsg()["checkout"])
+            lc = lmsg()["checkout"]
+            self.assertEqual(lc["status"], "DRAFT")
+            self.assertNotIn("refund_bank_account", lc)
+            # 3) 게시: 임차인 카드(금액, 계좌 정보 없음), 채팅에 계좌 입력 안내
+            calc(cleaning_fee=0, unpaid_rent=800000, publish=True)
+            tc = tmsg()["checkout"]
+            self.assertEqual((tc["status"], tc["refund_amount"], tc["tenant_checked_at"], tc["account_masked"]), ("CALCULATED", 4200000, "", ""))
+            self.assertTrue(any("정산 카드" in m and "계좌" in m for m in chats()))
+            # 4) 정산 내역 확인 → 계좌 입력 안내가 채팅에 한 번만
+            for _ in range(2):
+                self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{tc['id']}/confirm-checked", headers=th, json={}).status_code, 200)
+            self.assertEqual(len([m for m in chats() if "[💳 반환 계좌 입력 안내]" in m]), 1)
+            self.assertTrue(tmsg()["checkout"]["tenant_checked_at"])
+            self.assertEqual(lmsg()["checkout"]["status"], "CALCULATED")
+            self.assertNotIn("refund_bank_account", lmsg()["checkout"])                                      # 아직 계좌 없음
+            # 5) 채팅 카드에서 계좌·동의 제출 → 임대인 카드에는 계좌 전체, 임차인 카드에는 끝 4자리만
+            ag = c.post(f"/api/rent3_tenant/checkout/{tc['id']}/agree", headers=th, json={"bank_account": "토스 1000-22-334455", "signature": "계좌안내(동의)", "account_holder": "계좌안내"})
+            self.assertEqual(ag.status_code, 200, ag.text)
+            lc = lmsg()["checkout"]
+            self.assertEqual((lc["status"], lc["account_holder"], lc["refund_bank_account"], lc["refund_amount"]), ("AGREED", "계좌안내", "토스 1000-22-334455", 4200000))
+            tc = tmsg()["checkout"]
+            self.assertEqual((tc["status"], tc["account_masked"]), ("AGREED", "끝 4자리 4455"))
+            self.assertNotIn("refund_bank_account", tc)                                                      # 임차인 응답에도 계좌 전체는 싣지 않는다
+            self.assertTrue(any("송금 완료 표시" in m and "계좌 접수" in m for m in chats()))                   # 임대인에게 송금·표시 안내
+            # 6) 송금 완료 표시 → 양쪽 카드가 '송금됨'
+            pd = c.post(f"/api/rent3_lessor/checkout/{tc['id']}/mark-paid", headers=chic, json={"branch": "main"})
+            self.assertEqual(pd.status_code, 200, pd.text)
+            self.assertEqual((lmsg()["checkout"]["status"], tmsg()["checkout"]["status"]), ("PAID", "PAID"))
+            self.assertTrue(lmsg()["checkout"]["paid_at"])
+        finally:
+            for co in CheckOutSettlement.all():
+                if co.room_no == "780" and co.branch == "main":
+                    co.delete(action="t")
+            for ct_ in Contract.find(room_no="780"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "780" and s_.branch == "main":
+                    s_.delete(action="t")
+            r_ = Room.first(branch="main", room_no="780")
+            if r_:
+                r_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone == "010-7777-0780":
+                    t_.delete(action="t")
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        lapp, tapp = rd("rent3_lessor", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js")
+        for needle in ("tnMsgCo", "drawTenantCheckoutCard", "tnCoBank", "tnCoAgree", "tnCoCheck", "tnCoReceived", "반환 계좌를 입력해 주세요", "/confirm-received"):
+            self.assertIn(needle, tapp, needle)
+        for needle in ("msgCo", "drawLessorCheckoutCard", "msgCoPaid", "msgCoCopy", "송금 완료 표시", "계좌 복사", "/mark-paid"):
+            self.assertIn(needle, lapp, needle)
+        self.assertIn("채팅창", rd("rent3_lessor", "frontend", "manual.html"))
+        self.assertIn("채팅창", rd("rent3_tenant", "frontend", "manual.html"))
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id
