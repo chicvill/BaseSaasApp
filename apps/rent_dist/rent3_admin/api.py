@@ -672,6 +672,21 @@ def test_tenant(req: TestTenantReq):
     return {"success": out["status"] != "BLOCKED", "level": "warning" if out["status"] == "BLOCKED" else "success", **out}
 
 
+class TestIdentityReq(BaseModel):
+    name: str = ""
+    phone: str = ""
+    apply: bool = False
+
+
+@router.post("/accounts/test-identity", dependencies=ADMIN_ONLY)
+def test_identity(req: TestIdentityReq):
+    """시험용 예비임차인(가짜 번호라 문자 인증을 받을 수 없는 계정)을 본인인증 완료로 표시한다. apply=False 는 점검만, True 는 처리(처리 전 자동 백업)."""
+    from apps.rent_dist._rent3_core import testtenant as tt
+    ensure_pool_seeded()
+    out = tt.mark_prospect_verified(req.name, req.phone, apply=req.apply)
+    return {"success": out["status"] != "BLOCKED", "level": "warning" if out["status"] == "BLOCKED" else "success", **out}
+
+
 @router.get("/backups", dependencies=ADMIN_ONLY)
 def list_backups():
     from apps.rent_dist._rent3_core import backup as bk

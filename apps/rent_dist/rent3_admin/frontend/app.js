@@ -759,6 +759,18 @@
           <button id="btnTtCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
           <button id="btnTtApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 등록</button></div>
         <div id="ttResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
+      </div>
+      <div class="bass-card" style="margin-top:14px;">
+        <h3>🧪 시험 예비임차인 본인인증 처리</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">가짜 번호라 문자 인증번호를 받을 수 없는 <strong>시험용 예비임차인</strong>(포털에서 가입만 한 계정)을 본인인증 완료로 표시합니다. 입주 중인 임차인·이미 인증된 계정은 바꾸지 않고, 기록에는 <strong>시험용 인증</strong>으로 남습니다. 먼저 <strong>점검</strong>으로 확인한 뒤 <strong>처리</strong>하세요 — 처리 전에 풀 전체를 자동 백업합니다.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <input id="tiName" class="bass-input" value="홍길동" placeholder="성함" aria-label="성함" style="min-height:44px;">
+          <input id="tiPhone" class="bass-input" value="010-1111-2222" placeholder="휴대폰" aria-label="휴대폰" inputmode="tel" style="min-height:44px;">
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button id="btnTiCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
+          <button id="btnTiApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 본인인증 처리</button></div>
+        <div id="tiResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
       </div>`;
     const ttRun = (apply) => async function () {
       Bass.withLock(this, async () => {
@@ -773,6 +785,18 @@
     };
     document.getElementById("btnTtCheck").addEventListener("click", ttRun(false));
     document.getElementById("btnTtApply").addEventListener("click", ttRun(true));
+    const tiRun = (apply) => async function () {
+      Bass.withLock(this, async () => {
+        const body = { name: document.getElementById("tiName").value.trim(), phone: document.getElementById("tiPhone").value.trim(), apply };
+        if (apply && !window.confirm(`${body.name}님(${body.phone})을 시험용 본인인증 완료로 처리합니다. 처리 전에 자동 백업합니다. 계속할까요?`)) return;
+        const r = await Bass.api(APP_ID, "/accounts/test-identity", { method: "POST", body });
+        const color = r.status === "BLOCKED" ? "var(--warn)" : "var(--ok)";
+        document.getElementById("tiResult").innerHTML = `<span style="color:${color};font-weight:800;">${{ DRY: "점검 결과", EXISTS: "이미 인증됨", BLOCKED: "멈춤", DONE: "처리 완료" }[r.status] || ""}</span><br>${Bass.escapeHtml(r.message)}`;
+        if (r.status === "DONE") Bass.updateAppAlert("success", r.message);
+      });
+    };
+    document.getElementById("btnTiCheck").addEventListener("click", tiRun(false));
+    document.getElementById("btnTiApply").addEventListener("click", tiRun(true));
     document.getElementById("btnBkRun").addEventListener("click", function () {
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });

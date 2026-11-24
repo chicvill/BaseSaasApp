@@ -8777,6 +8777,57 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("/rent3/manual.html", "Rent3_통합_사용자_매뉴얼.pdf", "Rent3_QA_Test_Checklist.pdf", "/rent3/pool.html", 'href="/"'):
             self.assertIn(needle, adrawer, needle)
 
+    def test_142_admin_marks_test_prospect_identity_verified(self):
+        """142. 관리인 앱 '시험 예비임차인 본인인증 처리': 점검은 바꾸지 않고, 처리는 백업 후 시험용 인증(assurance=test)으로 표시하며, 이미 인증됐거나 입주 중인 임차인·가입 안 된 계정은 건드리지 않고, 임대인은 403. 처리된 계정은 계약을 시작할 수 있다."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        url = "/api/rent3_admin/accounts/test-identity"
+        body = {"name": "홍길동", "phone": "010-1111-2222"}
+        try:
+            self.assertIn(c.post(url, headers=chic, json=body).status_code, (401, 403))                     # 임대인은 못 한다
+            self.assertEqual(c.post(url, headers=admin, json=body).json()["status"], "BLOCKED")            # 가입 전에는 멈춘다
+            reg = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
+                         json={"role": "prospect", "name": "홍길동", "phone": "010-1111-2222", "password": "Pw123456"})
+            self.assertEqual(reg.status_code, 200, reg.text)
+            tid = reg.json()["user"]["id"]
+            self.assertFalse((Tenant.get(tid).identity or {}).get("verified"))
+            dry = c.post(url, headers=admin, json=body).json()
+            self.assertEqual(dry["status"], "DRY")
+            self.assertFalse((Tenant.get(tid).identity or {}).get("verified"))                             # 점검은 바꾸지 않는다
+            th = self._as(reg.json()["token"])
+            c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})
+            self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "964", "is_published": True, "deposit": 5000000, "monthly_rent": 300000}).status_code, 200)
+            call = {"caller_role": "tenant", "branch": "main", "room_no": "964", "mode": "NEW", "tenant_name": "홍길동", "tenant_phone": "010-1111-2222"}
+            self.assertEqual(c.post("/api/rent3_contract/sessions/call", headers=th, json=call).status_code, 403)   # 인증 전에는 계약을 시작할 수 없다
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_ti_")}):
+                done = c.post(url, headers=admin, json={**body, "apply": True}).json()
+                self.assertEqual(done["status"], "DONE", done)
+                self.assertTrue(done["backup"].endswith(".tar.gz"))                                         # 처리 전 자동 백업
+                idn = Tenant.get(tid).identity
+                self.assertEqual((idn["verified"], idn["fake"], idn["assurance"], idn["provider"]), (True, True, "test", "admin_test"))
+                self.assertEqual(c.post(url, headers=admin, json={**body, "apply": True}).json()["status"], "EXISTS")   # 재실행은 그대로
+                # 입주 중인 임차인은 건드리지 않는다
+                active = next(t for t in Tenant.all() if t.status == "ACTIVE" and not (t.identity or {}).get("verified"))
+                blocked = c.post(url, headers=admin, json={"name": active.name, "phone": active.phone, "apply": True}).json()
+                self.assertEqual(blocked["status"], "BLOCKED")
+                self.assertFalse((Tenant.get(active.id).identity or {}).get("verified"))
+            ok = c.post("/api/rent3_contract/sessions/call", headers=th, json=call)                         # 인증 뒤에는 계약을 시작할 수 있다
+            self.assertEqual(ok.status_code, 200, ok.text)
+        finally:
+            from apps.rent_dist._rent3_core import CoSignSession
+            for s_ in CoSignSession.all():
+                if (s_.terms or {}).get("tenant_phone") == "010-1111-2222":
+                    s_.delete(action="t")
+            t = next((x for x in Tenant.all() if x.phone == "010-1111-2222"), None)
+            if t:
+                t.delete(action="t")
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnTiCheck", "btnTiApply", "/accounts/test-identity", "시험 예비임차인 본인인증 처리"):
+            self.assertIn(needle, adm, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id
