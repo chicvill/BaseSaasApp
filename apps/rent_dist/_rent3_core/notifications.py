@@ -253,21 +253,29 @@ def _recent(role: str, ctx: Any) -> List[Dict[str, Any]]:
     """알림창 '최근 대화': 채팅창을 연 기록(세션)을 '채팅 : 상대(시작 M/D HH:MM)' 제목과 이동 주소만으로 보여 준다(대화 내용·미리보기 없음)."""
     from urllib.parse import quote
     from . import chatsessions as cht
+    from . import room_messages as rm
     try:
         viewer = {"tenant": f"tenant:{getattr(ctx, 'id', '')}", "lessor": f"lessor:{getattr(ctx, 'id', '')}", "admin": "admin"}[role]
         out = []
         for s in cht.recent(viewer, RECENT_CHATS_MAX):
             title = f"채팅 : {s.label_text}({_when(s.created_at)})"
-            link, action = "", ""
+            link, action, unread = "", "", 0
             if s.kind == "support" and role == "admin":
                 link = f"/rent3_admin/?tab=support&user={s.ref}"
+                unread = sup.unread_count(s.ref, "admin")
             elif s.kind == "support":
                 action = "support"
+                unread = sup.unread_count(sup.thread_key(ctx), "user")
             elif role == "lessor":
                 link = f"/rent3_lessor/?branch={s.branch}&tab=messages&room={quote(str(s.ref))}"
+                unread = rm.unread_count(s.branch, str(s.ref), "lessor")
             else:
                 link = f"/rent3_tenant/?tenant={getattr(ctx, 'id', '')}&svc=messages"
-            out.append({"title": title, "preview": "", "at": s.created_at, "link": link, "action": action, "unread": 0})
+                room = Room.first(branch=ctx.branch, room_no=ctx.room_no) if ctx.room_no else None
+                ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
+                unread = rm.unread_count(ctx.branch, ctx.room_no, "tenant", ctx, ct.created_at if ct else "") if ctx.room_no else 0
+            # unread 는 안 읽은 글 '개수'뿐(내용 아님) — 알림창에서 엷은 분홍색으로 구분한다
+            out.append({"title": title, "preview": "", "at": s.created_at, "link": link, "action": action, "unread": int(unread)})
         return out
     except Exception:                          # 최근 대화를 못 만들어도 알림은 계속 보여 준다
         return []

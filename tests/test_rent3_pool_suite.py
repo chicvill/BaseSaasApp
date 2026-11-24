@@ -8624,6 +8624,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         import re as _re
         self.assertRegex(mine[0]["title"], r"^채팅 : 201호 임차인\(\d{1,2}/\d{1,2} \d{2}:\d{2}\)$")
         self.assertEqual(mine[0]["preview"], "")
+        self.assertEqual(mine[0]["unread"], 0)                                 # 읽었으면 분홍 표시 없음
+        c.post("/api/rent3_tenant/myhome/tenant_201/messages", headers=ten, json={"body": secret + " 2"})
+        l_unread = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
+        self.assertEqual([x["unread"] for x in l_unread["recent_chats"] if "201호" in x["title"]][0], 1)   # 새 글이 오면 개수만 올라간다(분홍)
+        c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic)                       # 다시 읽음 처리
         self.assertIn("tab=messages&room=201", mine[0]["link"])
         self.assertNotIn(secret, json.dumps(l, ensure_ascii=False))          # 알림 응답 어디에도 대화 내용이 없다
         # 30초 넘게 비었다가 다시 열면 새 세션
@@ -8647,7 +8652,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(a, ensure_ascii=False))
         self.assertLessEqual(len(l["recent_chats"]), 8)
         nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
-        for needle in ("최근 대화", "recent_chats", "bindChats", "openFresh"):
+        for needle in ("최근 대화", "recent_chats", "bindChats", "openFresh", "r3-nitem--unread", "이력을 남기지 않습니다"):
             self.assertIn(needle, nj, needle)
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn('get("user")', adm)

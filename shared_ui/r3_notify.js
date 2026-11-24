@@ -24,6 +24,7 @@
     ".r3-nitem{display:flex;align-items:center;gap:10px;min-height:52px;padding:10px 12px;border-radius:12px;border:1px solid #e2e8f0;background:#fff;color:#1e293b;",
     "text-decoration:none;font:inherit;font-size:14px;text-align:left;cursor:pointer;width:100%}",
     ".r3-nitem--urgent{border-color:#fecdd3;background:#fff1f2}",
+    ".r3-nitem--unread{border-color:#fbcfe8;background:#fdf2f8}",       // 읽지 않은(아직 처리하지 않은) 알림: 엷은 분홍
     ".r3-nitem__n{flex:none;min-width:30px;height:30px;border-radius:15px;background:#e11d48;color:#fff;font-weight:800;font-size:13px;line-height:30px;text-align:center}",
     ".r3-nitem--normal .r3-nitem__n{background:#2563eb}.r3-nitem--info .r3-nitem__n{background:#64748b}",
     ".r3-nitem__t{flex:1 1 auto;min-width:0;font-weight:700}.r3-nitem__d{display:block;font-weight:400;font-size:12.5px;color:#64748b}",
@@ -112,7 +113,7 @@
       ? '<div style="margin:14px 0 6px;font-weight:800;font-size:14px;">💬 최근 대화</div><div class="r3-nlist">' + recent.map(function (c, i) {
           var inner = '<span class="r3-nitem__n" style="' + (c.unread > 0 ? "" : "background:#e2e8f0;color:#475569;") + '">' + (c.unread > 0 ? esc(badgeText(c.unread)) : "💬") + '</span><span class="r3-nitem__t">' + esc(c.title) +
             (c.preview ? '<span class="r3-nitem__d">' + esc(c.preview) + "</span>" : "") + '</span><span class="r3-nitem__go">열기 ›</span>';   // 제목에 상대·시작 시각이 들어 있다(대화 내용은 알림에 싣지 않는다)
-          var cls = "r3-nitem r3-nitem--normal";
+          var cls = "r3-nitem r3-nitem--normal" + (c.unread > 0 ? " r3-nitem--unread" : "");
           if (c.link && !c.action) return '<a class="' + cls + '" data-c="' + i + '" href="' + esc(c.link) + '">' + inner + "</a>";
           return '<button type="button" class="' + cls + '" data-c="' + i + '">' + inner + "</button>";
         }).join("") + "</div>"
@@ -135,10 +136,10 @@
     body.innerHTML = '<div class="r3-nlist">' + d.items.map(function (it, i) {
       var inner = '<span class="r3-nitem__n">' + esc(badgeText(it.count)) + '</span><span class="r3-nitem__t">' + esc(it.title) +
         (it.detail ? '<span class="r3-nitem__d">' + esc(it.detail) + '</span>' : "") + '</span><span class="r3-nitem__go">확인하기 ›</span>';
-      var cls = "r3-nitem r3-nitem--" + esc(it.level);
+      var cls = "r3-nitem r3-nitem--" + esc(it.level) + " r3-nitem--unread";      // 지금 처리할 알림은 모두 읽지 않은 것: 처리하면 목록에서 사라진다(이력 없음)
       if (it.link && !it.action) return '<a class="' + cls + '" data-i="' + i + '" href="' + esc(it.link) + '">' + inner + "</a>";
       return '<button type="button" class="' + cls + '" data-i="' + i + '">' + inner + "</button>";
-    }).join("") + '</div><div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.6;">처리를 마치면 알림은 저절로 사라집니다. 앱을 열지 않은 동안 생긴 일도 여기에 모여 있습니다.</div>' + recentHtml;
+    }).join("") + '</div><div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.6;">처리를 마치면 알림은 저절로 사라집니다(미납 같은 일회성 알림은 이력을 남기지 않습니다). 앱을 열지 않은 동안 생긴 일도 여기에 모여 있습니다.</div>' + recentHtml;
     bindChats();
     body.addEventListener("click", function (e) {
       var el = e.target.closest("[data-i]");
