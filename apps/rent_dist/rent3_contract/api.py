@@ -453,10 +453,11 @@ def get_session(token: str, request: Request):
 
 
 class ContractMsgReq(BaseModel):
-    kind: str = "question"            # question | proposal | change_request
+    kind: str = "question"            # question | proposal | bundle | change_request
     body: str = ""
     field: str = ""
     new_value: Optional[Any] = None   # 제안 값(숫자 또는 날짜)
+    bundle: Optional[Dict[str, Any]] = None   # 일괄 조건 제시용 {deposit, contract_deposit, monthly_rent, ...}
 
 
 class ContractMsgRespondReq(BaseModel):
@@ -550,8 +551,9 @@ def contract_messages(session_id: str, request: Request, mark_read: bool = True)
 def contract_message_post(session_id: str, req: ContractMsgReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     who = _chat_actor(request, s)
-    m = contract_chat.post(s, who["role"], who["name"], req.kind, body=req.body, field=req.field, new_value=req.new_value)
+    m = contract_chat.post(s, who["role"], who["name"], req.kind, body=req.body, field=req.field, new_value=req.new_value, bundle=req.bundle)
     msg = {"question": "문의를 남겼습니다.", "proposal": "제안을 보냈습니다. 상대방이 수락하면 조건이 바뀝니다.",
+           "bundle": "계약 조건 일괄 제시를 채팅방에 보냈습니다.",
            "change_request": "수정 요청을 보냈습니다."}[m.kind]
     return {"success": True, "message": msg, "item": contract_chat.public_item(m), "open_count": len(contract_chat.open_items(s.id))}
 

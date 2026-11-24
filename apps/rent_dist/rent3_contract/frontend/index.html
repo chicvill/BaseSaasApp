@@ -40,9 +40,18 @@
     .step-pill.is-done { border-color: var(--ok); color: var(--ok); }
     .step-pill.is-now { background: hsl(258 90% 60% / .25); border-color: var(--primary); font-weight: 800; }
 
-    /* 단계 모달: 진행 차트 바로 아래에 겹치지 않고 자연스럽게 배치 */
-    .cm-backdrop { position: relative; z-index: 10; background: transparent;
-      display: flex; justify-content: center; align-items: flex-start; padding: 12px 0 24px; }
+    /* 단계 모달: 채팅방 위에서 필요할 때 여는 팝업 모달 */
+    .cm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .48);
+      display: flex; justify-content: center; align-items: flex-start; padding: 16px 12px 24px; overflow-y: auto; }
+    .ws-action-card { background: #ffffff; border: 1px solid #dbeafe; border-radius: 16px; padding: 12px 14px; margin: 10px 0 8px;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, .05); }
+    .ws-action-card__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .ws-action-card__btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .cm-bundle { background: #ffffff; border: 1.5px solid #bfdbfe; border-radius: 16px; padding: 12px 14px; margin: 4px 0;
+      box-shadow: 0 3px 12px rgba(37, 99, 235, .08); }
+    .cm-bundle__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin: 8px 0; font-size: 13px; }
+    .cm-bundle__row { display: flex; justify-content: space-between; gap: 6px; padding: 4px 8px; background: #f8fafc; border-radius: 8px; }
+    .step-pill { cursor: pointer; pointer-events: auto; }
     .cm-card { width: 100%; max-width: 620px; background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b;
       border-radius: 20px; padding: 18px 16px 20px; box-shadow: 0 18px 42px rgba(15, 23, 42, .16);
       transition: opacity .2s ease-in, transform .2s ease-in; }
@@ -141,8 +150,31 @@
         <div id="turnLine" class="turn-line" aria-live="polite"></div>
       </header>
 
+      <section id="chatWorkspace" class="no-print" style="margin-top:8px;">
+        <div id="cmCall" style="margin-bottom:6px;"></div>
+        <div id="wsActionBar" class="ws-action-card"></div>
+        <div id="wsChatList" class="cm-list" style="max-height:46vh;min-height:200px;"></div>
+        <div id="wsChatNote" class="bass-muted" style="font-size:12px;margin:4px 0;"></div>
+        <div id="wsChatComposer">
+          <div class="r3-chat-compose">
+            <textarea id="wsChatMsg" class="bass-input" rows="2" placeholder="상대방에게 보낼 채팅을 입력하세요"></textarea>
+            <button id="wsChatSend" type="button" class="bass-btn bass-btn--sm bass-btn--primary">보내기</button>
+          </div>
+          <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="확인했습니다">확인했습니다</button>
+            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="조건 확인 후 승인하겠습니다">조건 확인 후 승인하겠습니다</button>
+          </div>
+        </div>
+      </section>
+
       <div id="stepModal" class="cm-backdrop no-print" hidden>
-        <div id="stepCard" class="cm-card"><div id="stepPanel"></div></div>
+        <div id="stepCard" class="cm-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;">
+            <strong style="font-size:14px;color:#0f172a;">📋 계약 단계 처리</strong>
+            <button id="btnCloseStepModal" type="button" class="bass-btn bass-btn--sm">✕ 채팅으로 돌아가기</button>
+          </div>
+          <div id="stepPanel"></div>
+        </div>
       </div>
 
       <section id="sealedContractView" style="display:none;"></section>

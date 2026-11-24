@@ -90,10 +90,13 @@
   let lastStamp = "";
   let modalAnimating = false;
   let modalTimer = null;
+  let stepModalOpen = false;
+  let wsChatLastSig = "";
 
   const elHome = document.getElementById("homeView");
   const elHomeBody = document.getElementById("homeBody");
   const elContract = document.getElementById("contractView");
+  const elChatWs = document.getElementById("chatWorkspace");
   const elModal = document.getElementById("stepModal");
   const elCard = document.getElementById("stepCard");
   const elStepPanel = document.getElementById("stepPanel");
@@ -521,6 +524,7 @@
     if (idx >= 0) allSessions[idx] = activeSession;
 
     if (forceRender || activeSession.current_step !== prevStep) viewStep = activeSession.current_step;
+    if (prevStep > 0 && activeSession.current_step !== prevStep) stepModalOpen = false;
 
     if (
       forceRender ||
@@ -579,7 +583,7 @@
   chatFab.addEventListener("click", () => openChatDrawer());
 
   function updateChatFab() {
-    chatFab.hidden = elContract.hidden || !activeSession;
+    chatFab.hidden = elContract.hidden || !activeSession || (elChatWs && !elChatWs.hidden);
     const n = chatFab.querySelector(".chat-fab__n");
     const o = chatFab.querySelector(".chat-fab__o");
     n.hidden = !(chatSummary.unread > 0);
@@ -595,6 +599,14 @@
 
   async function openChatDrawer() {
     if (!activeSession) return;
+    if (elChatWs && !elChatWs.hidden) {
+      stepModalOpen = false;
+      elModal.hidden = true;
+      await refreshInlineChat(true);
+      const inp = document.getElementById("wsChatMsg");
+      if (inp) inp.focus();
+      return;
+    }
     const sid = activeSession.id;
     const body = R3.openModal(`💬 계약방 채팅 · ${esc(activeSession.building_name)} ${esc(activeSession.room_no)}호`, `
       <div id="cmCall" style="margin-bottom:8px;"></div>
@@ -822,8 +834,7 @@
   }
 
   function positionModal() {
-    const head = document.getElementById("cvHead");
-    elModal.style.top = `${Math.round(head.getBoundingClientRect().bottom)}px`;
+    elModal.style.top = "0px";
   }
   window.addEventListener("resize", positionModal);
   window.addEventListener("scroll", positionModal, { passive: true });
@@ -836,8 +847,253 @@
     elCard.classList.add("is-open");
   }
 
+  function openStepModal(stepNum) {
+    if (stepNum) viewStep = stepNum;
+    stepModalOpen = true;
+    modalKey = "";
+    renderWorkspace();
+  }
+  const btnCloseStepModal = document.getElementById("btnCloseStepModal");
+  if (btnCloseStepModal) {
+    btnCloseStepModal.addEventListener("click", () => {
+      stepModalOpen = false;
+      elModal.hidden = true;
+    });
+  }
+  document.querySelectorAll("#stepperBar .step-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      if (!activeSession || activeSession.status === "COMPLETED") return;
+      const n = Number(pill.dataset.step);
+      if (n && n <= activeSession.current_step) openStepModal(n);
+    });
+  });
+
   function switchModal(s) {
     if (modalAnimating) return;
+    if (!stepModalOpen) {
+      elModal.hidden = true;
+      return;
+    }
+    const plan = planModal(s);
+    elModal.hidden = false;
+    positionModal();
+    const stamp = `${s.updated_at || ""}:${s.revision}:${chatSummary.open_count}:${stepModalOpen}`;
+    if (plan.key === modalKey) {
+      if (stamp !== lastStamp) { lastStamp = stamp; plan.render(); }
+      return;
+    }
+    lastStamp = stamp;
+    const first = modalKey === "";
+    modalKey = plan.key;
+    if (first) { plan.render(); openCardAnim(); return; }
+    modalAnimating = true;
+    elCard.classList.remove("is-open");
+    elCard.classList.add("is-closing");
+    clearTimeout(modalTimer);
+    modalTimer = setTimeout(() => {
+      modalAnimating = false;
+      if (!activeSession || !stepModalOpen) return;
+      planModal(activeSession).render();
+      openCardAnim();
+      elModal.scrollTop = 0;
+    }, 210);
+  }
+
+  function renderChatBubble(m, d) {
+    const mine = m.sender_role === currentRole;
+    const who = m.sender_role === "system" ? "안내" : `${m.sender_role === "lessor" ? "임대인" : "임차인"}${mine ? "(나)" : ""}`;
+    if (m.kind === "system") return `<div class="cm-sys">${esc(m.body)} <span>${hhmm(m.created_at)}</span></div>`;
+    if (m.kind === "question") {
+      return `<div class="cm-b ${mine ? "is-mine" : ""}"><div><div class="cm-meta">${who} · ${hhmm(m.created_at)} · ${m.step}단계</div>${esc(m.body)}</div></div>`;
+    }
+    if (m.kind === "bundle") {
+      const items = (m.proposal && m.proposal.items) || [];
+      const canAct = m.status === "open" && d.can_negotiate && !adminProxy && currentRole;
+      const buttons = !canAct ? "" : (mine
+        ? `<button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="withdraw" type="button">철회</button>`
+        : `<button class="bass-btn bass-btn--sm bass-btn--primary cm-act" data-id="${esc(m.id)}" data-act="accept" data-kind="bundle" type="button">✅ 전체 수락</button>
+           <button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="decline" type="button">거절</button>`);
+      return `<div class="cm-bundle ${m.status === "open" ? "is-open" : ""}">
+        <div class="cm-meta">${who} · ${hhmm(m.created_at)} · 📋 계약 조건 일괄 제시</div>
+        <div class="cm-bundle__grid">${items.map((it) => `<div class="cm-bundle__row"><span class="bass-muted">${esc(it.label)}</span><strong>${esc(it.new_text || fmtField(it.field, it.new))}</strong></div>`).join("")}</div>
+        <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="bass-badge ${m.status === "open" ? "bass-badge--warn" : (m.status === "accepted" ? "bass-badge--ok" : "")}">${STATUS_KO[m.status] || m.status}</span>${buttons}</div>
+      </div>`;
+    }
+    const isProp = m.kind === "proposal";
+    const head = isProp
+      ? `💡 <strong>${esc(m.proposal.label)}</strong> ${esc(fmtField(m.field, m.proposal.old))} → <strong>${esc(fmtField(m.field, m.proposal.new))}</strong> 제안`
+      : `✏️ <strong>${esc(d.request_fields[m.field] || "수정")}</strong> 수정 요청`;
+    const canAct = m.status === "open" && d.can_negotiate && !adminProxy && currentRole;
+    const buttons = !canAct ? "" : (mine
+      ? `<button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="withdraw" type="button">철회</button>`
+      : `<button class="bass-btn bass-btn--sm bass-btn--primary cm-act" data-id="${esc(m.id)}" data-act="accept" data-kind="${m.kind}" type="button">${isProp ? "수락" : "확인·반영"}</button>
+         <button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="decline" type="button">거절</button>`);
+    return `<div class="cm-card ${m.status === "open" ? "is-open" : ""}">
+      <div class="cm-meta">${who} · ${hhmm(m.created_at)} · ${m.step}단계</div>
+      <div>${head}</div>${m.body && !(isProp && m.body.includes("제안합니다.")) ? `<div class="bass-muted" style="font-size:12.5px;">${esc(m.body)}</div>` : ""}
+      <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="bass-badge ${m.status === "open" ? "bass-badge--warn" : (m.status === "accepted" ? "bass-badge--ok" : "")}">${STATUS_KO[m.status] || m.status}</span>${buttons}</div>
+    </div>`;
+  }
+
+  function openBundleDialog(s) {
+    const t = s.terms || {};
+    const body = R3.openModal("📋 계약 조건 한꺼번에 제시", `
+      <p class="bass-muted" style="font-size:13px;margin:0 0 10px;">보증금·계약금·월세·관리비·청소비·입주일·계약기간을 한 번에 입력해 채팅방에 올립니다. 상대가 채팅방에서 <strong>[✅ 전체 수락]</strong>을 누르면 한꺼번에 반영됩니다.</p>
+      <div class="field-grid">
+        <div><label class="bass-label">보증금 (원)</label><input id="bdDeposit" type="number" class="bass-input" value="${Number(t.deposit || 0)}"></div>
+        <div><label class="bass-label">계약금 (원)</label><input id="bdContractDeposit" type="number" class="bass-input" value="${Number(t.contract_deposit || 0)}"></div>
+        <div><label class="bass-label">월세 (원)</label><input id="bdMonthlyRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
+        <div><label class="bass-label">관리비 (원)</label><input id="bdMaintenance" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
+        <div><label class="bass-label">퇴실 청소비 (원)</label><input id="bdCleaning" type="number" class="bass-input" value="${Number(t.cleaning_fee || 0)}"></div>
+        <div><label class="bass-label">입주일</label><input id="bdMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
+        <div><label class="bass-label">계약기간 (개월)</label><input id="bdTermMonths" type="number" class="bass-input" value="${Number(t.lease_term_months || 12)}"></div>
+      </div>
+      <textarea id="bdNote" class="bass-input" rows="2" placeholder="안내 메모 (선택)" style="width:100%;margin-top:10px;"></textarea>
+      <button id="bdSubmit" type="button" class="bass-btn bass-btn--primary" style="width:100%;margin-top:10px;">💬 채팅방에 조건 일괄 제시하기</button>
+    `);
+    body.querySelector("#bdSubmit").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const bundle = {
+          deposit: Number(body.querySelector("#bdDeposit").value || 0),
+          contract_deposit: Number(body.querySelector("#bdContractDeposit").value || 0),
+          monthly_rent: Number(body.querySelector("#bdMonthlyRent").value || 0),
+          maintenance_fee: Number(body.querySelector("#bdMaintenance").value || 0),
+          cleaning_fee: Number(body.querySelector("#bdCleaning").value || 0),
+          move_in_date: body.querySelector("#bdMoveIn").value,
+          lease_term_months: Number(body.querySelector("#bdTermMonths").value || 12),
+        };
+        const note = body.querySelector("#bdNote").value.trim();
+        await Bass.api(APP_ID, `/sessions/${s.id}/messages`, {
+          method: "POST",
+          body: { kind: "bundle", body: note, bundle },
+        });
+        R3.closeModal();
+        Bass.updateAppAlert("success", "계약 조건을 채팅방에 일괄 제시했습니다.");
+        await refreshInlineChat(true);
+        await fetchActiveSession(true);
+      });
+    });
+  }
+
+  function renderWsActionBar(s) {
+    const bar = document.getElementById("wsActionBar");
+    if (!bar) return;
+    const step = s.current_step;
+    const prog = stepProgress(s, step);
+    const t = turnInfo(s);
+    const callRow = document.getElementById("cmCall");
+    if (callRow) {
+      const otherName = currentRole === "lessor" ? ((s.terms && s.terms.tenant_name) || "임차인") : (s.lessor_name || "임대인");
+      const otherPhone = currentRole === "lessor" ? ((s.terms && s.terms.tenant_phone) || "") : (s.lessor_phone || "");
+      const dig = digits(otherPhone);
+      callRow.innerHTML = !adminProxy && dig.length >= 9
+        ? `<div class="r3-chat-peer"><strong>📞 ${esc(otherName)}에게 전화</strong><a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${esc(dig)}">${esc(otherPhone)}</a></div><div class="bass-muted" style="font-size:12px;margin:2px 0 4px;">💡 중요한 통화 내용은 아래 채팅에 기록을 남겨 주세요.</div>`
+        : "";
+    }
+    let btns = "";
+    if (s.call_status === "CALLING") {
+      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="0">📞 호출 응답 / 연결 확인</button>`;
+    } else if (step === 1) {
+      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="1">🪪 신분증·등기부 확인 열기</button>`;
+    } else if (step === 2) {
+      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="2">🛋️ 옵션리스트 확인 열기</button>`;
+    } else if (step === 3) {
+      const canAgree = !adminProxy && currentRole && chatSummary.open_count === 0;
+      const agreedMine = currentRole === "lessor" ? s.step3_lessor_agreed : s.step3_tenant_agreed;
+      btns = `
+        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnBundle" class="bass-btn bass-btn--sm bass-btn--primary">📋 조건 일괄 제시</button>` : ""}
+        <button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="3">✏️ 세부 조건·특약 보기</button>
+        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnAgree3" class="bass-btn bass-btn--sm ${agreedMine ? "" : "bass-btn--primary"}" ${canAgree ? "" : "disabled"}>${agreedMine ? "✅ 동의 완료 (상대 대기)" : (s.mode === "RENEWAL" ? "🔒 재계약 승인" : "🔒 조건 전체 동의")}</button>` : ""}`;
+    } else if (step === 4) {
+      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="4">✍️ 전자서명 모달 열기</button>`;
+    } else {
+      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="5">🔏 최종 체결 모달 열기</button>`;
+    }
+    bar.innerHTML = `
+      <div class="ws-action-card__head">
+        <strong style="font-size:14px;">${esc(prog.label)}</strong>
+        <span class="bass-badge ${t.mine ? "bass-badge--warn" : "bass-badge--info"}">${esc(t.text)}</span>
+      </div>
+      <div class="ws-action-card__btns">${btns}</div>`;
+
+    bar.querySelectorAll(".js-ws-step").forEach((b) => {
+      b.addEventListener("click", () => {
+        const st = Number(b.dataset.step || 0);
+        openStepModal(st || s.current_step);
+      });
+    });
+    const btnBundle = document.getElementById("wsBtnBundle");
+    if (btnBundle) btnBundle.addEventListener("click", () => openBundleDialog(s));
+    const btnAgree3 = document.getElementById("wsBtnAgree3");
+    if (btnAgree3) {
+      btnAgree3.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/step3/agree`, {
+            method: "POST",
+            body: { role: currentRole, expected_revision: s.revision },
+          });
+          activeSession = res.session;
+          lastRevision = activeSession.revision;
+          viewStep = activeSession.current_step;
+          Bass.updateAppAlert("success", res.message);
+          renderWorkspace();
+        });
+      });
+    }
+  }
+
+  let wsChatBusy = false;
+  async function refreshInlineChat(markRead = true) {
+    const list = document.getElementById("wsChatList");
+    if (!activeSession || !list || wsChatBusy) return;
+    wsChatBusy = true;
+    try {
+      const d = await Bass.api(APP_ID, `/sessions/${activeSession.id}/messages?mark_read=${markRead ? "true" : "false"}`);
+      const note = document.getElementById("wsChatNote");
+      const comp = document.getElementById("wsChatComposer");
+      if (comp) comp.hidden = d.read_only || adminProxy || !currentRole;
+      if (note) note.textContent = d.purged ? d.purged_note : (d.read_only ? "종료된 계약방입니다(읽기 전용)." : "상대방과 대화하며 아래 카드 또는 상단 버튼으로 단계별 확인·승인을 진행하세요.");
+      const sig = JSON.stringify((d.messages || []).map((m) => [m.id, m.status]));
+      if (sig !== wsChatLastSig) {
+        wsChatLastSig = sig;
+        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
+        list.innerHTML = (d.messages || []).map((m) => renderChatBubble(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px;">아직 채팅이 없습니다. 상단 버튼으로 조건을 제시하거나 인사를 남겨 보세요.</div>';
+        if (atBottom) list.scrollTop = list.scrollHeight;
+        list.querySelectorAll(".cm-act").forEach((btn) => btn.addEventListener("click", () => {
+          Bass.withLock(btn, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${activeSession.id}/messages/${btn.dataset.id}/respond`, { method: "POST", body: { action: btn.dataset.act } });
+            Bass.updateAppAlert("success", res.message);
+            await refreshInlineChat(true);
+            await fetchActiveSession(true);
+          });
+        }));
+      }
+      chatSummary = { unread: d.unread || 0, open_count: d.open_count || 0 };
+      updateChatFab();
+      updateTurnLine();
+    } catch (_) { /* ignore polling error */ }
+    finally { wsChatBusy = false; }
+  }
+
+  const wsSendBtn = document.getElementById("wsChatSend");
+  if (wsSendBtn) {
+    const sendWsMsg = (text) => {
+      if (!activeSession || !text) return;
+      Bass.withLock(wsSendBtn, async () => {
+        await Bass.api(APP_ID, `/sessions/${activeSession.id}/messages`, { method: "POST", body: { kind: "question", body: text } });
+        const inp = document.getElementById("wsChatMsg");
+        if (inp) inp.value = "";
+        await refreshInlineChat(true);
+      });
+    };
+    wsSendBtn.addEventListener("click", () => {
+      const inp = document.getElementById("wsChatMsg");
+      sendWsMsg((inp && inp.value || "").trim());
+    });
+    document.querySelectorAll(".ws-quick").forEach((b) => b.addEventListener("click", () => sendWsMsg(b.dataset.t)));
+  }
+
+  function switchModalLegacy(s) {
     const plan = planModal(s);
     elModal.hidden = false;
     positionModal();
@@ -905,10 +1161,17 @@
     });
 
     if (s.status === "COMPLETED") {
+      if (elChatWs) elChatWs.hidden = true;
+      stepModalOpen = false;
       elModal.hidden = true;
       modalKey = "";
       renderSealedPaper();
       return;
+    }
+    if (elChatWs) {
+      elChatWs.hidden = false;
+      renderWsActionBar(s);
+      refreshInlineChat(true);
     }
     switchModal(s);
     renderSealedPaper();

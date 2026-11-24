@@ -9906,6 +9906,41 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("자동이체", tapp)
         self.assertNotIn("국민 123-456-789012", core)
 
+    def test_158_contract_chat_workspace_and_bundle_proposal(self):
+        """158. 계약방이 채팅 중심으로 동작하고, 임대인이 보증금·월세·관리비 등을 한꺼번에 제시해 채팅방에서 한 번에 승인할 수 있다."""
+        c = self.client
+        sid = self._policy_session("965", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        lh, th = self._party_headers(sid)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        r = c.post(url, headers=lh, json={
+            "kind": "bundle",
+            "body": "조건 일괄 제시드립니다.",
+            "bundle": {"deposit": 6000000, "monthly_rent": 320000, "maintenance_fee": 60000, "cleaning_fee": 80000, "lease_term_months": 24},
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        msg_id = r.json()["item"]["id"]
+        self.assertEqual(r.json()["open_count"], 1)
+        # 본인이 올린 일괄 제시는 수락 불가
+        self.assertEqual(c.post(f"{url}/{msg_id}/respond", headers=lh, json={"action": "accept"}).status_code, 403)
+        # 임차인이 채팅방에서 한 번에 전체 수락 → 조건 일괄 반영
+        acc = c.post(f"{url}/{msg_id}/respond", headers=th, json={"action": "accept"})
+        self.assertEqual(acc.status_code, 200, acc.text)
+        s = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        self.assertEqual(s["terms"]["deposit"], 6000000)
+        self.assertEqual(s["terms"]["monthly_rent"], 320000)
+        self.assertEqual(s["terms"]["maintenance_fee"], 60000)
+        self.assertEqual(s["terms"]["cleaning_fee"], 80000)
+        self.assertEqual(s["terms"]["lease_term_months"], 24)
+        # 화면 검증: 채팅 중심 워크스페이스 + 모달 닫기 + 일괄 제시 UI
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        html = rd("rent3_contract", "frontend", "index.html")
+        capp = rd("rent3_contract", "frontend", "app.js")
+        for needle in ('id="chatWorkspace"', 'id="wsActionBar"', 'id="wsChatList"', 'id="btnCloseStepModal"', "cm-bundle"):
+            self.assertIn(needle, html, needle)
+        for needle in ("openBundleDialog", "renderWsActionBar", "refreshInlineChat", "openStepModal", "✅ 전체 수락"):
+            self.assertIn(needle, capp, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

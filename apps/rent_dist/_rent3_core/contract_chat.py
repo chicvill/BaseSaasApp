@@ -37,7 +37,7 @@ PROPOSAL_FIELDS: Dict[str, tuple] = {
 }
 # 수정 요청(문구 협의) 항목
 REQUEST_FIELDS: Dict[str, str] = {"special_terms": "특약사항", "other": "기타 조건"}
-CONTRACT_KINDS = ("question", "proposal", "change_request", "system")
+CONTRACT_KINDS = ("question", "proposal", "bundle", "change_request", "system")
 MAX_BODY = 1000
 LAST_NEGOTIATION_STEP = 3
 CANCELLED_RETENTION_DAYS = 90        # 체결되지 못하고 취소된 계약방 채팅: 취소 후 90일
@@ -98,9 +98,9 @@ def _parse_value(field: str, raw: Any) -> Any:
     return n
 
 
-def _check_consistent(s: Any, field: str, new: Any) -> None:
-    """제안값을 반영했을 때 계약금이 보증금을 넘지 않는지 등 최소한의 일관성 확인."""
-    merged = {**(s.terms or {}), field: new}
+def _check_consistent(s: Any, field: str, new: Any, extra: Optional[Dict[str, Any]] = None) -> None:
+    """제안값을 반영했을 때 계약금이 보증금을 넘지 않는지 등 최소한의 일관성 확인(일괄 제시는 extra 로 함께 바뀌는 값을 같이 반영)."""
+    merged = {**(s.terms or {}), **(extra or {}), field: new}
     if int(merged.get("contract_deposit") or 0) > int(merged.get("deposit") or 0):
         raise DomainError("계약금이 보증금보다 클 수 없습니다.", hint="보증금과 계약금을 함께 확인해 주세요.")
     if int(merged.get("cleaning_fee") or 0) > int(merged.get("deposit") or 0):
@@ -181,7 +181,7 @@ def messages_of(session_id: str) -> List[DirectChat]:
 
 
 def open_items(session_id: str) -> List[DirectChat]:
-    return [m for m in messages_of(session_id) if m.kind in ("proposal", "change_request") and m.status == "open"]
+    return [m for m in messages_of(session_id) if m.kind in ("proposal", "bundle", "change_request") and m.status == "open"]
 
 
 # 해시 입력에는 불변 내용 필드만 쓴다. 읽음 표시(read_by_*)·updated_at 같은 열람 상태는 넣지 않아, 체결 뒤 당사자가 읽어도 값이 바뀌지 않는다.
@@ -240,11 +240,11 @@ def list_for(session: Any, role: Optional[str], mark_read: bool = True) -> Dict[
     }
 
 
-def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", field: str = "", new_value: Any = None) -> DirectChat:
+def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", field: str = "", new_value: Any = None, bundle: Optional[Dict[str, Any]] = None) -> DirectChat:
     if role not in ("lessor", "tenant"):
         raise Forbidden("계약 당사자만 글을 남길 수 있습니다.")
-    if kind not in ("question", "proposal", "change_request"):
-        raise DomainError("글 종류가 올바르지 않습니다.", hint="question / proposal / change_request")
+    if kind not in ("question", "proposal", "bundle", "change_request"):
+        raise DomainError("글 종류가 올바르지 않습니다.", hint="question / proposal / bundle / change_request")
     _ensure_open_session(session)
     base = dict(
         branch=session.branch, id_room=getattr(session, "id_room", "") or "", room_no=session.room_no, session_id=session.id,
@@ -257,7 +257,7 @@ def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", f
     if session.current_step > LAST_NEGOTIATION_STEP:
         raise DomainError(
             "단계 ④(서명) 이후에는 문의만 남길 수 있습니다.",
-            hint="조건을 바꿔야 하면 '조건 수정'을 쓰세요. 서명이 초기화되고 3단계로 돌아갑니다.",
+            hint="조건을 바꿔야 하면 '조건 수정'을 쓰세요. 서명이 초기화됩니다.",
         )
     if kind == "change_request":
         f = field or "special_terms"
@@ -265,6 +265,37 @@ def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", f
             raise DomainError("수정 요청 항목이 올바르지 않습니다.", hint=" / ".join(REQUEST_FIELDS))
         return DirectChat(kind="change_request", status="open", field=f, message=_clean_body(body, True), **base).save(
             action="contract_change_request", app_source="rent3_contract")
+
+    if kind == "bundle":
+        raw_bundle = dict(bundle or {})
+        items = []
+        parsed: Dict[str, Any] = {}
+        for k in PROPOSAL_FIELDS:
+            if k not in raw_bundle:
+                continue
+            new = _parse_value(k, raw_bundle[k])
+            old = (session.terms or {}).get(k)
+            parsed[k] = new
+            items.append({
+                "field": k,
+                "label": PROPOSAL_FIELDS[k][0],
+                "old": old,
+                "new": new,
+                "old_text": _show(k, old),
+                "new_text": _show(k, new),
+            })
+        if not items:
+            raise DomainError("제시할 계약 조건이 없습니다.")
+        _check_consistent(session, items[0]["field"], items[0]["new"], parsed)       # 함께 바뀌는 값 기준으로 한 번에 검사
+        for prev in open_items(session.id):
+            if prev.kind == "bundle" and prev.sender_role == role:
+                prev.status, prev.resolved_by, prev.resolved_at = "withdrawn", "system", now_iso()
+                prev.save(action="contract_bundle_replaced", app_source="rent3_contract")
+        summary = " · ".join(f"{it['label']} {it['new_text']}" for it in items[:4])
+        text = _clean_body(body, False) or f"계약 조건을 일괄 제시합니다 ({summary})."
+        return DirectChat(kind="bundle", status="open", field="bundle", proposal={"items": items}, message=text, **base).save(
+            action="contract_bundle_proposal", app_source="rent3_contract"
+        )
 
     # proposal
     if field not in PROPOSAL_FIELDS:
@@ -290,7 +321,7 @@ def respond(session: Any, msg_id: str, role: str, action: str) -> Dict[str, Any]
     if action not in ("accept", "decline", "withdraw"):
         raise DomainError("처리 방식이 올바르지 않습니다.", hint="accept / decline / withdraw")
     m = DirectChat.get(msg_id)
-    if m is None or m.session_id != session.id or m.kind not in ("proposal", "change_request"):
+    if m is None or m.session_id != session.id or m.kind not in ("proposal", "bundle", "change_request"):
         raise NotFound("해당 제안·수정 요청을 찾을 수 없습니다.")
     if m.status != "open":
         raise Conflict("이미 처리된 글입니다.")
@@ -305,7 +336,25 @@ def respond(session: Any, msg_id: str, role: str, action: str) -> Dict[str, Any]
     who = "임대인" if role == "lessor" else "임차인"
     result: Dict[str, Any] = {}
     if action == "accept":
-        if m.kind == "proposal":
+        if m.kind == "bundle":
+            if session.current_step > LAST_NEGOTIATION_STEP:
+                raise DomainError("단계 ④(서명) 이후에는 제안을 수락할 수 없습니다.", hint="조건 수정 경로를 쓰세요. 서명이 초기화됩니다.")
+            items = (m.proposal or {}).get("items") or []
+            updates: Dict[str, Any] = {}
+            allnew = {it.get("field"): it.get("new") for it in items if it.get("field") in PROPOSAL_FIELDS}
+            for f, nv in allnew.items():
+                if str((session.terms or {}).get(f)) != str(nv):
+                    updates[f] = nv
+            if allnew:
+                f0 = next(iter(allnew))
+                _check_consistent(session, f0, allnew[f0], allnew)
+            before_rev = session.revision
+            if updates:
+                session.update_terms(role=role, updates=updates, app_source="rent3_contract")
+            _sys(session, f"{who}이(가) 일괄 제시된 계약 조건을 수락했습니다 (리비전 v{session.revision}).", step=min(session.current_step, 3))
+            result["revision"] = session.revision
+            result["revision_changed"] = session.revision != before_rev
+        elif m.kind == "proposal":
             if session.current_step > LAST_NEGOTIATION_STEP:
                 raise DomainError("단계 ④(서명) 이후에는 제안을 수락할 수 없습니다.", hint="조건 수정 경로를 쓰세요. 서명이 초기화됩니다.")
             field, new = m.proposal["field"], m.proposal["new"]
@@ -326,10 +375,12 @@ def respond(session: Any, msg_id: str, role: str, action: str) -> Dict[str, Any]
         m.status = "accepted"
     elif action == "decline":
         m.status = "declined"
-        _sys(session, f"{who}이(가) {'제안' if m.kind == 'proposal' else '수정 요청'}을 거절했습니다.")
+        kind_ko = {"proposal": "제안", "bundle": "일괄 조건 제시", "change_request": "수정 요청"}[m.kind]
+        _sys(session, f"{who}이(가) {kind_ko}을(를) 거절했습니다.")
     else:
         m.status = "withdrawn"
-        _sys(session, f"{who}이(가) 올린 {'제안' if m.kind == 'proposal' else '수정 요청'}을 철회했습니다.")
+        kind_ko = {"proposal": "제안", "bundle": "일괄 조건 제시", "change_request": "수정 요청"}[m.kind]
+        _sys(session, f"{who}이(가) 올린 {kind_ko}을(를) 철회했습니다.")
     m.resolved_by, m.resolved_at = role, now_iso()
     m.save(action=f"contract_chat_{action}", app_source="rent3_contract")
     result["item"] = public_item(m)
