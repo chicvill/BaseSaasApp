@@ -526,7 +526,7 @@
   }
 
   // 단계별로 "내 차례"인지, 이미 마쳐서 상대를 기다려야 하는지 판단한다.
-  // ───────────── 지금 내 차례 · 계약방 대화(💬) · 제안 · 조건 다시 열기 (6단계) ─────────────
+  // ───────────── 지금 내 차례 · 계약방 채팅(💬) · 제안 · 조건 다시 열기 (6단계) ─────────────
   function turnInfo(s) {
     if (s.status === "CANCELLED") return { mine: false, text: "취소된 계약입니다" };
     if (s.status === "COMPLETED") return { mine: false, text: "체결이 완료되었습니다" };
@@ -561,7 +561,7 @@
   chatFab.type = "button";
   chatFab.id = "chatFab";
   chatFab.className = "chat-fab no-print";
-  chatFab.setAttribute("aria-label", "계약방 대화");
+  chatFab.setAttribute("aria-label", "계약방 채팅");
   chatFab.hidden = true;
   chatFab.innerHTML = '💬<span class="chat-fab__n" hidden></span><span class="chat-fab__o" hidden></span>';
   document.body.appendChild(chatFab);
@@ -585,7 +585,8 @@
   async function openChatDrawer() {
     if (!activeSession) return;
     const sid = activeSession.id;
-    const body = R3.openModal(`💬 계약방 대화 · ${esc(activeSession.building_name)} ${esc(activeSession.room_no)}호`, `
+    const body = R3.openModal(`💬 계약방 채팅 · ${esc(activeSession.building_name)} ${esc(activeSession.room_no)}호`, `
+      <div id="cmCall" style="margin-bottom:8px;"></div>
       <div id="cmList" class="cm-list"></div>
       <div id="cmNote" class="bass-muted" style="font-size:12px;margin:4px 0;"></div>
       <div id="cmComposer">
@@ -626,12 +627,21 @@
       if (busy) return;
       const d = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sid)}/messages?mark_read=true`);
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-      list.innerHTML = d.messages.map((m) => itemHtml(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px 0;">아직 대화가 없습니다. 궁금한 점을 남겨 보세요.</div>';
+      list.innerHTML = d.messages.map((m) => itemHtml(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px 0;">아직 채팅이 없습니다. 궁금한 점을 남겨 보세요.</div>';
       if (atBottom) list.scrollTop = list.scrollHeight;
+      // 상대방 전화 단추(임대인↔임차인). 관리인 열람(읽기 전용)에서는 보이지 않는다
+      const callEl = body.querySelector("#cmCall");
+      const other = currentRole === "lessor"
+        ? { name: (activeSession.terms || {}).tenant_name || "임차인", phone: (activeSession.terms || {}).tenant_phone }
+        : { name: activeSession.lessor_name || "임대인", phone: activeSession.lessor_phone };
+      const dg = String(other.phone || "").replace(/\D/g, "");
+      callEl.innerHTML = (!adminProxy && dg.length >= 9)
+        ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${dg}" style="min-height:40px;">📞 ${esc(other.name)}에게 전화 ${esc(other.phone)}</a><div class="bass-muted" style="font-size:12px;margin-top:4px;">💬 중요한 통화 내용은 아래 채팅에 기록을 남겨 주세요.</div>`
+        : "";
       const readOnly = d.read_only || adminProxy;
       body.querySelector("#cmComposer").style.display = readOnly ? "none" : "";
-      body.querySelector("#cmNote").textContent = d.purged ? "보관 기간이 지나 이 대화는 삭제되었습니다."
-        : d.read_only ? "체결되었거나 취소된 계약방입니다. 지난 대화는 읽을 수만 있습니다."
+      body.querySelector("#cmNote").textContent = d.purged ? "보관 기간이 지나 이 채팅은 삭제되었습니다."
+        : d.read_only ? "체결되었거나 취소된 계약방입니다. 지난 채팅은 읽을 수만 있습니다."
         : adminProxy ? "관리인은 읽기만 할 수 있습니다."
         : d.can_negotiate ? "조건 제안·수정 요청은 ③ 계약 조건 화면에서 보냅니다. 서명(④) 이후에는 문의만 가능합니다."
         : "서명(④) 이후에는 문의만 남길 수 있습니다. 조건을 바꾸려면 ‘조건 다시 열기’를 쓰세요.";
@@ -1871,7 +1881,7 @@
         <div class="dotline" style="margin:0;"><span class="dotline__item"><span class="dot ${s.step3_lessor_agreed ? "dot--ok" : "dot--wait"}"></span>임대인${currentRole === "lessor" ? " (나)" : ""}</span><span class="dotline__item"><span class="dot ${s.step3_tenant_agreed ? "dot--ok" : "dot--wait"}"></span>임차인${currentRole === "tenant" ? " (나)" : ""}</span></div>
         <button id="btnSaveTerms" class="bass-btn bass-btn--sm" type="button">✏️ 인적사항·특약 등 저장</button>
       </div>
-      ${chatSummary.open_count > 0 ? `<div class="call-banner" style="margin:8px 0;"><div style="font-weight:800;margin-bottom:4px;">답하지 않은 제안·수정 요청이 ${chatSummary.open_count}건 있습니다</div><div style="font-size:12.5px;margin-bottom:8px;">모두 처리(수락·거절·철회)해야 최종 동의할 수 있습니다.</div><button id="btnOpenChat3" type="button" class="bass-btn bass-btn--sm bass-btn--primary">💬 대화 열기</button></div>` : ""}
+      ${chatSummary.open_count > 0 ? `<div class="call-banner" style="margin:8px 0;"><div style="font-weight:800;margin-bottom:4px;">답하지 않은 제안·수정 요청이 ${chatSummary.open_count}건 있습니다</div><div style="font-size:12.5px;margin-bottom:8px;">모두 처리(수락·거절·철회)해야 최종 동의할 수 있습니다.</div><button id="btnOpenChat3" type="button" class="bass-btn bass-btn--sm bass-btn--primary">💬 채팅 열기</button></div>` : ""}
       <button id="btnAgreeStep3" class="bass-btn bass-btn--primary" style="width:100%;" type="button"${chatSummary.open_count > 0 ? " disabled" : ""}>
         ${s.mode === "RENEWAL" ? "🔒 재계약 승인" : "🔒 계약 조건 전체 동의"} (v${s.revision}) · ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"}
       </button>
@@ -2012,7 +2022,7 @@
         <span class="bass-badge ${s.tenant_signature ? "bass-badge--ok" : "bass-badge--warn"}">임차인 서명: ${s.tenant_signature ? "날인 완료 ✓" : "대기"}</span>
       </div>
       ${s.integrity_hash ? `<div class="bass-card" style="padding:12px;margin-bottom:12px;font-size:12px;">🔐 <strong>SHA-256 무결성 봉인 해시:</strong> <code>${Bass.escapeHtml(s.integrity_hash)}</code></div>` : ""}
-      ${sealedContract && sealedContract.chat_digest ? `<div class="bass-card" style="padding:12px;margin-bottom:12px;font-size:12px;">💬 <strong>협상 대화 기록 ${Number(sealedContract.chat_digest_count || 0)}건 해시:</strong> <code>${Bass.escapeHtml(sealedContract.chat_digest)}</code></div>` : ""}
+      ${sealedContract && sealedContract.chat_digest ? `<div class="bass-card" style="padding:12px;margin-bottom:12px;font-size:12px;">💬 <strong>협상 채팅 기록 ${Number(sealedContract.chat_digest_count || 0)}건 해시:</strong> <code>${Bass.escapeHtml(sealedContract.chat_digest)}</code></div>` : ""}
 
       <label class="bass-label">${currentRole === "lessor" ? "🏢 임대인(갑)" : "🔑 임차인(을)"} 자필 서명 패드 (마우스/터치 드로잉)</label>
       <canvas id="sigCanvas" class="sig-pad" width="600" height="110"></canvas>
@@ -2321,6 +2331,7 @@
       const found = sid ? allSessions.find((x) => x.id === sid || x.session_code === sid) : null;
       if (found) {
         await openSession(found.id);
+        if (params.get("chat") === "1") openChatDrawer();          // 알림창 '최근 대화'에서 바로 채팅으로
       } else if (params.get("call_branch") && params.get("call_room")) {
         const val = `${params.get("call_branch")}|${params.get("call_room")}`;
         if (currentRole === "lessor") openLessorCallDialog(val);

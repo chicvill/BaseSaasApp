@@ -469,12 +469,32 @@ def _chat_actor(request: Request, s) -> Dict[str, str]:
     return {"role": "tenant", "name": str((s.terms or {}).get("tenant_name") or "임차인")}
 
 
+def _touch_chat_session(s, role: str, request: Request) -> None:
+    from apps.rent_dist._rent3_core import chatsessions as chat_sessions
+    from apps.rent_dist._rent3_core.models import Lessor, Tenant
+    try:
+        if role == "lessor":
+            me = Lessor.for_branch(s.branch)
+            viewer = f"lessor:{me.id}" if me else ""
+        else:
+            c = claims_from(request) or {}
+            tid = str(c.get("u", "")).removeprefix("tenant:")
+            tid = tid if Tenant.get(tid) else (s.id_tenant or "")
+            viewer = f"tenant:{tid}" if tid else ""
+        if viewer:
+            chat_sessions.touch(viewer, "contract", s.id, f"{s.room_no}호 계약방", s.branch)
+    except Exception:                                  # 목록 기록이 실패해도 채팅은 계속 된다
+        pass
+
+
 @router.get("/sessions/{session_id}/messages")
 def contract_messages(session_id: str, request: Request, mark_read: bool = True):
-    """계약방 대화 목록(문의·제안·수정 요청·안내). 당사자만. mark_read=false 면 읽음 처리하지 않는다(주기적 확인용)."""
+    """계약방 채팅 목록(문의·제안·수정 요청·안내). 당사자만. mark_read=false 면 읽음 처리하지 않는다(주기적 확인용)."""
     contract_chat.purge_expired()        # 보관 기간 지난 대화 정리(10분에 한 번)
     s = CoSignSession.by_code_or_id(session_id)
     who = _chat_actor(request, s)
+    if who["role"] and mark_read:                      # 채팅 세션(제목·시작 시각만 기록) — 알림창 '최근 대화'용
+        _touch_chat_session(s, who["role"], request)
     return {"success": True, **contract_chat.list_for(s, who["role"] or None, mark_read=mark_read)}
 
 
@@ -767,7 +787,7 @@ def update_terms(session_id: str, req: TermsUpdateReq):
         if locked:
             raise Conflict(
                 f"{', '.join(locked)}은(는) 직접 고칠 수 없습니다. 상대에게 제안하고 수락을 받아야 바뀝니다.",
-                hint="계약방 대화(💬)에서 '제안'을 보내세요. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.",
+                hint="계약방 채팅(💬)에서 '제안'을 보내세요. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.",
             )
     prev_rev = s.revision
     s.update_terms(role=req.role, updates=req.updates, app_source=APP_SRC)

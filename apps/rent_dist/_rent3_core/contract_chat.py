@@ -1,7 +1,7 @@
 """
-apps/rent_dist/_rent3_core/contract_chat.py — 계약방 대화(문의 · 제안 · 수정 요청 · 시스템 안내).
+apps/rent_dist/_rent3_core/contract_chat.py — 계약방 채팅(문의 · 제안 · 수정 요청 · 시스템 안내).
 
-기존 DirectChat 을 확장해 쓴다(session_id 가 있는 글이 계약방 대화). 관리인 지원 채팅(SupportMessage)과는 완전히 별개다.
+기존 DirectChat 을 확장해 쓴다(session_id 가 있는 글이 계약방 채팅). 관리인 지원 채팅(SupportMessage)과는 완전히 별개다.
 
 종류
   question        자유 문의. 계약이 진행 중인 동안(체결·취소 전) 언제나 가능.
@@ -39,7 +39,7 @@ REQUEST_FIELDS: Dict[str, str] = {"special_terms": "특약사항", "other": "기
 CONTRACT_KINDS = ("question", "proposal", "change_request", "system")
 MAX_BODY = 1000
 LAST_NEGOTIATION_STEP = 3
-CANCELLED_RETENTION_DAYS = 90        # 체결되지 못하고 취소된 계약방 대화: 취소 후 90일
+CANCELLED_RETENTION_DAYS = 90        # 체결되지 못하고 취소된 계약방 채팅: 취소 후 90일
 CONCLUDED_RETENTION_DAYS = 1825      # 체결된 계약의 협상 대화: 계약 종료(퇴실·해지·재계약 마감) 후 5년
 PURGED_NOTE = "보관 기간(계약 종료 후 5년)이 지나 삭제되었습니다. 체결 당시 기록한 해시만 남아 있습니다."
 _last_purge = 0.0
@@ -74,7 +74,7 @@ def _ensure_open_session(s: Any) -> None:
     if s.status != "IN_PROGRESS":
         raise Conflict(
             "체결되었거나 취소된 계약방에는 새 글을 남길 수 없습니다.",
-            hint="지난 대화는 읽을 수만 있습니다.",
+            hint="지난 채팅은 읽을 수만 있습니다.",
         )
 
 
@@ -113,7 +113,7 @@ def _sys(s: Any, text: str, step: Optional[int] = None) -> DirectChat:
 
 
 def system_note(session: Any, text: str, step: Optional[int] = None) -> DirectChat:
-    """계약방 대화에 자동 안내 글을 남긴다(조건 다시 열기 등)."""
+    """계약방 채팅에 자동 안내 글을 남긴다(조건 다시 열기 등)."""
     return _sys(session, text, step)
 
 
@@ -125,7 +125,7 @@ def _day(iso: str) -> Optional[date]:
 
 
 def purge_expired(force: bool = False) -> Dict[str, int]:
-    """보관 기간이 지난 계약방 대화를 지운다(지연 삭제: 로그인·목록 조회 때 호출, 스케줄러 없음).
+    """보관 기간이 지난 계약방 채팅를 지운다(지연 삭제: 로그인·목록 조회 때 호출, 스케줄러 없음).
     - 취소된 계약방: 취소 시각(cancelled_at, 없으면 updated_at)으로부터 90일이 지나면 삭제.
     - 체결된 계약: 계약이 ACTIVE 인 동안에는 절대 지우지 않고, 종료(ended_at → move_out_date → updated_at) 후 5년이 지나면 삭제.
       이때 Contract.chat_purged_at 을 남겨, 해시가 달라진 것(변조)과 기간 만료로 지운 것을 구분한다.
@@ -186,7 +186,7 @@ DIGEST_FIELDS = ("id", "kind", "sender_role", "message", "step", "field", "propo
 
 
 def compute_digest(session_id: str) -> tuple:
-    """계약방 대화의 (SHA-256 16진수, 글 수). 같은 내용이면 언제 계산해도 같다."""
+    """계약방 채팅의 (SHA-256 16진수, 글 수). 같은 내용이면 언제 계산해도 같다."""
     import hashlib
     import json
     rows = [{k: getattr(m, k) for k in DIGEST_FIELDS} for m in messages_of(session_id)]
@@ -339,5 +339,5 @@ def ensure_no_open_requests(session_id: str) -> None:
     if n:
         raise Conflict(
             f"아직 답하지 않은 제안·수정 요청이 {n}건 있습니다.",
-            hint="계약방 대화에서 수락·거절·철회(또는 확인·반영)를 먼저 처리한 뒤 동의해 주세요.",
+            hint="계약방 채팅에서 수락·거절·철회(또는 확인·반영)를 먼저 처리한 뒤 동의해 주세요.",
         )

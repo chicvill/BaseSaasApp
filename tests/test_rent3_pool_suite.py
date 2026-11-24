@@ -4176,7 +4176,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for gone in ("미체크", "미확인", "임차인 확인 잠금", "임대인 확인: "):
             self.assertNotIn(gone, app, gone)
         manual = rd("apps", "rent_dist", "rent3_contract", "frontend", "manual.html")
-        for needle in ("제안", "수락", "[계약 조건 전체 동의]", "조건 다시 열기", "계약방 대화", "90일", "5년"):
+        for needle in ("제안", "수락", "[계약 조건 전체 동의]", "조건 다시 열기", "계약방 채팅", "90일", "5년"):
             self.assertIn(needle, manual, needle)
         self.assertNotIn("공동 편집", manual)
         qa = rd("scripts", "generate_rent3_qa_pdf.py")
@@ -8657,6 +8657,45 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, nj, needle)
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn('get("user")', adm)
+
+    def test_138_contract_room_chat_gets_chat_improvements(self):
+        """138. 계약방 채팅도 채팅과 같다: 열면 세션(제목·시작 시각만)이 남아 알림창 '최근 대화'에 뜨고 계약방으로 바로 돌아가며, 안 읽은 글은 개수로만 표시한다. 상대 전화 단추·'채팅' 용어."""
+        from apps.rent_dist._rent3_core import chatsessions as cht, Tenant
+        c = self.client
+        cht._last_seen.clear()
+        sid = self._policy_session("962", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        lh, th = self._party_headers(sid)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        secret = "t138 비밀 문의 5521"
+        self.assertEqual(c.post(url, headers=th, json={"kind": "question", "body": secret}).status_code, 200)
+        for _ in range(3):                                                      # 열려 있는 동안 반복 읽기는 한 세션
+            c.get(url, headers=lh)
+        mine = [x for x in cht.ChatSession.find(viewer="lessor:" + self._lessor_id_main()) if x.kind == "contract"]
+        self.assertEqual(len(mine), 1)
+        c.get(url + "?mark_read=false", headers=lh)                             # 주기적 확인(읽음 처리 없음)은 세션을 만들지 않는다
+        self.assertEqual(len([x for x in cht.ChatSession.find(viewer="lessor:" + self._lessor_id_main()) if x.kind == "contract"]), 1)
+        l = c.get("/api/rent3_lessor/notifications?branch=main", headers=lh).json()
+        rec = [x for x in l["recent_chats"] if "962호 계약방" in x["title"]]
+        self.assertTrue(rec, l["recent_chats"])
+        self.assertRegex(rec[0]["title"], r"^채팅 : 962호 계약방\(\d{1,2}/\d{1,2} \d{2}:\d{2}\)$")
+        self.assertEqual(rec[0]["link"], f"/rent3_contract/?session={sid}&chat=1")
+        self.assertEqual(rec[0]["preview"], "")
+        self.assertEqual(rec[0]["unread"], 0)
+        self.assertNotIn(secret, json.dumps(l, ensure_ascii=False))             # 알림에는 내용이 없다
+        # 임차인이 새 글을 보내면 임대인 쪽은 개수만 올라가고(분홍), 임차인은 자기 목록에 계약방이 생긴다
+        c.post(url, headers=th, json={"kind": "question", "body": secret + " 2"})
+        l2 = c.get("/api/rent3_lessor/notifications?branch=main", headers=lh).json()
+        self.assertEqual([x["unread"] for x in l2["recent_chats"] if "962호 계약방" in x["title"]][0], 1)
+        c.get(url, headers=th)
+        owners = [t for t in Tenant.all() if any(v.kind == "contract" and v.ref == sid for v in cht.ChatSession.find(viewer=f"tenant:{t.id}"))]
+        self.assertEqual(len(owners), 1)
+        # 화면: 전화 단추 + '채팅' 용어 + 알림에서 바로 열기
+        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("cmCall", 'href="tel:', "에게 전화", "중요한 통화 내용은 아래 채팅에 기록", "계약방 채팅", 'params.get("chat") === "1"'):
+            self.assertIn(needle, app, needle)
+        self.assertNotIn("계약방 대화", app)
+        self.assertNotIn("대화 열기", app)
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

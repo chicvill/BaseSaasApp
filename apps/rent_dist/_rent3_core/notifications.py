@@ -266,6 +266,12 @@ def _recent(role: str, ctx: Any) -> List[Dict[str, Any]]:
             elif s.kind == "support":
                 action = "support"
                 unread = sup.unread_count(sup.thread_key(ctx), "user")
+            elif s.kind == "contract":
+                from .cosign import CoSignSession
+                from . import contract_chat as cc
+                cs = CoSignSession.by_code_or_id(s.ref)
+                link = f"/rent3_contract/?session={quote(str(s.ref))}&chat=1"
+                unread = cc.summary_for(cs, role)["unread"]
             elif role == "lessor":
                 link = f"/rent3_lessor/?branch={s.branch}&tab=messages&room={quote(str(s.ref))}"
                 unread = rm.unread_count(s.branch, str(s.ref), "lessor")
