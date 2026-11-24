@@ -132,8 +132,8 @@
       (c.unread > 0 ? ` <span class="bass-badge bass-badge--err">안 읽음 ${c.unread}</span>` : "");
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <h3 style="margin:0 0 4px;">🎯 원격 지원 · 대리 접속</h3>
-        <p class="bass-muted" style="font-size:12.5px;margin:0 0 10px;">사용자가 <strong>원격 지원을 허용</strong>했고 <strong>지원 채팅</strong>(전화로 받았다면 사용자에게 먼저 글을 보내 시작)이 있어야 입장할 수 있습니다. 입장하면 <strong>보기 전용</strong>이며 접속 기록이 남습니다.</p>
+        <h3 style="margin:0 0 4px;">💬 임대인·임차인 채팅 · 원격 지원</h3>
+        <p class="bass-muted" style="font-size:12.5px;margin:0 0 10px;">① 건물·호실을 고르고 임대인 또는 임차인 카드의 <strong>[💬 채팅하기]</strong>를 누르면 그 사용자와 채팅(관리인이 먼저 글을 보내 시작 가능)할 수 있습니다. 화면 <strong>입장</strong>은 그 사용자 본인이 <strong>원격 지원을 허용</strong>했을 때만 되며, 보기 전용이고 접속 기록이 남습니다.</p>
         <div class="field-grid">
           <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">① 건물<select id="spBranch" class="bass-select">${d.branches.map((b) => `<option value="${Bass.escapeHtml(b.branch)}" ${b.branch === sp.branch ? "selected" : ""}>${Bass.escapeHtml(b.building_name)} (${Bass.escapeHtml(b.branch)})</option>`).join("")}</select></label>
           <label class="r3-fld" style="display:grid;gap:3px;font-size:12.5px;">② 호실<select id="spRoom" class="bass-select"><option value="">건물 전체 (임대인)</option>${rooms.map((r) => `<option value="${Bass.escapeHtml(r.room_no)}" ${r.room_no === sp.roomNo ? "selected" : ""}>${Bass.escapeHtml(r.room_no)}호 ${r.tenant ? Bass.escapeHtml(r.tenant.name) : "공실"}${r.sessions.length ? ` · 계약방 ${r.sessions.length}` : ""}</option>`).join("")}</select></label>
@@ -142,7 +142,7 @@
           <div class="item-card" style="margin-top:8px;">
             <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
               <div><strong>${Bass.escapeHtml(c.title)}</strong> <span class="bass-muted" style="font-size:12px;">(끝자리 ${Bass.escapeHtml(c.phone_tail)})</span><div style="margin-top:4px;">${badge(c)}</div></div>
-              <button class="bass-btn bass-btn--sm ${c.user === sp.user ? "bass-btn--primary" : ""} btn-sp-open" data-user="${Bass.escapeHtml(c.user)}" type="button">💬 지원 채팅 / 입장</button>
+              <button class="bass-btn bass-btn--sm ${c.user === sp.user ? "bass-btn--primary" : ""} btn-sp-open" data-user="${Bass.escapeHtml(c.user)}" type="button">💬 채팅하기</button>
             </div>
           </div>`).join("") || '<div class="bass-muted">이 건물에서 보여 줄 사용자가 없습니다.</div>'}</div>
       </div>

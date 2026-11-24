@@ -8596,6 +8596,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("관리인에게 전화 :", 'id="r3SupAllow"', "/support\", { method: \"POST\"", "중요한 통화 내용은 이 채팅창에 남겨 주세요"):
             self.assertIn(needle, shell, needle)
         self.assertIn("위 채팅창에 기록을 남겨 주세요", adm)
+        for needle in ("💬 채팅하기", "임대인·임차인 채팅 · 원격 지원"):
+            self.assertIn(needle, adm, needle)
+        idx = open(os.path.join(base, "rent3_admin", "frontend", "index.html"), encoding="utf-8").read()
+        self.assertIn("💬 임대인·임차인에게 채팅", idx)        # ☰ 메뉴에서 바로 채팅으로 간다
         self.assertIn('callBtn(d.tenant_phone, "임차인 전화")', open(os.path.join(base, "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read())
         self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
 
