@@ -8825,8 +8825,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             if t:
                 t.delete(action="t")
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("btnTiCheck", "btnTiApply", "/accounts/test-identity", "시험 예비임차인 본인인증 처리"):
+        for needle in ("btnTiCheck", "btnTiApply", "/accounts/test-identity", "시험 예비임차인 본인인증 처리", 'id="tiCard"', 'get("focus") === "testtools"'):
             self.assertIn(needle, adm, needle)
+        aidx = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8").read()
+        self.assertIn("/rent3_admin/?tab=ops&focus=testtools", aidx)                                       # ☰ 바로가기
 
     def test_143_login_by_name_is_explained_in_production(self):
         """143. 운영 접속에서는 이름(성명)만으로 로그인되지 않으며, 오류 안내가 그 사실을 알리고 '번호로 간편가입' 제안은 번호를 넣었을 때만 나온다. 휴대폰 번호로는 로그인된다."""

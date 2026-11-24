@@ -745,7 +745,7 @@
           <button id="btnOpsResetAct" class="bass-btn" type="button" style="min-height:44px;">↩ 가입 상태 초기화 (재시험)</button></div>
         <div id="opsResult" style="margin-top:10px;font-size:13px;word-break:break-all;"></div>
       </div>
-      <div class="bass-card" style="margin-top:14px;">
+      <div class="bass-card" id="ttCard" style="margin-top:14px;">
         <h3>🧪 시험 임차인 등록</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">실사용 확인용으로 호실 하나와 <strong>0원 계약</strong> 임차인을 등록합니다(공개 매물에는 나오지 않음). 먼저 <strong>점검</strong>으로 확인한 뒤 <strong>등록</strong>하세요 — 등록 전에 풀 전체를 자동 백업하고, 같은 호실·임차인이 있으면 아무것도 만들지 않습니다.</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -760,7 +760,7 @@
           <button id="btnTtApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 등록</button></div>
         <div id="ttResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
       </div>
-      <div class="bass-card" style="margin-top:14px;">
+      <div class="bass-card" id="tiCard" style="margin-top:14px;">
         <h3>🧪 시험 예비임차인 본인인증 처리</h3>
         <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">가짜 번호라 문자 인증번호를 받을 수 없는 <strong>시험용 예비임차인</strong>(포털에서 가입만 한 계정)을 본인인증 완료로 표시합니다. 입주 중인 임차인·이미 인증된 계정은 바꾸지 않고, 기록에는 <strong>시험용 인증</strong>으로 남습니다. 먼저 <strong>점검</strong>으로 확인한 뒤 <strong>처리</strong>하세요 — 처리 전에 풀 전체를 자동 백업합니다.</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
@@ -797,6 +797,12 @@
     };
     document.getElementById("btnTiCheck").addEventListener("click", tiRun(false));
     document.getElementById("btnTiApply").addEventListener("click", tiRun(true));
+    // ☰ '🧪 시험 계정 도구' 바로가기(?tab=ops&focus=testtools): 처음 한 번만 시험 계정 카드 위치로 내려간다
+    if (!window.__r3FocusDone && new URLSearchParams(location.search).get("focus") === "testtools") {
+      window.__r3FocusDone = true;
+      const el = document.getElementById("ttCard");
+      if (el) el.scrollIntoView({ block: "start" });
+    }
     document.getElementById("btnBkRun").addEventListener("click", function () {
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
