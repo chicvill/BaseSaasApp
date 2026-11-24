@@ -8576,9 +8576,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         c = self.client
         chic, ten = self._login("chic"), self._login("tenant_201")
         sup = c.get("/api/rent3/pool/support/thread", headers=chic).json()
-        self.assertEqual(sup["admin_phone"], "010-1212-3434")
+        self.assertEqual(sup["admin_phone"], "010-3269-3343")
         tsup = c.get("/api/rent3/pool/support/thread", headers=ten).json()
-        self.assertEqual(tsup["admin_phone"], "010-1212-3434")
+        self.assertEqual(tsup["admin_phone"], "010-3269-3343")
         room = c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic).json()
         self.assertIn("tenant_phone", room)
         self.assertTrue(room["tenant_phone"])
@@ -8588,9 +8588,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         adm = open(os.path.join(base, "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("에게 전화 :", 'href="tel:${Bass.escapeHtml(callDigits)}"', 'id="spCat"'):
             self.assertIn(needle, adm, needle)
-        for gone in ('id="btnSpPhone"', 'id="spMemo"', "전화 접수 남기기", "중요한 통화 내용"):
+        for gone in ('id="btnSpPhone"', 'id="spMemo"', "전화 접수 남기기"):
             self.assertNotIn(gone, adm, gone)
-        self.assertIn("관리인에게 전화", open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read())
+        shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
+        for needle in ("관리인에게 전화 :", 'id="r3SupAllow"', "/support\", { method: \"POST\"", "중요한 통화 내용은 이 채팅창에 남겨 주세요"):
+            self.assertIn(needle, shell, needle)
+        self.assertIn("위 채팅창에 기록을 남겨 주세요", adm)
         self.assertIn('callBtn(d.tenant_phone, "임차인 전화")', open(os.path.join(base, "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read())
         self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
 

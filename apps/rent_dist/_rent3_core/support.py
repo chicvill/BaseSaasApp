@@ -26,6 +26,9 @@ from .pool import PoolObj, now_iso
 SUPPORT_CHAT_DAYS = 10          # 지원 채팅 글 보관 일수
 ACCESS_LOG_DAYS = 365           # 접속 기록 보관 일수 (1년)
 ACCESS_WINDOW_MIN = 30          # 접속 후 '관리인이 접속 중' 알림을 보이는 시간(분)
+import os as _os
+# 사용자가 '관리인에게 전화' 단추로 거는 번호(운영 중 바꾸려면 환경변수 RENT3_SUPPORT_PHONE). 없으면 관리인 계정의 번호를 쓴다.
+SUPPORT_PHONE = _os.environ.get("RENT3_SUPPORT_PHONE", "010-3269-3343").strip()
 CATEGORIES = ("사용법 문의", "오류 신고", "계정 문제", "기타")
 VIEW_KO = {"lessor": "임대인 입장", "tenant": "임차인 입장", "contract": "계약방"}
 MAX_BODY = 1000

@@ -541,7 +541,9 @@ def _support_user(request: Request) -> Any:
 
 
 def _admin_phone() -> str:
-    """사용자가 관리인에게 전화할 번호: 번호가 있는 총괄 관리인(superadmin) 계정의 연락처."""
+    """사용자가 관리인에게 전화할 번호: 지원 전화번호(SUPPORT_PHONE), 없으면 번호가 있는 총괄 관리인(superadmin) 계정의 연락처."""
+    if sup.SUPPORT_PHONE:
+        return sup.SUPPORT_PHONE
     from apps.rent_dist._rent3_core.models import Admin
     admins = sorted(Admin.all(), key=lambda a: (a.role != "superadmin", a.created_at))
     return next(((a.phone or "").strip() for a in admins if (a.phone or "").strip()), "")

@@ -129,7 +129,7 @@ class Admin(PoolObj):
     id: str = Field(default_factory=lambda: f"admin_{uuid4().hex[:6]}")
     username: str = "admin"
     name: str = "본사 총괄 관리인"
-    phone: str = "010-1212-3434"
+    phone: str = "010-3269-3343"
     account_number: str = "국민 123-456-789012"
     business_number: str = "101-86-12345"
     email: str = "admin@rent3.saas.kr"

@@ -175,6 +175,7 @@
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
           <div class="bass-row" style="gap:8px;align-items:center;flex-wrap:wrap;"><strong style="font-size:13.5px;">📞 ${Bass.escapeHtml(card.title)}에게 전화 :</strong>
             ${callPhone ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${Bass.escapeHtml(callDigits)}" style="min-height:40px;">${Bass.escapeHtml(callPhone)}</a>` : '<span class="bass-muted" style="font-size:12.5px;">등록된 전화번호가 없습니다</span>'}</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-top:6px;">💡 중요한 통화 내용은 위 채팅창에 기록을 남겨 주세요.</div>
         </div>
 
         <div style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--border);">
