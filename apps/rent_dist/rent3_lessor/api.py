@@ -2302,6 +2302,7 @@ class RenewalPreviewReq(BaseModel):
     proposed_monthly_rent: Optional[int] = None
     proposed_maintenance_fee: Optional[int] = None
     proposed_term_months: int = 12
+    proposed_cleaning_fee: Optional[int] = None
     renewal_note: str = ""
     open_cosign_session: bool = True
 
@@ -2370,6 +2371,7 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
         renewal_note=req.renewal_note,
         open_cosign_session=req.open_cosign_session,
         app_source=APP_SRC,
+        proposed_cleaning_fee=req.proposed_cleaning_fee,
     )
     code_hint = (
         f"공동 재계약방(참여코드 {chk.cosign_session_code})이 함께 개설되어 임차인 마이홈에 전달되었습니다."

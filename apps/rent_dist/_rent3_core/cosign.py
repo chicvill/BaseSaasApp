@@ -594,7 +594,7 @@ class CoSignSession(PoolObj):
                 "pay_timing": listing.pay_timing or "후불",
                 "vat_target": prev_ct.vat_target if prev_ct else listing.vat_applicable,
                 "vat_separate": True,
-                "contract_deposit": 0 if is_renewal else 300000,
+                "contract_deposit": 0 if is_renewal else int(round(int((prev_ct.deposit if prev_ct else listing.deposit) or 0) * 0.1 / 1000.0)) * 1000,   # 계약금 = 보증금의 10%(천 원 단위)
                 "deposit": prev_ct.deposit if prev_ct else listing.deposit,
                 "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else listing.monthly_rent),
                 "maintenance_fee": prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee,

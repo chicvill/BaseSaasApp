@@ -900,6 +900,7 @@ class ExpiryRenewalCheck(PoolObj):
         renewal_note: str = "",
         open_cosign_session: bool = True,
         app_source: str = "rent3_lessor",
+        proposed_cleaning_fee: Optional[int] = None,
     ) -> "ExpiryRenewalCheck":
         if self.tenant_plan == "MOVE_OUT":
             raise DomainError(
@@ -959,6 +960,7 @@ class ExpiryRenewalCheck(PoolObj):
                     "deposit": dep,
                     "monthly_rent": rent,
                     "maintenance_fee": maint,
+                    **({"cleaning_fee": int(proposed_cleaning_fee)} if proposed_cleaning_fee is not None else {}),
                     "lease_term_months": months,
                     "move_in_date": ct.expiry_date or date_today().isoformat(),
                     "special_terms": (

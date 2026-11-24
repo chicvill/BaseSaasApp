@@ -9957,6 +9957,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         t = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
         self.assertEqual((t["deposit"], t["contract_deposit"]), (4800000, 480000))
 
+    def test_160_contract_deposit_default_ten_percent_and_no_new_button(self):
+        """160. 신규 계약의 계약금 기본값은 보증금의 10%(천 원 단위)이고, 입주 중 계약 창에는 '신규 계약' 단추가 없으며 연장 계약은 청소비를 서버로 보내고 오류를 삼키지 않는다."""
+        c = self.client
+        sid = self._policy_session("967", 5000000, 300000)
+        t = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
+        self.assertEqual(t["contract_deposit"], 500000)
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        lapp = rd("rent3_lessor", "frontend", "app.js")
+        self.assertNotIn("cmNewContract", lapp)
+        self.assertIn("proposed_cleaning_fee: pClean", lapp)
+        self.assertNotIn("catch (_) {}", lapp[lapp.index("rnGo"):lapp.index("rnGo") + 3000])
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

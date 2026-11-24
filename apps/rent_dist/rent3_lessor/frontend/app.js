@@ -975,7 +975,6 @@
         <button id="cmSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
         ${hasPhoto ? `<button id="cmViewPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 보기</button>` : ""}
         <button id="cmPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 ${hasPhoto ? "다시 " : ""}등록</button>
-        <button id="cmNewContract" class="bass-btn bass-btn--sm" type="button">🤝 신규 계약</button>
         <button id="cmRenew" class="bass-btn bass-btn--sm" type="button">🔁 연장 계약</button>
       </div>
       ${ct.keys_released === false ? `<div class="bass-card" style="margin-top:12px;padding:10px;">
@@ -1017,41 +1016,6 @@
       });
     });
     $m("cmPhoto").addEventListener("click", () => { closeModal(); brokerTargetRoomNo = no; switchTab("broker"); });
-    const btnNewCt = $m("cmNewContract");
-    if (btnNewCt) {
-      btnNewCt.addEventListener("click", function () {
-        Bass.withLock(this, async () => {
-          await saveContractEdits();
-          const dep = Number($m("cmDep").value || 0);
-          const rent = Number($m("cmRent").value || 0);
-          const fee = Number($m("cmFee").value || 0);
-          const clean = Number($m("cmClean").value || 0);
-          const moveIn = $m("cmIn").value;
-          const tName = (ct.tenant_name || "").trim();
-          const tPhone = $m("cmTel").value.trim();
-          const created = await Bass.api("rent3_contract", "/sessions", {
-            method: "POST",
-            body: { branch: currentBranch, room_no: no, tenant_name: tName, tenant_phone: tPhone, mode: "NEW", initiated_by_role: "lessor" },
-          });
-          const sess = created.session;
-          if (sess && sess.id) {
-            const bundle = { deposit: dep, monthly_rent: rent, maintenance_fee: fee, cleaning_fee: clean };
-            if (moveIn) bundle.move_in_date = moveIn;
-            try {
-              await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sess.id)}/terms`, {
-                method: "POST",
-                body: { role: "lessor", updates: bundle, expected_revision: sess.revision },
-              });
-              await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sess.id)}/messages`, {
-                method: "POST",
-                body: { kind: "bundle", body: "수정된 신규 계약 조건을 제시합니다.", bundle },
-              });
-            } catch (_) {}
-            window.location.href = `/rent3_contract/?session=${encodeURIComponent(sess.id)}&role=lessor&chat=1`;
-          }
-        });
-      });
-    }
     const btnRenew = $m("cmRenew");
     if (btnRenew) {
       btnRenew.addEventListener("click", () => {
@@ -1096,22 +1060,13 @@
                 proposed_monthly_rent: pRent,
                 proposed_maintenance_fee: pFee,
                 proposed_term_months: pTerm,
+                proposed_cleaning_fee: pClean,
                 open_cosign_session: true,
               },
             });
             Bass.updateAppAlert("success", res.message || "연장 재계약방이 열렸습니다.");
             const sid = res.check && res.check.cosign_session_id;
             if (sid) {
-              try {
-                await Bass.api("rent3_contract", `/sessions/${encodeURIComponent(sid)}/messages`, {
-                  method: "POST",
-                  body: {
-                    kind: "bundle",
-                    body: "연장 재계약 조건을 제시합니다.",
-                    bundle: { deposit: pDep, monthly_rent: pRent, maintenance_fee: pFee, cleaning_fee: pClean, lease_term_months: pTerm },
-                  },
-                });
-              } catch (_) {}
               await refresh();
               window.location.href = `/rent3_contract/?session=${encodeURIComponent(sid)}&role=lessor&chat=1`;
             } else {
