@@ -1042,7 +1042,7 @@ def _user_card(user: Any) -> Dict[str, Any]:
     key = sup.thread_key(user)
     msgs = sup.thread_messages(key)
     return {
-        "id": user.id, "name": user.name, "user": key, "phone_tail": "".join(ch for ch in (user.phone or "") if ch.isdigit())[-4:],
+        "id": user.id, "name": user.name, "user": key, "branch": user.branch, "room_no": sup._room_of(user), "role": sup.thread_role(user), "phone_tail": "".join(ch for ch in (user.phone or "") if ch.isdigit())[-4:],
         "support_allowed": cs.support_allowed(user),
         "has_thread": bool(msgs), "unread": sup.unread_count(key, "admin"),
         "last_at": msgs[-1].created_at if msgs else "",

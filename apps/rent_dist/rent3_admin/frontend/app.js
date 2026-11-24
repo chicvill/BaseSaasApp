@@ -114,6 +114,16 @@
 
   async function renderSupportTab() {
     elTabContent.innerHTML = '<div class="bass-muted" style="padding:14px;">불러오는 중...</div>';
+    // 알림창의 '최근 대화'에서 들어오면(?user=lessor:..) 그 사용자의 건물·호실을 고르고 채팅을 바로 연다(한 번만)
+    const qUser = new URLSearchParams(location.search).get("user");
+    if (qUser && currentTab === "support") {
+      try {
+        const t0 = await Bass.api(APP_ID, `/support/thread?user=${encodeURIComponent(qUser)}`);
+        const u0 = t0.user || {};
+        sp.branch = u0.branch || sp.branch; sp.roomNo = u0.room_no || ""; sp.user = qUser;
+      } catch (_) { /* 사용자를 못 찾으면 평소처럼 목록부터 */ }
+      try { const u = new URL(location.href); u.searchParams.delete("user"); history.replaceState(history.state, "", u.toString()); } catch (_) { /* 주소 정리 실패는 무시 */ }
+    }
     let d = await Bass.api(APP_ID, "/support/directory" + (sp.branch ? `?branch=${encodeURIComponent(sp.branch)}` : ""));
     if (!sp.branch && d.branches.length) {
       sp.branch = d.branches[0].branch;

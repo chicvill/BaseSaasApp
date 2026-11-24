@@ -237,6 +237,86 @@ def _a_all(_: Any) -> List[Optional[Dict[str, Any]]]:
 ADMIN_COLLECTORS: List[Callable[[Any], Any]] = [_a_all]
 
 
+# ───────────────────────── 최근 대화 (새 글이 없어도 알림창에서 이전 대화로 돌아가는 목록) ─────────────────────────
+RECENT_CHATS_MAX = 8
+
+
+def _chat(title: str, body: str, at: str, link: str = "", action: str = "", unread: int = 0, mine: bool = False) -> Dict[str, Any]:
+    text = " ".join(str(body or "").split())
+    return {"title": title, "preview": ("나: " if mine else "") + (text[:40] + ("…" if len(text) > 40 else "")), "at": at or "",
+            "link": link, "action": action, "unread": int(unread)}
+
+
+def _support_chat(user: Any) -> Optional[Dict[str, Any]]:
+    ms = sup.thread_messages(sup.thread_key(user))
+    ms = [m for m in ms if m.kind != "access_start"] or ms
+    if not ms:
+        return None
+    m = ms[-1]
+    return _chat("💬 관리인 문의", m.body, m.created_at, action="support", unread=sup.unread_count(sup.thread_key(user), "user"), mine=m.sender_role == "user")
+
+
+def _recent_lessor(l: Lessor) -> List[Dict[str, Any]]:
+    from urllib.parse import quote
+    from . import room_messages as rm
+    out = []
+    for r in rm.rooms_overview(l.branch):
+        if not r.get("count"):
+            continue
+        who = f" {r['tenant_name']}" if r.get("tenant_name") else ""
+        out.append(_chat(f"{r['room_no']}호{who}", r.get("last_body", ""), r.get("last_at", ""),
+                         link=_l_base(l) + f"&tab=messages&room={quote(str(r['room_no']))}", unread=int(r.get("unread") or 0), mine=r.get("last_role") == "lessor"))
+    s = _support_chat(l)
+    return [c for c in out + ([s] if s else [])]
+
+
+def _recent_tenant(t: Tenant) -> List[Dict[str, Any]]:
+    from . import room_messages as rm
+    out = []
+    if t.room_no:
+        room = Room.first(branch=t.branch, room_no=t.room_no)
+        ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
+        msgs = rm.room_messages(t.branch, t.room_no, t, ct.created_at if ct else "")
+        if msgs:
+            m = msgs[-1]
+            out.append(_chat("✉️ 임대인과 메시지", m.message, m.created_at, link=f"/rent3_tenant/?tenant={t.id}&svc=messages",
+                             unread=rm.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else ""), mine=m.sender_role == "tenant"))
+    s = _support_chat(t)
+    return out + ([s] if s else [])
+
+
+def _recent_admin(_: Any) -> List[Dict[str, Any]]:
+    from .support import SupportMessage
+    threads: Dict[str, List[Any]] = {}
+    for m in SupportMessage.all():
+        threads.setdefault(m.thread_user, []).append(m)
+    out = []
+    for key, ms in threads.items():
+        ms.sort(key=lambda m: (m.created_at, m.id))
+        last = [m for m in ms if m.kind != "access_start"] or ms
+        m = last[-1]
+        try:
+            u = sup.user_by_thread(key)
+            name = (getattr(u, "name", "") or key)
+        except Exception:
+            name = key
+        role = "임대인" if key.startswith("lessor:") else "임차인"
+        room = f" {m.room_no}호" if m.room_no else ""
+        out.append(_chat(f"{role} {name}{room}", m.body, m.created_at, link=f"/rent3_admin/?tab=support&user={key}",
+                         unread=sum(1 for x in ms if x.sender_role == "user" and not x.read_by_admin), mine=m.sender_role != "user"))
+    return out
+
+
+def _recent(role: str, ctx: Any) -> List[Dict[str, Any]]:
+    try:
+        fn = {"tenant": _recent_tenant, "lessor": _recent_lessor, "admin": _recent_admin}[role]
+        chats = fn(ctx)
+    except Exception:                          # 최근 대화를 못 만들어도 알림은 계속 보여 준다
+        return []
+    chats.sort(key=lambda c: c["at"], reverse=True)
+    return chats[:RECENT_CHATS_MAX]
+
+
 # ───────────────────────── 일괄 실행 ─────────────────────────
 def _run(collectors: List[Callable[[Any], Any]], ctx: Any) -> List[Dict[str, Any]]:
     items: List[Dict[str, Any]] = []
@@ -268,7 +348,7 @@ def summary(role: str, ctx: Any, key: str, use_cache: bool = True) -> Dict[str, 
     colls = {"tenant": TENANT_COLLECTORS, "lessor": LESSOR_COLLECTORS, "admin": ADMIN_COLLECTORS}[role]
     items = _run(colls, ctx)
     data = {"total": sum(i["count"] for i in items), "urgent": sum(i["count"] for i in items if i["level"] == "urgent"), "items": items,
-            "generated_at": now_iso()}
+            "recent_chats": _recent(role, ctx), "generated_at": now_iso()}
     _cache[ck] = {"rev": rev, "at": time.time(), "data": data}
     return data
 

@@ -8604,5 +8604,37 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
 
 
+    def test_137_notification_panel_lists_recent_chats_even_without_new_alerts(self):
+        """137. 알림창에 새 알림이 없어도 '최근 대화' 목록이 있어 이전 대화로 돌아갈 수 있다(임대인=호실 대화·관리인 문의, 임차인=임대인 대화, 관리인=문의 대화 → ?user= 로 그 채팅이 열린다)."""
+        c = self.client
+        chic, ten = self._login("chic"), self._login("tenant_201")
+        # 읽은 상태로 만든 뒤에도 목록은 남는다
+        posted = c.post("/api/rent3_tenant/myhome/tenant_201/messages", headers=ten, json={"body": "t137 안녕하세요 임대인님"})
+        self.assertEqual(posted.status_code, 200, posted.text)
+        c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic)                    # 임대인이 읽음 처리
+        l = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
+        self.assertIn("recent_chats", l)
+        mine = [x for x in l["recent_chats"] if "201호" in x["title"]]
+        self.assertTrue(mine, l["recent_chats"])
+        self.assertIn("t137", mine[0]["preview"])
+        self.assertIn("tab=messages&room=201", mine[0]["link"])
+        self.assertEqual(mine[0]["unread"], 0)                                                      # 읽었어도 남는다
+        c.post("/api/rent3/pool/support/messages", headers=chic, json={"body": "t137 문의"})
+        l2 = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
+        self.assertTrue(any(x["action"] == "support" and "t137" in x["preview"] for x in l2["recent_chats"]))
+        t = c.get("/api/rent3_tenant/myhome/tenant_201/notifications", headers=ten).json()
+        self.assertTrue(any("임대인과 메시지" in x["title"] for x in t["recent_chats"]))
+        a = c.get("/api/rent3_admin/notifications").json()
+        lk = [x for x in a["recent_chats"] if "t137" in x["preview"]]
+        self.assertTrue(lk and "tab=support&user=lessor:" in lk[0]["link"], a["recent_chats"])
+        self.assertLessEqual(len(l["recent_chats"]), 8)
+        base = os.path.join(ROOT, "shared_ui", "r3_notify.js")
+        nj = open(base, encoding="utf-8").read()
+        for needle in ("최근 대화", "recent_chats", "bindChats"):
+            self.assertIn(needle, nj, needle)
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn('get("user")', adm)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -95,8 +95,30 @@
     var d = state.data;
     if (!global.R3 || !global.R3.openModal) { return; }
     var body = global.R3.openModal("🔔 알림 " + (d.total > 0 ? d.total + "건" : "없음"), "");
+    var recent = (d.recent_chats || []);
+    // 새 알림이 없어도 이전에 대화하던 창으로 돌아갈 수 있게 '최근 대화' 목록을 늘 함께 보여 준다
+    var recentHtml = recent.length
+      ? '<div style="margin:14px 0 6px;font-weight:800;font-size:14px;">💬 최근 대화</div><div class="r3-nlist">' + recent.map(function (c, i) {
+          var inner = '<span class="r3-nitem__n" style="' + (c.unread > 0 ? "" : "background:#e2e8f0;color:#475569;") + '">' + (c.unread > 0 ? esc(badgeText(c.unread)) : "💬") + '</span><span class="r3-nitem__t">' + esc(c.title) +
+            '<span class="r3-nitem__d">' + esc(c.preview || "") + (c.at ? " · " + esc(String(c.at).slice(5, 16).replace("T", " ").replace("-", ".")) : "") + '</span></span><span class="r3-nitem__go">열기 ›</span>';
+          var cls = "r3-nitem r3-nitem--normal";
+          if (c.link && !c.action) return '<a class="' + cls + '" data-c="' + i + '" href="' + esc(c.link) + '">' + inner + "</a>";
+          return '<button type="button" class="' + cls + '" data-c="' + i + '">' + inner + "</button>";
+        }).join("") + "</div>"
+      : "";
+    function bindChats() {
+      body.addEventListener("click", function (e) {
+        var el = e.target.closest("[data-c]");
+        if (!el) return;
+        var c = recent[Number(el.getAttribute("data-c"))];
+        if (!c) return;
+        if (c.action === "support" && state.opts && state.opts.openSupport) { global.R3.closeModal(); state.opts.openSupport(); }
+        else if (c.link && el.tagName !== "A") { location.href = c.link; }
+      });
+    }
     if (!d.items.length) {
-      body.innerHTML = '<div style="padding:24px 8px;text-align:center;color:#64748b;font-size:14px;">지금 처리할 알림이 없습니다. 👍</div>';
+      body.innerHTML = '<div style="padding:18px 8px;text-align:center;color:#64748b;font-size:14px;">지금 처리할 알림이 없습니다. 👍</div>' + recentHtml;
+      bindChats();
       return;
     }
     body.innerHTML = '<div class="r3-nlist">' + d.items.map(function (it, i) {
@@ -105,7 +127,8 @@
       var cls = "r3-nitem r3-nitem--" + esc(it.level);
       if (it.link && !it.action) return '<a class="' + cls + '" data-i="' + i + '" href="' + esc(it.link) + '">' + inner + "</a>";
       return '<button type="button" class="' + cls + '" data-i="' + i + '">' + inner + "</button>";
-    }).join("") + '</div><div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.6;">처리를 마치면 알림은 저절로 사라집니다. 앱을 열지 않은 동안 생긴 일도 여기에 모여 있습니다.</div>';
+    }).join("") + '</div><div style="margin-top:10px;font-size:12.5px;color:#64748b;line-height:1.6;">처리를 마치면 알림은 저절로 사라집니다. 앱을 열지 않은 동안 생긴 일도 여기에 모여 있습니다.</div>' + recentHtml;
+    bindChats();
     body.addEventListener("click", function (e) {
       var el = e.target.closest("[data-i]");
       if (!el) return;
