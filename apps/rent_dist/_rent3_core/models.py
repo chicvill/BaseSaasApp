@@ -1006,38 +1006,67 @@ class Contract(PoolObj):
             "days_to_expiry": self.days_to_expiry(),
         }
 
+    @staticmethod
+    def _cycle_anchor(start: date, k: int) -> date:
+        """k번째 달 임차료 기간의 시작일. 1개월분은 매달 전입일부터 다음 달 전입일 전날까지이므로 전입일의 '일'을 그대로 쓴다(그 달에 없는 날이면 말일)."""
+        idx = start.year * 12 + (start.month - 1) + k
+        y, m0 = divmod(idx, 12)
+        return date(y, m0 + 1, min(start.day, calendar.monthrange(y, m0 + 1)[1]))
+
     def checkout_liability(self, room: Optional["Room"] = None) -> Dict[str, Any]:
-        """조기 전출(만기 전 퇴실) 때 임차인이 더 부담하는 월세 구간.
+        """조기 전출(만기 전 퇴실) 때 이전 임차인이 부담하는 월 임차료.
         규칙: 만기 전에 나가도 '만기일 또는 새 임차인이 입주할 때까지(먼저 오는 날)' 이전 임차인이 임차료를 부담하고, 아직 내지 않은 금액은 전출 정산에서 보증금에서 공제한다.
-        - 새 임차인이 미리 계약해 둔(예약 계약, SCHEDULED) 입주일이 만기보다 빠르면 그날까지, 아니면 만기일까지.
-        - 월 단위 청구라 끝나는 달까지 센다: 만기는 만기월까지, 새 임차인 입주로 끝나면 새 계약이 후불(입주월 면제)이면 입주월까지, 선불이면 입주 전달까지.
-        - 지금 달까지의 미납(unpaid_now)과 구분해 '지금 달 이후 ~ 끝나는 달'의 미납분만 early_amount 로 돌려준다(이미 선납한 만큼은 빠진다)."""
+        - 부담이 끝나는 마지막 날: 만기일, 단 새 임차인이 미리 계약해 둔(예약 계약, SCHEDULED) 입주일이 만기 이내면 입주일의 전날(전입일·전출일이 같은 날이면 그날부터 새 임차인).
+        - 1개월분은 매달 전입일부터 다음 달 전입일 전날까지다. 그 마지막 날까지 끝난 달들은 달 임차료 전액, 마지막 날이 한 달 기간의 중간이면
+          그 기간은 (경과 일수 × 월 임차료) ÷ 30 만 추가로 징수한다(월 임차료 = 월세 + 관리비 + 부가세).
+        - unpaid_now: 지금 달까지의 미납(부담 범위 안), early_amount: 지금 달 이후 ~ 마지막 날까지 아직 안 낸 금액(일할 포함, 선납분은 제외)."""
         today_ym = current_ym()
-        exp = (self.expiry_date or "").strip()
-        end_date, reason, end_ym = exp, "EXPIRY", ""
-        new_in = ""
+        monthly = (0 if self.lease_type == "전세" else int(self.monthly_rent or 0)) + int(self.maintenance_fee or 0) \
+            + (int(self.compute_vat()) if (self.vat_target and self.vat_separate) else 0)
+        out: Dict[str, Any] = {"end_date": self.expiry_date or "", "last_liable_date": self.expiry_date or "", "reason": "EXPIRY", "new_tenant_move_in": "",
+                               "unpaid_now": int(self.ledger()["total_unpaid"]), "early_amount": 0, "months": [], "full_cycles": 0,
+                               "partial_from": "", "partial_days": 0, "partial_amount": 0, "monthly_total": monthly}
+        try:
+            mi = date.fromisoformat((self.move_in_date or "")[:10])
+            exp = date.fromisoformat((self.expiry_date or "")[:10])
+        except ValueError:
+            return out
+        last, reason, new_in = exp, "EXPIRY", ""
         if room is not None:
             res = room.reservation()
-            if res is not None and not res.renews_contract_id and re.match(r"^\d{4}-\d{2}-\d{2}$", res.move_in_date or ""):
-                new_in = res.move_in_date
-                if not re.match(r"^\d{4}-\d{2}-\d{2}$", exp) or new_in < exp:
-                    end_date, reason = new_in, "NEW_TENANT"
-                    ym = parse_ym(new_in)
-                    if ym:
-                        idx = ym_index(*ym) - (0 if res.pay_timing == "후불" else 1)
-                        end_ym = index_to_ym(idx)
-        if not end_ym:
-            ym = parse_ym(end_date)
-            end_ym = f"{ym[0]:04d}-{ym[1]:02d}" if ym else today_ym
-        unpaid_now = int(self.ledger()["total_unpaid"])
-        out = {"end_date": end_date, "end_ym": end_ym, "reason": reason, "new_tenant_move_in": new_in,
-               "unpaid_now": unpaid_now, "early_amount": 0, "months": []}
-        if end_ym <= today_ym:
-            return out
-        through = self.ledger(up_to_ym=end_ym)
-        out["early_amount"] = max(0, int(through["total_unpaid"]) - unpaid_now)
-        out["months"] = [{"ym": m["ym"], "due": int(m["due"]), "unpaid": int(m.get("unpaid", 0))} for m in through.get("months", [])
-                         if m["ym"] > today_ym and int(m.get("unpaid", 0)) > 0]
+            if res is not None and not res.renews_contract_id:
+                try:
+                    n_in = date.fromisoformat((res.move_in_date or "")[:10])
+                except ValueError:
+                    n_in = None
+                if n_in is not None and n_in <= exp:
+                    last, reason, new_in = n_in - timedelta(days=1), "NEW_TENANT", res.move_in_date
+        # 마지막 날까지 끝난 달 수(n_full)와 그 다음 기간에서 마지막 날까지 지난 일수(partial_days)
+        n_full = 0
+        while n_full < 600 and self._cycle_anchor(mi, n_full + 1) - timedelta(days=1) <= last:
+            n_full += 1
+        part_from = self._cycle_anchor(mi, n_full)
+        partial_days = min(30, (last - part_from).days + 1) if last >= part_from else 0
+        partial_amount = min(monthly, round(partial_days * monthly / 30)) if partial_days > 0 else 0
+        unpaid_now, future, credit = 0, [], 0
+        if n_full > 0:
+            # 끝난 달들에 해당하는 원장 달: 후불은 그 기간이 끝나는 달에, 선불은 그 기간이 시작하는 달에 청구된다
+            anchor = self._cycle_anchor(mi, n_full) if self.pay_timing == "후불" else self._cycle_anchor(mi, n_full - 1)
+            led = self.ledger(up_to_ym=f"{anchor.year:04d}-{anchor.month:02d}")
+            rows = led["months"]
+            unpaid_now = sum(int(r["unpaid"]) for r in rows if r["ym"] <= today_ym)
+            future = [r for r in rows if r["ym"] > today_ym and int(r["unpaid"]) > 0]
+            credit = int(led.get("advance_credit", 0))
+        else:
+            credit = sum(p.total_amount for p in Pay.find(id_contract=self.id) if p.payment_kind == "MONTHLY_RENT")
+        partial_net = max(0, partial_amount - credit)                 # 남는 선납액이 있으면 일할분에서 먼저 뺀다
+        out.update({
+            "end_date": last.isoformat(), "last_liable_date": last.isoformat(), "reason": reason, "new_tenant_move_in": new_in,
+            "unpaid_now": unpaid_now, "full_cycles": n_full,
+            "early_amount": sum(int(r["unpaid"]) for r in future) + partial_net,
+            "months": [{"ym": r["ym"], "due": int(r["due"]), "unpaid": int(r["unpaid"])} for r in future],
+            "partial_from": part_from.isoformat() if partial_days > 0 else "", "partial_days": partial_days, "partial_amount": partial_net,
+        })
         return out
 
     def validate_renewal_cap(self, new_deposit: int, new_rent: int) -> Dict[str, Any]:

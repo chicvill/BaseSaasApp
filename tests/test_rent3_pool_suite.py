@@ -9463,7 +9463,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self._cleanup_renewal_rooms("791")
 
     def test_152_early_checkout_tenant_bears_rent_until_expiry_or_new_tenant_and_it_is_deducted(self):
-        """152. 만기 전에 퇴실하면 만기일 또는 새 임차인이 입주할 때까지(먼저 오는 날) 이전 임차인이 월세를 부담하고, 아직 안 낸 금액은 전출 정산에서 보증금에서 공제한다. 새 임차인이 입주하면 그날로 부담이 끝나고(후불은 입주월까지·선불은 전달까지), 선납한 월세는 빠지며, 공제가 보증금보다 크면 부족분을 표시한다. 정상 만기 퇴실에는 추가 부담이 없다."""
+        """152. 만기 전에 퇴실하면 만기일 또는 새 임차인이 입주할 때까지(먼저 오는 날) 이전 임차인이 월 임차료를 부담하고, 아직 안 낸 금액은 전출 정산에서 보증금에서 공제한다. 1개월분은 매달 전입일~다음 달 전입일 전날이며, 부담이 끝나는 날이 한 달 기간 중간이면 그 기간은 (경과 일수 × 월 임차료) ÷ 30 만 징수한다. 새 임차인 입주 전날까지만 부담, 선납분 제외, 보증금 부족분 표시, 정상 만기 퇴실은 추가 없음."""
         from unittest import mock
         from apps.rent_dist._rent3_core import Room, Tenant, Contract, Pay, CoSignSession
         from apps.rent_dist._rent3_core.ops import CheckOutSettlement
@@ -9477,59 +9477,68 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             room = Room.first(branch="main", room_no="787")
             ct = Contract.get(room.active_contract_id)
             monthly = ct.monthly_rent + ct.maintenance_fee + (ct.compute_vat() if (ct.vat_target and ct.vat_separate) else 0)
-            self.assertGreater(monthly, 0)
-            # 1) 만기 전: 만기월까지의 월세가 퇴실 후 부담분(지금 달까지의 미납과 구분)
+            self.assertEqual((ct.move_in_date, ct.expiry_date, ct.pay_timing, monthly), ("2026-10-29", "2027-10-28", "후불", 330000))
+            # 1) 만기까지: 전입일 주기(10/29~다음 달 28)가 딱 맞아 12개월분이 그대로, 일할 없음
             lb = ct.checkout_liability(room)
-            ledger_now = ct.ledger()
-            ledger_end = ct.ledger(up_to_ym=ct.expiry_date[:7])
-            self.assertEqual((lb["reason"], lb["end_date"], lb["end_ym"]), ("EXPIRY", ct.expiry_date, ct.expiry_date[:7]))
-            self.assertEqual(lb["unpaid_now"], int(ledger_now["total_unpaid"]))
-            self.assertEqual(lb["early_amount"], int(ledger_end["total_unpaid"]) - int(ledger_now["total_unpaid"]))
-            self.assertGreater(lb["early_amount"], 0)
-            self.assertEqual(lb["early_amount"], sum(m["unpaid"] for m in lb["months"]))
+            self.assertEqual((lb["reason"], lb["end_date"], lb["full_cycles"], lb["partial_days"], lb["partial_amount"]), ("EXPIRY", "2027-10-28", 12, 0, 0))
+            self.assertEqual((lb["unpaid_now"], lb["early_amount"], lb["monthly_total"]), (0, 12 * monthly, monthly))
+            self.assertEqual(sum(m["unpaid"] for m in lb["months"]), 12 * monthly)
             # 2) 정산서: 퇴실 후 월세가 보증금에서 공제된다
-            r = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"})
-            self.assertEqual(r.status_code, 200, r.text)
-            s = r.json()["settlement"]
-            self.assertEqual((s["unpaid_rent_deduction"], s["early_rent_deduction"], s["liability_reason"], s["liability_end_date"]), (lb["unpaid_now"], lb["early_amount"], "EXPIRY", ct.expiry_date))
-            self.assertEqual(s["refund_amount"], max(0, ct.deposit - (lb["unpaid_now"] + lb["early_amount"] + s["cleaning_fee"])))
-            self.assertEqual(s["shortfall_amount"], max(0, lb["unpaid_now"] + lb["early_amount"] + s["cleaning_fee"] - ct.deposit))
+            s = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"}).json()["settlement"]
+            self.assertEqual((s["unpaid_rent_deduction"], s["early_rent_deduction"], s["liability_reason"], s["liability_end_date"]), (0, 12 * monthly, "EXPIRY", "2027-10-28"))
+            self.assertEqual(s["refund_amount"], max(0, ct.deposit - (12 * monthly + s["cleaning_fee"])))
+            self.assertEqual(s["shortfall_amount"], max(0, 12 * monthly + s["cleaning_fee"] - ct.deposit))
             from apps.rent_dist._rent3_core import DirectChat
             self.assertTrue(any("월세 부담분" in (m.message or "") for m in DirectChat.find(id_room=room.id)))
             # 3) 선납한 달은 부담분에서 빠진다
             first_future = lb["months"][0]
             pre = Pay(branch="main", id_contract=ct.id, room_no="787", id_tenant=t.id, payment_kind="MONTHLY_RENT", billing_month=first_future["ym"],
                       paid_date="2026-10-29", total_amount=first_future["due"]).save(action="t")
-            self.assertEqual(ct.checkout_liability(room)["early_amount"], lb["early_amount"] - first_future["due"])
+            self.assertEqual(ct.checkout_liability(room)["early_amount"], 11 * monthly)
             pre.delete(action="t")
-            # 4) 새 임차인이 만기 전에 입주하기로 한 경우(예약 계약): 그 입주일까지만 부담 — 후불은 입주월까지, 선불은 입주 전달까지
+            # 4) 만기가 한 달 기간 중간(2027-10-15)이면 마지막 기간은 일할: 9/29~10/15 = 17일 → (17 × 월 임차료) ÷ 30
+            ct.expiry_date = "2027-10-15"
+            ct.save(action="t")
+            lb_mid = Contract.get(ct.id).checkout_liability(room)
+            self.assertEqual((lb_mid["full_cycles"], lb_mid["partial_from"], lb_mid["partial_days"]), (11, "2027-09-29", 17))
+            self.assertEqual(lb_mid["partial_amount"], round(17 * monthly / 30))
+            self.assertEqual(lb_mid["early_amount"], 11 * monthly + round(17 * monthly / 30))
+            ct.expiry_date = "2027-10-28"
+            ct.save(action="t")
+            # 5) 새 임차인이 만기 전(2027-03-15)에 입주하기로 한 경우: 그 전날(03-14)까지만 부담. 2/28~3/14 = 15일 → (15 × 월 임차료) ÷ 30. 새 계약이 후불이든 선불이든 같다
             sched = Contract(branch="main", id_room=room.id, room_no="787", id_tenant="tenant_new_x", tenant_name="새임차", status="SCHEDULED", deposit=5000000,
-                             monthly_rent=300000, maintenance_fee=30000, pay_timing="후불", move_in_date="2027-03-15", expiry_date="2028-03-15").save(action="t")
+                             monthly_rent=300000, maintenance_fee=30000, pay_timing="후불", move_in_date="2027-03-15", expiry_date="2028-03-14").save(action="t")
             room.reserved_contract_id = sched.id
             room.save(action="t")
             room = Room.first(branch="main", room_no="787")
             lb2 = ct.checkout_liability(room)
-            self.assertEqual((lb2["reason"], lb2["end_date"], lb2["end_ym"], lb2["new_tenant_move_in"]), ("NEW_TENANT", "2027-03-15", "2027-03", "2027-03-15"))
-            self.assertEqual(lb2["early_amount"], int(ct.ledger(up_to_ym="2027-03")["total_unpaid"]) - lb2["unpaid_now"])
+            self.assertEqual((lb2["reason"], lb2["end_date"], lb2["new_tenant_move_in"]), ("NEW_TENANT", "2027-03-14", "2027-03-15"))
+            self.assertEqual((lb2["full_cycles"], lb2["partial_from"], lb2["partial_days"], lb2["partial_amount"]), (4, "2027-02-28", 15, round(15 * monthly / 30)))
+            self.assertEqual(lb2["early_amount"], 4 * monthly + round(15 * monthly / 30))
             self.assertLess(lb2["early_amount"], lb["early_amount"])
             sched.pay_timing = "선불"
             sched.save(action="t")
-            lb3 = ct.checkout_liability(Room.first(branch="main", room_no="787"))
-            self.assertEqual(lb3["end_ym"], "2027-02")                                                                   # 선불 새 임차인은 입주월 월세를 따로 내므로 이전 임차인은 전달까지
-            self.assertEqual(lb2["early_amount"] - lb3["early_amount"], monthly)
+            self.assertEqual(ct.checkout_liability(Room.first(branch="main", room_no="787"))["early_amount"], lb2["early_amount"])
             s2 = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"}).json()["settlement"]
-            self.assertEqual((s2["liability_reason"], s2["liability_end_date"], s2["early_rent_deduction"]), ("NEW_TENANT", "2027-03-15", lb3["early_amount"]))
-            # 5) 공제가 보증금보다 크면 부족분을 표시하고 반환액은 0
-            big = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "cleaning_fee": 9000000}).json()["settlement"]
-            self.assertEqual(big["refund_amount"], 0)
-            self.assertEqual(big["shortfall_amount"], lb3["unpaid_now"] + lb3["early_amount"] + 9000000 - ct.deposit)
-            # 6) 정상 만기 퇴실(만기월 안): 추가 부담 없음
+            self.assertEqual((s2["liability_reason"], s2["liability_end_date"], s2["early_rent_deduction"], s2["early_partial_days"], s2["early_partial_amount"]),
+                             ("NEW_TENANT", "2027-03-14", lb2["early_amount"], 15, round(15 * monthly / 30)))
+            self.assertTrue(any("÷ 30" in (m.message or "") for m in DirectChat.find(id_room=room.id)))
+            # 6) 선납이 남으면 일할분에서 먼저 뺀다
+            big = Pay(branch="main", id_contract=ct.id, room_no="787", id_tenant=t.id, payment_kind="MONTHLY_RENT", billing_month="", paid_date="2026-10-29",
+                      total_amount=4 * monthly + 100000).save(action="t")
+            self.assertEqual(ct.checkout_liability(Room.first(branch="main", room_no="787"))["early_amount"], round(15 * monthly / 30) - 100000)
+            big.delete(action="t")
+            # 7) 공제가 보증금보다 크면 부족분을 표시하고 반환액은 0
+            over = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "cleaning_fee": 9000000}).json()["settlement"]
+            self.assertEqual(over["refund_amount"], 0)
+            self.assertEqual(over["shortfall_amount"], lb2["early_amount"] + 9000000 - ct.deposit)
+            # 8) 정상 만기 퇴실(만기일 당일): 미래 부담 없음, 그때까지 못 낸 것만 체납으로 공제
             room.reserved_contract_id = ""
             room.save(action="t")
             with mock.patch.dict(os.environ, {"RENT3_TODAY": ct.expiry_date}):
                 end = ct.checkout_liability(Room.first(branch="main", room_no="787"))
-                self.assertEqual(end["early_amount"], 0)
-                self.assertEqual(end["months"], [])
+                self.assertEqual((end["early_amount"], end["months"], end["partial_days"]), (0, [], 0))
+                self.assertEqual(end["unpaid_now"], 12 * monthly)
         finally:
             for co in CheckOutSettlement.all():
                 if co.room_no == "787" and co.branch == "main":
@@ -9549,11 +9558,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if t_.phone == "010-7777-0787":
                     t_.delete(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("퇴실 후 월세 부담", "checkout_liability", "만기 전 퇴실 월세 부담분"):
+        for needle in ("퇴실 후 월세 부담", "checkout_liability", "만기 전 퇴실 월세 부담분", "경과 일수 × 월 임차료"):
             self.assertIn(needle, lapp, needle)
         tapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("early_rent_deduction", "shortfall_amount", "liability_end_date"):
+        for needle in ("early_rent_deduction", "shortfall_amount", "liability_end_date", "early_partial_days"):
             self.assertIn(needle, tapp, needle)
+        lm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "manual.html"), encoding="utf-8").read()
+        self.assertIn("매달 전입일부터 다음 달 전입일 전날까지", lm)
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

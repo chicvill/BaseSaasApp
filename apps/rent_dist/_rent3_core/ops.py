@@ -173,7 +173,9 @@ class CheckOutSettlement(PoolObj):
     unpaid_rent_deduction: int = 0           # Contract.ledger() 실시간 미납액 자동 반영
     early_rent_deduction: int = 0            # 조기 전출 때 지금 달 이후 ~ 만기일(또는 새 임차인 입주 전)까지 아직 안 낸 월세 — 이전 임차인이 부담하고 보증금에서 공제
     liability_end_date: str = ""             # 위 월세를 부담하는 마지막 날(만기일 또는 새 임차인 입주일)
-    liability_reason: str = ""               # EXPIRY(만기일까지) / NEW_TENANT(새 임차인 입주 전까지)
+    liability_reason: str = ""               # EXPIRY(만기일까지) / NEW_TENANT(새 임차인 입주 전날까지)
+    early_partial_days: int = 0              # 부담이 끝나는 날이 한 달 기간(전입일~다음 달 전입일 전날) 중간일 때 그 기간의 경과 일수
+    early_partial_amount: int = 0            # 그 일수분 일할 금액 = 경과 일수 × 월 임차료 ÷ 30 (early_rent_deduction 에 포함)
     shortfall_amount: int = 0                # 공제액이 보증금보다 커서 보증금으로 못 채운 금액(임차인이 따로 부담)
     utility_settlement: int = 0              # 당일 계량기 공과금 실비
     cleaning_fee: int = 70000                # 입주 청소비 약정액
@@ -247,6 +249,7 @@ class CheckOutSettlement(PoolObj):
             id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED", deposit_original=ct.deposit,
             unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",
             liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
+            early_partial_days=int(liab["partial_days"]) if early else 0, early_partial_amount=int(liab["partial_amount"]) if early else 0,
             utility_settlement=utility_settlement, cleaning_fee=cleaning_fee,
             damage_restoration_fee=damage_restoration_fee, refund_amount=refund, inspection_notes=inspection_notes,
         )
@@ -261,8 +264,9 @@ class CheckOutSettlement(PoolObj):
 
         extra_note = ""
         if early:
-            who = "새 임차인이 입주하기 전" if liab["reason"] == "NEW_TENANT" else "계약 만기일"
-            extra_note += f"(공제에는 만기 전 퇴실에 따른 월세 부담분 {early:,}원이 포함됩니다 — {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담합니다.) "
+            who = "새 임차인이 입주하기 전날" if liab["reason"] == "NEW_TENANT" else "계약 만기일"
+            part = (f" 이 중 한 달 기간 중간인 {liab['partial_days']}일분은 (경과 일수 × 월 임차료) ÷ 30 = {int(liab['partial_amount']):,}원입니다." if int(liab["partial_days"]) > 0 else "")
+            extra_note += f"(공제에는 만기 전 퇴실에 따른 월세 부담분 {early:,}원이 포함됩니다 — {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담합니다.{part}) "
         if shortfall:
             extra_note += f"공제액이 보증금보다 {shortfall:,}원 많아 이 금액은 따로 정산해야 합니다. "
         DirectChat(

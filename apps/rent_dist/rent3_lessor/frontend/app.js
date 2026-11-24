@@ -1158,7 +1158,7 @@
     const unpaid = Number(r.ledger.total_unpaid || 0);
     const lb = r.checkout_liability || {};
     const early = Number(lb.early_amount || 0);             // 만기 전 퇴실: 만기일(또는 새 임차인 입주 전)까지 이전 임차인이 부담하는 월세(보증금에서 공제)
-    const earlyWho = lb.reason === "NEW_TENANT" ? "새 임차인 입주 전" : "만기일";
+    const earlyWho = lb.reason === "NEW_TENANT" ? "새 임차인 입주 전날" : "만기일";
     const dep = Number(ct.deposit || 0);
     const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
     const num = (id) => Number(($m(id) && $m(id).value) || 0);
@@ -1176,6 +1176,7 @@
         <label class="r3-fld">체납 공과금(원)<input id="moUtil" class="bass-input" type="number" value="0"></label>
         <label class="r3-fld">파손 복구비(원)<input id="moDmg" class="bass-input" type="number" value="0"></label>
       </div>
+      ${early > 0 ? `<div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-top:6px;">만기 전 퇴실이라 <strong>${Bass.escapeHtml(dotDate(lb.end_date))}(${earlyWho})</strong>까지 월 임차료를 부담합니다. 1개월분은 매달 전입일부터 다음 달 전입일 전날까지이며, 한 달 기간 중간에 끝나면 <strong>(경과 일수 × 월 임차료 ${fmtWon(lb.monthly_total)}) ÷ 30</strong>만 징수합니다${Number(lb.partial_days || 0) > 0 ? ` — 이번에는 ${Number(lb.partial_days)}일분 ${fmtWon(lb.partial_amount)}이 포함됩니다` : ""}.</div>` : ""}
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
         <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
         <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📤 정산서 보내기</button>
