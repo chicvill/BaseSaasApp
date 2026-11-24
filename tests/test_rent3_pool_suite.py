@@ -9559,7 +9559,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if t_.phone == "010-7777-0787":
                     t_.delete(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("퇴실 후 월세 부담", "checkout_liability", "만기 전 퇴실 월세 부담분", "경과 일수 × 월 임차료"):
+        for needle in ("일할 계산 임차료", "미납 임차료", "checkout_liability", "경과 일수 × 월 임차료"):
             self.assertIn(needle, lapp, needle)
         tapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("early_rent_deduction", "shortfall_amount", "liability_end_date", "early_partial_days"):
@@ -9641,6 +9641,92 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, lapp, needle)
         self.assertIn("퇴실 청소비", rd("rent3_lessor", "frontend", "manual.html"))
         self.assertIn("청소비", rd("rent3_tenant", "frontend", "manual.html"))
+
+    def test_154_checkout_statement_is_itemized_editable_by_lessor_and_checked_by_tenant(self):
+        """154. 전출 정산 = 임차보증금 − 미납 임차료 − 일할 계산 임차료 − 청소비 − 미납 공과금(전기·수도·가스·기타): 임대인이 자동 계산값을 항목별로 고칠 수 있고(자동값·수정 여부 기록), 청소비는 약정 이내, 음수는 거부한다. 임차인은 [정산 내역 확인]으로 내역을 확인하고(임대인 채팅 알림·임대인 화면 표시), 정산서를 다시 보내면 확인이 지워지며, 동의하면 확인한 것으로 본다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, DirectChat
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        c = self.client
+        calc = lambda **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "783", **kw})
+        try:
+            c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})
+            self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "783", "is_published": True, "deposit": 5000000, "monthly_rent": 300000, "maintenance_fee": 30000}).status_code, 200)
+            t = self._new_prospect("정산확인", "010-7777-0783")
+            self._complete_contract(None, None, t.id, "783", "정산확인", "010-7777-0783")
+            room = Room.first(branch="main", room_no="783")
+            ct = Contract.get(room.active_contract_id)
+            ed = {"branch": "main", "contract_id": ct.id, "deposit": ct.deposit, "monthly_rent": ct.monthly_rent, "maintenance_fee": ct.maintenance_fee}
+            self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", json={**ed, "cleaning_fee": 60000}).status_code, 200)
+            # 1) 수정 없이: 자동 계산값이 그대로 항목이 된다(만기까지 12개월분 = 미납 임차료, 일할 0)
+            s0 = calc().json()["settlement"]
+            self.assertEqual((s0["rent_unpaid"], s0["rent_prorated"], s0["rent_unpaid_auto"], s0["rent_prorated_auto"], s0["edited_by_lessor"]), (3960000, 0, 3960000, 0, False))
+            self.assertEqual((s0["cleaning_fee"], s0["utility_settlement"], s0["refund_amount"]), (60000, 0, 5000000 - 3960000 - 60000))
+            self.assertEqual((s0["unpaid_rent_deduction"], s0["early_rent_deduction"]), (0, 3960000))                    # 예전 필드(자동값)는 그대로
+            # 2) 임대인이 항목을 고친다: 미납 임차료·일할 임차료 수정, 공과금은 전기·수도·가스·기타로 나눠 입력, 청소비는 약정(6만원) 이내
+            s1 = calc(unpaid_rent=1000000, prorated_rent=50000, cleaning_fee=100000, utility_electric=20000, utility_water=10000, utility_gas=5000, utility_other=3000, damage_restoration_fee=7000).json()["settlement"]
+            self.assertEqual((s1["rent_unpaid"], s1["rent_prorated"], s1["cleaning_fee"], s1["cleaning_fee_agreed"]), (1000000, 50000, 60000, 60000))   # 청소비는 약정 이내로 제한
+            self.assertEqual((s1["utility_electric"], s1["utility_water"], s1["utility_gas"], s1["utility_other"], s1["utility_settlement"]), (20000, 10000, 5000, 3000, 38000))
+            self.assertEqual((s1["rent_unpaid_auto"], s1["rent_prorated_auto"], s1["edited_by_lessor"]), (3960000, 0, True))                              # 자동값과 수정 여부를 남긴다
+            self.assertEqual(s1["refund_amount"], 5000000 - (1000000 + 50000 + 60000 + 38000 + 7000))
+            self.assertEqual(s1["shortfall_amount"], 0)
+            self.assertEqual(s1["id"], s0["id"])                                                                                                          # 같은 정산서를 이어서 고친다
+            chat = " ".join((m.message or "") for m in DirectChat.find(id_room=room.id))
+            self.assertIn("[명세]", chat)
+            self.assertIn("수정했습니다", chat)
+            # 3) 예전 방식(공과금 한 칸)은 '기타'로 받고, 음수는 거부
+            self.assertEqual(calc(utility_settlement=30000).json()["settlement"]["utility_other"], 30000)
+            for bad in ({"unpaid_rent": -1}, {"prorated_rent": -1}, {"utility_electric": -5}, {"utility_water": -5}, {"utility_gas": -5}, {"utility_other": -5}, {"damage_restoration_fee": -5}):
+                self.assertEqual(calc(**bad).status_code, 400, bad)
+            # 4) 임차인: 정산 내역을 보고 [정산 내역 확인]을 누른다 → 임대인 채팅 알림·임대인 화면 표시, 한 번만
+            s2 = calc(unpaid_rent=1000000, prorated_rent=50000, utility_electric=20000).json()["settlement"]
+            th = {"Authorization": f"Bearer {tenant_token(Tenant.get(t.id))}"}
+            mine = c.get(f"/api/rent3_tenant/myhome/{t.id}", headers=th).json()["pending_checkout"]
+            self.assertEqual((mine["rent_unpaid"], mine["rent_prorated"], mine["utility_electric"], mine["tenant_checked_at"]), (1000000, 50000, 20000, ""))
+            stranger = self._new_prospect("남남", "010-7777-0782")
+            sh = {"Authorization": f"Bearer {tenant_token(Tenant.get(stranger.id))}"}
+            self.assertIn(c.post(f"/api/rent3_tenant/checkout/{s2['id']}/confirm-checked", headers=sh, json={}).status_code, (401, 403))      # 본인 정산서만
+            ok = c.post(f"/api/rent3_tenant/checkout/{s2['id']}/confirm-checked", headers=th, json={})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertTrue(ok.json()["settlement"]["tenant_checked_at"])
+            n_msgs = len([m for m in DirectChat.find(id_room=room.id) if "정산 내역 확인" in (m.message or "")])
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{s2['id']}/confirm-checked", headers=th, json={}).status_code, 200)                # 다시 눌러도 알림은 한 번
+            self.assertEqual(len([m for m in DirectChat.find(id_room=room.id) if "정산 내역 확인" in (m.message or "")]), n_msgs)
+            dash = c.get("/api/rent3_lessor/dashboard?branch=main").json()
+            self.assertTrue(next(x for x in dash["checkouts"] if x["id"] == s2["id"])["tenant_checked_at"])                                          # 임대인 화면에 확인 표시 데이터
+            # 5) 임대인이 정산서를 고쳐 다시 보내면 확인 표시가 지워진다(다시 확인해야 한다)
+            s3 = calc(unpaid_rent=900000, prorated_rent=50000, utility_electric=20000).json()["settlement"]
+            self.assertEqual((s3["id"], s3["status"], s3["tenant_checked_at"]), (s2["id"], "CALCULATED", ""))
+            # 6) 확인 없이 바로 동의해도 되고, 동의하면 확인한 것으로 본다. 동의 뒤에는 확인 단추가 필요 없다
+            ag = c.post(f"/api/rent3_tenant/checkout/{s3['id']}/agree", headers=th, json={"bank_account": "토스 1000-22-334455", "signature": "정산확인(동의)", "account_holder": "정산확인"})
+            self.assertEqual(ag.status_code, 200, ag.text)
+            self.assertEqual(ag.json()["settlement"]["status"], "AGREED")
+            self.assertTrue(ag.json()["settlement"]["tenant_checked_at"])
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{s3['id']}/confirm-checked", headers=th, json={}).status_code, 400)
+        finally:
+            for co in CheckOutSettlement.all():
+                if co.room_no == "783" and co.branch == "main":
+                    co.delete(action="t")
+            for ct_ in Contract.find(room_no="783"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "783" and s_.branch == "main":
+                    s_.delete(action="t")
+            r_ = Room.first(branch="main", room_no="783")
+            if r_:
+                r_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone in ("010-7777-0783", "010-7777-0782"):
+                    t_.delete(action="t")
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        lapp, tapp = rd("rent3_lessor", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js")
+        for needle in ("moUnpaid", "moProrated", "moElec", "moWater", "moGas", "moUtilOther", "moFormula", "임차인이 정산 내역을 확인했습니다", "정산 내역"):
+            self.assertIn(needle, lapp, needle)
+        for needle in ("coItemsHtml", "btnCheckCo", "정산 내역 확인", "/confirm-checked", "임대인 수정" if False else "임대인이 자동 계산값"):
+            self.assertIn(needle, tapp, needle)
+        self.assertIn("정산 내역 확인", rd("rent3_lessor", "frontend", "manual.html"))
+        self.assertIn("정산 내역 확인", rd("rent3_tenant", "frontend", "manual.html"))
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

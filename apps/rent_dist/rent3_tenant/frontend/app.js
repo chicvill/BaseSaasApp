@@ -65,6 +65,27 @@
   const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
 
+  // 전출 정산 명세: 임차보증금 − 미납 임차료 − 일할 계산 임차료 − 청소비 − 미납 공과금(전기·수도·가스·기타) (− 파손 복구비) = 반환 예정액
+  function coItemsHtml(co) {
+    const W = (n) => fmtWon(Number(n || 0));
+    const hasFinals = Number(co.rent_unpaid_auto || 0) + Number(co.rent_prorated_auto || 0) + Number(co.rent_unpaid || 0) + Number(co.rent_prorated || 0) > 0;
+    const unpaid = hasFinals ? Number(co.rent_unpaid || 0) : Number(co.unpaid_rent_deduction || 0) + Math.max(0, Number(co.early_rent_deduction || 0) - Number(co.early_partial_amount || 0));
+    const prorated = hasFinals ? Number(co.rent_prorated || 0) : Number(co.early_partial_amount || 0);
+    const utilParts = [["전기", co.utility_electric], ["수도", co.utility_water], ["가스", co.utility_gas], ["기타", co.utility_other]].filter(([, v]) => Number(v || 0) > 0);
+    const util = Number(co.utility_settlement || 0);
+    const row = (label, val, sub) => `<tr><td style="padding:3px 0;">${label}${sub ? `<div class="bass-muted" style="font-size:12px;">${sub}</div>` : ""}</td><td style="text-align:right;padding:3px 0;white-space:nowrap;">${val}</td></tr>`;
+    return `<table style="width:100%;border-collapse:collapse;font-size:13.5px;margin:6px 0;">
+      ${row("임차보증금", W(co.deposit_original))}
+      ${row("− 미납 임차료", W(unpaid), Number(co.early_rent_deduction || 0) - Number(co.early_partial_amount || 0) > 0 ? "만기(또는 새 임차인 입주 전날)까지 아직 내지 않은 월 임차료 포함" : "")}
+      ${row(`− 일할 계산 임차료${Number(co.early_partial_days || 0) > 0 ? ` (${Number(co.early_partial_days)}일분)` : ""}`, W(prorated), Number(co.early_partial_days || 0) > 0 ? "(경과 일수 × 월 임차료) ÷ 30" : "")}
+      ${row("− 청소비", W(co.cleaning_fee), Number(co.cleaning_fee_agreed || 0) > 0 ? `계약에 약정한 퇴실 청소비 ${W(co.cleaning_fee_agreed)} 이내` : "")}
+      ${row("− 미납 공과금", W(util), utilParts.length ? utilParts.map(([k, v]) => `${k} ${W(v)}`).join(" · ") : "")}
+      ${Number(co.damage_restoration_fee || 0) > 0 ? row("− 파손 복구비", W(co.damage_restoration_fee)) : ""}
+      <tr style="border-top:2px solid var(--border);"><td style="padding:6px 0;"><strong>= 반환 예정액</strong></td><td style="text-align:right;padding:6px 0;"><strong>${W(co.refund_amount)}</strong></td></tr>
+    </table>
+    ${co.edited_by_lessor ? `<p class="bass-muted" style="font-size:12.5px;">ℹ️ 임대인이 자동 계산값(미납 임차료 ${W(co.rent_unpaid_auto)} · 일할 계산 임차료 ${W(co.rent_prorated_auto)})에서 수정했습니다. 다르다고 생각하면 이의 제기로 협의하세요.</p>` : ""}`;
+  }
+
   const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", messages: "임대인과 채팅", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
   let svcView = SVC_TITLES[params.get("svc")] !== undefined ? params.get("svc") : "home";
 
@@ -483,18 +504,27 @@
         <div class="bass-card no-print" style="margin-bottom:14px;border-color:var(--warn);">
           ${co.status === "REQUESTED" ? `<h3>🚪 퇴실 신청이 접수되었습니다</h3><p class="bass-muted" style="font-size:13px;">임대인이 점검 후 정산서를 보냅니다. 📄 <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>는 퇴실 전에 미리 내려받아 두세요.</p>` : `
           <h3>🚪 퇴실 보증금 정산 명세서 (실반환 예정액: ${fmtWon(co.refund_amount)})</h3>
-          <p class="bass-muted" style="font-size:13px;">원보증금 ${fmtWon(co.deposit_original)} − 미납월세 ${fmtWon(co.unpaid_rent_deduction)}${Number(co.early_rent_deduction || 0) > 0 ? ` − 퇴실 후 월세 부담분 ${fmtWon(co.early_rent_deduction)}` : ""} − 공과금 ${fmtWon(co.utility_settlement)} − 청소비 ${fmtWon(co.cleaning_fee)} − 파손 ${fmtWon(co.damage_restoration_fee)}</p>
-          ${Number(co.early_rent_deduction || 0) > 0 ? `<p class="bass-muted" style="font-size:13px;line-height:1.6;">ℹ️ 계약 만기 전에 퇴실하셔서, <strong>${Bass.escapeHtml(co.liability_end_date || "")}</strong>(${co.liability_reason === "NEW_TENANT" ? "새 임차인이 입주하기 전날" : "계약 만기일"})까지는 월세를 부담하는 것으로 정산됩니다. 아직 내지 않은 월세 ${fmtWon(co.early_rent_deduction)}은 보증금에서 공제됩니다.${Number(co.early_partial_days || 0) > 0 ? ` 한 달 기간 중간에 끝나는 ${co.early_partial_days}일분은 (경과 일수 × 월 임차료) ÷ 30 = ${fmtWon(co.early_partial_amount)}으로 계산했습니다.` : ""}</p>` : ""}
+          ${coItemsHtml(co)}
+          ${Number(co.early_rent_deduction || 0) > 0 ? `<p class="bass-muted" style="font-size:13px;line-height:1.6;">ℹ️ 계약 만기 전에 퇴실하셔서, <strong>${Bass.escapeHtml(co.liability_end_date || "")}</strong>(${co.liability_reason === "NEW_TENANT" ? "새 임차인이 입주하기 전날" : "계약 만기일"})까지는 월세를 부담하는 것으로 정산됩니다. 아직 내지 않은 월세는 위 표의 <strong>미납 임차료·일할 계산 임차료</strong>로 보증금에서 공제됩니다.${Number(co.early_partial_days || 0) > 0 ? ` 한 달 기간 중간에 끝나는 ${co.early_partial_days}일분은 (경과 일수 × 월 임차료) ÷ 30으로 계산합니다.` : ""}</p>` : ""}
           ${Number(co.shortfall_amount || 0) > 0 ? `<p style="font-size:13px;color:var(--err);">공제액이 보증금보다 ${fmtWon(co.shortfall_amount)} 많아, 이 금액은 따로 정산해야 합니다.</p>` : ""}
           <p style="font-size:13px;">📄 퇴실하면 로그인 수단이 정리됩니다. <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>를 미리 내려받아 두세요(퇴실 후에도 다음 해 2월 말까지 조회는 가능).</p>`}
           ${co.status === "CALCULATED" ? `
+          ${co.tenant_checked_at ? `
+            <div class="bass-muted" style="font-size:13px;margin-top:6px;">✅ 정산 내역을 확인했습니다. 반환받을 계좌를 입력하고 동의 서명을 해 주세요.</div>
             <div class="field-grid" style="margin-top:8px;">
               <input id="coBank" class="bass-input" value="${Bass.escapeHtml(t.account_number || "")}" placeholder="반환받을 은행 계좌번호">
               <input id="coHolder" class="bass-input" value="" placeholder="예금주 (계약자 본인 ${Bass.escapeHtml(t.name)})">
               <input id="coSig" class="bass-input" value="${Bass.escapeHtml(t.name)} (동의서명)" placeholder="동의 전자서명">
-              <button id="btnAgreeCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button">✍️ 정산 내역 확인 및 동의 서명</button>
+              <button id="btnAgreeCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button">✍️ 계좌 제출 및 동의 서명</button>
               <button id="btnDisputeCo" data-id="${co.id}" class="bass-btn" type="button">⚠️ 이의 제기 (채팅·통화로 협의)</button>
             </div>
+          ` : `
+            <div class="bass-row" style="gap:8px;margin-top:8px;flex-wrap:wrap;">
+              <button id="btnCheckCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;">✅ 정산 내역 확인</button>
+              <button id="btnDisputeCo" data-id="${co.id}" class="bass-btn" type="button" style="min-height:48px;">⚠️ 이의 제기 (채팅·통화로 협의)</button>
+            </div>
+            <p class="bass-muted" style="font-size:12.5px;">위 정산 내역을 확인하면 임대인에게 알리고, 이어서 반환받을 계좌를 입력합니다. 내용이 다르면 이의 제기로 협의하세요.</p>
+          `}
           ` : co.status === "AGREED" ? `<span class="bass-badge bass-badge--ok">동의 완료 — 임대인 송금 대기 중</span> <button id="btnDisputeCo" data-id="${co.id}" class="bass-btn bass-btn--sm" type="button">⚠️ 이의 제기</button>`
           : co.status === "PAID" ? `<div style="font-size:14px;line-height:1.7;">💸 임대인이 ${fmtWon(co.refund_amount)}을 송금했다고 표시했습니다. 입금을 확인해 주세요. (표시 후 7일 안에 이의가 없으면 자동 확정)</div>
             <div class="bass-row" style="gap:8px;margin-top:8px;"><button id="btnReceivedCo" data-id="${co.id}" class="bass-btn bass-btn--primary" type="button" style="min-height:48px;">✅ 받았습니다</button><button id="btnDisputeCo" data-id="${co.id}" class="bass-btn" type="button" style="min-height:48px;">❌ 못 받았습니다</button></div>`
@@ -713,7 +743,7 @@
 
     if (window.R3Shell && R3Shell.isViaPin && R3Shell.isViaPin()) {
       // 간편 비밀번호로 들어온 상태: 서버가 막는 작업은 미리 비활성화하고 이유를 알려 준다
-      ["btnAgreeCo", "btnPlanStay", "btnPlanMoveOut", "btnAckRenewal"].forEach((id) => {
+      ["btnAgreeCo", "btnCheckCo", "btnPlanStay", "btnPlanMoveOut", "btnAckRenewal"].forEach((id) => {
         const b = document.getElementById(id);
         if (b) { b.disabled = true; b.title = "아이디·비밀번호로 로그인해야 할 수 있습니다"; b.insertAdjacentHTML("afterend", '<div class="bass-muted" style="font-size:12px;">🔐 이 작업은 아이디·비밀번호로 로그인해야 합니다.</div>'); }
       });
@@ -745,6 +775,16 @@
       });
     });
 
+    const btnCheckCo = document.getElementById("btnCheckCo");
+    if (btnCheckCo) {
+      btnCheckCo.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/checkout/${btnCheckCo.dataset.id}/confirm-checked`, { method: "POST", body: {} });
+          Bass.updateAppAlert("success", res.message);
+          await loadMyhome();
+        });
+      });
+    }
     const btnAgreeCo = document.getElementById("btnAgreeCo");
     if (btnAgreeCo) {
       btnAgreeCo.addEventListener("click", function () {

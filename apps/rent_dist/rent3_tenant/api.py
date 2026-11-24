@@ -480,6 +480,14 @@ def _own_settlement(settlement_id: str, request: Request) -> CheckOutSettlement:
     return s
 
 
+@router.post("/checkout/{settlement_id}/confirm-checked", dependencies=[Depends(any_user)])
+def confirm_checkout_checked(settlement_id: str, request: Request):
+    """임차인이 임대인이 보낸 정산 내역을 확인했다고 표시한다(임대인 채팅에 알림)."""
+    s = _own_settlement(settlement_id, request)
+    s.tenant_confirm_checked(app_source=APP_SRC)
+    return {"success": True, "message": "정산 내역을 확인했다고 임대인에게 알렸습니다. 이어서 반환받을 계좌를 입력하고 동의 서명을 해 주세요.", "settlement": s.model_dump()}
+
+
 @router.post("/checkout/{settlement_id}/agree", dependencies=[Depends(any_user)])
 def agree_checkout(settlement_id: str, req: CheckoutAgreeReq, request: Request):
     s = _own_settlement(settlement_id, request)

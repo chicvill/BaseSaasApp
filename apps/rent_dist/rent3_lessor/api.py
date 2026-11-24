@@ -124,6 +124,12 @@ class CheckoutCalcReq(BaseModel):
     room_no: str
     utility_settlement: int = 0
     cleaning_fee: Optional[int] = None      # 비우면 계약서에 약정한 청소비. 약정액을 넘길 수 없다(약정 없으면 0원)
+    unpaid_rent: Optional[int] = None       # 미납 임차료(원). 비우면 자동 계산값 — 임대인이 고칠 수 있다
+    prorated_rent: Optional[int] = None     # 일할 계산 임차료(원). 비우면 자동 계산값(경과 일수 × 월 임차료 ÷ 30)
+    utility_electric: int = 0               # 미납 공과금: 전기·수도·가스·기타
+    utility_water: int = 0
+    utility_gas: int = 0
+    utility_other: int = 0
     damage_restoration_fee: int = 0
     inspection_notes: str = "6대 시설 자연마모 외 파손 없음"
 
@@ -2087,6 +2093,12 @@ def calculate_checkout(req: CheckoutCalcReq):
         damage_restoration_fee=req.damage_restoration_fee,
         inspection_notes=req.inspection_notes,
         app_source=APP_SRC,
+        unpaid_rent=req.unpaid_rent,
+        prorated_rent=req.prorated_rent,
+        utility_electric=req.utility_electric,
+        utility_water=req.utility_water,
+        utility_gas=req.utility_gas,
+        utility_other=req.utility_other,
     )
     return {
         "success": True,

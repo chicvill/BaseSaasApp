@@ -177,6 +177,17 @@ class CheckOutSettlement(PoolObj):
     early_partial_days: int = 0              # 부담이 끝나는 날이 한 달 기간(전입일~다음 달 전입일 전날) 중간일 때 그 기간의 경과 일수
     early_partial_amount: int = 0            # 그 일수분 일할 금액 = 경과 일수 × 월 임차료 ÷ 30 (early_rent_deduction 에 포함)
     shortfall_amount: int = 0                # 공제액이 보증금보다 커서 보증금으로 못 채운 금액(임차인이 따로 부담)
+    # ── 전출 정산 = 임차보증금 − 미납 임차료 − 일할 계산 임차료 − 청소비 − 미납 공과금(전기·수도·가스·기타) (− 파손 복구비). 임대인이 항목별로 수정할 수 있다.
+    rent_unpaid_auto: int = 0                # 미납 임차료 자동 계산값(지금 달까지 미납 + 만기까지 끝난 달의 미납 월 임차료)
+    rent_unpaid: int = 0                     # 미납 임차료 확정값(임대인이 고치지 않으면 자동 계산값)
+    rent_prorated_auto: int = 0              # 일할 계산 임차료 자동 계산값 = (경과 일수 × 월 임차료) ÷ 30
+    rent_prorated: int = 0                   # 일할 계산 임차료 확정값
+    utility_electric: int = 0                # 미납 공과금 — 전기
+    utility_water: int = 0                   # 미납 공과금 — 수도
+    utility_gas: int = 0                     # 미납 공과금 — 가스
+    utility_other: int = 0                   # 미납 공과금 — 그 밖(인터넷·관리비 정산 등). utility_settlement 는 네 항목의 합계
+    edited_by_lessor: bool = False           # 임대인이 자동 계산값(미납 임차료·일할 임차료)을 고쳤는지
+    tenant_checked_at: str = ""              # 임차인이 정산 내역을 확인했다고 누른 시각(정산서를 다시 보내면 지워진다)
     utility_settlement: int = 0              # 당일 계량기 공과금 실비
     cleaning_fee: int = 0                    # 이번 정산에서 공제하는 청소비(계약에 약정한 금액 이내)
     cleaning_fee_agreed: int = 0             # 계약서에 약정한 퇴실 청소비(Contract.cleaning_fee) — 이 금액을 넘겨 공제할 수 없다
@@ -228,6 +239,12 @@ class CheckOutSettlement(PoolObj):
         damage_restoration_fee: int = 0,
         inspection_notes: str = "6대 주요 시설(에어컨·세탁기·냉장고·도어락·벽지·욕실) 자연마모 외 이상 없음",
         app_source: str = "rent3_lessor",
+        unpaid_rent: Optional[int] = None,
+        prorated_rent: Optional[int] = None,
+        utility_electric: int = 0,
+        utility_water: int = 0,
+        utility_gas: int = 0,
+        utility_other: int = 0,
     ) -> "CheckOutSettlement":
         b_id = normalize_branch_id(branch)
         room = Room.first(branch=b_id, room_no=room_no)
@@ -241,7 +258,21 @@ class CheckOutSettlement(PoolObj):
         liab = ct.checkout_liability(room)            # 만기 전 퇴실이면 만기일(또는 새 임차인 입주 전)까지의 월세도 이전 임차인이 부담한다
         unpaid = int(liab["unpaid_now"])
         early = int(liab["early_amount"])
-        total_deduct = unpaid + early + utility_settlement + cleaning_fee + damage_restoration_fee
+        partial = int(liab["partial_amount"])
+        # 정산 항목: 미납 임차료(자동 = 지금까지 미납 + 만기까지 끝난 달) / 일할 계산 임차료(자동 = 경과 일수 × 월 임차료 ÷ 30) — 임대인이 고칠 수 있다
+        rent_unpaid_auto = unpaid + max(0, early - partial)
+        rent_prorated_auto = partial
+        for label, v in (("미납 임차료", unpaid_rent), ("일할 계산 임차료", prorated_rent), ("전기 요금", utility_electric), ("수도 요금", utility_water),
+                         ("가스 요금", utility_gas), ("기타 공과금", utility_other), ("파손 복구비", damage_restoration_fee)):
+            if v is not None and int(v) < 0:
+                raise DomainError(f"{label}은(는) 0원 이상이어야 합니다.")
+        rent_unpaid = rent_unpaid_auto if unpaid_rent is None else int(unpaid_rent)
+        rent_prorated = rent_prorated_auto if prorated_rent is None else int(prorated_rent)
+        u_el, u_wa, u_ga, u_ot = int(utility_electric or 0), int(utility_water or 0), int(utility_gas or 0), int(utility_other or 0)
+        if int(utility_settlement or 0) > 0 and not (u_el or u_wa or u_ga or u_ot):      # 예전 방식(공과금 한 칸)은 '기타'로 받는다
+            u_ot = int(utility_settlement)
+        utility_total = u_el + u_wa + u_ga + u_ot
+        total_deduct = rent_unpaid + rent_prorated + utility_total + cleaning_fee + int(damage_restoration_fee or 0)
         refund = max(0, ct.deposit - total_deduct)
         shortfall = max(0, total_deduct - ct.deposit)
 
@@ -254,8 +285,11 @@ class CheckOutSettlement(PoolObj):
             unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",
             liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
             early_partial_days=int(liab["partial_days"]) if early else 0, early_partial_amount=int(liab["partial_amount"]) if early else 0,
-            utility_settlement=utility_settlement, cleaning_fee=cleaning_fee, cleaning_fee_agreed=agreed,
-            damage_restoration_fee=damage_restoration_fee, refund_amount=refund, inspection_notes=inspection_notes,
+            utility_settlement=utility_total, cleaning_fee=cleaning_fee, cleaning_fee_agreed=agreed,
+            damage_restoration_fee=int(damage_restoration_fee or 0), refund_amount=refund, inspection_notes=inspection_notes,
+            rent_unpaid_auto=rent_unpaid_auto, rent_unpaid=rent_unpaid, rent_prorated_auto=rent_prorated_auto, rent_prorated=rent_prorated,
+            utility_electric=u_el, utility_water=u_wa, utility_gas=u_ga, utility_other=u_ot,
+            edited_by_lessor=(rent_unpaid != rent_unpaid_auto or rent_prorated != rent_prorated_auto), tenant_checked_at="",
         )
         if existing is not None:        # 임차인 신청·이의 건을 이어서 쓴다(동의·계좌는 다시 받는다)
             for k, v in fields.items():
@@ -269,10 +303,18 @@ class CheckOutSettlement(PoolObj):
         extra_note = ""
         if early:
             who = "새 임차인이 입주하기 전날" if liab["reason"] == "NEW_TENANT" else "계약 만기일"
-            part = (f" 이 중 한 달 기간 중간인 {liab['partial_days']}일분은 (경과 일수 × 월 임차료) ÷ 30 = {int(liab['partial_amount']):,}원입니다." if int(liab["partial_days"]) > 0 else "")
-            extra_note += f"(공제에는 만기 전 퇴실에 따른 월세 부담분 {early:,}원이 포함됩니다 — {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담합니다.{part}) "
+            if fields["edited_by_lessor"]:        # 임대인이 고친 정산서: 금액은 아래 [명세]에만 두고 여기서는 기준만 설명한다
+                extra_note += f"(만기 전 퇴실이라 {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담하는 것으로 계산했습니다.) "
+            else:
+                part = (f" 이 중 한 달 기간 중간인 {liab['partial_days']}일분은 (경과 일수 × 월 임차료) ÷ 30 = {int(liab['partial_amount']):,}원입니다." if int(liab["partial_days"]) > 0 else "")
+                extra_note += f"(공제에는 만기 전 퇴실에 따른 월세 부담분 {early:,}원이 포함됩니다 — {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담합니다.{part}) "
         if shortfall:
             extra_note += f"공제액이 보증금보다 {shortfall:,}원 많아 이 금액은 따로 정산해야 합니다. "
+        items = [("미납 임차료", rent_unpaid), ("일할 계산 임차료", rent_prorated), ("청소비", cleaning_fee), ("미납 공과금(전기 %s·수도 %s·가스 %s·기타 %s)" % (f"{u_el:,}", f"{u_wa:,}", f"{u_ga:,}", f"{u_ot:,}"), utility_total),
+                 ("파손 복구비", int(damage_restoration_fee or 0))]
+        extra_note += "[명세] 임차보증금 %s원 − " % f"{ct.deposit:,}" + " − ".join(f"{k} {v:,}원" for k, v in items if v) + f" = 반환 예정액 {refund:,}원. "
+        if fields["edited_by_lessor"]:
+            extra_note += f"(임대인이 자동 계산값(미납 임차료 {rent_unpaid_auto:,}원·일할 임차료 {rent_prorated_auto:,}원)에서 수정했습니다.) "
         DirectChat(
             branch=b_id,
             id_room=room.id,
@@ -323,6 +365,17 @@ class CheckOutSettlement(PoolObj):
                 f"/rent3_tenant/?tenant={tenant.id}&svc=cert", app_source=app_source)
         return s
 
+    def tenant_confirm_checked(self, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
+        """임차인이 임대인이 보낸 정산 내역(항목별 공제)을 확인했다고 표시한다. 임대인 채팅에 알림이 가고, 이어서 반환 계좌 입력·동의를 한다."""
+        if self.status != "CALCULATED":
+            raise DomainError("확인할 수 있는 정산서가 아닙니다.", hint="임대인이 정산서를 보낸 뒤에 확인할 수 있습니다.")
+        if not self.tenant_checked_at:
+            self.tenant_checked_at = now_iso()
+            self.save(action="checkout_checked_by_tenant", app_source=app_source)
+            self._chat("tenant", self.tenant_name, f"[✅ 정산 내역 확인] {self.tenant_name} 세입자가 정산 내역을 확인했습니다. 반환 예정액 {self.refund_amount:,}원. "
+                       "이의가 없으면 이어서 반환 계좌를 입력하고 동의 서명을 합니다.", app_source=app_source)
+        return self
+
     def tenant_agree(self, bank_account: str, signature: str, account_holder: str = "", app_source: str = "rent3_tenant") -> "CheckOutSettlement":
         if self.status != "CALCULATED":
             raise DomainError("동의할 수 있는 정산서가 아닙니다.", hint="임대인이 정산서를 보낸 뒤에만, 한 번만 동의할 수 있습니다(동의 뒤 계좌 변경은 임대인에게 요청).")
@@ -333,6 +386,8 @@ class CheckOutSettlement(PoolObj):
         self.refund_bank_account = bank_account.strip()
         self.account_holder = account_holder.strip()
         self.tenant_signature = signature.strip()
+        if not self.tenant_checked_at:
+            self.tenant_checked_at = now_iso()      # 동의하면 내역을 확인한 것으로 본다
         self.status = "AGREED"
         self.save(action="checkout_agreed_by_tenant", app_source=app_source)
         self._chat("tenant", self.tenant_name, f"[✍️ 정산 동의·반환 계좌 접수] 반환액 {self.refund_amount:,}원 · 예금주 {self.account_holder} · 계좌 {self._mask_account(bank_account)}. "
