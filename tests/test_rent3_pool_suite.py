@@ -8588,6 +8588,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertTrue(tm["lessor_phone"])
         base = os.path.join(ROOT, "apps", "rent_dist")
         adm = open(os.path.join(base, "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        self.assertIn('label: "💬 임차인과 채팅 (호실별)", tab: "messages"', open(os.path.join(base, "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read())   # 임대인 ☰ 1단계 메뉴
         for needle in ("에게 전화 :", 'href="tel:${Bass.escapeHtml(callDigits)}"', 'id="spCat"'):
             self.assertIn(needle, adm, needle)
         for gone in ('id="btnSpPhone"', 'id="spMemo"', "전화 접수 남기기"):

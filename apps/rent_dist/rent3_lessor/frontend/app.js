@@ -43,7 +43,7 @@
   const LESSOR_MENU = [
     { title: "1단계 · 기본 업무", items: [
       { label: "💰 수납 현황 · 입금 문자 처리", tab: "ledger" },
-      { label: "💬 임차인 메시지", tab: "messages" },
+      { label: "💬 임차인과 채팅 (호실별)", tab: "messages" },
       { label: "📸 중개 계약서 사진 등록", tab: "broker" },
     ] },
     { title: "2단계 · 매물 · 홍보", more: true, items: [
@@ -101,7 +101,7 @@
   R3Shell.watchSupport();
   // 🔔 알림 센터: 메시지·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
   if (window.R3Notify && !VIA_PIN) R3Notify.start({ url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
-  const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "메시지", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정", mail: "입금 메일 자동 정리" };
+  const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "임차인과 채팅", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정", mail: "입금 메일 자동 정리" };
 
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
