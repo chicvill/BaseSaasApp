@@ -420,7 +420,7 @@ def session_party_ok(c: Dict[str, Any], session: Any) -> bool:
 
 
 # 공개·타인에게 내려보내면 안 되는 호실 필드 (도어락 비밀번호, 등기 정보, 입주자·계약 연결)
-ROOM_PRIVATE_FIELDS = ("doorlock_pwd", "registry_info", "id_tenant", "active_contract_id")
+ROOM_PRIVATE_FIELDS = ("doorlock_pwd", "registry_info", "id_tenant", "active_contract_id", "reserved_contract_id")
 
 
 def public_room(d: Dict[str, Any]) -> Dict[str, Any]:

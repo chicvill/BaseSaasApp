@@ -76,6 +76,7 @@ class CoSignSession(PoolObj):
     session_code: str = Field(default_factory=lambda: f"{random.randint(100000, 999999)}")
     mode: str = "NEW"                        # NEW (신규계약) / RENEWAL (조건변경 재계약)
     prev_contract_id: str = ""
+    reserve_after: str = ""                  # 사전 계약(입주 중인 전출 예정 호실): 새 입주일의 가장 빠른 날 = 현재 입주자의 예상 퇴실일
     branch: str = "main"
     id_building: str = ""
     building_name: str = ""
@@ -508,9 +509,14 @@ class CoSignSession(PoolObj):
             if len(digits) >= 8:
                 matched_t = next((t for t in Tenant.all() if re.sub(r"\D", "", t.phone) == digits), None)
 
+        # 입주 중인 전출 예정 호실(사전 계약): 현재 계약 값이 아니라 사전 매물로 올린 조건(as_listing)을 쓰고, 입주일은 예상 퇴실일 이후로 시작한다.
+        pre_contract = (mode != "RENEWAL") and room.is_occupied
+        listing = room.as_listing() if pre_contract else room
+        reserve_after = room.expected_vacate_date() if pre_contract else ""
         move_in_default = (
             prev_ct.expiry_date if prev_ct and prev_ct.expiry_date
-            else (room.available_from if re_is_date(room.available_from) else date_today().isoformat())
+            else (reserve_after if reserve_after
+                  else (room.available_from if re_is_date(room.available_from) else date_today().isoformat()))
         )
         t_name = tenant_name or (matched_t.name if matched_t else (prev_ct.tenant_name if prev_ct else ""))
         t_phone = tenant_phone or (matched_t.phone if matched_t else (prev_ct.tenant_phone if prev_ct else ""))
@@ -527,12 +533,13 @@ class CoSignSession(PoolObj):
         ]
 
         is_renewal = (mode == "RENEWAL")
-        base_rent = prev_ct.monthly_rent if prev_ct else room.monthly_rent
+        base_rent = prev_ct.monthly_rent if prev_ct else listing.monthly_rent
         renewal_rent_5pct = max(base_rent, (int(base_rent * 1.05) // 1000) * 1000)
         now_str = now_iso()
         session = cls(
             mode=mode,
             prev_contract_id=prev_ct.id if prev_ct else "",
+            reserve_after=reserve_after,
             branch=b_id,
             id_building=bldg.id if bldg else "",
             building_name=bldg.building_name if bldg else b_id,
@@ -583,14 +590,14 @@ class CoSignSession(PoolObj):
                 "tenant_business_number": matched_t.business_number if matched_t else (prev_ct.tenant_business_number if prev_ct else ""),
                 "tenant_company_name": matched_t.company_name if matched_t else (prev_ct.tenant_company_name if prev_ct else ""),
                 "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
-                "lease_type": room.lease_type or "월세",
-                "pay_timing": room.pay_timing or "후불",
-                "vat_target": prev_ct.vat_target if prev_ct else room.vat_applicable,
+                "lease_type": listing.lease_type or "월세",
+                "pay_timing": listing.pay_timing or "후불",
+                "vat_target": prev_ct.vat_target if prev_ct else listing.vat_applicable,
                 "vat_separate": True,
                 "contract_deposit": 0 if is_renewal else 300000,
-                "deposit": prev_ct.deposit if prev_ct else room.deposit,
-                "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else room.monthly_rent),
-                "maintenance_fee": prev_ct.maintenance_fee if prev_ct else room.maintenance_fee,
+                "deposit": prev_ct.deposit if prev_ct else listing.deposit,
+                "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else listing.monthly_rent),
+                "maintenance_fee": prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee,
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,
                 "special_terms": (
@@ -609,6 +616,8 @@ class CoSignSession(PoolObj):
         callee_role = "tenant" if initiated_by_role == "lessor" else "lessor"
         caller_name = session.lessor_name if initiated_by_role == "lessor" else (t_name or "임차인")
         msg_prefix = "[📞 실시간 공동계약 호출]" if call_status == "CALLING" else "[🤝 공동 임대계약방 개설]"
+        if pre_contract:
+            return session          # 입주 중인 호실의 채팅은 지금 사는 임차인도 보므로, 다음 입주자와의 계약 호출은 그 채팅에 남기지 않는다(앱 알림·홈 화면으로 전달)
         DirectChat(
             branch=b_id,
             id_room=room.id,
@@ -722,6 +731,15 @@ class CoSignSession(PoolObj):
                     f"동시에 진행할 수 있는 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
                     hint="진행 중인 계약을 마치거나 취소한 뒤 다른 호실을 선택해 주세요.",
                 )
+
+        room0 = Room.first(branch=normalize_branch_id(branch), room_no=room_no)
+        if room0 is not None and mode != "RENEWAL":
+            if room0.reservation() is not None:
+                raise DomainError(f"{room_no}호는 이미 다음 입주자와 예약 계약이 체결되었습니다.",
+                                  hint="예약이 취소되면 다시 계약을 시작할 수 있습니다.")
+            if room0.is_occupied and not room0.pre_moveout_notice:
+                raise DomainError(f"{room_no}호는 입주 중입니다.",
+                                  hint="임차인의 전출 예정이 확인되어 사전 매물로 공개된 호실만 퇴실 전에 미리 계약할 수 있습니다.")
 
         # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
         # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)
@@ -1084,6 +1102,7 @@ class CoSignSession(PoolObj):
                 changed = True
 
         merged = self._sync_cleanup_clause(merged)
+        self._check_pre_contract_move_in(merged)
         if merged != self.terms:
             changed = True
 
@@ -1110,9 +1129,26 @@ class CoSignSession(PoolObj):
 
         return self
 
+    def pre_contract_min_move_in(self) -> str:
+        """사전 계약(입주 중인 전출 예정 호실)이면 새 입주일의 가장 빠른 날, 아니면 ''. 현재 입주자가 나가기 전에는 들어올 수 없다."""
+        if self.mode == "RENEWAL":
+            return ""
+        room = Room.get(self.id_room)
+        if room is None or not room.is_occupied:
+            return ""
+        return room.expected_vacate_date()
+
+    def _check_pre_contract_move_in(self, terms: Dict[str, Any]) -> None:
+        floor = self.pre_contract_min_move_in()
+        mv = str(terms.get("move_in_date") or "")
+        if floor and re_is_date(mv) and mv < floor:
+            raise DomainError(f"입주일은 현재 입주자의 퇴실 예정일({floor}) 이후여야 합니다.",
+                              hint="전입일과 전출일은 같은 날까지 가능합니다. 퇴실 예정일 이후 날짜를 입력해 주세요.")
+
     def agree_step3(self, role: str, expected_revision: Optional[int] = None, app_source: str = "rent3_contract") -> "CoSignSession":
         self._ensure_ready_for_steps()
         self._ensure_risk_ok()
+        self._check_pre_contract_move_in(self.terms)
         from .contract_chat import ensure_no_open_requests   # 답하지 않은 제안·수정 요청이 있으면 최종 동의 불가
         ensure_no_open_requests(self.id)
         if expected_revision is not None and expected_revision != self.revision:
@@ -1208,6 +1244,16 @@ class CoSignSession(PoolObj):
         room = Room.require(self.id_room)
         t_info = self.terms
 
+        # 사전 계약: 입주 중인 전출 예정 호실에 미리 체결하는 경우 현재 입주자 기록을 건드리지 않고 '예약 계약'(SCHEDULED)으로 만든다.
+        # 퇴실이 확정되어 방이 비는 순간(Room.vacate) 이 계약이 ACTIVE 가 되고 임차인이 입주한다.
+        reserve = (self.mode != "RENEWAL") and room.is_occupied
+        if reserve:
+            if room.reservation() is not None:
+                raise Conflict(f"{room.room_no}호는 이미 다음 입주자와 예약 계약이 체결되었습니다.", hint="예약이 취소된 뒤에 다시 시도해 주세요.")
+            if not room.pre_moveout_notice:
+                raise DomainError(f"{room.room_no}호는 입주 중이며 전출 예정으로 공개되지 않아 미리 계약할 수 없습니다.")
+            self._check_pre_contract_move_in(t_info)
+
         # 1) 임차인 객체 생성 또는 갱신 -> users.json 즉시 업데이트
         tenant = (
             (Tenant.get(self.id_tenant) if self.id_tenant else None)
@@ -1222,12 +1268,12 @@ class CoSignSession(PoolObj):
                 company_name=t_info.get("tenant_company_name", ""),
                 ceo_name=t_info.get("tenant_ceo_name", ""),
                 car_number=t_info.get("tenant_car_number", ""),
-                doorlock_pwd=room.doorlock_pwd,
+                doorlock_pwd="" if reserve else room.doorlock_pwd,
                 branch=self.branch,
                 id_building=self.id_building,
-                current_room_id=room.id,
-                room_no=room.room_no,
-                status="ACTIVE",
+                current_room_id="" if reserve else room.id,
+                room_no="" if reserve else room.room_no,
+                status="PROSPECT" if reserve else "ACTIVE",
             )
         else:
             tenant.name = t_info["tenant_name"]
@@ -1240,13 +1286,14 @@ class CoSignSession(PoolObj):
                 tenant.ceo_name = str(t_info["tenant_ceo_name"]).strip()
             if t_info.get("tenant_car_number"):
                 tenant.car_number = t_info["tenant_car_number"]
-            tenant.doorlock_pwd = room.doorlock_pwd
-            tenant.branch = self.branch
-            tenant.id_building = self.id_building
-            tenant.current_room_id = room.id
-            tenant.room_no = room.room_no
-            tenant.status = "ACTIVE"
-        tenant.save(action="tenant_activated_by_cosign", app_source=app_source)
+            if not reserve:
+                tenant.doorlock_pwd = room.doorlock_pwd
+                tenant.branch = self.branch
+                tenant.id_building = self.id_building
+                tenant.current_room_id = room.id
+                tenant.room_no = room.room_no
+                tenant.status = "ACTIVE"
+        tenant.save(action="tenant_reserved_by_cosign" if reserve else "tenant_activated_by_cosign", app_source=app_source)
         self.id_tenant = tenant.id
 
         # 재계약인 경우 이전 계약 RENEWED 마감
@@ -1318,24 +1365,29 @@ class CoSignSession(PoolObj):
             cosign_session_id=self.id,
             chat_digest=chat_digest,
             chat_digest_count=chat_digest_count,
-            status="ACTIVE",
+            status="SCHEDULED" if reserve else "ACTIVE",
         )
         ct.vat = ct.compute_vat()
         ct.save(action="contract_sealed_from_cosign", app_source=app_source)
 
         # 3) Room 호실 상태 입주 전환 (공실 광고 자동 비노출) -> rooms.json 즉시 업데이트
-        room.id_tenant = tenant.id
-        room.active_contract_id = ct.id
-        room.deposit = ct.deposit
-        room.monthly_rent = ct.monthly_rent
-        room.maintenance_fee = ct.maintenance_fee
-        room.lease_type = ct.lease_type
-        room.pay_timing = ct.pay_timing
-        room.pre_moveout_notice = False
-        room.next_listing = {}                  # 매물 등록 때의 임시 조건은 계약 값으로 덮였으니 삭제
-        room.available_from = "즉시입주"
-        room.is_published = False
-        room.save(action="room_assigned_by_cosign", app_source=app_source)
+        if reserve:
+            room.reserved_contract_id = ct.id   # 현재 입주자·계약은 그대로 두고 예약만 건다(광고는 내린다)
+            room.is_published = False
+            room.save(action="room_reserved_by_cosign", app_source=app_source)
+        else:
+            room.id_tenant = tenant.id
+            room.active_contract_id = ct.id
+            room.deposit = ct.deposit
+            room.monthly_rent = ct.monthly_rent
+            room.maintenance_fee = ct.maintenance_fee
+            room.lease_type = ct.lease_type
+            room.pay_timing = ct.pay_timing
+            room.pre_moveout_notice = False
+            room.next_listing = {}                  # 매물 등록 때의 임시 조건은 계약 값으로 덮였으니 삭제
+            room.available_from = "즉시입주"
+            room.is_published = False
+            room.save(action="room_assigned_by_cosign", app_source=app_source)
 
         # 4) 계약금 수납 기록 생성 -> payments.json 즉시 업데이트
         c_dep = ct.contract_deposit
@@ -1371,17 +1423,18 @@ class CoSignSession(PoolObj):
         self.completed_at = now_iso()
         self.save(action="cosign_completed_and_sealed", app_source=app_source)
 
-        DirectChat(
-            branch=self.branch,
-            id_room=room.id,
-            room_no=room.room_no,
-            sender_role="system",
-            sender_name="전자계약 체결 알림",
-            message=(
-                f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었습니다. "
-                f"계약 접수번호는 {rtms.fixed_date_no} 입니다. (법적 확정일자는 아닙니다 — 주민센터·등기소에서 별도로 받으세요)"
-            ),
-        ).save(action="chat_auto_sent", app_source=app_source)
+        if not reserve:        # 예약 계약의 체결 알림은 현재 입주자도 보는 호실 채팅에 남기지 않는다
+            DirectChat(
+                branch=self.branch,
+                id_room=room.id,
+                room_no=room.room_no,
+                sender_role="system",
+                sender_name="전자계약 체결 알림",
+                message=(
+                    f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었습니다. "
+                    f"계약 접수번호는 {rtms.fixed_date_no} 입니다. (법적 확정일자는 아닙니다 — 주민센터·등기소에서 별도로 받으세요)"
+                ),
+            ).save(action="chat_auto_sent", app_source=app_source)
 
         return {
             "session": self.model_dump(),
@@ -1389,6 +1442,7 @@ class CoSignSession(PoolObj):
             "tenant": tenant.model_dump(),
             "room": room.model_dump(),
             "rtms": rtms.model_dump(),
+            "reserved": reserve,
         }
 
     def _ensure_in_progress(self) -> None:

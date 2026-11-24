@@ -158,7 +158,7 @@ def purge_expired(force: bool = False) -> Dict[str, int]:
             s.save(action="contract_chat_purged", app_source="rent3_contract")
             n_sess += 1
     for ct in Contract.all():
-        if ct.status == "ACTIVE" or not ct.cosign_session_id or ct.chat_purged_at:
+        if ct.status in ("ACTIVE", "SCHEDULED") or not ct.cosign_session_id or ct.chat_purged_at:
             continue                                   # 유효한 계약의 대화는 지우지 않는다
         d = _day(ct.ended_at or ct.move_out_date or ct.updated_at)
         if d is not None and (today - d).days > CONCLUDED_RETENTION_DAYS:

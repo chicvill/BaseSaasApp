@@ -2039,9 +2039,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         who = {"name": "사진임차", "phone": "01066660801", "birth": "930303"}
         c.post(f"{base}/identity/start", headers=ten, json=who)
         c.post(f"{base}/identity/confirm", headers=ten, json={**who, "code": "000000"})
-        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "915", "is_published": True})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "921", "is_published": True})
         sid = c.post(f"{base}/sessions/call", headers=ten, json={
-            "caller_role": "tenant", "branch": "main", "room_no": "915", "mode": "NEW", "tenant_name": "사진임차", "tenant_phone": "010-6666-0801"}).json()["session"]["id"]
+            "caller_role": "tenant", "branch": "main", "room_no": "921", "mode": "NEW", "tenant_name": "사진임차", "tenant_phone": "010-6666-0801"}).json()["session"]["id"]
 
         # 호출 대기 화면의 QR 은 계약 id 만 담는다 — 로그인 없이도, 당사자가 아니어도 내용은 열리지 않는다
         self.assertEqual(c.get(f"{base}/sessions/{sid}", headers=self.NOAUTH).status_code, 401)
@@ -2079,10 +2079,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(up(chic, "lessor").status_code, 400)
 
         # 점검 단계가 끝난 계약(체결 완료)에는 사진을 더 올릴 수 없다
-        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "916", "is_published": True})
+        c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "923", "is_published": True})
         reg2 = c.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={
             "role": "prospect", "name": "사진임차2", "phone": "01066660802", "password": "Pw123456"}).json()
-        sid2 = self._complete_contract(chic, self._as(reg2["token"]), reg2["user"]["id"], "916", "사진임차2", "010-6666-0802")
+        sid2 = self._complete_contract(chic, self._as(reg2["token"]), reg2["user"]["id"], "923", "사진임차2", "010-6666-0802")
         late = c.post(f"{base}/sessions/{sid2}/facility-photos", json={"role": "lessor", "photo_data_url": png})
         self.assertIn(late.status_code, (400, 409))
 
@@ -8956,6 +8956,185 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ("btnTvCheck", "btnTvApply", "/accounts/test-vacate", "시험 호실 비우기"):
             self.assertIn(needle, adm, needle)
+
+    def _make_pre_moveout_room(self, room_no, phone, vacate_on="2027-01-15", deposit=4000000, rent=280000):
+        """사전 계약 시험용: 시험 임차인이 사는 호실을 만들고, 임차인이 전출 예정을 회신해 사전 매물(다음 세입자 조건 포함)로 공개된 상태를 돌려준다."""
+        import tempfile
+        from unittest import mock
+        c = self.client
+        lsr_url = "/api/rent3_admin/accounts/test-tenant"
+        with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_pre_")}):
+            done = c.post(lsr_url, json={"branch": "main", "room_no": room_no, "name": "기존입주", "phone": phone, "apply": True, "raise_limit": True}).json()
+        self.assertEqual(done["status"], "DONE", done)
+        rec = c.post("/api/rent3_lessor/expiry/record-plan", json={"branch": "main", "room_no": room_no, "tenant_plan": "MOVE_OUT", "planned_move_out_date": vacate_on})
+        self.assertEqual(rec.status_code, 200, rec.text)
+        pub = c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": room_no, "is_published": True, "pre_moveout_notice": True, "available_from": vacate_on,
+                                                    "deposit": deposit, "monthly_rent": rent, "maintenance_fee": 30000})
+        self.assertEqual(pub.status_code, 200, pub.text)
+
+    def _new_prospect(self, name, phone):
+        from apps.rent_dist._rent3_core import Tenant
+        reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH, json={"role": "prospect", "name": name, "phone": phone, "password": "Pw123456"})
+        self.assertEqual(reg.status_code, 200, reg.text)
+        t = Tenant.get(reg.json()["user"]["id"])
+        t.identity = {"verified": True}
+        t.save(action="t")
+        return t
+
+    def test_146_pre_contract_on_moveout_room_reserves_then_activates_at_vacate(self):
+        """146. 사전 계약: 입주 중인 전출 예정 호실에도 퇴실 전에 계약할 수 있다. 체결하면 현재 입주자·계약은 그대로 두고 '예약 계약'(SCHEDULED)이 걸리며(청구·원장 제외, 입주자 채팅에 안 보임), 퇴실이 확정되어 방이 비는 순간 예약 계약이 입주 계약(ACTIVE)이 되고 임차인이 입주한다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, DirectChat, Lessor
+        c, base = self.client, "/api/rent3_contract"
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            self._make_pre_moveout_room("796", "010-1234-0796")
+            room = Room.first(branch="main", room_no="796")
+            old_ct, old_tid = room.active_contract_id, room.id_tenant
+            self.assertTrue(room.is_occupied and room.pre_moveout_notice and room.is_published)
+            # 계약 앱 후보 목록: 입주 중이어도 사전 매물로 나오고, 값은 '다음 세입자용 조건'이다
+            cand = next(r for r in c.get(f"{base}/rooms").json()["rooms"] if r["room_no"] == "796" and r["branch"] == "main")
+            self.assertTrue(cand["is_occupied"] and cand["pre_moveout_notice"] and cand["is_published"])
+            self.assertEqual((cand["deposit"], cand["monthly_rent"]), (4000000, 280000))
+            self.assertEqual((cand["expected_vacate_date"], cand["has_reservation"]), ("2027-01-15", False))
+            # 새 임차인이 계약을 시작: 조건은 사전 매물 값, 입주일은 전출 예정일부터
+            new_t = self._new_prospect("신규예약", "010-7777-0796")
+            sid = c.post(f"{base}/sessions/call", json={"caller_role": "tenant", "branch": "main", "room_no": "796", "mode": "NEW",
+                                                        "tenant_name": "신규예약", "tenant_phone": "010-7777-0796", "id_tenant": new_t.id}).json()["session"]["id"]
+            self.assertEqual(c.post(f"{base}/sessions/{sid}/respond", json={"responder_role": "lessor", "responder_name": "김임대"}).status_code, 200)   # 임대인이 호출에 응답
+            ses = CoSignSession.get(sid)
+            self.assertEqual((ses.terms["deposit"], ses.terms["monthly_rent"], ses.terms["maintenance_fee"]), (4000000, 280000, 30000))
+            self.assertEqual((ses.terms["move_in_date"], ses.reserve_after), ("2027-01-15", "2027-01-15"))
+            # 지금 사는 임차인의 호실 채팅에는 다음 입주자와의 계약 호출이 남지 않는다
+            self.assertFalse([m for m in DirectChat.find(id_room=room.id) if "공동계약 요청" in (m.message or "")])
+            # 입주일은 현재 입주자의 퇴실 예정일 이전으로 정할 수 없다(같은 날은 가능)
+            from core.errors import DomainError
+            with self.assertRaisesRegex(DomainError, "퇴실 예정일"):
+                CoSignSession.get(sid).update_terms("lessor", {"move_in_date": "2027-01-10"})
+            CoSignSession.get(sid).update_terms("lessor", {"move_in_date": "2027-01-15"})
+            # 체결
+            self._complete_contract(None, None, new_t.id, "796", "신규예약", "010-7777-0796")
+            ses = CoSignSession.get(sid)
+            self.assertEqual(ses.status, "COMPLETED")
+            ct = Contract.get(ses.created_contract_id)
+            self.assertEqual(ct.status, "SCHEDULED")                                                                   # 입주 전 예약 계약
+            room = Room.first(branch="main", room_no="796")
+            self.assertEqual((room.id_tenant, room.active_contract_id), (old_tid, old_ct))                              # 현재 입주자·계약은 그대로
+            self.assertEqual(room.reserved_contract_id, ct.id)
+            self.assertFalse(room.is_published)                                                                         # 더는 광고하지 않는다
+            self.assertEqual((Tenant.get(old_tid).status, Tenant.get(new_t.id).status, Tenant.get(new_t.id).current_room_id), ("ACTIVE", "PROSPECT", ""))
+            self.assertEqual(Contract.get(old_ct).status, "ACTIVE")
+            self.assertEqual([x.id for x in Contract.find(id_room=room.id, status="ACTIVE")], [old_ct])                # 청구·원장은 현재 계약만
+            self.assertFalse([m for m in DirectChat.find(id_room=room.id) if "계약 최종 체결" in (m.message or "")])    # 체결 알림도 입주자 채팅에 안 남는다
+            # 예약이 걸린 호실: 계약 앱 후보 표시, 새 계약 호출 차단, 임대인 카드에 예약 요약, '전출의사 없음'으로 못 바꿈
+            cand = next(r for r in c.get(f"{base}/rooms").json()["rooms"] if r["room_no"] == "796" and r["branch"] == "main")
+            self.assertTrue(cand["has_reservation"])
+            other = self._new_prospect("끼어들기", "010-7777-0797")
+            blocked = c.post(f"{base}/sessions/call", json={"caller_role": "tenant", "branch": "main", "room_no": "796", "mode": "NEW",
+                                                            "tenant_name": "끼어들기", "tenant_phone": "010-7777-0797", "id_tenant": other.id})
+            self.assertEqual(blocked.status_code, 400)
+            self.assertIn("예약 계약", blocked.json()["message"])
+            card = next(r for r in c.get("/api/rent3_lessor/dashboard?branch=main").json()["rooms"] if r["room_no"] == "796")
+            self.assertEqual((card["reservation"]["tenant_name"], card["reservation"]["move_in_date"]), ("신규예약", "2027-01-15"))
+            stay = c.post("/api/rent3_lessor/expiry/record-plan", json={"branch": "main", "room_no": "796", "tenant_plan": "STAY"})
+            self.assertEqual(stay.status_code, 400)
+            # 퇴실 확정(방이 빌 때): 예약 계약이 입주 계약이 되고 새 임차인이 입주한다
+            from apps.rent_dist._rent3_core import testtenant as tt
+            with __import__("unittest").mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": __import__("tempfile").mkdtemp(prefix="rent3_bk_pre2_")}):
+                res = tt.vacate_test_room("main", "796", apply=True)
+            self.assertEqual(res["status"], "DONE", res)
+            self.assertIn("예약 계약의 임차인 신규예약", res["message"])
+            room = Room.first(branch="main", room_no="796")
+            self.assertEqual((room.id_tenant, room.active_contract_id, room.reserved_contract_id), (new_t.id, ct.id, ""))
+            self.assertEqual((room.deposit, room.monthly_rent, room.maintenance_fee), (4000000, 280000, 30000))
+            self.assertFalse(room.is_published or room.pre_moveout_notice)
+            self.assertEqual(Contract.get(ct.id).status, "ACTIVE")
+            self.assertEqual(Contract.get(old_ct).status, "TERMINATED")
+            nt = Tenant.get(new_t.id)
+            self.assertEqual((nt.status, nt.current_room_id, nt.room_no), ("ACTIVE", room.id, "796"))
+            self.assertEqual(Tenant.get(old_tid).status, "MOVED_OUT")
+            # 화면·매뉴얼: 집 고르기에 사전 매물 표시, 체결 후 예약 안내, 임대인 카드의 예약·취소, 입주일 최소값
+            rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
+            capp = rd("rent3_contract", "frontend", "app.js")
+            for needle in ("!r.has_reservation && (!r.is_occupied || r.pre_moveout_notice)", "퇴실 전 미리 계약", "reservedBannerHtml", "입주 예약 계약입니다", "s.reserve_after"):
+                self.assertIn(needle, capp, needle)
+            lapp = rd("rent3_lessor", "frontend", "app.js")
+            for needle in ("reservationCardHtml", "btnCancelReserve", "/reservation/cancel", "다음 입주 예약"):
+                self.assertIn(needle, lapp, needle)
+            self.assertIn("퇴실 전에 미리 계약", rd("rent3_contract", "frontend", "manual.html"))
+            self.assertIn("다음 입주 예약", rd("rent3_lessor", "frontend", "manual.html"))
+        finally:
+            for cls, oid in ((Contract, "ct_main_796"), (Tenant, "tenant_main_796"), (Room, "room_main_796")):
+                o = cls.get(oid)
+                if o:
+                    o.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "796":
+                    if s_.created_contract_id and Contract.get(s_.created_contract_id):
+                        Contract.get(s_.created_contract_id).delete(action="t")
+                    s_.delete(action="t")
+            for t in Tenant.all():
+                if t.phone in ("010-7777-0796", "010-7777-0797"):
+                    t.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
+
+    def test_147_reservation_can_be_cancelled_and_room_is_relisted(self):
+        """147. 예약 계약 취소: 임대인이 취소하면 계약은 CANCELLED, 호실은 전출 예정 사전 매물로 다시 공개되고 새 계약이 가능하다. 예약이 없으면 취소할 수 없고, 다른 지점 임대인·임차인은 못 한다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, Lessor
+        c, base = self.client, "/api/rent3_contract"
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        chic, sunho = self._login("chic"), self._login("sunho")
+        try:
+            self._make_pre_moveout_room("795", "010-1234-0795")
+            room = Room.first(branch="main", room_no="795")
+            url = f"/api/rent3_lessor/rooms/{room.id}/reservation/cancel"
+            self.assertEqual(c.post(url, headers=chic, json={}).status_code, 400)                                          # 예약이 없으면 취소할 것이 없다
+            t1 = self._new_prospect("예약취소", "010-7777-0795")
+            self._complete_contract(None, None, t1.id, "795", "예약취소", "010-7777-0795")
+            room = Room.first(branch="main", room_no="795")
+            ct = room.reservation()
+            self.assertIsNotNone(ct)
+            self.assertIn(c.post(url, headers=sunho, json={}).status_code, (401, 403))                                      # 다른 지점 임대인은 못 한다
+            ok = c.post(url, headers=chic, json={"reason": "임차인 사정"})
+            self.assertEqual(ok.status_code, 200, ok.text)
+            self.assertIn("계약금", ok.json()["hint"])
+            room = Room.first(branch="main", room_no="795")
+            self.assertEqual(room.reserved_contract_id, "")
+            self.assertTrue(room.is_published and room.pre_moveout_notice and room.is_occupied)                              # 다시 사전 매물로 공개
+            self.assertEqual(Contract.get(ct.id).status, "CANCELLED")
+            self.assertIn("예약 취소 사유", Contract.get(ct.id).special_terms)
+            self.assertEqual(Tenant.get(t1.id).status, "PROSPECT")
+            cand = next(r for r in c.get(f"{base}/rooms").json()["rooms"] if r["room_no"] == "795" and r["branch"] == "main")
+            self.assertFalse(cand["has_reservation"])
+            # 취소 뒤 다른 사람이 다시 계약을 시작할 수 있다
+            t2 = self._new_prospect("재도전", "010-7777-0794")
+            again = c.post(f"{base}/sessions/call", json={"caller_role": "tenant", "branch": "main", "room_no": "795", "mode": "NEW",
+                                                          "tenant_name": "재도전", "tenant_phone": "010-7777-0794", "id_tenant": t2.id})
+            self.assertEqual(again.status_code, 200, again.text)
+            # 입주 중이면서 사전 매물이 아닌 호실은 새 계약을 시작할 수 없다(서버 규칙)
+            real = c.post(f"{base}/sessions/call", json={"caller_role": "tenant", "branch": "main", "room_no": "201", "mode": "NEW",
+                                                         "tenant_name": "재도전", "tenant_phone": "010-7777-0794", "id_tenant": t2.id})
+            self.assertEqual(real.status_code, 400)
+            self.assertIn("입주 중", real.json()["message"])
+        finally:
+            for cls, oid in ((Contract, "ct_main_795"), (Tenant, "tenant_main_795"), (Room, "room_main_795")):
+                o = cls.get(oid)
+                if o:
+                    o.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "795":
+                    if s_.created_contract_id and Contract.get(s_.created_contract_id):
+                        Contract.get(s_.created_contract_id).delete(action="t")
+                    s_.delete(action="t")
+            for t in Tenant.all():
+                if t.phone in ("010-7777-0795", "010-7777-0794"):
+                    t.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

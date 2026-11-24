@@ -1772,12 +1772,35 @@
         보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)}<br>
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>
+      ${reservationCardHtml(r)}
       <div id="payInline" class="room-card r3-zone r3-zone--pay" style="margin-top:10px;"></div>`;
+    const cancelBtn = box.querySelector("#btnCancelReserve");
+    if (cancelBtn) cancelBtn.addEventListener("click", function () {
+      const why = window.prompt(`${r.room_no}호 예약 계약(${(r.reservation && r.reservation.tenant_name) || ""}님)을 취소합니다. 취소 사유를 적어 주세요(선택).\n취소하면 이 호실은 전출 예정 사전 매물로 다시 공개됩니다.`, "");
+      if (why === null) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/reservation/cancel`, { method: "POST", body: { reason: why } });
+        Bass.updateAppAlert("success", res.message, res.hint || "");
+        await refresh();
+      });
+    });
     const acts = { contract: showContractModal, expiry: showExpiryModal, moveout: showMoveOutModal, invite: showInviteModal, lostphone: revokeShortcuts,
       unpaidmsg: (rn) => { const rm = roomOf(rn); if (!rm || !rm.ledger) return; copyAndSms(unpaidText(rm), (rm.contract && rm.contract.tenant_phone) || (rm.tenant && rm.tenant.phone) || ""); } };
     box.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => acts[b.dataset.act](r.room_no)));
     box.querySelectorAll(".btn-open-promo").forEach((btn) => btn.addEventListener("click", () => showPromoModal(btn.dataset.id, btn.dataset.room)));
     renderPayInline(r.room_no);      // 호실을 고르면 그 호실의 수납 내용이 바로 펼쳐진 채로 열린다
+  }
+
+  // 입주 중인 호실에 미리 체결한 '예약 계약'(퇴실 확정 때 새 입주자로 바뀐다): 요약과 취소 단추
+  function reservationCardHtml(r) {
+    const rv = r.reservation;
+    if (!rv) return "";
+    return `<div class="room-card r3-zone" style="margin-top:10px;border-color:var(--warn);">
+      <div style="font-weight:800;">📅 다음 입주 예약 · ${Bass.escapeHtml(rv.tenant_name || "")}님</div>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:4px 0 8px;">입주 예정일 <strong>${Bass.escapeHtml(rv.move_in_date || "-")}</strong> · 보증금 ${fmtWon(rv.deposit)} · 월세 ${fmtWon(rv.monthly_rent)} · 관리비 ${fmtWon(rv.maintenance_fee)}<br>
+        현재 입주자가 퇴실 확정(정산 완료)되면 이 계약으로 입주가 시작됩니다. 그때까지 현재 계약·청구는 그대로입니다.</div>
+      <button id="btnCancelReserve" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">예약 계약 취소</button>
+    </div>`;
   }
 
   function renderLedgerTab() {

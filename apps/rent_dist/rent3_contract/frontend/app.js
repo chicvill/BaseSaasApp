@@ -401,14 +401,16 @@
     if (incoming.length) { openSession(incoming[0].id); return; }
     const ongoing = ongoingSessions();
     if (ongoing.length) { openSession(ongoing[0].id); return; }
-    const listings = candidateRooms.filter((r) => !r.is_occupied && r.is_published);
+    // 공실 + 입주 중이지만 전출 예정으로 공개된 '사전 매물'(퇴실 전에 미리 계약해 전입일·전출일을 맞춘다). 이미 예약이 걸린 호실은 뺀다.
+    const listings = candidateRooms.filter((r) => r.is_published && !r.has_reservation && (!r.is_occupied || r.pre_moveout_notice));
     const bd = openDialog(`
       <h3 style="margin:0 0 4px;">계약할 집 고르기</h3>
-      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다.</div>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다. 입주 중이어도 퇴실이 예정된 집은 <strong>퇴실 전에 미리 계약</strong>할 수 있습니다.</div>
       ${listings.length ? listings.map((r) => `
         <div class="room-row">
           <div class="room-row__main">
-            <div class="room-row__title">${esc(r.building_name)} ${esc(r.room_no)}호</div>
+            <div class="room-row__title">${esc(r.building_name)} ${esc(r.room_no)}호${r.is_occupied ? ' <span class="bass-badge bass-badge--warn" style="font-size:11.5px;">📅 퇴실 전 미리 계약</span>' : ""}</div>
+            ${r.is_occupied ? `<div class="bass-muted" style="font-size:12px;">현재 입주 중 · ${r.expected_vacate_date ? `<strong>${esc(r.expected_vacate_date)}</strong> 이후 입주` : "퇴실 확정 후 입주"} (전입일과 전출일은 같은 날까지 가능)</div>` : ""}
             <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}<br>${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${esc(r.direction)}` : ""} · 입주 ${esc(r.available_from || "즉시")}</div>
           </div>
           <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">이 집으로</button>
@@ -689,7 +691,7 @@
     const body = R3.openModal(`💡 ${label} 제안`, `
       <div style="font-size:14px;margin-bottom:8px;">현재 ${label}: <strong>${esc(fmtField(field, cur))}</strong></div>
       <label class="r3-fld">제안할 값${field === "lease_term_months" ? " (개월)" : isDate ? "" : " (원)"}
-        <input id="pfVal" class="bass-input" type="${isDate ? "date" : "number"}" value="${esc(String(cur ?? ""))}"></label>
+        <input id="pfVal" class="bass-input" type="${isDate ? "date" : "number"}"${isDate && s.reserve_after ? ` min="${esc(s.reserve_after)}"` : ""} value="${esc(String(cur ?? ""))}"></label>
       <label class="r3-fld" style="margin-top:8px;">사유 (선택)<textarea id="pfWhy" class="bass-input" rows="2" placeholder="예: 이사 일정 때문에 5일 늦추고 싶습니다"></textarea></label>
       <button id="pfSend" class="bass-btn bass-btn--primary" type="button" style="width:100%;margin-top:10px;">제안 보내기</button>
       <p class="bass-muted" style="font-size:12px;margin:8px 0 0;">상대가 수락하면 이 값으로 바뀌고, 양측의 3단계 동의가 초기화됩니다. 같은 항목에 다시 제안하면 이전 제안은 대체됩니다.</p>`);
@@ -862,7 +864,7 @@
     document.getElementById("wsTitle").textContent = `${s.building_name} ${s.room_no}호`;
     R3Shell.proxyBanner(`${s.building_name} ${s.room_no}호 (${ROLE_KO[currentRole]} 입장 · 계약방)`);   // 관리인 대리 접속 때만 보인다
     document.getElementById("wsMeta").textContent =
-      `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}`;
+      `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}${s.reserve_after ? ` · 📅 퇴실 전 사전 계약 (입주 ${s.reserve_after} 이후)` : ""}`;
 
     document.getElementById("btnCancelContract").hidden = s.status !== "IN_PROGRESS";
     updateTurnLine();
@@ -982,7 +984,7 @@
       const taxReq = Boolean(t.tax_invoice_requested || t.tenant_business_number);
       box.innerHTML = head + `
         <div class="field-grid">
-          <div><label class="bass-label">입주 예정일(잔금일)</label><input id="pfMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
+          <div><label class="bass-label">입주 예정일(잔금일)</label><input id="pfMoveIn" type="date" class="bass-input"${s.reserve_after ? ` min="${esc(s.reserve_after)}"` : ""} value="${esc(t.move_in_date || "")}"></div>
           <div><label class="bass-label">계약 기간(개월)</label><input id="pfTerm" type="number" class="bass-input" value="${Number(t.lease_term_months || 12)}"></div>
           <div><label class="bass-label">보증금(원)</label><input id="pfDeposit" type="number" class="bass-input" value="${Number(t.deposit || 0)}"></div>
           <div><label class="bass-label">계약금(원, 보증금 안)</label><input id="pfConDep" type="number" class="bass-input" value="${Number(t.contract_deposit || 0)}"></div>
@@ -2111,6 +2113,17 @@
     return { show: currentRole === "tenant" && ct.keys_released === false, br, read: br.read || {}, done: !!br.checked_at && !br.changed, changed: !!br.checked_at && !!br.changed };
   }
 
+  // 입주 중인 호실에 미리 체결한 '예약 계약'(SCHEDULED) 안내: 현재 입주자가 퇴실 확정되는 순간 입주 계약이 된다
+  function reservedBannerHtml() {
+    const ct = sealedContract || {};
+    if (ct.status !== "SCHEDULED") return "";
+    return `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--warn);font-size:13px;line-height:1.7;">
+      <strong>📅 입주 예약 계약입니다</strong><br>
+      현재 입주자가 퇴실 확정되면 입주 계약이 시작됩니다(입주 예정일 <strong>${Bass.escapeHtml(ct.move_in_date || "-")}</strong>). 월세 청구와 납부 내역은 입주가 시작된 뒤부터 계산됩니다.
+      도어락 정보는 입주가 시작되고 임대인이 잔금 입금을 확인한 뒤에 안내됩니다. 예약을 취소하려면 임대인에게 요청해 주세요.
+    </div>`;
+  }
+
   function balRegCardHtml() {
     const st = balRegState();
     if (!st.show) return "";
@@ -2198,6 +2211,7 @@
         입금 계좌: ${Bass.escapeHtml(s.lessor_account)} (예금주 ${Bass.escapeHtml(s.lessor_name)})<br>
         🔒 <strong>도어락·공동현관 번호는 입주 당일 잔금 입금을 임대인이 확인한 뒤 임차인 마이홈에 공개됩니다.</strong>
       </div>` : ""}
+      ${done ? reservedBannerHtml() : ""}
       ${done ? balRegCardHtml() : ""}
       ${done ? `
         <div class="bass-row">
@@ -2277,6 +2291,7 @@
     elSealedView.style.display = "block";
     elSealedView.innerHTML = `
       <div class="no-print" style="margin-top:14px;">
+        ${reservedBannerHtml()}
         <div class="bass-card" style="padding:14px;">
           <div style="font-weight:800;margin-bottom:4px;">🎉 계약이 체결되었습니다</div>
           <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">

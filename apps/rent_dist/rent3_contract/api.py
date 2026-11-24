@@ -184,9 +184,12 @@ def list_candidate_rooms(request: Request, branch: Optional[str] = None):
         b = bldgs.get(r.id_building)
         lsr = lessors_by_branch.get(r.branch)
         occ_t = tenants_by_room.get(r.id)
+        shown = r.as_listing() if r.is_occupied else r          # 입주 중인 전출 예정 호실은 사전 매물로 올린 다음 세입자용 조건을 보여 준다
         items.append({
-            **(r.model_dump() if (staff_all or r.branch == my_branch) else public_room(r.model_dump())),
+            **(shown.model_dump() if (staff_all or r.branch == my_branch) else public_room(shown.model_dump())),
             "is_occupied": r.is_occupied,
+            "has_reservation": r.reservation() is not None,
+            "expected_vacate_date": r.expected_vacate_date() if (r.is_occupied and r.pre_moveout_notice) else "",
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lsr.name if lsr else "건물 소유주",

@@ -634,6 +634,11 @@ class ExpiryRenewalCheck(PoolObj):
         self.tenant_responded_at = now_iso()
 
         room = Room.get(self.id_room)
+        if plan == "STAY" and room is not None and room.reservation() is not None:
+            raise DomainError(
+                "이미 다음 입주자와 예약 계약이 체결되어 '전출의사 없음'으로 바꿀 수 없습니다.",
+                hint="연장하려면 임대인이 먼저 예약 계약을 취소해야 합니다.",
+            )
 
         if plan == "MOVE_OUT":
             self.status = "MOVEOUT_PLANNED"

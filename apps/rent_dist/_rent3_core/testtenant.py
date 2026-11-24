@@ -154,8 +154,13 @@ def vacate_test_room(branch: str = "main", room_no: str = "701", apply: bool = F
     tenant.current_room_id = ""
     tenant.readonly_until = CheckOutSettlement._readonly_until(date.today())
     tenant.save(action="test_tenant_moved_out", app_source="admin_test_vacate")
+    reserved = room.reservation()
     room.vacate(app_source="admin_test_vacate")
     room = Room.get(room.id)
+    if reserved is not None:        # 미리 체결해 둔 예약 계약이 있으면 공실로 내놓지 않고 그 임차인이 바로 입주한다
+        nt = Tenant.get(reserved.id_tenant)
+        return {"status": "DONE", "backup": info.get("name", ""),
+                "message": f"처리했습니다: {room_no}호 시험 임차인 {tenant.name}님 퇴실 처리 + 계약 종료 → 예약 계약의 임차인 {nt.name if nt else ''}님이 입주했습니다(계약 {reserved.id}). 처리 전 백업: {info.get('name', '')}."}
     if not int(room.deposit or 0) and not int(room.monthly_rent or 0):
         room.deposit, room.monthly_rent = int(deposit or 0), int(monthly_rent or 0)
         room.save(action="test_room_terms_filled", app_source="admin_test_vacate")

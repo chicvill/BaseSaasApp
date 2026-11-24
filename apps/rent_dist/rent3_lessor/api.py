@@ -464,6 +464,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
             "ledger": ledger,
             "expiry_window": exp_win,
             "expiry_check": exp_chk.model_dump() if exp_chk else None,
+            "reservation": _reservation_summary(r),
             "billing_schedule": bill_sched,
             "billing_notices": bill_notices,
         }
@@ -618,6 +619,29 @@ def create_or_update_room(req: RoomCreateReq):
         is_published=req.is_published,
     ).save(action="room_created", app_source=APP_SRC)
     return {"success": True, "message": f"신규 {room.room_no}호가 등록되었습니다.", "room": room.model_dump()}
+
+
+def _reservation_summary(room: Room) -> Optional[Dict[str, Any]]:
+    """입주 중인 호실에 미리 체결한 예약 계약의 요약(없으면 None). 주민번호·서명 같은 상세는 싣지 않는다."""
+    ct = room.reservation()
+    if ct is None:
+        return None
+    return {"contract_id": ct.id, "tenant_name": ct.tenant_name, "tenant_phone": ct.tenant_phone, "move_in_date": ct.move_in_date,
+            "deposit": ct.deposit, "monthly_rent": ct.monthly_rent, "maintenance_fee": ct.maintenance_fee, "contract_date": ct.contract_date}
+
+
+class ReservationCancelReq(BaseModel):
+    reason: str = ""
+
+
+@router.post("/rooms/{room_id}/reservation/cancel")
+def cancel_room_reservation(room_id: str, req: ReservationCancelReq):
+    """퇴실 전에 미리 체결한 예약 계약을 취소한다(임대인). 호실은 전출 예정 사전 매물로 다시 공개된다. 받은 계약금 반환은 당사자가 직접 처리한다."""
+    room = Room.require(room_id)
+    ct = room.cancel_reservation(reason=req.reason, app_source=APP_SRC)
+    return {"success": True, "level": "success",
+            "message": f"{room.room_no}호 예약 계약({ct.tenant_name}님)을 취소했습니다. 호실은 전출 예정 사전 매물로 다시 공개됩니다.",
+            "hint": f"이미 받은 계약금({ct.contract_deposit:,}원)이 있으면 임차인에게 직접 반환해 주세요.", "room": room.model_dump()}
 
 
 @router.post("/rooms/{room_id}/publish")

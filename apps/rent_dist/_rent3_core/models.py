@@ -421,6 +421,7 @@ class Room(PoolObj):
     # 입주 중인 호실을 사전 매물로 등록할 때 '다음 세입자용 조건'을 여기에 따로 둔다(현재 계약과 방 값은 건드리지 않는다).
     # 퇴실이 확정돼 호실이 비면(vacate) 방 값에 반영하고 곧바로 비운다. 새 계약이 체결되면 계약 값으로 덮이고 이 값도 비워진다.
     next_listing: Dict[str, Any] = Field(default_factory=dict)
+    reserved_contract_id: str = ""           # 입주 중인 전출 예정 호실에 미리 체결한 '예약 계약'(status=SCHEDULED). 퇴실 확정(vacate) 때 새 입주자로 바뀐다
     is_published: bool = True
     images: List[str] = Field(default_factory=list)
 
@@ -452,8 +453,73 @@ class Room(PoolObj):
             return self.model_copy(update={k: v for k, v in self.next_listing.items() if k in self.LISTING_FIELDS})
         return self
 
+    def reservation(self) -> Optional["Contract"]:
+        """이 호실에 미리 체결해 둔 예약 계약(SCHEDULED). 없으면 None."""
+        ct = Contract.get(self.reserved_contract_id) if self.reserved_contract_id else None
+        return ct if (ct is not None and ct.status == "SCHEDULED") else None
+
+    def expected_vacate_date(self) -> str:
+        """입주 중인 호실의 예상 퇴실일(YYYY-MM-DD): 임차인이 회신한 전출 예정일 → 입주가능일에 적은 날짜 → 현재 계약 만기일. 모르면 ''."""
+        import re as _re
+        if not self.active_contract_id:
+            return ""
+        try:
+            from .ops import ExpiryRenewalCheck
+            chk = ExpiryRenewalCheck.for_contract(self.active_contract_id)
+            if chk and _re.match(r"^\d{4}-\d{2}-\d{2}$", chk.planned_move_out_date or ""):
+                return chk.planned_move_out_date
+        except Exception:
+            pass
+        m = _re.search(r"\d{4}-\d{2}-\d{2}", self.available_from or "")
+        if m:
+            return m.group(0)
+        ct = Contract.get(self.active_contract_id)
+        return (ct.expiry_date or "") if ct else ""
+
+    def cancel_reservation(self, reason: str = "", app_source: str = "rent3_lessor") -> "Contract":
+        """예약 계약을 취소한다(체결 후 아직 입주 전). 계약은 CANCELLED, 호실은 전출 예정 사전 매물로 다시 공개한다.
+        이미 받은 계약금 반환은 당사자가 직접 처리한다(수납 기록은 지우지 않는다)."""
+        ct = self.reservation()
+        if ct is None:
+            raise DomainError("취소할 예약 계약이 없습니다.")
+        ct.status = "CANCELLED"
+        ct.ended_at = date_today().isoformat()
+        ct.special_terms = (ct.special_terms or "") + (f"\n[예약 취소 사유] {reason.strip()}" if reason.strip() else "\n[예약 취소]")
+        ct.save(action="reserved_contract_cancelled", app_source=app_source)
+        self.reserved_contract_id = ""
+        self.is_published = True
+        self.save(action="room_reservation_cancelled", app_source=app_source)
+        return ct
+
+    def _activate_reservation(self, ct: "Contract", app_source: str) -> "Room":
+        """퇴실이 확정되어 방이 비는 순간, 미리 체결한 예약 계약이 입주 계약(ACTIVE)이 되고 임차인이 입주한다."""
+        ct.status = "ACTIVE"
+        ct.save(action="reserved_contract_activated", app_source=app_source)
+        self.id_tenant = ct.id_tenant
+        self.active_contract_id = ct.id
+        self.deposit, self.monthly_rent, self.maintenance_fee = ct.deposit, ct.monthly_rent, ct.maintenance_fee
+        self.lease_type, self.pay_timing = ct.lease_type, ct.pay_timing
+        self.pre_moveout_notice = False
+        self.next_listing = {}
+        self.reserved_contract_id = ""
+        self.available_from = "즉시입주"
+        self.is_published = False
+        t = Tenant.get(ct.id_tenant)
+        if t is not None:
+            t.status = "ACTIVE"
+            t.current_room_id, t.room_no, t.branch, t.id_building = self.id, self.room_no, self.branch, self.id_building
+            t.doorlock_pwd = self.doorlock_pwd
+            t.save(action="tenant_activated_from_reservation", app_source=app_source)
+        return self.save(action="room_assigned_from_reservation", app_source=app_source)
+
     def vacate(self, app_source: str = "rent3_lessor") -> "Room":
-        """퇴실 정산 완료 시 공실 전환 및 직거래 매물 자동 재노출. 다음 세입자용 조건(next_listing)이 있으면 방 값으로 반영하고 비운다."""
+        """퇴실 정산 완료 시 공실 전환 및 직거래 매물 자동 재노출. 다음 세입자용 조건(next_listing)이 있으면 방 값으로 반영하고 비운다.
+        미리 체결한 예약 계약이 있으면 공실로 내놓지 않고 곧바로 그 계약의 임차인이 입주한다."""
+        reserved = self.reservation()
+        if reserved is not None:
+            self.id_tenant = ""
+            self.active_contract_id = ""
+            return self._activate_reservation(reserved, app_source)
         nl = {k: v for k, v in (self.next_listing or {}).items() if k in self.LISTING_FIELDS}
         for k, v in nl.items():
             setattr(self, k, v)
@@ -542,7 +608,7 @@ class Contract(PoolObj):
     contract_photo_name: str = ""            # 원본 업로드 파일명
     broker_info: Dict[str, Any] = Field(default_factory=dict)  # 중개사무소 상호, 공인중개사명, 등록번호, 연락처 등
     fixed_date_no: str = ""                  # 대법원 확정일자 번호 (FIX-YYYYMMDD-XXXXXX)
-    status: str = "ACTIVE"                   # ACTIVE / TERMINATED / RENEWED
+    status: str = "ACTIVE"                   # ACTIVE / TERMINATED / RENEWED / SCHEDULED(입주 전 예약 계약) / CANCELLED(예약 취소)
 
     def summary(self) -> str:
         ch = "중개계약" if self.contract_channel == "BROKER_PAPER" else "직거래"
