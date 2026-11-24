@@ -722,7 +722,7 @@
       </div>
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>🏢 임대인 암호 설정 · 6개월 변경 권유</h3>
-        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">전화로 본인 확인을 마친 임대인에게 <strong>1회용 비밀번호 설정 링크</strong>(7일 유효, 4칸 대조 필수)를 보내거나, 6개월(180일)이 지난 임대인에게 <strong>새 암호 설정 권유 메시지·링크</strong>를 보냅니다(새 비밀번호를 정하기 전까지 기존 비밀번호와 등록 기기는 유지됩니다).</div>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">전화로 본인 확인을 마친 임대인에게 <strong>1회용 비밀번호 설정 링크</strong>(7일 유효, 4칸 대조 필수)를 보내거나, 6개월(180일)이 지난 임대인에게 <strong>새 암호 설정 권유 채팅·링크</strong>를 보냅니다(새 비밀번호를 정하기 전까지 기존 비밀번호와 등록 기기는 유지됩니다).</div>
         <select id="opsLessor" class="bass-select" style="width:100%;min-height:44px;margin-bottom:8px;">
           ${(ls.lessors || []).map((l) => `<option value="${Bass.escapeHtml(l.id)}">${Bass.escapeHtml(l.building_name || l.branch)} · ${Bass.escapeHtml(l.name)}${l.activated ? " (가입됨" + (l.days_since_change != null ? ` · ${l.days_since_change}일 경과` : "") + ")" : " (미설정)"}${l.due_6m ? " · ⚠️ 6개월 경과 권유 대상" : ""}${l.invite_pending ? " · 링크 대기" : ""}</option>`).join("")}
         </select>

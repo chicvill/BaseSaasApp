@@ -1,8 +1,8 @@
 """
-apps/rent_dist/_rent3_core/room_messages.py — '메시지' 화면(임대인·임차인): 호실별 1:1 대화와 계약 협상 기록.
+apps/rent_dist/_rent3_core/room_messages.py — '채팅' 화면(임대인·임차인): 호실별 1:1 대화와 계약 협상 기록.
 
 보여 주는 것
-  - 호실 대화: DirectChat 중 session_id 가 없는 글(문의·메시지·안내). 계약방 대화는 섞지 않는다.
+  - 호실 대화: DirectChat 중 session_id 가 없는 글(문의·채팅·안내). 계약방 대화는 섞지 않는다.
   - 계약 협상 기록: 그 호실의 현재 계약이 만들어진 계약방(Contract.cosign_session_id)의 대화. 접어서 따로 보여 주고
     체결 때 기록한 chat_digest 와 지금 내용이 맞는지(무결성) 함께 알려 준다.
 관리인 지원 채팅(SupportMessage)은 여기에 나오지 않는다.
@@ -102,7 +102,7 @@ def active_contract(room: Optional[Room]) -> Optional[Contract]:
 
 
 def rooms_overview(branch: str) -> List[Dict[str, Any]]:
-    """임대인 메시지 목록: 호실별 마지막 글과 안 읽은 수."""
+    """임대인 채팅 목록: 호실별 마지막 글과 안 읽은 수."""
     b = normalize_branch_id(branch)
     out = []
     for r in sorted(Room.find(branch=b), key=lambda x: x.room_no):

@@ -17,7 +17,7 @@ from .pool import PoolObj, now_iso
 
 
 class DirectChat(PoolObj):
-    """외부 알림톡 비용 0원 — 임대인·임차인 1:1 인앱 실시간 직통 메시지 객체."""
+    """외부 알림톡 비용 0원 — 임대인·임차인 1:1 인앱 실시간 직통 채팅 객체."""
     collection: ClassVar[str] = "ops"
     label: ClassVar[str] = "1:1 대화"
 

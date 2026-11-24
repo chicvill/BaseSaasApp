@@ -78,7 +78,7 @@
       { label: "🔓 아이디·비밀번호로 로그인", id: "btnFullLogin", pinOnly: true },
     ] },
     { title: "도움말 · 문의", items: [
-      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
+      { label: "💬 관리인과 채팅", id: "btnSupportChat", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
     ] },
     { title: "이동 (관리인)", items: [
@@ -91,7 +91,7 @@
   const ME_ADMIN = R3Shell.isAdminSession();
   // 관리인: 다른 앱으로 건너가는 링크(임대인·임차인 앱)는 입장 없이는 막히므로 숨기고, 원격 지원 입장 중일 때만 돌아갈 곳(관리인 앱·Data Pool)을 보인다
   const adminLinkOk = (i) => R3Shell.isAdminProxy() && /^\/(rent3_admin\/|rent3\/pool)/.test(i.href || "");
-  // 간편 비밀번호(PIN)로 들어온 화면: 서버가 허용한 일(현황 조회·메시지·시설 처리·수납[허용 기기])만 메뉴에 둔다
+  // 간편 비밀번호(PIN)로 들어온 화면: 서버가 허용한 일(현황 조회·채팅·시설 처리·수납[허용 기기])만 메뉴에 둔다
   const VIA_PIN = R3Shell.isViaPin();
   const PIN_TABS = ["ledger", "messages", "ops"];
   const pinOk = (i) => i.pinOnly || i.id === "btnShortcut" || i.href === "manual.html" || PIN_TABS.includes(i.tab);
@@ -99,7 +99,7 @@
   const buildMenu = () => LESSOR_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (i.tab !== "mail" || MAIL_ON) && (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly) && (VIA_PIN ? pinOk(i) : !i.pinOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), buildMenu());
   R3Shell.watchSupport();
-  // 🔔 알림 센터: 메시지·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
+  // 🔔 알림 센터: 채팅·정산·A/S·연결 요청 등 내가 처리할 일을 한곳에 모아 건수로 알린다(앱을 열지 않은 동안 생긴 일도 포함)
   if (window.R3Notify && !VIA_PIN) R3Notify.start({ url: `/api/rent3_lessor/notifications?branch=${encodeURIComponent(currentBranch)}`, seenUrl: "/api/rent3_lessor/notifications/seen", seenBody: { branch: currentBranch }, openSupport: () => R3Shell.openSupportChat() });
   const TAB_TITLES = { rooms: "임대매물 등록", registry: "등기부 확인", broker: "중개 계약서 사진 등록", tax: "세무 · 경비", ops: "A/S 접수", messages: "임차인과 채팅", expiry: "만기 통보", notice: "일괄 납입 통보", bldgtax: "부가세 · 소득세 대상 호실 설정", mail: "입금 메일 자동 정리" };
 
@@ -129,7 +129,7 @@
     }
     const pin = (dash && dash.pin) || {};
     const pay = pin.pay_ok ? `수납 허용 기기 — 오늘 남은 한도 <strong>${pin.left_n}건 · ${fmtWon(pin.left_amount)}</strong>` : "이 기기는 <strong>수납 불가</strong>(바로가기 설정에서 '수납 허용'을 켤 수 있습니다)";
-    bar.innerHTML = `🔐 간편 비밀번호로 접속 중 · 조회·메시지·A/S 처리만 가능 · ${pay}<br><span class="bass-muted">계약·세무·내보내기·설정은 </span><a href="#" id="pinBarLogin" style="font-weight:700;">아이디·비밀번호로 로그인</a>`;
+    bar.innerHTML = `🔐 간편 비밀번호로 접속 중 · 조회·채팅·A/S 처리만 가능 · ${pay}<br><span class="bass-muted">계약·세무·내보내기·설정은 </span><a href="#" id="pinBarLogin" style="font-weight:700;">아이디·비밀번호로 로그인</a>`;
     document.getElementById("pinBarLogin").addEventListener("click", (e) => { e.preventDefault(); fullLogin(); });
   }
   function fullLogin() {
@@ -540,7 +540,7 @@
     return `[${bldgName()}] ${r.room_no}호 ${(r.contract && r.contract.tenant_name) || ""}님, 아래 월세가 아직 확인되지 않았습니다.\n${list}\n합계 ${fmtWon(r.ledger.total_unpaid)}. 확인 후 입금 부탁드립니다.`;
   }
 
-  // 수납확인 메시지 복사 → 임차인 문자창 자동 실행 (모달 없이 바로 문자창 오픈)
+  // 수납확인 문자 복사 → 임차인 문자창 자동 실행 (모달 없이 바로 문자창 오픈)
   async function sendReceiptSms(rn, pay, remain) {
     const r = roomOf(rn);
     const ct = r && r.contract;
@@ -719,7 +719,7 @@
     }));
   }
 
-  // ① 수납내역(호실 카드 아래에 항상 펼쳐 둔다): 직접 수납(현금 등) · 월별 납부 내역(날짜·금액 고치기) · 수납확인 메시지
+  // ① 수납내역(호실 카드 아래에 항상 펼쳐 둔다): 직접 수납(현금 등) · 월별 납부 내역(날짜·금액 고치기) · 수납확인 문자
   function renderPayInline(no) {
     const r = roomOf(no);
     if (!r || !r.ledger) return;
@@ -1041,7 +1041,7 @@
     const body = openModal(`📅 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 만기통보`, `
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">만기 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${ew ? ` · 법정 통지기간 ${Bass.escapeHtml(dotDate(ew.notice_open_date))} ~ ${Bass.escapeHtml(dotDate(ew.notice_deadline_date))}` : ""}
         ${ec ? `<br>현재 상태: <strong>${Bass.escapeHtml(expiryStatusLabel(ec))}</strong>` : "<br>통보 실적이 없습니다."}</div>
-      <div class="r3-lbl">① 전출계획 확인 메시지</div>
+      <div class="r3-lbl">① 전출계획 확인 문자</div>
       <button id="exCopy1" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="margin:6px 0 12px;">📋 복사 → 임차인 문자창</button>
       <div class="r3-lbl">② 임차인 답변</div>
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px;">
@@ -1859,7 +1859,7 @@
         });
       });
     });
-    // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 메시지를 보낸다
+    // 문자 → 수납 처리 → 그 호실이 선택되어 수납 결과가 펼쳐지고 → 수납확인 문자를 보낸다
     // 호실·입금자명·금액이 장부와 다르면 저장하지 않고 경고 → '원본 고치기' 또는 '입금자명 기준으로 그대로 반영'
     const smsWarn = document.getElementById("smsWarn");
     async function runSms(force, targetMonths) {
@@ -3108,13 +3108,13 @@
         </div>
         <div style="margin:10px 0;padding:10px;border-radius:10px;background:var(--surface-2,#f1f5f9);">
           <div style="font-size:12.5px;" class="bass-muted">내 전용 수신 주소</div>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><code id="mlAddr" style="font-size:13px;word-break:break-all;">${st.address ? E(st.address) : "(수신 도메인이 아직 설정되지 않았습니다 — 관리인에게 문의)"}</code>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;"><code id="mlAddr" style="font-size:13px;word-break:break-all;">${st.address ? E(st.address) : "(수신 도메인이 아직 설정되지 않았습니다 — 관리인과 채팅)"}</code>
             ${st.address ? '<button id="mlCopy" class="bass-btn bass-btn--sm" type="button" style="min-height:40px;">복사</button>' : ""}</div>
         </div>
         ${st.forward_code ? `<div style="margin:0 0 10px;padding:10px;border-radius:10px;border:2px solid var(--primary,#2563eb);"><div style="font-size:13px;">📮 지메일 전달 확인 코드 <strong style="font-size:20px;letter-spacing:2px;">${E(st.forward_code)}</strong></div>
           <div class="bass-muted" style="font-size:12.5px;margin:4px 0 6px;">지메일의 '전달' 설정 화면에 이 코드를 입력하세요. 1시간 뒤 저절로 사라집니다.</div>
           <button id="mlCodeDone" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">입력했어요 (코드 지우기)</button></div>` : ""}
-        ${st.forward_error ? '<div role="alert" style="margin:0 0 10px;padding:10px;border-radius:10px;background:#fff1f2;font-size:13px;">⚠️ 지메일 확인 메일이 도착했으나 코드를 읽지 못했습니다. 지메일 전달 설정 화면의 안내에 따라 다시 시도하거나 관리인에게 문의해 주세요.</div>' : ""}
+        ${st.forward_error ? '<div role="alert" style="margin:0 0 10px;padding:10px;border-radius:10px;background:#fff1f2;font-size:13px;">⚠️ 지메일 확인 메일이 도착했으나 코드를 읽지 못했습니다. 지메일 전달 설정 화면의 안내에 따라 다시 시도하거나 관리인과 채팅해 주세요.</div>' : ""}
         <ol style="margin:0 0 10px;padding-left:20px;font-size:13px;line-height:1.7;"><li>지메일 <strong>설정 → 전달 및 POP/IMAP → 전달 주소 추가</strong>에 위 주소를 입력합니다. 구글이 보낸 <strong>확인 코드</strong>는 이 화면에 잠시 나타납니다.</li>
           <li>지메일 <strong>설정 → 필터 및 차단된 주소 → 새 필터 만들기</strong>에서 <strong>보낸사람</strong>에 ${E([...new Set(st.accounts.flatMap((a) => a.domains))].join(" 또는 "))} 를 넣고, <strong>다음 주소로 전달</strong>에서 위 주소를 고릅니다.</li>
           <li>은행에서 <strong>입금 알림을 이메일로</strong> 받도록 설정되어 있어야 합니다(은행 앱/인터넷뱅킹의 알림 설정).</li></ol>
@@ -3187,7 +3187,7 @@
     });
   }
 
-  // ── 운영 ▸ 메시지: 호실별 1:1 대화(임차인과) + 접어 둔 계약 협상 기록. 관리인 지원 채팅·계약방 대화는 섞지 않는다 ──
+  // ── 운영 ▸ 채팅: 호실별 1:1 대화(임차인과) + 접어 둔 계약 협상 기록. 관리인 지원 채팅·계약방 대화는 섞지 않는다 ──
   let msgRoom = currentTab === "messages" ? (params.get("room") || "") : "";   // 알림에서 호실을 지정해 들어오면 그 호실 대화부터 연다
   let msgTimer = null;
   const fmtMsgTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
@@ -3229,7 +3229,7 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
     elTabContent.innerHTML = `
       <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong>${callBtn(d.tenant_phone, "임차인 전화")}</div>
       <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
-      <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
+      <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>
       <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
       <details style="margin-top:14px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.purged ? `(보관 기간 만료로 삭제됨 · 당시 ${neg.original_count}건)` : `${neg.count}건 ${neg.count ? "보기" : ""}`}</summary>
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>

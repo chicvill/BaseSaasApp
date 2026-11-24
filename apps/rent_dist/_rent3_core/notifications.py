@@ -43,11 +43,11 @@ def _t_messages(t: Tenant) -> Optional[Dict[str, Any]]:
     room = Room.first(branch=t.branch, room_no=t.room_no)
     ct = Contract.get(room.active_contract_id) if (room and room.active_contract_id) else None
     n = rm.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else "")
-    return _item("messages", "임대인이 보낸 메시지", n, f"/rent3_tenant/?tenant={t.id}&svc=messages", "normal")
+    return _item("messages", "임대인이 보낸 채팅", n, f"/rent3_tenant/?tenant={t.id}&svc=messages", "normal")
 
 
 def _t_support(t: Tenant) -> Optional[Dict[str, Any]]:
-    return _item("support", "관리인 문의 답변", sup.unread_count(sup.thread_key(t), "user"), "", "normal", action="support")
+    return _item("support", "관리인 채팅 답변", sup.unread_count(sup.thread_key(t), "user"), "", "normal", action="support")
 
 
 def _t_checkout(t: Tenant) -> List[Optional[Dict[str, Any]]]:
@@ -116,13 +116,13 @@ def _l_messages(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     out = []
     for r in rm.rooms_overview(l.branch):
         who = f" · {r['tenant_name']}" if r.get("tenant_name") else ""
-        out.append(_item(f"messages:{r['room_no']}", f"{r['room_no']}호 세입자 메시지", int(r["unread"]),
+        out.append(_item(f"messages:{r['room_no']}", f"{r['room_no']}호 임차인 채팅", int(r["unread"]),
                          _l_base(l) + f"&tab=messages&room={quote(str(r['room_no']))}", "normal", detail=f"{r['room_no']}호{who}"))
     return out
 
 
 def _l_support(l: Lessor) -> Optional[Dict[str, Any]]:
-    return _item("support", "관리인 문의 답변", sup.unread_count(sup.thread_key(l), "user"), "", "normal", action="support")
+    return _item("support", "관리인 채팅 답변", sup.unread_count(sup.thread_key(l), "user"), "", "normal", action="support")
 
 
 def _l_expiry(l: Lessor) -> List[Optional[Dict[str, Any]]]:
@@ -226,7 +226,7 @@ def _a_all(_: Any) -> List[Optional[Dict[str, Any]]]:
     unread = sum(1 for m in SupportMessage.all() if m.sender_role == "user" and not m.read_by_admin)
     base = "/rent3_admin/?tab="
     return [
-        _item("support", "임대인·임차인 문의 — 안 읽음", unread, base + "support", "urgent"),
+        _item("support", "임대인·임차인 채팅 — 안 읽음", unread, base + "support", "urgent"),
         _item("franchise_review", "가맹 심사 대기", review, base + "lessors", "urgent"),
         _item("hometax_verify", "홈택스 사업자 상태 확인 대기", hometax, base + "lessors", "urgent"),
         _item("fee_overdue", "가맹비 연체", overdue, base + "lessors", "urgent"),

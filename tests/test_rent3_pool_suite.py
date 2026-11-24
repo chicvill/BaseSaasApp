@@ -4682,7 +4682,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for gone in ("roomPick", "lateHtml", "호실 선택</label>", "btn-late-sms"):
             self.assertNotIn(gone, app, gone)
         for needle in ("rl-row", "rl-row--ok", "rl-row--wait", "rl-row--late", "repeat(1, minmax(0, 1fr))", "function openRoomModal", 'id="roomPanel"', 'id="roomModalClose"', "닫기", "openRoomModal(rn)", "📨 미납 안내 문자",
-                       "bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 메시지 복사"):
+                       "bankSmsGo", "/payments/sms-paste", 'id="payInline"', "payFlash", "renderPayInline(r.room_no)", "직접 수납 (현금·여러 달분 입금 등)", "수납확인 문자 복사"):
             self.assertIn(needle, app, needle)
         for gone in ("pmParse", "pmSms", 'data-act="pay"', "showPayModal"):
             self.assertNotIn(gone, app, gone)

@@ -21,7 +21,7 @@
     "@media (min-width:640px){.r3-modal{align-items:center}.r3-modal__box{border-radius:16px}}",
     ".r3-modal__head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;font-size:15px;color:#1e293b}",
     ".r3-modal__x{min-width:40px;min-height:40px;font-size:18px}",
-    // 대화 말풍선(계약방 대화·메시지 화면 공용)
+    // 대화 말풍선(계약방 대화·채팅 화면 공용)
     ".cm-list{max-height:46vh;overflow-y:auto;padding:2px 2px 6px}",
     ".cm-b{margin:6px 0;display:flex}.cm-b.is-mine{justify-content:flex-end}",
     ".cm-b>div{max-width:88%;padding:8px 10px;border-radius:12px;font-size:13.5px;line-height:1.5;background:#f1f5f9;color:#1e293b;border:1px solid #e2e8f0}",
@@ -132,7 +132,7 @@
     });
   }
 
-  ensureStyle();   // 창을 열지 않는 화면(메시지 말풍선 등)도 같은 스타일을 쓴다
+  ensureStyle();   // 창을 열지 않는 화면(채팅 말풍선 등)도 같은 스타일을 쓴다
   global.R3 = Object.assign(global.R3 || {}, {
     openModal: openModal, closeModal: closeModal, copyText: copyText, copyAndSms: copyAndSms
   });

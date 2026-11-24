@@ -2037,12 +2037,12 @@ def send_lessor_chat(req: ChatReplyReq):
     lessor = Lessor.first(branch=b_id)
     msg = room_messages.post(b_id, req.room_no, "lessor", lessor.name if lessor else "임대인", req.message,
                              tenant_id=(room.id_tenant if room else "") or "")
-    return {"success": True, "message": "메시지가 전송되었습니다.", "chat": msg.model_dump()}
+    return {"success": True, "message": "채팅을 보냈습니다.", "chat": msg.model_dump()}
 
 
 @router.get("/messages/rooms")
 def messages_rooms(branch: str = "main"):
-    """메시지 화면 목록: 호실별 마지막 글·안 읽은 수 (관리인 지원 채팅·계약방 대화는 섞지 않는다)."""
+    """채팅 화면 목록: 호실별 마지막 글·안 읽은 수 (관리인 지원 채팅·계약방 대화는 섞지 않는다)."""
     ensure_pool_seeded()
     contract_chat.purge_expired()
     return {"success": True, "rooms": room_messages.rooms_overview(branch)}
@@ -2281,7 +2281,7 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
 
 @router.post("/expiry/remind-password")
 def remind_tenant_renewal_password(req: TenantInviteReq, request: Request):
-    """만기·재계약(또는 1년 도래) 임차인에게 새 비밀번호 설정 권유 메시지·1회용 링크를 보낸다. 기존 비밀번호와 등록 기기는 유지된다."""
+    """만기·재계약(또는 1년 도래) 임차인에게 새 비밀번호 설정 권유 채팅·1회용 링크를 보낸다. 기존 비밀번호와 등록 기기는 유지된다."""
     from apps.rent_dist._rent3_core import invite as inv
     ensure_pool_seeded()
     b_id = normalize_branch_id(req.branch)
@@ -2323,7 +2323,7 @@ def remind_tenant_renewal_password(req: TenantInviteReq, request: Request):
         "room_no": t.room_no,
         "building_name": bname,
         "sms_text": sms_text,
-        "message": f"{t.room_no}호 {t.name}님께 재계약 새 비밀번호 설정 안내 메시지와 1회용 링크를 보냈습니다.",
+        "message": f"{t.room_no}호 {t.name}님께 재계약 새 비밀번호 설정 안내 채팅와 1회용 링크를 보냈습니다.",
     }
 
 
@@ -2361,7 +2361,7 @@ def send_room_billing_notice(req: SendBillingNoticeReq):
             if is_overdue
             else f"🔔 {bn.room_no}호({bn.tenant_name}) 납입일({bn.due_date}) 사전 안내 발송 완료 — 예정액 {bn.amount_due:,}원"
         ),
-        "hint": "임차인 마이홈 상단 알림 배너와 1:1 메시지로 실시간 전달되었습니다.",
+        "hint": "임차인 마이홈 상단 알림 배너와 1:1 채팅으로 실시간 전달되었습니다.",
         "notice": bn.model_dump(),
     }
 

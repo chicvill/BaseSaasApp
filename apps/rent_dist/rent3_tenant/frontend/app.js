@@ -36,7 +36,7 @@
       { label: "🚪 퇴실 정산", id: "btnSvcCheckout" },
     ] },
     { title: "생활 · 요청", items: [
-      { label: "✉️ 임대인과 메시지", id: "btnSvcMsg" },
+      { label: "💬 임대인과 채팅", id: "btnSvcMsg" },
       { label: "🔧 A/S 요청", id: "btnSvcAs" },
       { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
     ] },
@@ -46,7 +46,7 @@
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
     ] },
     { title: "도움말 · 문의", items: [
-      { label: "💬 관리인에게 문의", id: "btnSupportChat", userOnly: true },
+      { label: "💬 관리인과 채팅", id: "btnSupportChat", userOnly: true },
       { label: "📘 이용 매뉴얼", href: "manual.html" },
     ] },
     { title: "다른 집 찾기", items: [
@@ -65,7 +65,7 @@
   const MY_MENU = TENANT_MENU.map((g) => ({ ...g, items: g.items.filter((i) => (ME_ADMIN ? (!i.userOnly && (!i.adminOnly || adminLinkOk(i))) : !i.adminOnly)) })).filter((g) => g.items.length);
   R3Shell.renderMenu(document.querySelector("[data-r3-drawer]"), MY_MENU);
 
-  const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", messages: "임대인과 메시지", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
+  const SVC_TITLES = { home: "", notice: "납입 안내 · 미납 통보", expiry: "만기 · 연장 안내", checkout: "퇴실 정산", paper: "중개 계약서 사본", as: "A/S 요청", messages: "임대인과 채팅", cert: "연말정산 납부확인서", door: "도어락 · 차량" };
   let svcView = SVC_TITLES[params.get("svc")] !== undefined ? params.get("svc") : "home";
 
   function closeDrawer() {
@@ -89,7 +89,7 @@
     if (svcView === "messages") loadTenantMessages();
   }
 
-  // ── 임대인과 메시지 (내 호실 1:1 대화 + 접어 둔 계약 협상 기록). 관리인 지원 문의·계약방 대화는 섞지 않는다 ──
+  // ── 임대인과 채팅 (내 호실 1:1 대화 + 접어 둔 계약 협상 기록). 관리인 지원 문의·계약방 대화는 섞지 않는다 ──
   let tnMsgTimer = null;
   let tnMsgCount = -1;
   const tnTime = (iso) => (iso && iso.length >= 16 ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
@@ -202,7 +202,7 @@
     const cur = await Bass.api(APP_ID, `/myhome/${encodeURIComponent(selectedTenantId)}/business-registration`);
     const b = cur.business || {};
     const body = R3.openModal("🏢 사업자 정보 · 세금계산서 요청", `
-      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">사업자등록증을 올리면 번호·상호·대표자를 읽어 채웁니다(AI 읽기는 아래 동의 시에만). <strong>사업자등록번호가 없으면</strong> 세금계산서 대신 <strong>현금영수증</strong>을 임대인에게 요청하세요(☰ 임대인과 메시지).</div>
+      <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">사업자등록증을 올리면 번호·상호·대표자를 읽어 채웁니다(AI 읽기는 아래 동의 시에만). <strong>사업자등록번호가 없으면</strong> 세금계산서 대신 <strong>현금영수증</strong>을 임대인에게 요청하세요(☰ 임대인과 채팅).</div>
       ${cur.submitted_at ? `<div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">마지막 제출 ${E(String(cur.submitted_at).slice(0, 16).replace("T", " "))}</div>` : ""}
       <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin:6px 0;"><button type="button" id="tbCam" class="bass-btn bass-btn--primary" style="min-height:48px;">📷 촬영하기</button><button type="button" id="tbPic" class="bass-btn" style="min-height:48px;">🖼 사진·PDF 선택</button></div>
       <input id="tbFileCam" type="file" accept="image/*" capture="environment" hidden><input id="tbFile" type="file" accept="image/*,application/pdf" hidden>
@@ -247,7 +247,7 @@
   const btnSupportSetting = document.getElementById("btnSupportSetting");
   if (btnSupportSetting) btnSupportSetting.addEventListener("click", () => { closeDrawer(); R3Shell.openSupportSettings(); });
   R3Shell.watchSupport();
-  // 🔔 알림 센터: 정산서·만기 회신·메시지·미납 등 내가 확인할 일을 한곳에 모아 건수로 알린다
+  // 🔔 알림 센터: 정산서·만기 회신·채팅·미납 등 내가 확인할 일을 한곳에 모아 건수로 알린다
   if (window.R3Notify && selectedTenantId && !ME_ADMIN) R3Notify.start({ url: `/api/rent3_tenant/myhome/${encodeURIComponent(selectedTenantId)}/notifications`, seenUrl: `/api/rent3_tenant/myhome/${encodeURIComponent(selectedTenantId)}/notifications/seen`, openSupport: () => R3Shell.openSupportChat() });
   if (params.get("welcome")) {    // 입주 안내 링크로 가입을 마친 직후: 홈 화면 추가 방법을 한 번 보여 주고 주소에서 welcome 을 뺀다
     try { const u = new URL(window.location.href); u.searchParams.delete("welcome"); window.history.replaceState(null, "", u.toString()); } catch (_) { /* 무시 */ }
@@ -343,7 +343,7 @@
     if (ec && ec.status === "AWAITING_TENANT") todos.push({ icon: "📅", text: "만기 후 전출 계획을 알려 주세요", label: "답변하기", go: "expiry", hot: true });
     else if (ec && ec.status === "RENEWAL_PREVIEWED") todos.push({ icon: "📝", text: "연장 재계약 예고가 도착했습니다", label: "확인하기", go: "expiry", hot: true });
     else if (ew && ew.in_6_to_2_months_window && !ec) todos.push({ icon: "📅", text: "만기가 다가옵니다. 전출 계획을 알릴 수 있습니다", label: "열기", go: "expiry", hot: false });
-    if ((data.messages_unread || 0) > 0) todos.push({ icon: "✉️", text: `임대인 메시지 ${data.messages_unread}건이 있습니다`, label: "보기", go: "messages", hot: false });
+    if ((data.messages_unread || 0) > 0) todos.push({ icon: "✉️", text: `임대인 채팅 ${data.messages_unread}건이 있습니다`, label: "보기", go: "messages", hot: false });
     if (activeBns.some((x) => x.status !== "ACKNOWLEDGED")) todos.push({ icon: "🔔", text: "납입 안내가 도착했습니다", label: "보기", go: "notice", hot: false });
     const todoHtml = todos.length ? `<div class="bass-card no-print" style="margin-bottom:14px;padding:10px 12px;">${todos.slice(0, 2).map((x) => `
       <div class="bass-row" style="justify-content:space-between;align-items:center;gap:8px;padding:4px 0;">
@@ -366,7 +366,7 @@
             <span class="bass-badge ${(lg.overdue_unpaid ?? lg.total_unpaid) > 0 ? "bass-badge--err" : (lg.total_unpaid > 0 ? "bass-badge--warn" : "bass-badge--ok")}">${(lg.overdue_unpaid ?? lg.total_unpaid) > 0 ? `미납 ${fmtWon(lg.overdue_unpaid ?? lg.total_unpaid)}` : (lg.total_unpaid > 0 ? `🕒 납부 예정 ${fmtWon(lg.total_unpaid)}` : "미납 0원 (완납)")}</span>
             ${bs ? `<span class="bass-badge ${bs.is_pre_due_3d ? "bass-badge--warn" : "bass-badge--info"}">매월 ${bs.payment_day}일 납입 · 차기 ${Bass.escapeHtml(bs.upcoming_due_date)} (D-${bs.days_until_due})</span>` : ""}
             <span class="bass-badge ${ew && ew.in_6_to_2_months_window ? "bass-badge--warn" : "bass-badge--info"}">만기 D-${lg.days_to_expiry ?? "-"}${ew && ew.in_6_to_2_months_window ? " (6~2개월 통지구간)" : ""}</span>
-            ${(data.messages_unread || 0) > 0 ? `<span class="bass-badge bass-badge--info">✉️ 새 메시지 ${data.messages_unread}</span>` : ""}
+            ${(data.messages_unread || 0) > 0 ? `<span class="bass-badge bass-badge--info">✉️ 새 채팅 ${data.messages_unread}</span>` : ""}
           </div>
         </div>
 
@@ -596,12 +596,12 @@
       </section>
       <section class="svc" data-svc="messages">
         <div class="bass-card no-print">
-          <h3 style="margin:0 0 6px;">✉️ 임대인과 메시지</h3>
-          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">내 호실의 임대인과 주고받는 앱 안 대화입니다. 관리인에게 도움을 청할 때는 메뉴의 ‘관리인에게 문의’를 쓰세요.</div>
+          <h3 style="margin:0 0 6px;">💬 임대인과 채팅</h3>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">내 호실의 임대인과 주고받는 앱 안 대화입니다. 관리인에게 도움을 청할 때는 메뉴의 ‘관리인과 채팅’를 쓰세요.</div>
           <div id="tnMsgCall" style="margin-bottom:8px;"></div>
           <div id="tnMsgList" class="cm-list" style="max-height:50vh;"></div>
           <div id="tnMsgComposer"${R3Shell.isAdminSession() ? " hidden" : ""}>
-            <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 메시지" style="width:100%;margin-top:8px;"></textarea>
+            <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>
             <button id="btnTnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
           </div>
           <div id="tnMsgNeg"></div>
@@ -633,7 +633,7 @@
     `;
 
     const msgMenuBtn = document.getElementById("btnSvcMsg");
-    if (msgMenuBtn) msgMenuBtn.textContent = "✉️ 임대인과 메시지" + ((data.messages_unread || 0) > 0 ? ` (${data.messages_unread})` : "");   // 안 읽은 수는 메뉴에도 보인다
+    if (msgMenuBtn) msgMenuBtn.textContent = "💬 임대인과 채팅" + ((data.messages_unread || 0) > 0 ? ` (${data.messages_unread})` : "");   // 안 읽은 수는 메뉴에도 보인다
     applyView();
     document.getElementById("btnTnMsgSend").addEventListener("click", function () {
       Bass.withLock(this, async () => {

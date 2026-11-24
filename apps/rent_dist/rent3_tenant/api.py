@@ -146,7 +146,7 @@ def submit_inquiry(req: InquiryReq):
     ).save(action="prospect_inquiry_sent", app_source=APP_SRC)
     return {
         "success": True,
-        "message": f"{req.room_no}호 임대인에게 1:1 방문투어/문의 메시지가 실시간 전달되었습니다 .",
+        "message": f"{req.room_no}호 임대인에게 1:1 방문투어/문의 채팅이 실시간 전달되었습니다 .",
         "chat": chat.model_dump(),
     }
 
@@ -229,7 +229,7 @@ def get_myhome(tenant_id: str):
         "tickets": [tk.model_dump() for tk in tickets],
         "pending_checkout": checkouts[0].model_dump() if checkouts else None,
         "chats": [c.model_dump() for c in chats],
-        "messages_unread": (room_messages.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else "") if t.room_no else 0),   # 임대인 메시지 안 읽은 수(읽음 처리 없음)
+        "messages_unread": (room_messages.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else "") if t.room_no else 0),   # 임대인 채팅 안 읽은 수(읽음 처리 없음)
     }
 
 
@@ -264,7 +264,7 @@ def _tenant_since(t: Tenant):
 
 @router.get("/myhome/{tenant_id}/messages", dependencies=[Depends(tenant_scope)])
 def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
-    """임대인과의 메시지(내 호실). 계약 협상 기록은 접어서 따로 준다. 관리인 지원 채팅·계약방 대화는 섞지 않는다."""
+    """임대인과의 채팅(내 호실). 계약 협상 기록은 접어서 따로 준다. 관리인 지원 채팅·계약방 대화는 섞지 않는다."""
     ensure_pool_seeded()
     contract_chat.purge_expired()
     t = _tenant_by_id(tenant_id)
@@ -288,7 +288,7 @@ def tenant_message_send(tenant_id: str, req: TenantMsgReq):
     ensure_pool_seeded()
     t = _tenant_by_id(tenant_id)
     if not t.room_no:
-        raise DomainError("입주한 호실이 없어 메시지를 보낼 수 없습니다.", hint="빈 집 찾기의 1:1 방문문의를 이용해 주세요.")
+        raise DomainError("입주한 호실이 없어 채팅을 보낼 수 없습니다.", hint="빈 집 찾기의 1:1 방문문의를 이용해 주세요.")
     m = room_messages.post(t.branch, t.room_no, "tenant", t.name, req.body, tenant_id=t.id)
     return {"success": True, "message": "임대인에게 보냈습니다.", "item": room_messages.public(m)}
 

@@ -584,7 +584,7 @@ def issue_lessor_invite(req: InviteIssueReq, request: Request):
 
 @router.post("/accounts/lessors/{lessor_id}/remind-password", dependencies=ADMIN_ONLY)
 def remind_lessor_password(lessor_id: str, request: Request):
-    """관리인 → 임대인 6개월(180일) 주기 새 비밀번호 설정 권유 메시지·링크 발송. 강제 만료·차단은 하지 않으며 기존 비밀번호와 등록 기기는 유지된다."""
+    """관리인 → 임대인 6개월(180일) 주기 새 비밀번호 설정 권유 채팅·링크 발송. 강제 만료·차단은 하지 않으며 기존 비밀번호와 등록 기기는 유지된다."""
     from apps.rent_dist._rent3_core import invite as inv
     lsr = Lessor.get(lessor_id)
     if lsr is None:
@@ -613,7 +613,7 @@ def remind_lessor_password(lessor_id: str, request: Request):
         "building_name": bname,
         "days_since_change": age,
         "sms_text": body,
-        "message": f"{lsr.name} 임대인에게 6개월 새 비밀번호 설정 권유 메시지와 1회용 링크를 보냈습니다.",
+        "message": f"{lsr.name} 임대인에게 6개월 새 비밀번호 설정 권유 채팅와 1회용 링크를 보냈습니다.",
     }
 
 

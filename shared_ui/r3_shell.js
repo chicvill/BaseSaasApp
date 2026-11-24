@@ -11,7 +11,7 @@
  *   R3Shell.startClock(제목요소, () => "건물이름[아이디]") → "🏢 이름 2026.11.10 17:05" 를 30초마다 갱신, 갱신 함수를 돌려준다
  *   R3Shell.menuTabs(그룹목록) → 메뉴에 있는 tab 이름 목록(테스트·점검용)
  *   R3Shell.isAdminSession() / isAdminProxy() / proxyBanner(라벨) → 관리인 대리 접속 중 위쪽 띠(보기 전용 안내 + 관리인 페이지로 돌아가기)
- *   R3Shell.openSupportChat() → '관리인에게 문의' 창(지원 채팅). R3Shell.watchSupport() → 안 읽은 글 수·관리인 접속 알림 확인
+ *   R3Shell.openSupportChat() → '관리인과 채팅' 창(지원 채팅). R3Shell.watchSupport() → 안 읽은 글 수·관리인 접속 알림 확인
  *   R3Shell.openSupportSettings() → '관리인 원격 지원 허용 ON/OFF' 창 (임대인·임차인 앱 메뉴에서 연다). r3_modal.js 가 먼저 있어야 한다.
  *   R3Shell.openShortcutSettings() → '바로가기 · 간편 비밀번호' 창 (입주 임차인 앱 메뉴): PIN 정하기, 이 기기 바로가기 만들기, 기기별 해제.
  *   R3Shell.pinPending() → 주소에 qk(바로가기 키)가 있고 아직 로그인 전이거나, 주소에 invite(입주 안내 링크)가 있으면 true.
@@ -389,13 +389,13 @@
         var html = LESSOR ?
           '<p style="font-size:13.5px;line-height:1.7;margin:0 0 8px;">홈 화면 아이콘을 누르면 <strong>4자리 숫자</strong>만으로 임대인 화면이 열립니다. 기기는 <strong>' + st.max_devices + '대까지</strong>, 접속은 1시간 동안 유지됩니다.</p>' +
           '<ul style="font-size:12.5px;line-height:1.6;margin:0 0 10px;padding-left:18px;">' +
-          "<li>간편 비밀번호로는 <strong>현황 조회·메시지·시설(A/S) 처리</strong>만 됩니다.</li>" +
+          "<li>간편 비밀번호로는 <strong>현황 조회·채팅·시설(A/S) 처리</strong>만 됩니다.</li>" +
           "<li>수납은 기기별 <strong>'수납 허용'</strong>을 켠 기기에서만, 하루 25건·1,000만 원까지 됩니다. (수정·삭제는 불가)</li>" +
           "<li>계약·세무·내보내기·건물 설정은 아이디·비밀번호로 로그인해야 합니다.</li>" +
           "<li>5번 틀리면 그 기기는 잠기고, 아이디·비밀번호로 로그인하면 풀립니다. 폰 잠금(생체·패턴)도 꼭 켜 두세요.</li></ul>" :
           '<p style="font-size:13.5px;line-height:1.7;margin:0 0 8px;">홈 화면 아이콘을 누르면 <strong>4자리 숫자</strong>만으로 내 집 화면이 열립니다. 이 기기에서만 쓰이고, 언제든 해제할 수 있습니다.</p>' +
           '<ul style="font-size:12.5px;line-height:1.6;margin:0 0 10px;padding-left:18px;">' +
-          "<li>열람·납부·메시지·A/S 요청 같은 일상 업무만 됩니다.</li>" +
+          "<li>열람·납부·채팅·A/S 요청 같은 일상 업무만 됩니다.</li>" +
           "<li>계약 동의·서명, 퇴실 정산 동의, 설정 변경은 아이디·비밀번호로 로그인해야 합니다.</li>" +
           "<li>5번 틀리면 그 기기는 잠기고, 아이디·비밀번호로 로그인하면 풀립니다.</li></ul>";
         if (st.via_pin) {
@@ -553,7 +553,7 @@
       var callRow = adminDigits.length >= 9
         ? '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;"><strong style="font-size:14px;">📞 관리인에게 전화 :</strong><a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:' + adminDigits + '" style="min-height:40px;">' + esc(d.admin_phone) + "</a></div>"
         : "";
-      var body = global.R3.openModal("💬 관리인에게 문의",
+      var body = global.R3.openModal("💬 관리인과 채팅",
         callRow + '<div id="r3SupList" style="max-height:44vh;overflow-y:auto;padding:2px 2px 6px;">' + rows + "</div>" +
         '<textarea id="r3SupMsg" class="bass-input" rows="3" placeholder="도움이 필요한 내용을 적어 주세요" style="width:100%;margin-top:6px;"></textarea>' +
         '<div style="display:flex;gap:8px;margin-top:6px;align-items:center;flex-wrap:wrap;">' +
@@ -604,7 +604,7 @@
           if (!d) return;
           var btn = document.getElementById("btnSupportChat");
           if (btn) {
-            var supTxt = "관리인에게 문의" + (d.unread > 0 ? " (" + d.unread + ")" : "");
+            var supTxt = "관리인과 채팅" + (d.unread > 0 ? " (" + d.unread + ")" : "");
             var tileTxt = btn.querySelector(".r3-tile-txt");
             if (tileTxt) tileTxt.textContent = supTxt;
             else btn.textContent = "💬 " + supTxt;
