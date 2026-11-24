@@ -103,6 +103,13 @@
   const esc = Bass.escapeHtml;
   const digits = (v) => String(v || "").replace(/\D/g, "");
 
+  function acctLabel(s) {
+    const a = (s && s.lessor_account || "").trim();
+    return a ? `${Bass.escapeHtml(a)} (예금주: ${Bass.escapeHtml(s.lessor_name || "")})` : "임대인이 수납 계좌를 아직 등록하지 않았습니다(임대인에게 계좌 안내를 요청하세요)";
+  }
+  function autoPayGuideHtml() {
+    return "💡 매월 연체 없이 납부하려면 <strong>은행 앱의 자동이체</strong>를 등록하길 권합니다. (신용카드·페이 결제는 추후 지원 예정입니다.)";
+  }
   function fmtWon(n) {
     return Number(n || 0).toLocaleString("ko-KR") + "원";
   }
@@ -2207,7 +2214,7 @@
       <h3>⑤ 계약금 입금 확인 & 공동 Data Pool 원장 일괄 생성</h3>
       <p class="bass-muted" style="font-size:13px;">체결이 끝나면 계약·호실·입주자·수납 정보가 한꺼번에 반영됩니다.</p>
       <div class="bass-card" style="padding:14px;margin:12px 0;">
-        <div><strong>입금 계좌:</strong> ${Bass.escapeHtml(s.lessor_account)} (예금주: ${Bass.escapeHtml(s.lessor_name)})</div>
+        <div><strong>입금 계좌:</strong> ${acctLabel(s)}</div>
         <div><strong>당일 계약금:</strong> ${fmtWon(t.contract_deposit)} / <strong>보증금 총액:</strong> ${fmtWon(t.deposit)} / <strong>월세+관리비:</strong> ${fmtWon(Number(t.monthly_rent || 0) + Number(t.maintenance_fee || 0))} (${Bass.escapeHtml(t.pay_timing)})</div>
         ${s.fixed_date_no ? `<div style="margin-top:6px;color:var(--ok);font-weight:700;">📄 계약 접수번호: ${Bass.escapeHtml(s.fixed_date_no)}<div class="bass-muted" style="font-weight:400;font-size:12px;">이 번호는 이 서비스의 접수번호이며 <strong>법적 확정일자가 아닙니다.</strong> 입주일에 전입신고와 함께 주민센터(또는 등기소)에서 확정일자를 받아야 보증금이 보호됩니다.</div></div>` : ""}
       </div>
@@ -2215,7 +2222,8 @@
         <strong>💰 잔금 안내</strong><br>
         잔금 <strong>${fmtWon(Math.max(Number(t.deposit || 0) - Number(t.contract_deposit || 0), 0))}</strong> (보증금 ${fmtWon(t.deposit)} − 계약금 ${fmtWon(t.contract_deposit)}) ·
         납부일(입주일) <strong>${Bass.escapeHtml(t.move_in_date || "-")}</strong><br>
-        입금 계좌: ${Bass.escapeHtml(s.lessor_account)} (예금주 ${Bass.escapeHtml(s.lessor_name)})<br>
+        입금 계좌: ${acctLabel(s)}<br>
+        <span id="autoPayGuide">${autoPayGuideHtml()}</span><br>
         🔒 <strong>도어락·공동현관 번호는 입주 당일 잔금 입금을 임대인이 확인한 뒤 임차인 마이홈에 공개됩니다.</strong>
       </div>` : ""}
       ${done ? reservedBannerHtml() : ""}
@@ -2327,6 +2335,7 @@
           <tr><th>보증금</th><td>${fmtWon(c.deposit)}</td><th>계약금(보증금 내)</th><td>${fmtWon(c.contract_deposit)} (영수함)</td></tr>
           <tr><th>월 임차료</th><td>${fmtWon(c.monthly_rent)} (${Bass.escapeHtml(c.pay_timing)})</td><th>월 관리비 / 부가세</th><td>${fmtWon(c.maintenance_fee)} / ${fmtWon(c.vat)}</td></tr>
           <tr><th>퇴실 청소비</th><td colspan="3">${Number(c.cleaning_fee || 0) > 0 ? `${fmtWon(c.cleaning_fee)} — 퇴실할 때 임차인이 부담하며 전출 정산에서 보증금에서 공제함` : "약정 없음(임차인이 청소비를 부담하지 않음)"}</td></tr>
+          <tr><th>임차료 수납 계좌</th><td colspan="3">${acctLabel(activeSession)}<br><span style="font-size:11.5px;">임차료·관리비는 매월 납입일(입주일)에 위 계좌로 납부합니다. ${autoPayGuideHtml()}</span></td></tr>
           <tr><th>임대차 기간</th><td colspan="3">${Bass.escapeHtml(c.move_in_date)} ~ ${Bass.escapeHtml(c.expiry_date)} (${c.lease_term_months}개월)</td></tr>
           <tr><th>본인인증 및 신분증·등기 확인</th><td colspan="3">양측 로그인 본인인증 완료 · 임대인↔임차인 상호 신분증 대조 본인 확인 체크 완료 · 등기부등본(${Bass.escapeHtml(regSnap.issue_number || "-")}, 소유자 ${Bass.escapeHtml(regSnap.owner_name || c.lessor_name)}) 열람 확인 필</td></tr>
           ${tdr.submitted ? `<tr><th>임차인 직접 열람 확인</th><td colspan="3">인터넷등기소 직접 열람 (${Bass.escapeHtml(tdr.viewed_at || "-")}) · 소유자 ${Bass.escapeHtml(tdr.owner_name || "-")} · 근저당 채권최고액 ${fmtWon(tdr.mortgage_amount)} · 압류/신탁 ${Bass.escapeHtml(tdr.seizure_or_trust || "-")}${tdr.guarantee_status ? ` · 보증금 반환보증 ${Bass.escapeHtml(tdr.guarantee_status)}` : ""}${regSnap.tenant_recheck_at ? ` · 체결 직전 재열람 확인 ${Bass.escapeHtml(String(regSnap.tenant_recheck_at).slice(0, 16).replace("T", " "))}` : ""}${regSnap.registry_attachment_sha256 ? `<br><span style="font-family:monospace;font-size:10.5px;">첨부 SHA-256 ${Bass.escapeHtml(regSnap.registry_attachment_sha256)}</span>` : ""}</td></tr>` : ""}

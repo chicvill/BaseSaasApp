@@ -471,6 +471,7 @@
             </span>
           </div>
           <div style="font-size:13px;margin-top:8px;line-height:1.5;">${Bass.escapeHtml(bn.message)}</div>
+          <div class="bass-muted" style="font-size:12px;margin-top:4px;">💡 매월 납부를 잊지 않도록 은행 앱에서 위 계좌로 <strong>자동이체</strong>를 등록해 두길 권합니다. (카드·페이 결제는 추후 지원 예정)</div>
           <div class="bass-row" style="margin-top:10px;gap:8px;flex-wrap:wrap;">
             <button class="bass-btn bass-btn--sm bass-btn--primary btn-jump-pay" data-amt="${bn.amount_due}" type="button">💳 ${fmtWon(bn.amount_due)} 즉시 납부하기</button>
             ${bn.status !== "ACKNOWLEDGED" ? `<button class="bass-btn bass-btn--sm btn-ack-bn" data-id="${bn.id}" type="button">✅ 통보 내용 확인 완료</button>` : ""}

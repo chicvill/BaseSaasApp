@@ -9897,6 +9897,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("채팅창", rd("rent3_lessor", "frontend", "manual.html"))
         self.assertIn("채팅창", rd("rent3_tenant", "frontend", "manual.html"))
 
+    def test_157_contract_shows_rent_account_and_autopay_guidance(self):
+        """157. 계약서(체결본)에 임차료 수납 계좌 행과 자동이체 권유 안내가 있고, 임대인 계좌가 없을 때 가짜 계좌를 넣지 않는다(카드·페이는 추후 지원 예정으로만 안내)."""
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        capp, tapp, core = rd("rent3_contract", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js"), rd("_rent3_core", "cosign.py")
+        for needle in ("임차료 수납 계좌", "autoPayGuideHtml", "자동이체", "추후 지원 예정", "acctLabel"):
+            self.assertIn(needle, capp, needle)
+        self.assertIn("자동이체", tapp)
+        self.assertNotIn("국민 123-456-789012", core)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

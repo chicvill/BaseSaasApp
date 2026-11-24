@@ -549,7 +549,7 @@ class CoSignSession(PoolObj):
             id_lessor=lessor.id if lessor else "",
             lessor_name=lessor.name if lessor else "김임대",
             lessor_phone=lessor.phone if lessor else "010-1212-3434",
-            lessor_account=lessor.account_number if lessor else "국민 123-456-789012",
+            lessor_account=(lessor.account_number or "") if lessor else "",     # 가짜 계좌를 대신 넣지 않는다(미등록이면 빈 값)
             id_tenant=resolved_tid,
             initiated_by_role=initiated_by_role,
             call_status=call_status,
