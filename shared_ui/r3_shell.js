@@ -572,7 +572,7 @@
           .then(function (r) { return r.json().then(function (x) { return { ok: r.ok, x: x }; }); })
           .then(function (r2) {
             box.disabled = false;
-            if (!r2.ok) { box.checked = !allow; notify("error", r2.x.message || r2.x.detail || "바꾸지 못했습니다."); return; }
+            if (!r2.ok) { box.checked = !allow; notify("error", (r2.x.message || r2.x.detail || "바꾸지 못했습니다.") + (r2.x.hint ? " " + r2.x.hint : "")); return; }
             var st = body.querySelector("#r3SupAllowState");
             if (st) st.textContent = r2.x.support_access ? "— 허용 중: 관리인이 보기 전용으로 접속해 도와드릴 수 있습니다." : "— 꺼짐: 체크하면 바로 적용됩니다.";
             notify("success", r2.x.message || (allow ? "원격 지원을 허용했습니다." : "원격 지원 허용을 껐습니다."));
