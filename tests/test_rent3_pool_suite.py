@@ -8853,6 +8853,60 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("isNotFound && rawDigits.length >= 8", app)
         self.assertNotIn("isNotFound && (rawDigits.length >= 8 || rawIdent)", app)
 
+    def test_144_admin_can_reset_test_prospect_password_and_unlock_login(self):
+        """144. 관리인 앱 시험 계정 도구에서 새 비밀번호를 정하면: 규칙(8자 이상·영문+숫자)을 지키고, 옛 비밀번호는 안 되고 새 비밀번호로 로그인되며, 틀려서 걸린 로그인 잠금이 풀린다. 이미 인증된 계정도 비밀번호만 바꿀 수 있고, 입주 임차인·임대인 계정은 안 된다."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Tenant, ratelimit
+        c, NA = self.client, self.NOAUTH
+        remote = {**NA, "X-Forwarded-For": "203.0.113.77"}
+        admin, chic = self._login("admin"), self._login("chic")
+        url = "/api/rent3_admin/accounts/test-identity"
+        body = {"name": "홍길동", "phone": "010-1111-2222"}
+        login = lambda pw, ident="010-1111-2222": c.post("/api/rent3/pool/auth/login", headers=remote, json={"login_mode": "account", "identifier": ident, "password": pw})
+        reg = c.post("/api/rent3/pool/auth/register", headers=NA, json={"role": "prospect", "name": "홍길동", "phone": "010-1111-2222", "password": "OldPw1234"})
+        self.assertEqual(reg.status_code, 200, reg.text)
+        tid = reg.json()["user"]["id"]
+        try:
+            self.assertIn(c.post(url, headers=chic, json={**body, "new_password": "Test1234"}).status_code, (401, 403))   # 임대인은 못 한다
+            for _ in range(5):                                                                                           # 비밀번호를 틀려 잠금에 걸린 상태
+                self.assertEqual(login("wrong-pw").status_code, 401)
+            self.assertEqual(login("OldPw1234").status_code, 429)
+            weak = c.post(url, headers=admin, json={**body, "new_password": "1212", "apply": True}).json()                # 규칙에 안 맞으면 멈춘다
+            self.assertEqual(weak["status"], "BLOCKED")
+            self.assertEqual(login("OldPw1234").status_code, 429)
+            dry = c.post(url, headers=admin, json={**body, "new_password": "Test1234"}).json()
+            self.assertEqual(dry["status"], "DRY")
+            self.assertIn("비밀번호", dry["message"])
+            self.assertEqual(login("OldPw1234").status_code, 429)                                                        # 점검은 바꾸지 않는다
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_pw_")}):
+                done = c.post(url, headers=admin, json={**body, "new_password": "Test1234", "apply": True}).json()
+                self.assertEqual(done["status"], "DONE", done)
+                self.assertTrue(done["backup"].endswith(".tar.gz"))
+                self.assertNotIn("Test1234", json.dumps(done, ensure_ascii=False))                                      # 응답에 비밀번호를 되돌려 주지 않는다
+                self.assertEqual(login("OldPw1234").status_code, 401)                                                    # 잠금은 풀렸고 옛 비밀번호는 안 된다
+                ok = login("Test1234")
+                self.assertEqual(ok.status_code, 200, ok.text)
+                self.assertTrue((Tenant.get(tid).identity or {}).get("verified"))                                      # 인증 표시도 함께 처리됐다
+                # 이미 인증된 계정: 새 비밀번호 없이는 그대로, 있으면 비밀번호만 바꾼다
+                self.assertEqual(c.post(url, headers=admin, json={**body, "apply": True}).json()["status"], "EXISTS")
+                again = c.post(url, headers=admin, json={**body, "new_password": "Second5678", "apply": True}).json()
+                self.assertEqual(again["status"], "DONE")
+                self.assertEqual(login("Test1234").status_code, 401)
+                self.assertEqual(login("Second5678").status_code, 200)
+                # 입주 임차인은 건드리지 않는다
+                active = next(t for t in Tenant.all() if t.status == "ACTIVE")
+                blocked = c.post(url, headers=admin, json={"name": active.name, "phone": active.phone, "new_password": "Test1234", "apply": True}).json()
+                self.assertEqual(blocked["status"], "BLOCKED")
+        finally:
+            ratelimit.reset_all()
+            t = Tenant.get(tid)
+            if t:
+                t.delete(action="t")
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ('id="tiPw"', "new_password", "처리 (본인인증 · 비밀번호)"):
+            self.assertIn(needle, adm, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

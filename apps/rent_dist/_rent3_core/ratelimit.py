@@ -64,6 +64,18 @@ def clear(scope: str, keys: Iterable[str]) -> None:
             _locked.pop(full, None)
 
 
+def clear_matching(scope: str, match) -> int:
+    """계정 키(`<scope>:u:<입력한 아이디>`)의 식별 부분이 match(식별값)에 맞는 실패·잠금 기록을 지운다(관리인 도구: 비밀번호를 새로 정할 때 잠금도 푼다)."""
+    prefix = f"{scope}:u:"
+    n = 0
+    with _lock:
+        for store in (_fails, _locked):
+            for full in [k for k in store if k.startswith(prefix) and match(k[len(prefix):])]:
+                store.pop(full, None)
+                n += 1
+    return n
+
+
 def reset_all() -> None:
     """테스트·운영 도구용: 모든 기록 초기화."""
     with _lock:

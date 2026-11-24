@@ -12,6 +12,7 @@ mark_prospect_verified: 가짜 번호 등으로 문자 인증을 받을 수 없�
  - 가입만 한 예비임차인(PROSPECT)만 대상이다. 입주 중인 임차인·이미 인증된 계정은 건드리지 않는다.
  - 점검(apply=False)은 바꾸지 않고, 처리(apply=True)는 먼저 풀 전체를 자동 백업한다.
  - 기록에 provider=admin_test · fake=True · assurance=test 로 남아 실제 인증과 구분되고, 이력(_events)에 'test_identity_marked' 로 남는다.
+ - 새 비밀번호(규칙: 8자 이상·영문+숫자)를 함께 주면 그 계정의 비밀번호도 새로 정하고(간편 비밀번호 해제·로그인 잠금 해제), 이미 인증된 계정도 비밀번호만 바꿀 수 있다.
 """
 from __future__ import annotations
 
@@ -75,8 +76,10 @@ def register(branch: str = "main", room_no: str = "701", name: str = "민흥식"
             "message": f"등록했습니다: {plan}. 등록 전 백업: {info.get('name', '')}. 장부 미납 {unpaid}원(0이어야 정상)."}
 
 
-def mark_prospect_verified(name: str, phone: str, apply: bool = False) -> Dict[str, Any]:
-    name, phone = str(name).strip(), str(phone).strip()
+def mark_prospect_verified(name: str, phone: str, apply: bool = False, new_password: str = "") -> Dict[str, Any]:
+    from core.errors import DomainError
+    from . import passwords, quicklogin, ratelimit
+    name, phone, new_password = str(name).strip(), str(phone).strip(), str(new_password or "").strip()
     if not name or len(_digits(phone)) < 10:
         return {"status": "BLOCKED", "message": "성함과 휴대폰 번호(10자리 이상)를 모두 입력해 주세요."}
     found = [t for t in Tenant.all() if _digits(t.phone) == _digits(phone) and t.name.strip() == name]
@@ -85,16 +88,35 @@ def mark_prospect_verified(name: str, phone: str, apply: bool = False) -> Dict[s
     if len(found) > 1:
         return {"status": "BLOCKED", "message": f"같은 이름·번호의 계정이 {len(found)}개라 멈춥니다. 기존 자료를 보호하기 위해 아무것도 바꾸지 않았습니다."}
     t = found[0]
-    if (t.identity or {}).get("verified"):
-        return {"status": "EXISTS", "message": f"이미 본인인증이 되어 있습니다({t.name} {t.phone} · {(t.identity or {}).get('provider', '')}). 아무것도 바꾸지 않았습니다."}
     if t.status != "PROSPECT":
         return {"status": "BLOCKED", "message": f"{t.name}님은 예비임차인이 아닙니다(상태 {t.status}). 입주 중인 임차인은 이 도구로 바꾸지 않습니다."}
-    plan = f"{t.name} {t.phone} (예비임차인) → 본인인증 완료(시험용 표시)"
+    need_verify = not (t.identity or {}).get("verified")
+    need_pw = bool(new_password)
+    if need_pw:
+        try:
+            passwords.validate_new_password(new_password)
+        except DomainError as exc:
+            return {"status": "BLOCKED", "message": f"{exc.message} {getattr(exc, 'hint', '') or ''}".strip()}
+    if not need_verify and not need_pw:
+        return {"status": "EXISTS", "message": f"이미 본인인증이 되어 있습니다({t.name} {t.phone} · {(t.identity or {}).get('provider', '')}). 비밀번호를 다시 정하려면 새 비밀번호를 적어 주세요. 아무것도 바꾸지 않았습니다."}
+    todo = [x for x, on in (("본인인증 완료(시험용 표시)", need_verify), ("비밀번호 새로 설정(로그인 잠금도 해제)", need_pw)) if on]
+    plan = f"{t.name} {t.phone} (예비임차인) → " + " + ".join(todo)
     if not apply:
         return {"status": "DRY", "message": f"점검만 했습니다(바뀐 것 없음). 처리하면 → {plan}"}
     info = backup.create()
-    t.identity = {"verified": True, "name": t.name, "phone": t.phone, "birth6": "", "provider": "admin_test", "fake": True,
-                  "assurance": "test", "verified_at": date.today().isoformat() + "T12:00:00"}
-    t.save(action="test_identity_marked", app_source="admin_test_identity")
+    now = date.today().isoformat() + "T12:00:00"
+    if need_verify:
+        t.identity = {"verified": True, "name": t.name, "phone": t.phone, "birth6": "", "provider": "admin_test", "fake": True,
+                      "assurance": "test", "verified_at": now}
+    if need_pw:
+        t.password = passwords.hash_password(new_password)
+        t.password_changed_at = now
+        if not getattr(t, "activated_at", ""):
+            t.activated_at = now
+    t.save(action="test_identity_marked" if need_verify else "test_password_set", app_source="admin_test_identity")
+    if need_pw:
+        quicklogin.revoke_all(t)                      # 비밀번호를 새로 정하면 이전 간편 비밀번호·바로가기는 모두 해제
+        digits, tid, email, nm = _digits(t.phone), t.id.lower(), (t.email or "").lower(), t.name.strip().lower()
+        ratelimit.clear_matching("login", lambda who: (len(_digits(who)) >= 8 and _digits(who) == digits) or who in {tid, nm} or (email and who == email))
     return {"status": "DONE", "backup": info.get("name", ""),
-            "message": f"처리했습니다: {plan}. 처리 전 백업: {info.get('name', '')}. 이 계정으로 다시 로그인하면 계약을 시작할 수 있습니다."}
+            "message": f"처리했습니다: {plan}. 처리 전 백업: {info.get('name', '')}. 휴대폰 번호와 {'새 ' if need_pw else '기존 '}비밀번호로 로그인하면 계약을 시작할 수 있습니다."}

@@ -767,9 +767,11 @@
           <input id="tiName" class="bass-input" value="홍길동" placeholder="성함" aria-label="성함" style="min-height:44px;">
           <input id="tiPhone" class="bass-input" value="010-1111-2222" placeholder="휴대폰" aria-label="휴대폰" inputmode="tel" style="min-height:44px;">
         </div>
+        <input id="tiPw" class="bass-input" type="text" autocomplete="off" placeholder="새 비밀번호 (선택 — 적으면 비밀번호도 새로 정합니다)" aria-label="새 비밀번호" style="min-height:44px;width:100%;margin-top:8px;">
+        <div class="bass-muted" style="font-size:12px;margin-top:4px;">비밀번호는 8자 이상, 영문과 숫자를 모두 포함해야 합니다(예: Test1234). 새로 정하면 그 계정의 로그인 잠금과 간편 비밀번호도 풀립니다.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
           <button id="btnTiCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
-          <button id="btnTiApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 본인인증 처리</button></div>
+          <button id="btnTiApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 처리 (본인인증 · 비밀번호)</button></div>
         <div id="tiResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
       </div>`;
     const ttRun = (apply) => async function () {
@@ -787,12 +789,12 @@
     document.getElementById("btnTtApply").addEventListener("click", ttRun(true));
     const tiRun = (apply) => async function () {
       Bass.withLock(this, async () => {
-        const body = { name: document.getElementById("tiName").value.trim(), phone: document.getElementById("tiPhone").value.trim(), apply };
-        if (apply && !window.confirm(`${body.name}님(${body.phone})을 시험용 본인인증 완료로 처리합니다. 처리 전에 자동 백업합니다. 계속할까요?`)) return;
+        const body = { name: document.getElementById("tiName").value.trim(), phone: document.getElementById("tiPhone").value.trim(), apply, new_password: document.getElementById("tiPw").value.trim() };
+        if (apply && !window.confirm(`${body.name}님(${body.phone})을 처리합니다${body.new_password ? " — 본인인증 표시와 새 비밀번호 설정" : " — 시험용 본인인증 완료 표시"}. 처리 전에 자동 백업합니다. 계속할까요?`)) return;
         const r = await Bass.api(APP_ID, "/accounts/test-identity", { method: "POST", body });
         const color = r.status === "BLOCKED" ? "var(--warn)" : "var(--ok)";
         document.getElementById("tiResult").innerHTML = `<span style="color:${color};font-weight:800;">${{ DRY: "점검 결과", EXISTS: "이미 인증됨", BLOCKED: "멈춤", DONE: "처리 완료" }[r.status] || ""}</span><br>${Bass.escapeHtml(r.message)}`;
-        if (r.status === "DONE") Bass.updateAppAlert("success", r.message);
+        if (r.status === "DONE") { document.getElementById("tiPw").value = ""; Bass.updateAppAlert("success", r.message); }
       });
     };
     document.getElementById("btnTiCheck").addEventListener("click", tiRun(false));
