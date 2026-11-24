@@ -368,11 +368,13 @@
     const unpaidExtra = dueSoon > 0
       ? ` <span class="bass-badge bass-badge--warn" style="font-size:12px;">납부 예정 ${fmtWon(dueSoon)}</span>`
       : (totalUnpaid > mUnpaid ? ` <span class="bass-muted" style="font-size:12.5px;">(당월 ${fmtWon(mUnpaid)})</span>` : "");
+    const occPct = Math.max(0, Math.min(100, Number(fin.occupancy_rate || 0)));
+    const paidPct = Math.max(0, Math.min(100, mRate));
     document.getElementById("kpiGrid").innerHTML =
-      `<span>${ymMonth}월 목표액 <strong>${fmtWon(mTarget)}</strong></span>` +
-      `<span>수납액 <strong style="color:var(--ok);">${fmtWon(mPaid)} (${mRate}%)</strong></span>` +
-      `<span>미납액 <strong style="color:${unpaidColor};">${fmtWon(totalUnpaid)}</strong>${unpaidExtra}</span>` +
-      `<span class="bass-muted">가동 ${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실 (${fin.occupancy_rate || 0}%)</span>`;
+      `<div class="r3-kpi"><span class="r3-kpi__lbl">🎯 ${ymMonth}월 목표액</span><strong class="r3-kpi__val">${fmtWon(mTarget)}</strong></div>` +
+      `<div class="r3-kpi r3-kpi--ok"><span class="r3-kpi__lbl">💰 수납액</span><strong class="r3-kpi__val" style="color:var(--ok);">${fmtWon(mPaid)} (${mRate}%)</strong><div class="r3-kpi__bar"><i style="width:${paidPct}%;"></i></div></div>` +
+      `<div class="r3-kpi ${totalUnpaid > 0 ? "r3-kpi--err" : "r3-kpi--ok"}"><span class="r3-kpi__lbl">❗ 미납액</span><strong class="r3-kpi__val" style="color:${unpaidColor};">${fmtWon(totalUnpaid)}</strong>${unpaidExtra}</div>` +
+      `<div class="r3-kpi r3-kpi--info"><span class="r3-kpi__lbl">🏢 가동률</span><strong class="r3-kpi__val">${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실 (${occPct}%)</strong><div class="r3-kpi__bar"><i style="width:${occPct}%;"></i></div></div>`;
 
     renderTab();
   }
@@ -382,7 +384,16 @@
     if (tabName === "tax" && currentTab !== "tax") { taxView = "hub"; taxMonth = 0; }   // 메뉴에서 들어오면 세무 허브부터
     currentTab = tabName;
     document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.tab === tabName));
+    document.querySelectorAll("#lessorBottomNav [data-ltab]").forEach((b) => b.classList.toggle("is-active", b.dataset.ltab === tabName));
     renderTab();
+  }
+
+  const bNav = document.getElementById("lessorBottomNav");
+  if (bNav) {
+    bNav.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-ltab]");
+      if (btn) switchTab(btn.dataset.ltab);
+    });
   }
 
   document.getElementById("tabBar").addEventListener("click", (e) => {
@@ -3383,11 +3394,16 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
       ? `<div class="cm-sys">${Bass.escapeHtml(m.body)} <span>${fmtMsgTime(m.created_at)}</span></div>`
       : `<div class="cm-b ${m.sender_role === "lessor" ? "is-mine" : ""}"><div><div class="cm-meta">${Bass.escapeHtml(m.sender_role === "lessor" ? "나" : m.sender_name || "임차인")} · ${fmtMsgTime(m.created_at)}</div>${Bass.escapeHtml(m.body)}</div></div>`;
     elTabContent.innerHTML = `
-      <div class="bass-row" style="gap:8px;margin:0 0 10px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong>${callBtn(d.tenant_phone, "임차인 전화")}</div>
+      <div class="r3-chat-peer">
+        <div class="bass-row" style="gap:8px;"><button id="btnMsgBack" class="bass-btn bass-btn--sm" type="button">← 목록</button><strong>👤 ${Bass.escapeHtml(room)}호 ${Bass.escapeHtml(d.tenant_name || "공실")}</strong></div>
+        ${callBtn(d.tenant_phone, "임차인 전화")}
+      </div>
       <div id="msgCo" style="margin:0 0 10px;"></div>
       <div id="msgList" class="cm-list" style="max-height:52vh;">${d.messages.map(bubble).join("") || '<div class="bass-muted" style="font-size:13px;">아직 대화가 없습니다.</div>'}</div>
-      <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>
-      <button id="btnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
+      <div class="r3-chat-compose">
+        <textarea id="msgInput" class="bass-input" rows="2" placeholder="입주자에게 보낼 채팅"></textarea>
+        <button id="btnMsgSend" class="bass-btn bass-btn--primary bass-btn--sm" type="button">보내기</button>
+      </div>
       <details style="margin-top:14px;"><summary class="bass-muted" style="cursor:pointer;font-size:13px;min-height:32px;">계약 협상 기록 ${neg.purged ? `(보관 기간 만료로 삭제됨 · 당시 ${neg.original_count}건)` : `${neg.count}건 ${neg.count ? "보기" : ""}`}</summary>
         <div class="bass-muted" style="font-size:12px;margin:4px 0;">${Bass.escapeHtml(digestLine)}</div>
         ${neg.items.map((m) => `<div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--border);">[${m.step}단계] ${Bass.escapeHtml(m.sender_role === "lessor" ? "임대인" : m.sender_role === "tenant" ? "임차인" : "안내")}: ${Bass.escapeHtml(m.body)}${m.status ? ` <span class="bass-badge">${Bass.escapeHtml(({ open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" })[m.status] || m.status)}</span>` : ""}</div>`).join("")}

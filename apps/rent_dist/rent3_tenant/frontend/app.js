@@ -108,6 +108,23 @@
     }
     clearInterval(tnMsgTimer);
     if (svcView === "messages") loadTenantMessages();
+    const tCur = mode === "listings" ? "listings" : svcView;
+    document.querySelectorAll("#tenantBottomNav [data-tview]").forEach((b) => b.classList.toggle("is-active", b.dataset.tview === tCur));
+  }
+
+  const tnBNav = document.getElementById("tenantBottomNav");
+  if (tnBNav) {
+    tnBNav.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-tview]");
+      if (!btn) return;
+      const v = btn.dataset.tview;
+      if (v === "listings") {
+        setMode("listings");
+        document.querySelectorAll("#tenantBottomNav [data-tview]").forEach((b) => b.classList.toggle("is-active", b.dataset.tview === "listings"));
+      } else {
+        go(v);
+      }
+    });
   }
 
   // ── 임대인과 채팅 (내 호실 1:1 대화 + 접어 둔 계약 협상 기록). 관리인 지원 문의·계약방 대화는 섞지 않는다 ──
@@ -679,9 +696,9 @@
           <div id="tnMsgCall" style="margin-bottom:8px;"></div>
           <div id="tnMsgCo" style="margin-bottom:8px;"></div>
           <div id="tnMsgList" class="cm-list" style="max-height:50vh;"></div>
-          <div id="tnMsgComposer"${R3Shell.isAdminSession() ? " hidden" : ""}>
-            <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 채팅" style="width:100%;margin-top:8px;"></textarea>
-            <button id="btnTnMsgSend" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;">보내기</button>
+          <div id="tnMsgComposer" class="r3-chat-compose"${R3Shell.isAdminSession() ? " hidden" : ""}>
+            <textarea id="tnMsgInput" class="bass-input" rows="2" placeholder="임대인에게 보낼 채팅"></textarea>
+            <button id="btnTnMsgSend" class="bass-btn bass-btn--primary bass-btn--sm" type="button">보내기</button>
           </div>
           <div id="tnMsgNeg"></div>
         </div>

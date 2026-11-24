@@ -338,3 +338,163 @@ a {
   color: #0284C7;
 }
 
+/* ── 12. 앱 공통 헤더 · 2x2 KPI 카드 · 채팅 말풍선 · 하단 빠른 탭바 ── */
+.app-shell > header.bass-card {
+  background: linear-gradient(135deg, #EFF6FF 0%, #FFFFFF 66%) !important;
+  border: 1px solid #DBEAFE !important;
+}
+#kpiGrid.kpi-strip {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+.r3-kpi {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 14px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  min-width: 0;
+}
+.r3-kpi--ok { background: #F0FDF4; border-color: #BBF7D0; }
+.r3-kpi--warn { background: #FFFBEB; border-color: #FDE68A; }
+.r3-kpi--err { background: #FEF2F2; border-color: #FECACA; }
+.r3-kpi--info { background: #EFF6FF; border-color: #BFDBFE; }
+.r3-kpi__lbl { font-size: 12px; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 5px; }
+.r3-kpi__val { font-size: 15.5px; font-weight: 800; color: #0F172A; line-height: 1.25; }
+.r3-kpi__bar { height: 5px; border-radius: 999px; background: rgba(15, 23, 42, 0.08); overflow: hidden; margin-top: 2px; }
+.r3-kpi__bar > i { display: block; height: 100%; border-radius: 999px; background: #16A34A; }
+.r3-kpi--info .r3-kpi__bar > i { background: #2563EB; }
+
+/* 채팅 말풍선 & 바 */
+.r3-chat-peer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+}
+.cm-list {
+  background: #F4F7FB;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cm-b {
+  display: flex;
+  justify-content: flex-start;
+}
+.cm-b.is-mine {
+  justify-content: flex-end;
+}
+.cm-b > div {
+  max-width: 84%;
+  background: #FFFFFF;
+  color: #0F172A;
+  border: 1px solid #E2E8F0;
+  border-radius: 16px 16px 16px 4px;
+  padding: 9px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+.cm-b.is-mine > div {
+  background: #E0ECFF;
+  border-color: #BFDBFE;
+  border-radius: 16px 16px 4px 16px;
+}
+.cm-meta {
+  font-size: 12px;
+  color: #64748B;
+  margin-bottom: 3px;
+  font-weight: 600;
+}
+.cm-sys {
+  align-self: center;
+  background: #FEF3C7;
+  color: #78350F;
+  border-radius: 12px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 92%;
+}
+.r3-chat-compose {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  margin-top: 8px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 20px;
+  padding: 6px 8px 6px 12px;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+}
+.r3-chat-compose textarea {
+  flex: 1;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 6px 2px !important;
+  resize: none;
+  min-height: 38px !important;
+}
+
+/* 모바일 하단 고정 탭바 */
+.r3-bottom-nav {
+  display: none;
+}
+@media (max-width: 640px) {
+  .app-shell {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .r3-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 120;
+    background: rgba(255, 255, 255, 0.97);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-top: 1px solid #E2E8F0;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+  }
+  .r3-bottom-nav__btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    background: transparent;
+    border: none;
+    color: #64748B;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 2px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .r3-bottom-nav__btn.is-active {
+    color: #FF385C;
+  }
+}
+
+
