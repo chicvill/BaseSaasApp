@@ -849,13 +849,21 @@
   });
 
   // Affordability Calculator
-  $("btnToggleAfford").addEventListener("click", () => {
-    const p = $("affordPanel");
-    const open = p.style.display === "none";
-    p.style.display = open ? "block" : "none";
+  // ☰ 더보기 > 계산기: 모달로 연다(예전엔 페이지 위쪽 패널을 펼쳐서, 메뉴가 닫힌 뒤 보고 있던 위치에서는 아무 일도 없어 보였다).
+  // 폰의 뒤로가기( < )는 R3Hist 로 모달만 닫는다.
+  function setAffordOpen(open) {
+    const m = $("affordModal");
+    if (open === m.classList.contains("is-open")) return;
+    m.classList.toggle("is-open", open);
     $("btnToggleAfford").classList.toggle("is-active", open);
-    updateAffordPreview();
-  });
+    if (window.R3Hist) {
+      if (open) R3Hist.open("afford", () => { m.classList.remove("is-open"); $("btnToggleAfford").classList.remove("is-active"); });
+      else R3Hist.close("afford");
+    }
+    if (open) updateAffordPreview();
+  }
+  $("btnToggleAfford").addEventListener("click", () => setAffordOpen(true));
+  $("btnCloseAfford").addEventListener("click", () => setAffordOpen(false));
   $("calcIncomeMan").addEventListener("input", updateAffordPreview);
   $("btnApplyBudget").addEventListener("click", () => {
     state.maxMonthlyWon = updateAffordPreview();
@@ -866,11 +874,13 @@
       "success",
       `월세+관리비 ${fmtMan(state.maxMonthlyWon)} 이하 · 보증금 ${fmtMan(state.maxDepositWon)} 이하 조건으로 필터링했습니다.`
     );
+    setAffordOpen(false);
     $("heroSearchForm").scrollIntoView({ behavior: "smooth", block: "start" });
   });
   $("btnResetBudget").addEventListener("click", () => {
     state.budgetActive = false;
     renderListings();
+    setAffordOpen(false);
     Bass.updateAppAlert("warning", "월세 예산 필터가 해제되었습니다.");
   });
 
@@ -925,6 +935,7 @@
       if (e.target === $(mid)) $(mid).classList.remove("is-open");
     });
   });
+  $("affordModal").addEventListener("click", (e) => { if (e.target === $("affordModal")) setAffordOpen(false); });
 
   // 초기 진입 처리 (?logout=1 또는 ?login=1 지원)
   const urlParams = new URLSearchParams(window.location.search);

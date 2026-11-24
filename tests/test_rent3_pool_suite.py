@@ -8741,6 +8741,24 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("bellHost", "placeBell"):
             self.assertIn(needle, nj, needle)
 
+    def test_140_portal_afford_calculator_opens_as_modal(self):
+        """140. 포털 ☰ 더보기의 '월세 적정 예산 계산기'는 모달로 열린다(예전엔 페이지 위쪽 패널을 펼쳐 메뉴가 닫힌 뒤 아무 일도 없어 보였다). 같은 입력칸 id, ✕·바깥 클릭·적용·뒤로가기( < )로 닫힌다."""
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
+        html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
+        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        self.assertNotIn('id="affordPanel"', html)                                   # 페이지 안 접이식 패널은 없다
+        self.assertIn('id="affordModal" class="or-modal-backdrop"', html)
+        for ident in ("calcIncomeMan", "calcDepositMan", "calcRecommendedText", "btnApplyBudget", "btnResetBudget", "btnCloseAfford"):
+            self.assertEqual(html.count(f'id="{ident}"'), 1, ident)
+        # 모달 안에 계산기 입력칸이 들어 있다
+        m0 = html.index('id="affordModal"')
+        m1 = html.index('id="rentNowModal"')
+        for ident in ("calcIncomeMan", "btnApplyBudget", "btnCloseAfford"):
+            self.assertTrue(m0 < html.index(f'id="{ident}"') < m1, ident)
+        for needle in ("setAffordOpen", 'R3Hist.open("afford"', 'R3Hist.close("afford")', 'setAffordOpen(true)', 'setAffordOpen(false)'):
+            self.assertIn(needle, app, needle)
+        self.assertNotIn("affordPanel", app)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

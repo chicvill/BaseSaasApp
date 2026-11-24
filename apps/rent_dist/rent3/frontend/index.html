@@ -106,32 +106,6 @@
         <button type="button" class="or-chip is-active" data-filter="all">전체 공개 매물</button>
         <button type="button" class="or-chip" data-filter="instant">⚡ 즉시입주 가능</button>
       </div>
-
-      <!-- Collapsible Affordability Calculator (OpenRent Signature Feature) -->
-      <div id="affordPanel" class="or-calc-panel" style="display:none;">
-        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
-          <div>
-            <strong style="font-size:15.5px; color:var(--or-navy);">🧮 OpenRent 월세 부담능력 계산기 (Affordability Calculator)</strong>
-            <div style="font-size:12.5px; color:var(--or-muted);">월 세후 소득 대비 권장 주거비(30% 이내)와 보유 보증금 기준으로 적정 매물을 자동 필터링합니다.</div>
-          </div>
-          <button type="button" id="btnResetBudget" class="or-btn or-btn--outline or-btn--sm">예산 필터 해제</button>
-        </div>
-        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end;">
-          <div>
-            <label style="font-size:12px; font-weight:700; color:#334155;">월 세후 소득 (만원)</label>
-            <input id="calcIncomeMan" type="number" class="or-input" value="280" min="50" step="10">
-          </div>
-          <div>
-            <label style="font-size:12px; font-weight:700; color:#334155;">보유 보증금 상한 (만원)</label>
-            <input id="calcDepositMan" type="number" class="or-input" value="1000" min="0" step="100">
-          </div>
-          <div style="background:#f8fafc; border:1px solid var(--or-border); border-radius:8px; padding:9px 12px;">
-            <div style="font-size:11.5px; color:var(--or-muted);">권장 월세+관리비 상한 (소득 30%)</div>
-            <div id="calcRecommendedText" style="font-size:16px; font-weight:800; color:var(--or-blue);">월 84만원 이하</div>
-          </div>
-          <button type="button" id="btnApplyBudget" class="or-btn or-btn--green">이 예산 이내 매물 보기</button>
-        </div>
-      </div>
     </div>
   </section>
 
@@ -463,6 +437,35 @@
           📨 임대인에게 실시간 전송
         </button>
       </form>
+    </div>
+  </div>
+
+    <!-- 🧮 월세 적정 예산 계산기 (☰ 더보기에서 열린다) -->
+  <div id="affordModal" class="or-modal-backdrop" role="dialog" aria-modal="true" aria-label="월세 적정 예산 계산기">
+    <div class="or-modal">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:10px;">
+        <div style="flex:1;min-width:0;">
+          <strong style="font-size:15.5px; color:var(--or-navy);">🧮 OpenRent 월세 부담능력 계산기 (Affordability Calculator)</strong>
+          <div style="font-size:12.5px; color:var(--or-muted);">월 세후 소득 대비 권장 주거비(30% 이내)와 보유 보증금 기준으로 적정 매물을 자동 필터링합니다.</div>
+        </div>
+        <button type="button" id="btnCloseAfford" aria-label="닫기" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--or-muted);">✕</button>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; align-items:end;">
+        <div>
+          <label style="font-size:12px; font-weight:700; color:#334155;">월 세후 소득 (만원)</label>
+          <input id="calcIncomeMan" type="number" class="or-input" value="280" min="50" step="10">
+        </div>
+        <div>
+          <label style="font-size:12px; font-weight:700; color:#334155;">보유 보증금 상한 (만원)</label>
+          <input id="calcDepositMan" type="number" class="or-input" value="1000" min="0" step="100">
+        </div>
+        <div style="background:#f8fafc; border:1px solid var(--or-border); border-radius:8px; padding:9px 12px;">
+          <div style="font-size:11.5px; color:var(--or-muted);">권장 월세+관리비 상한 (소득 30%)</div>
+          <div id="calcRecommendedText" style="font-size:16px; font-weight:800; color:var(--or-blue);">월 84만원 이하</div>
+        </div>
+        <button type="button" id="btnApplyBudget" class="or-btn or-btn--green">이 예산 이내 매물 보기</button>
+      </div>
+      <div style="margin-top:10px;text-align:right;"><button type="button" id="btnResetBudget" class="or-btn or-btn--outline or-btn--sm">예산 필터 해제</button></div>
     </div>
   </div>
 
