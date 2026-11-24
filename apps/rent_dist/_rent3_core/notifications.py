@@ -191,6 +191,7 @@ def _l_checkout(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     return [
         _item("checkout_requested", "퇴실 신청 — 정산서 작성 필요", sum(1 for s in rows if s.status == "REQUESTED"), link, "urgent"),
         _item("checkout_disputed", "정산 이의 — 협의 후 정산서 수정 필요", sum(1 for s in rows if s.status == "DISPUTED"), link, "urgent"),
+        _item("checkout_draft", "퇴실 정산서 작성 중 — 마치고 '게시'해야 임차인에게 보임", sum(1 for s in rows if s.status == "DRAFT"), link, "normal"),
         _item("checkout_agreed", "임차인 동의 완료 — 송금 후 '송금 표시' 필요", sum(1 for s in rows if s.status == "AGREED"), link, "normal"),
     ]
 

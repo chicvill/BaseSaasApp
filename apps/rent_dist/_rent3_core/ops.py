@@ -157,7 +157,8 @@ class CheckOutSettlement(PoolObj):
     id_contract: str = ""
     id_tenant: str = ""
     tenant_name: str = ""
-    status: str = "CALCULATED"               # REQUESTED(임차인 신청) -> CALCULATED(임대인 정산서) -> AGREED(임차인 동의·계좌) -> PAID(임대인 송금 표시) -> COMPLETED(임차인 수취 확인 또는 7일 자동 확정) / DISPUTED(이의)
+    status: str = "CALCULATED"               # DRAFT(임대인이 작성 중 — 임차인에게 안 보임, '게시'해야 CALCULATED) / REQUESTED(임차인 신청) -> CALCULATED(임대인이 게시한 정산서) -> AGREED(임차인 동의·계좌) -> PAID(임대인 송금 표시) -> COMPLETED(임차인 수취 확인 또는 7일 자동 확정) / DISPUTED(이의)
+    published_at: str = ""                   # 임대인이 정산서를 임차인에게 게시한 마지막 시각(게시한 적이 있는 정산서를 다시 수정하려고 거두면 '수정 중'으로 보인다)
     requested_at: str = ""
     desired_date: str = ""                   # 임차인이 적은 퇴실 희망일
     tenant_request_memo: str = ""
@@ -245,7 +246,10 @@ class CheckOutSettlement(PoolObj):
         utility_water: int = 0,
         utility_gas: int = 0,
         utility_other: int = 0,
+        publish: bool = False,
     ) -> "CheckOutSettlement":
+        """정산서를 계산해 저장한다. publish=False 면 임시 저장(DRAFT) — 임차인에게 보이지 않고 알림도 가지 않는다(수정 중에 임차인이 보고 이의를 제기하지 않도록).
+        publish=True 면 임차인에게 게시(CALCULATED)하고 채팅·알림을 보낸다."""
         b_id = normalize_branch_id(branch)
         room = Room.first(branch=b_id, room_no=room_no)
         if not room or not room.active_contract_id:
@@ -276,12 +280,12 @@ class CheckOutSettlement(PoolObj):
         refund = max(0, ct.deposit - total_deduct)
         shortfall = max(0, total_deduct - ct.deposit)
 
-        existing = next((x for x in cls.find(id_room=room.id) if x.status in ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")), None)
+        existing = next((x for x in cls.find(id_room=room.id) if x.status in cls.OPEN_STATES), None)
         if existing is not None and existing.status == "PAID":
             raise DomainError("이미 송금을 표시한 정산서입니다.", hint="임차인이 이의를 제기하면 수정해서 다시 보낼 수 있습니다.")
         fields = dict(
             branch=b_id, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id,
-            id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED", deposit_original=ct.deposit,
+            id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED" if publish else "DRAFT", deposit_original=ct.deposit,
             unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",
             liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
             early_partial_days=int(liab["partial_days"]) if early else 0, early_partial_amount=int(liab["partial_amount"]) if early else 0,
@@ -290,7 +294,9 @@ class CheckOutSettlement(PoolObj):
             rent_unpaid_auto=rent_unpaid_auto, rent_unpaid=rent_unpaid, rent_prorated_auto=rent_prorated_auto, rent_prorated=rent_prorated,
             utility_electric=u_el, utility_water=u_wa, utility_gas=u_ga, utility_other=u_ot,
             edited_by_lessor=(rent_unpaid != rent_unpaid_auto or rent_prorated != rent_prorated_auto), tenant_checked_at="",
+            published_at=now_iso() if publish else (existing.published_at if existing is not None else ""),
         )
+        was_published = existing is not None and existing.status in ("CALCULATED", "AGREED", "DISPUTED")
         if existing is not None:        # 임차인 신청·이의 건을 이어서 쓴다(동의·계좌는 다시 받는다)
             for k, v in fields.items():
                 setattr(existing, k, v)
@@ -300,6 +306,12 @@ class CheckOutSettlement(PoolObj):
         else:
             settlement = cls(**fields).save(action="checkout_calculated", app_source=app_source)
 
+        if not publish:                  # 임시 저장: 임차인에게 알리지 않는다(이미 게시했던 정산서를 거둔 경우에만 '수정 중' 안내)
+            if was_published:
+                DirectChat(branch=b_id, id_room=room.id, room_no=room.room_no, sender_role="system", sender_name="퇴실정산 안내",
+                           message="[✏️ 정산서 수정 중] 임대인이 정산서를 수정하고 있어 내용을 잠시 숨겼습니다. 수정이 끝나 게시되면 다시 알려 드립니다.",
+                           quick_action_label="정산 상태 보기", quick_action_url=f"/rent3_tenant/?tenant={ct.id_tenant}&svc=checkout").save(action="chat_auto_sent", app_source=app_source)
+            return settlement
         extra_note = ""
         if early:
             who = "새 임차인이 입주하기 전날" if liab["reason"] == "NEW_TENANT" else "계약 만기일"
@@ -330,7 +342,7 @@ class CheckOutSettlement(PoolObj):
         return settlement
 
     # ───────── 임차인이 먼저 신청 → 임대인 정산서 → 동의·계좌 → 송금 → 수취 확인 (채팅 카드로 안내)
-    OPEN_STATES: ClassVar[tuple] = ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")
+    OPEN_STATES: ClassVar[tuple] = ("DRAFT", "REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")
     AUTO_CONFIRM_DAYS: ClassVar[int] = 7
 
     @staticmethod
@@ -352,9 +364,19 @@ class CheckOutSettlement(PoolObj):
         room = Room.get(tenant.current_room_id) if tenant.current_room_id else Room.first(branch=tenant.branch, room_no=tenant.room_no)
         if not room or not room.active_contract_id:
             raise DomainError("퇴실을 신청할 수 있는 활성 계약이 없습니다.")
-        if any(x.status in cls.OPEN_STATES for x in cls.find(id_room=room.id)):
+        open_ones = [x for x in cls.find(id_room=room.id) if x.status in cls.OPEN_STATES]
+        draft = next((x for x in open_ones if x.status == "DRAFT"), None)
+        if open_ones and not (draft is not None and not draft.requested_at and len(open_ones) == 1):
             raise DomainError("이미 진행 중인 퇴실 정산이 있습니다.", hint="채팅에서 진행 상황을 확인해 주세요.")
         ct = Contract.require(room.active_contract_id)
+        if draft is not None:        # 임대인이 먼저 작성 중인 정산서가 있으면 신청만 기록한다(아직 게시 전이라 임차인에게는 '신청 접수'로 보인다)
+            draft.requested_at = now_iso()
+            draft.desired_date = (desired_date or "").strip()
+            draft.tenant_request_memo = (memo or "").strip()
+            draft.save(action="checkout_requested_on_draft", app_source=app_source)
+            draft._chat("tenant", ct.tenant_name, f"[🚪 퇴실 신청] {room.room_no}호 {ct.tenant_name} 세입자가 퇴실을 신청했습니다. 희망일 {draft.desired_date or '미정'}."
+                        + (f" 메모: {draft.tenant_request_memo}" if draft.tenant_request_memo else "") + " 작성 중인 정산서를 게시해 주세요.", app_source=app_source)
+            return draft
         s = cls(branch=tenant.branch, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id, id_tenant=tenant.id,
                 tenant_name=ct.tenant_name, status="REQUESTED", deposit_original=ct.deposit, requested_at=now_iso(),
                 desired_date=(desired_date or "").strip(), tenant_request_memo=(memo or "").strip()).save(action="checkout_requested", app_source=app_source)
@@ -364,6 +386,20 @@ class CheckOutSettlement(PoolObj):
                 "(퇴실 후에도 다음 해 2월 말까지는 로그인해서 조회·내려받기만 할 수 있습니다.)", "연말정산 납부확인서 내려받기",
                 f"/rent3_tenant/?tenant={tenant.id}&svc=cert", app_source=app_source)
         return s
+
+    def tenant_view(self) -> Optional[Dict[str, Any]]:
+        """임차인에게 내려 주는 모양. 임대인이 작성 중(DRAFT)이면 금액을 숨기고, 임차인이 신청했던 건은 '신청 접수', 한 번 게시했다가 거둔 건은 '수정 중'으로만 알린다.
+        신청도 게시도 없던 초안은 임차인에게 없는 것과 같다(None)."""
+        if self.status != "DRAFT":
+            return self.model_dump()
+        if self.published_at:
+            status = "REVISING"
+        elif self.requested_at:
+            status = "REQUESTED"
+        else:
+            return None
+        keep = ("id", "branch", "id_room", "room_no", "id_contract", "id_tenant", "tenant_name", "requested_at", "desired_date", "created_at", "updated_at")
+        return {**{k: getattr(self, k) for k in keep}, "status": status, "deposit_original": self.deposit_original}
 
     def tenant_confirm_checked(self, app_source: str = "rent3_tenant") -> "CheckOutSettlement":
         """임차인이 임대인이 보낸 정산 내역(항목별 공제)을 확인했다고 표시한다. 임대인 채팅에 알림이 가고, 이어서 반환 계좌 입력·동의를 한다."""

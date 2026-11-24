@@ -130,6 +130,7 @@ class CheckoutCalcReq(BaseModel):
     utility_water: int = 0
     utility_gas: int = 0
     utility_other: int = 0
+    publish: bool = False                   # True 일 때만 임차인에게 게시(임차인이 보고 확인·이의 제기). 기본은 임시 저장(임차인에게 안 보임)
     damage_restoration_fee: int = 0
     inspection_notes: str = "6대 시설 자연마모 외 파손 없음"
 
@@ -2099,10 +2100,12 @@ def calculate_checkout(req: CheckoutCalcReq):
         utility_water=req.utility_water,
         utility_gas=req.utility_gas,
         utility_other=req.utility_other,
+        publish=req.publish,
     )
     return {
         "success": True,
-        "message": f"{s.room_no}호 퇴실 정산 명세서(실반환 {s.refund_amount:,}원)가 생성되어 임차인 앱에 공유되었습니다.",
+        "message": (f"{s.room_no}호 퇴실 정산 명세서(실반환 {s.refund_amount:,}원)가 생성되어 임차인 앱에 공유되었습니다." if req.publish else
+                    f"{s.room_no}호 퇴실 정산 명세서(실반환 {s.refund_amount:,}원)를 임시 저장했습니다. 게시에 체크해 보내기 전까지 임차인에게는 보이지 않습니다."),
         "settlement": s.model_dump(),
     }
 

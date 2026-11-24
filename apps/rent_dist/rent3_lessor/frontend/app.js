@@ -1166,8 +1166,9 @@
     const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
     const num = (id) => Number(($m(id) && $m(id).value) || 0);
     // 이미 보낸 정산서(임차인 확인·이의 대기)가 있으면 그 값에서 고친다. 없으면 자동 계산값으로 시작한다.
-    const prev = ((dash && dash.checkouts) || []).find((x) => x.room_no === no && ["CALCULATED", "DISPUTED"].includes(x.status) && (Number(x.rent_unpaid_auto || 0) + Number(x.rent_prorated_auto || 0) + Number(x.rent_unpaid || 0) > 0 || Number(x.refund_amount || 0) > 0 && "rent_unpaid_auto" in x));
+    const prev = ((dash && dash.checkouts) || []).find((x) => x.room_no === no && ["DRAFT", "CALCULATED", "DISPUTED"].includes(x.status) && (Number(x.rent_unpaid_auto || 0) + Number(x.rent_prorated_auto || 0) + Number(x.rent_unpaid || 0) > 0 || Number(x.refund_amount || 0) > 0 && "rent_unpaid_auto" in x));
     const pv = (k, auto) => (prev && k in prev ? Number(prev[k] || 0) : auto);
+    const published = Boolean(prev && prev.status !== "DRAFT");             // 이미 임차인에게 게시한 정산서면 체크된 채로 시작한다
     const body = openModal(`📦 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 전출`, `
       <div style="font-size:13px;line-height:1.7;margin-bottom:8px;">
         👤 <strong>${Bass.escapeHtml(ct.tenant_name || "")}</strong> ${phone ? `· ${Bass.escapeHtml(phone)}` : ""}<br>
@@ -1188,9 +1189,13 @@
       </div>
       ${early > 0 ? `<div class="bass-muted" style="font-size:12.5px;line-height:1.6;margin-top:6px;">만기 전 퇴실이라 <strong>${Bass.escapeHtml(dotDate(lb.end_date))}(${earlyWho})</strong>까지 월 임차료를 부담합니다. 1개월분은 매달 전입일부터 다음 달 전입일 전날까지이며, 한 달 기간 중간에 끝나면 <strong>(경과 일수 × 월 임차료 ${fmtWon(lb.monthly_total)}) ÷ 30</strong>만 징수합니다${Number(lb.partial_days || 0) > 0 ? ` — 이번에는 ${Number(lb.partial_days)}일분 ${fmtWon(lb.partial_amount)}이 일할 계산 임차료입니다` : ""}.</div>` : ""}
       <div id="moFormula" class="bass-card" style="margin-top:8px;padding:10px;font-size:13px;line-height:1.7;"></div>
+      <label class="bass-card" style="display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding:10px;cursor:pointer;font-size:13.5px;font-weight:700;border-color:var(--warn);">
+        <input id="moPublish" type="checkbox" style="margin-top:3px;width:20px;height:20px;" ${published ? "checked" : ""}>
+        <span>정산을 마쳤습니다 — <strong>임차인에게 게시</strong><br><span class="bass-muted" style="font-weight:400;font-size:12.5px;">체크하고 보내야 임차인이 정산서를 볼 수 있습니다. 체크하지 않으면 <strong>임시 저장</strong>만 되어 임차인에게 보이지 않고 알림도 가지 않습니다(수정하는 중에 임차인이 보고 이의 제기를 하지 않도록).</span></span>
+      </label>
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
         <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
-        <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📤 정산서 보내기</button>
+        <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">${published ? "📤 정산서 게시" : "💾 임시 저장 (임차인에게 안 보임)"}</button>
       </div>
       <div id="moState" style="margin-top:10px;"></div>
       <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산서를 보내면 임차인 앱·채팅에 도착하고, 임차인이 <strong>[정산 내역 확인]</strong>을 누르면 여기에 확인 표시가 뜹니다. 이어서 임차인이 <strong>본인 명의 계좌</strong>를 입력하고 동의하면 <strong>송금 완료 표시</strong>를 합니다. 임차인이 받았다고 확인하거나(또는 7일 안에 이의가 없으면) 퇴실이 확정되어 공실 매물로 공개됩니다. 이의가 오면 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요.</div>`);
@@ -1204,6 +1209,7 @@
       $m("moFormula").innerHTML = `<strong>정산 내역</strong><br>임차보증금 ${fmtWon(dep)} − 미납 임차료 ${fmtWon(num("moUnpaid"))} − 일할 계산 임차료 ${fmtWon(num("moProrated"))} − 청소비 ${fmtWon(clean())} − 미납 공과금 ${fmtWon(utilTotal())}(전기 ${fmtWon(num("moElec"))} · 수도 ${fmtWon(num("moWater"))} · 가스 ${fmtWon(num("moGas"))} · 기타 ${fmtWon(num("moUtilOther"))})${num("moDmg") > 0 ? ` − 파손 복구비 ${fmtWon(num("moDmg"))}` : ""}<br><strong>= 반환 예정액 ${fmtWon(refund())}</strong>${short > 0 ? `<br><span style="color:var(--err);">공제액이 보증금보다 ${fmtWon(short)} 많습니다 — 부족분은 따로 정산해야 합니다.</span>` : ""}${(num("moUnpaid") !== unpaidAuto || num("moProrated") !== partialAuto) ? `<br><span class="bass-muted">※ 자동 계산값(미납 임차료 ${fmtWon(unpaidAuto)} · 일할 임차료 ${fmtWon(partialAuto)})에서 수정했습니다. 임차인에게도 수정 사실이 표시됩니다.</span>` : ""}`;
     };
     document.querySelectorAll(".mo-in").forEach((el) => el.addEventListener("input", drawFormula));
+    $m("moPublish").addEventListener("change", () => { $m("moDone").textContent = $m("moPublish").checked ? "📤 정산서 게시" : "💾 임시 저장 (임차인에게 안 보임)"; });
     drawFormula();
     const compose = () => {
       const lines = [`[${bldgName()}] ${no}호 ${ct.tenant_name}님 전출 정산 안내 (전출일 ${dotDate($m("moDate").value)})`, `임차보증금 ${fmtWon(dep)}`];
@@ -1218,7 +1224,7 @@
     const drawState = () => {
       const co = stateOf(), box = $m("moState");
       if (!co) { box.innerHTML = ""; return; }
-      const label = { REQUESTED: "🚪 임차인이 퇴실을 신청했습니다(희망일 " + (co.desired_date || "미정") + "). 금액을 입력해 정산서를 보내세요.", CALCULATED: (co.tenant_checked_at ? `✅ 임차인이 정산 내역을 확인했습니다(${String(co.tenant_checked_at).slice(5, 16).replace("T", " ")}) — 계좌 입력·동의 대기` : "📤 정산서를 보냈습니다 — 임차인 확인·동의 대기"), AGREED: "✍️ 임차인이 동의하고 계좌를 입력했습니다 — 송금 후 아래 단추를 누르세요", PAID: "💸 송금 표시 완료 — 임차인 수취 확인 대기(7일 안에 이의 없으면 자동 확정)", DISPUTED: "⚠️ 임차인 이의: " + (co.dispute_note || "") + " — 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요" }[co.status] || co.status;
+      const label = { DRAFT: "💾 임시 저장됨 — 임차인에게 보이지 않습니다. 정산을 마치면 '임차인에게 게시'에 체크하고 보내세요.", REQUESTED: "🚪 임차인이 퇴실을 신청했습니다(희망일 " + (co.desired_date || "미정") + "). 금액을 입력해 정산서를 보내세요.", CALCULATED: (co.tenant_checked_at ? `✅ 임차인이 정산 내역을 확인했습니다(${String(co.tenant_checked_at).slice(5, 16).replace("T", " ")}) — 계좌 입력·동의 대기` : "📤 정산서를 보냈습니다 — 임차인 확인·동의 대기"), AGREED: "✍️ 임차인이 동의하고 계좌를 입력했습니다 — 송금 후 아래 단추를 누르세요", PAID: "💸 송금 표시 완료 — 임차인 수취 확인 대기(7일 안에 이의 없으면 자동 확정)", DISPUTED: "⚠️ 임차인 이의: " + (co.dispute_note || "") + " — 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요" }[co.status] || co.status;
       box.innerHTML = `<div class="bass-card" style="padding:10px;font-size:13px;line-height:1.7;"><strong>${Bass.escapeHtml(label)}</strong>
         ${co.status === "AGREED" ? `<br>예금주 <strong>${Bass.escapeHtml(co.account_holder || "")}</strong> · 계좌 <strong>${Bass.escapeHtml(co.refund_bank_account || "")}</strong> · 반환액 <strong>${fmtWon(co.refund_amount)}</strong><br><button id="moPaid" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;margin-top:6px;">💸 송금 완료 표시</button>` : ""}</div>`;
       const paid = $m("moPaid");
@@ -1238,7 +1244,7 @@
         const res = await Bass.api(APP_ID, "/checkout/calculate", {
           method: "POST",
           body: { branch: currentBranch, room_no: no, unpaid_rent: num("moUnpaid"), prorated_rent: num("moProrated"), cleaning_fee: clean(),
-                  utility_electric: num("moElec"), utility_water: num("moWater"), utility_gas: num("moGas"), utility_other: num("moUtilOther"), damage_restoration_fee: num("moDmg") },
+                  utility_electric: num("moElec"), utility_water: num("moWater"), utility_gas: num("moGas"), utility_other: num("moUtilOther"), damage_restoration_fee: num("moDmg"), publish: Boolean($m("moPublish").checked) },
         });
         Bass.updateAppAlert("success", res.message);
         await refresh();

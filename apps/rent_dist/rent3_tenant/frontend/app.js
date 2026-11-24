@@ -502,7 +502,7 @@
       <section class="svc" data-svc="checkout">
       ${blk(`      ${co ? `
         <div class="bass-card no-print" style="margin-bottom:14px;border-color:var(--warn);">
-          ${co.status === "REQUESTED" ? `<h3>🚪 퇴실 신청이 접수되었습니다</h3><p class="bass-muted" style="font-size:13px;">임대인이 점검 후 정산서를 보냅니다. 📄 <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>는 퇴실 전에 미리 내려받아 두세요.</p>` : `
+          ${co.status === "REQUESTED" ? `<h3>🚪 퇴실 신청이 접수되었습니다</h3><p class="bass-muted" style="font-size:13px;">임대인이 점검 후 정산서를 보냅니다. 📄 <a href="?tenant=${t.id}&svc=cert">연말정산 납부확인서</a>는 퇴실 전에 미리 내려받아 두세요.</p>` : co.status === "REVISING" ? `<h3>✏️ 퇴실 정산서를 수정하고 있습니다</h3><p class="bass-muted" style="font-size:13px;line-height:1.7;">임대인이 정산서를 수정하고 있어 내용을 잠시 숨겼습니다. 수정이 끝나 <strong>게시되면 알려 드립니다</strong>(🔔·채팅). 그때 항목을 확인하고, 다르면 이의 제기로 협의하세요.</p>` : `
           <h3>🚪 퇴실 보증금 정산 명세서 (실반환 예정액: ${fmtWon(co.refund_amount)})</h3>
           ${coItemsHtml(co)}
           ${Number(co.early_rent_deduction || 0) > 0 ? `<p class="bass-muted" style="font-size:13px;line-height:1.6;">ℹ️ 계약 만기 전에 퇴실하셔서, <strong>${Bass.escapeHtml(co.liability_end_date || "")}</strong>(${co.liability_reason === "NEW_TENANT" ? "새 임차인이 입주하기 전날" : "계약 만기일"})까지는 월세를 부담하는 것으로 정산됩니다. 아직 내지 않은 월세는 위 표의 <strong>미납 임차료·일할 계산 임차료</strong>로 보증금에서 공제됩니다.${Number(co.early_partial_days || 0) > 0 ? ` 한 달 기간 중간에 끝나는 ${co.early_partial_days}일분은 (경과 일수 × 월 임차료) ÷ 30으로 계산합니다.` : ""}</p>` : ""}

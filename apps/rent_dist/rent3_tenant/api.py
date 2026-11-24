@@ -190,7 +190,7 @@ def get_myhome(tenant_id: str):
 
     tickets = sorted(MaintenanceTicket.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
     CheckOutSettlement.auto_confirm_due(tenant_id=t.id)      # 송금 표시 뒤 7일 동안 이의가 없으면 자동 확정
-    checkouts = [c for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED"]
+    checkouts = [v for v in (c.tenant_view() for c in CheckOutSettlement.find(id_tenant=t.id) if c.status != "COMPLETED") if v]     # 임대인이 작성 중인 초안의 금액은 임차인에게 보이지 않는다
     chats = sorted(
         [c for c in DirectChat.find(branch=t.branch, room_no=t.room_no) if not c.session_id],   # 계약방 대화는 계약 화면에서만
         key=lambda x: x.created_at,
@@ -232,7 +232,7 @@ def get_myhome(tenant_id: str):
         "payments": [p.model_dump() for p in payments],
         "transfer_notice": (lambda ns: ns[-1].model_dump() if ns else None)(sorted(TransferNotice.find(tenant_id=t.id), key=lambda x: x.created_at)),
         "tickets": [tk.model_dump() for tk in tickets],
-        "pending_checkout": checkouts[0].model_dump() if checkouts else None,
+        "pending_checkout": checkouts[0] if checkouts else None,
         "chats": [c.model_dump() for c in chats],
         "messages_unread": (room_messages.unread_count(t.branch, t.room_no, "tenant", t, ct.created_at if ct else "") if t.room_no else 0),   # 임대인 채팅 안 읽은 수(읽음 처리 없음)
     }
@@ -582,7 +582,7 @@ def request_checkout(tenant_id: str, req: CheckoutRequestReq):
     if not t or t.status != "ACTIVE":
         raise NotFound("입주 중인 임차인만 퇴실을 신청할 수 있습니다.")
     s = CheckOutSettlement.tenant_request(t, req.desired_date, req.memo, app_source=APP_SRC)
-    return {"success": True, "message": "퇴실 신청이 임대인에게 전달되었습니다. 연말정산 납부확인서는 지금 미리 내려받아 두세요.", "settlement": s.model_dump()}
+    return {"success": True, "message": "퇴실 신청이 임대인에게 전달되었습니다. 연말정산 납부확인서는 지금 미리 내려받아 두세요.", "settlement": s.tenant_view() or {}}
 
 
 @router.post("/checkout/{settlement_id}/confirm-received", dependencies=[Depends(any_user)])
@@ -609,7 +609,7 @@ def moved_out_archive(tenant_id: str):
     cts = sorted(Contract.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
     ct = cts[0] if cts else None
     cert = TaxAndCertificateService.build_tenant_tax_certificate(ct.id) if ct else None
-    sets = sorted(CheckOutSettlement.find(id_tenant=t.id), key=lambda x: x.updated_at, reverse=True)
+    sets = sorted((x for x in CheckOutSettlement.find(id_tenant=t.id) if x.status != "DRAFT"), key=lambda x: x.updated_at, reverse=True)
     mask = CheckOutSettlement._mask_account
     return {"success": True, "name": t.name, "moved_out": t.status == "MOVED_OUT", "readonly_until": t.readonly_until, "certificate": cert,
             "settlements": [{**{k: v for k, v in x.model_dump().items() if k not in ("refund_bank_account", "tenant_signature")}, "account_masked": mask(x.refund_bank_account)} for x in sets]}

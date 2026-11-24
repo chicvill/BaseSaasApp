@@ -390,6 +390,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             "room_no": "202",
             "utility_settlement": 30000,
             "cleaning_fee": 70000,
+            "publish": True,
         }).json()["settlement"]
         self.assertEqual((r_co["unpaid_rent_deduction"], r_co["early_rent_deduction"]), (lb202["unpaid_now"], lb202["early_amount"]))
         self.assertEqual(r_co["refund_amount"], max(0, 5000000 - (100000 + lb202["unpaid_now"] + lb202["early_amount"])))
@@ -5268,7 +5269,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t.save(action="t")
             self.assertEqual(c.post(f"{PL}/auth/login", headers=NA, json={"login_mode": "account", "identifier": t.id, "password": "MoveOut#Pass1"}).status_code, 200)
 
-            co = c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": "201", "utility_settlement": 10000, "cleaning_fee": 70000}).json()["settlement"]
+            co = c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": "201", "utility_settlement": 10000, "cleaning_fee": 70000, "publish": True}).json()["settlement"]
             co_id = co["id"]
             tk = self._login(t.id, "MoveOut#Pass1")
             agr = {"bank_account": "국민 111-22-3333", "signature": "서명", "account_holder": t.name}
@@ -5445,7 +5446,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         texts = " ".join(x.message for x in DirectChat.find(branch="main", room_no=room.room_no))
         self.assertIn("연말정산 납부확인서", texts)
         # 임대인이 정산서 작성 → 신청 건을 이어서 쓴다(새 건이 생기지 않음)
-        calc = lambda: c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": room.room_no, "utility_settlement": 5000, "cleaning_fee": 70000}).json()["settlement"]
+        calc = lambda: c.post(f"{LS}/checkout/calculate", headers=chic, json={"branch": "main", "room_no": room.room_no, "utility_settlement": 5000, "cleaning_fee": 70000, "publish": True}).json()["settlement"]
         self.assertEqual(calc()["id"], co_id)
         # 이의 제기 → 임대인이 고쳐 다시 보냄(같은 건, 동의는 다시)
         self.assertEqual(c.post(f"{TN}/checkout/{co_id}/dispute", headers=tk, json={"note": ""}).status_code, 400)
@@ -9484,7 +9485,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual((lb["unpaid_now"], lb["early_amount"], lb["monthly_total"]), (0, 12 * monthly, monthly))
             self.assertEqual(sum(m["unpaid"] for m in lb["months"]), 12 * monthly)
             # 2) 정산서: 퇴실 후 월세가 보증금에서 공제된다
-            s = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"}).json()["settlement"]
+            s = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "publish": True}).json()["settlement"]
             self.assertEqual((s["unpaid_rent_deduction"], s["early_rent_deduction"], s["liability_reason"], s["liability_end_date"]), (0, 12 * monthly, "EXPIRY", "2027-10-28"))
             self.assertEqual(s["cleaning_fee"], 0)                                                                   # 청소비 약정이 없는 계약이라 공제하지 않는다
             self.assertEqual(s["refund_amount"], max(0, ct.deposit - 12 * monthly))
@@ -9520,7 +9521,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             sched.pay_timing = "선불"
             sched.save(action="t")
             self.assertEqual(ct.checkout_liability(Room.first(branch="main", room_no="787"))["early_amount"], lb2["early_amount"])
-            s2 = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"}).json()["settlement"]
+            s2 = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "publish": True}).json()["settlement"]
             self.assertEqual((s2["liability_reason"], s2["liability_end_date"], s2["early_rent_deduction"], s2["early_partial_days"], s2["early_partial_amount"]),
                              ("NEW_TENANT", "2027-03-14", lb2["early_amount"], 15, round(15 * monthly / 30)))
             self.assertTrue(any("÷ 30" in (m.message or "") for m in DirectChat.find(id_room=room.id)))
@@ -9573,7 +9574,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         from apps.rent_dist._rent3_core.contract_chat import PROPOSAL_FIELDS
         from apps.rent_dist._rent3_core.ops import CheckOutSettlement
         c = self.client
-        calc = lambda room_no, **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": room_no, **kw})
+        calc = lambda room_no, **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": room_no, "publish": True, **kw})
         try:
             # 1) 약정 없는 계약: 청소비 요청이 와도 0원, 약정액 0
             sid = self._policy_session("786", 5000000, 300000)
@@ -9648,7 +9649,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         from apps.rent_dist._rent3_core.authz import tenant_token
         from apps.rent_dist._rent3_core.ops import CheckOutSettlement
         c = self.client
-        calc = lambda **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "783", **kw})
+        calc = lambda **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "783", "publish": True, **kw})
         try:
             c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})
             self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "783", "is_published": True, "deposit": 5000000, "monthly_rent": 300000, "maintenance_fee": 30000}).status_code, 200)
@@ -9727,6 +9728,96 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, tapp, needle)
         self.assertIn("정산 내역 확인", rd("rent3_lessor", "frontend", "manual.html"))
         self.assertIn("정산 내역 확인", rd("rent3_tenant", "frontend", "manual.html"))
+
+    def test_155_checkout_statement_is_hidden_from_tenant_until_lessor_publishes(self):
+        """155. 임대인이 정산서를 수정하는 동안 임차인이 보고 이의 제기하지 않도록: '게시'하지 않은 정산서는 임시 저장(DRAFT)이라 임차인에게 금액·알림·채팅이 가지 않고 임차인의 확인·동의·이의도 막힌다. 게시해야 임차인이 보며, 게시한 정산서를 거두면 '수정 중'으로만 보이고, 다시 게시하면 확인부터 다시 한다. 임차인 신청은 초안에 붙고, 임대인에게는 '게시 필요' 알림이 간다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, DirectChat
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        c = self.client
+        chic = self._login("chic")
+        calc = lambda **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "781", **kw})
+        try:
+            c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500})
+            self.assertEqual(c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "781", "is_published": True, "deposit": 5000000, "monthly_rent": 300000, "maintenance_fee": 30000}).status_code, 200)
+            t = self._new_prospect("게시확인", "010-7777-0781")
+            self._complete_contract(None, None, t.id, "781", "게시확인", "010-7777-0781")
+            room = Room.first(branch="main", room_no="781")
+            th = {"Authorization": f"Bearer {tenant_token(Tenant.get(t.id))}"}
+            seen = lambda: c.get(f"/api/rent3_tenant/myhome/{t.id}", headers=th).json()["pending_checkout"]
+            notes = lambda: {i["kind"]: i["count"] for i in c.get(f"/api/rent3_tenant/myhome/{t.id}/notifications", headers=th).json()["items"]}
+            chats = lambda: " ".join((m.message or "") for m in DirectChat.find(id_room=room.id))
+            # 1) 임시 저장(기본): 임차인에게 안 보이고 알림·채팅도 없다
+            r = calc(cleaning_fee=0, unpaid_rent=800000)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIn("임시 저장", r.json()["message"])
+            d = r.json()["settlement"]
+            self.assertEqual((d["status"], d["published_at"], d["refund_amount"]), ("DRAFT", "", 5000000 - 800000))
+            self.assertIsNone(seen())
+            self.assertNotIn("checkout_agree", notes())
+            self.assertNotIn("정산 명세서 도착", chats())
+            # 2) 임차인은 초안을 확인·동의·이의할 수 없다(주소를 알아도)
+            for path, body in (("confirm-checked", {}), ("agree", {"bank_account": "1", "signature": "x", "account_holder": "게시확인"}), ("dispute", {"note": "이의"})):
+                self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{d['id']}/{path}", headers=th, json=body).status_code, 400, path)
+            # 3) 임대인에게는 '작성 중 — 게시 필요' 알림
+            ln = {i["kind"]: i["count"] for i in c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()["items"]}
+            self.assertEqual(ln.get("checkout_draft"), 1)
+            # 4) 임차인이 퇴실을 신청하면 초안에 붙고, 임차인에게는 '신청 접수'만 보이며 금액은 응답에도 없다
+            rq = c.post(f"/api/rent3_tenant/myhome/{t.id}/checkout/request", headers=th, json={"desired_date": "2026-12-20", "memo": "이사"})
+            self.assertEqual(rq.status_code, 200, rq.text)
+            self.assertEqual(rq.json()["settlement"]["status"], "REQUESTED")
+            self.assertNotIn("refund_amount", rq.json()["settlement"])
+            self.assertEqual(CheckOutSettlement.get(d["id"]).status, "DRAFT")
+            stub = seen()
+            self.assertEqual((stub["status"], stub["desired_date"]), ("REQUESTED", "2026-12-20"))
+            self.assertNotIn("refund_amount", stub)
+            self.assertNotIn("rent_unpaid", stub)
+            self.assertEqual(c.post(f"/api/rent3_tenant/myhome/{t.id}/checkout/request", headers=th, json={"desired_date": "2026-12-21"}).status_code, 400)   # 두 번 신청은 안 된다
+            # 5) 게시: 임차인이 금액을 보고 알림·채팅이 간다
+            pub = calc(cleaning_fee=0, unpaid_rent=800000, publish=True).json()["settlement"]
+            self.assertEqual((pub["id"], pub["status"], bool(pub["published_at"])), (d["id"], "CALCULATED", True))
+            shown = seen()
+            self.assertEqual((shown["status"], shown["rent_unpaid"], shown["refund_amount"]), ("CALCULATED", 800000, 4200000))
+            self.assertEqual(notes().get("checkout_agree"), 1)
+            self.assertIn("정산 명세서 도착", chats())
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{d['id']}/confirm-checked", headers=th, json={}).status_code, 200)
+            # 6) 임대인이 수정하려고 거두면(게시 체크 해제) 임차인에게는 '수정 중'만 보이고 확인이 지워지며 채팅에 안내가 간다
+            wd = calc(cleaning_fee=0, unpaid_rent=700000).json()["settlement"]
+            self.assertEqual((wd["status"], wd["tenant_checked_at"], bool(wd["published_at"])), ("DRAFT", "", True))
+            rev = seen()
+            self.assertEqual(rev["status"], "REVISING")
+            self.assertNotIn("refund_amount", rev)
+            self.assertNotIn("checkout_agree", notes())
+            self.assertIn("정산서 수정 중", chats())
+            self.assertEqual(c.post(f"/api/rent3_tenant/checkout/{d['id']}/confirm-checked", headers=th, json={}).status_code, 400)
+            # 7) 다시 게시하면 새 금액으로 보이고 확인부터 다시 한다
+            again = calc(cleaning_fee=0, unpaid_rent=700000, publish=True).json()["settlement"]
+            self.assertEqual((again["status"], again["tenant_checked_at"], again["rent_unpaid"]), ("CALCULATED", "", 700000))
+            self.assertEqual(seen()["refund_amount"], 4300000)
+        finally:
+            for co in CheckOutSettlement.all():
+                if co.room_no == "781" and co.branch == "main":
+                    co.delete(action="t")
+            for ct_ in Contract.find(room_no="781"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "781" and s_.branch == "main":
+                    s_.delete(action="t")
+            r_ = Room.first(branch="main", room_no="781")
+            if r_:
+                r_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone == "010-7777-0781":
+                    t_.delete(action="t")
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        lapp, tapp = rd("rent3_lessor", "frontend", "app.js"), rd("rent3_tenant", "frontend", "app.js")
+        for needle in ("moPublish", "임차인에게 게시", "임시 저장 (임차인에게 안 보임)", "publish: Boolean($m(\"moPublish\").checked)", "DRAFT:"):
+            self.assertIn(needle, lapp, needle)
+        for needle in ("REVISING", "수정하고 있습니다", "게시되면 알려 드립니다"):
+            self.assertIn(needle, tapp, needle)
+        self.assertIn("임차인에게 게시", rd("rent3_lessor", "frontend", "manual.html"))
+        self.assertIn("게시", rd("rent3_tenant", "frontend", "manual.html"))
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
