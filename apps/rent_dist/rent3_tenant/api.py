@@ -173,6 +173,7 @@ def list_tenants():
 @router.get("/myhome/{tenant_id}", dependencies=[Depends(tenant_scope)])
 def get_myhome(tenant_id: str):
     ensure_pool_seeded()
+    ExpiryRenewalCheck.activate_due()           # 시작일이 된 연장 재계약의 새 조건을 먼저 적용한다(청구는 현재 적용 중인 계약 기준)
     t = Tenant.get(tenant_id) or Tenant.first(phone=tenant_id)
     if not t:
         raise NotFound(f"임차인('{tenant_id}') 정보를 찾을 수 없습니다.")
@@ -200,6 +201,8 @@ def get_myhome(tenant_id: str):
     tenant_d = t.safe_dump()
     bldg_d = bldg.model_dump() if bldg else None
     room_d = room.model_dump() if room else None
+    if room_d is not None:
+        room_d.pop("next_terms", None)          # 임대인이 임시 저장해 둔 다음 계약 조건 초안은 임차인에게 보이지 않는다
     keys_locked = bool(ct and ct.keys_released is False)  # 잔금 확인 전: 출입 정보를 API 단계에서 가린다
     if keys_locked:
         tenant_d["doorlock_pwd"] = LOCKED_TEXT

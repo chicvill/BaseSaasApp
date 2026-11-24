@@ -733,6 +733,8 @@ class CoSignSession(PoolObj):
                 )
 
         room0 = Room.first(branch=normalize_branch_id(branch), room_no=room_no)
+        if room0 is not None and mode == "RENEWAL" and room0.reservation() is not None:
+            raise DomainError(f"{room_no}호는 이미 다음 계약(연장 또는 예약)이 체결되어 있습니다.", hint="체결된 계약을 취소한 뒤에 다시 진행해 주세요.")
         if room0 is not None and mode != "RENEWAL":
             if room0.reservation() is not None:
                 raise DomainError(f"{room_no}호는 이미 다음 입주자와 예약 계약이 체결되었습니다.",
@@ -1131,8 +1133,9 @@ class CoSignSession(PoolObj):
 
     def pre_contract_min_move_in(self) -> str:
         """사전 계약(입주 중인 전출 예정 호실)이면 새 입주일의 가장 빠른 날, 아니면 ''. 현재 입주자가 나가기 전에는 들어올 수 없다."""
-        if self.mode == "RENEWAL":
-            return ""
+        if self.mode == "RENEWAL":      # 연장 재계약: 새 조건은 이전 계약 만기일부터 적용(그 전까지는 이전 조건)
+            prev = Contract.get(self.prev_contract_id) if self.prev_contract_id else None
+            return (prev.expiry_date or "") if prev else ""
         room = Room.get(self.id_room)
         if room is None or not room.is_occupied:
             return ""
@@ -1142,6 +1145,9 @@ class CoSignSession(PoolObj):
         floor = self.pre_contract_min_move_in()
         mv = str(terms.get("move_in_date") or "")
         if floor and re_is_date(mv) and mv < floor:
+            if self.mode == "RENEWAL":
+                raise DomainError(f"연장 계약의 시작일은 현재 계약 만기일({floor}) 이후여야 합니다.",
+                                  hint="만기 전까지는 이전 계약 조건이 적용되고, 새 조건은 만기일부터 적용됩니다.")
             raise DomainError(f"입주일은 현재 입주자의 퇴실 예정일({floor}) 이후여야 합니다.",
                               hint="전입일과 전출일은 같은 날까지 가능합니다. 퇴실 예정일 이후 날짜를 입력해 주세요.")
 
@@ -1254,6 +1260,17 @@ class CoSignSession(PoolObj):
                 raise DomainError(f"{room.room_no}호는 입주 중이며 전출 예정으로 공개되지 않아 미리 계약할 수 없습니다.")
             self._check_pre_contract_move_in(t_info)
 
+        # 연장 재계약을 만기 전에 미리 체결하는 경우: 새 계약은 '예약'(SCHEDULED)으로 두고 이전 계약·호실 값은 그대로 둔다.
+        # 새 조건의 시작일(이전 계약 만기일)이 되면 이전 계약이 RENEWED, 새 계약이 ACTIVE 로 바뀌고 호실 조건이 새 값으로 바뀐다(ExpiryRenewalCheck.activate_due).
+        renewal_later = False
+        prev_for_renewal = Contract.get(self.prev_contract_id) if (self.mode == "RENEWAL" and self.prev_contract_id) else None
+        if prev_for_renewal is not None:
+            self._check_pre_contract_move_in(t_info)
+            start0 = str(t_info.get("move_in_date") or prev_for_renewal.expiry_date or "")
+            renewal_later = prev_for_renewal.status == "ACTIVE" and bool(start0) and start0 > date_today().isoformat()
+            if renewal_later and room.reservation() is not None:
+                raise Conflict(f"{room.room_no}호는 이미 연장 재계약이 체결되었습니다.", hint="체결된 재계약을 취소한 뒤에 다시 시도해 주세요.")
+
         # 1) 임차인 객체 생성 또는 갱신 -> users.json 즉시 업데이트
         tenant = (
             (Tenant.get(self.id_tenant) if self.id_tenant else None)
@@ -1296,8 +1313,8 @@ class CoSignSession(PoolObj):
         tenant.save(action="tenant_reserved_by_cosign" if reserve else "tenant_activated_by_cosign", app_source=app_source)
         self.id_tenant = tenant.id
 
-        # 재계약인 경우 이전 계약 RENEWED 마감
-        if self.mode == "RENEWAL" and self.prev_contract_id:
+        # 재계약인 경우 이전 계약 RENEWED 마감(미리 체결한 연장은 시작일에 마감한다)
+        if self.mode == "RENEWAL" and self.prev_contract_id and not renewal_later:
             old_ct = Contract.get(self.prev_contract_id)
             if old_ct:
                 old_ct.status = "RENEWED"
@@ -1365,16 +1382,18 @@ class CoSignSession(PoolObj):
             cosign_session_id=self.id,
             chat_digest=chat_digest,
             chat_digest_count=chat_digest_count,
-            status="SCHEDULED" if reserve else "ACTIVE",
+            status="SCHEDULED" if (reserve or renewal_later) else "ACTIVE",
+            renews_contract_id=self.prev_contract_id if (self.mode == "RENEWAL" and self.prev_contract_id) else "",
         )
         ct.vat = ct.compute_vat()
         ct.save(action="contract_sealed_from_cosign", app_source=app_source)
 
         # 3) Room 호실 상태 입주 전환 (공실 광고 자동 비노출) -> rooms.json 즉시 업데이트
-        if reserve:
-            room.reserved_contract_id = ct.id   # 현재 입주자·계약은 그대로 두고 예약만 건다(광고는 내린다)
-            room.is_published = False
-            room.save(action="room_reserved_by_cosign", app_source=app_source)
+        if reserve or renewal_later:
+            room.reserved_contract_id = ct.id   # 현재 입주자·계약은 그대로 두고 예약만 건다(새 입주자 예약은 광고를 내린다, 연장 예약은 호실 값 그대로)
+            if reserve:
+                room.is_published = False
+            room.save(action="room_reserved_by_cosign" if reserve else "room_renewal_reserved_by_cosign", app_source=app_source)
         else:
             room.id_tenant = tenant.id
             room.active_contract_id = ct.id
@@ -1385,6 +1404,7 @@ class CoSignSession(PoolObj):
             room.pay_timing = ct.pay_timing
             room.pre_moveout_notice = False
             room.next_listing = {}                  # 매물 등록 때의 임시 조건은 계약 값으로 덮였으니 삭제
+            room.next_terms = {}                    # 임대인이 저장해 둔 다음 계약 조건도 이 계약으로 쓰였으니 비운다
             room.available_from = "즉시입주"
             room.is_published = False
             room.save(action="room_assigned_by_cosign", app_source=app_source)
@@ -1433,6 +1453,7 @@ class CoSignSession(PoolObj):
                 message=(
                     f"[🎉 임대차 계약 최종 체결 완료] {room.room_no}호 계약원장({ct.id})이 봉인되었습니다. "
                     f"계약 접수번호는 {rtms.fixed_date_no} 입니다. (법적 확정일자는 아닙니다 — 주민센터·등기소에서 별도로 받으세요)"
+                    + (f" 연장 계약의 새 조건은 {ct.move_in_date}부터 적용되며, 그때까지는 현재 계약 조건이 적용됩니다." if renewal_later else "")
                 ),
             ).save(action="chat_auto_sent", app_source=app_source)
 
@@ -1443,6 +1464,7 @@ class CoSignSession(PoolObj):
             "room": room.model_dump(),
             "rtms": rtms.model_dump(),
             "reserved": reserve,
+            "renewal_scheduled": renewal_later,
         }
 
     def _ensure_in_progress(self) -> None:

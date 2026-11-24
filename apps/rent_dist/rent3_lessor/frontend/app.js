@@ -1030,12 +1030,14 @@
     const msg1 = `[${bldgName()}] ${no}호 ${ct.tenant_name}님 안녕하세요, 임대인입니다.\n계약 만기가 ${dotDate(ct.expiry_date)}입니다. 만기 후 이사(전출) 계획이 있으신지 ${deadline}알려 주시기 바랍니다.\n연장(전출의사 없음) 시에는 월세 5% 범위 내에서 인상된 조건으로 재계약이 진행됩니다. 자세한 조건은 따로 안내드리겠습니다.`;
     const stay = Boolean(ec && (ec.tenant_plan === "STAY" || /RENEWAL/.test(ec.status || "")));
     const moveOut = Boolean(ec && ec.tenant_plan === "MOVE_OUT");
-    const dep0 = (ec && ec.proposed_deposit) || r.deposit;
+    const nt0 = r.next_terms || {};
+    const previewed0 = Boolean(ec && /RENEWAL_/.test(ec.status || ""));
+    const dep0 = previewed0 ? ((ec && ec.proposed_deposit) || r.deposit) : (nt0.deposit != null ? nt0.deposit : ((ec && ec.proposed_deposit) || r.deposit));
     // 재계약 기본안: 월세 5% 인상(천 원 단위 내림, 법정 한도 안). 예고 전에는 이 값이 채워지고 임대인이 고칠 수 있으며, 공동 재계약방에서 서로 조정한다.
     const rent5 = Math.max(Number(r.monthly_rent || 0), Math.floor(Number(r.monthly_rent || 0) * 1.05 / 1000) * 1000);
     const previewed = Boolean(ec && /RENEWAL_/.test(ec.status || ""));
-    const rent0 = (previewed && ec.proposed_monthly_rent) ? ec.proposed_monthly_rent : rent5;
-    const fee0 = (ec && ec.proposed_maintenance_fee != null && ec.status !== "AWAITING_TENANT") ? ec.proposed_maintenance_fee : r.maintenance_fee;
+    const rent0 = (previewed && ec.proposed_monthly_rent) ? ec.proposed_monthly_rent : (nt0.monthly_rent != null ? nt0.monthly_rent : rent5);
+    const fee0 = (previewed && ec.proposed_maintenance_fee != null) ? ec.proposed_maintenance_fee : (nt0.maintenance_fee != null ? nt0.maintenance_fee : r.maintenance_fee);
     const maxDep = Math.round(Number(r.deposit || 0) * 1.05);
     const maxRent = Math.round(Number(r.monthly_rent || 0) * 1.05);
     const body = openModal(`📅 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 만기통보`, `
@@ -1773,10 +1775,35 @@
         만기일 ${Bass.escapeHtml(dotDate(ct.expiry_date))}${lg.days_to_expiry != null ? ` (D-${lg.days_to_expiry})` : ""}${bs ? ` · 납부일 매월 ${bs.payment_day}일` : ""}${ec ? ` · ${Bass.escapeHtml(expiryStatusLabel(ec))}` : ""}
       </div></div>
       ${reservationCardHtml(r)}
+      ${nextTermsCardHtml(r)}
       <div id="payInline" class="room-card r3-zone r3-zone--pay" style="margin-top:10px;"></div>`;
+    const ntSave = box.querySelector("#btnNtSave");
+    if (ntSave) ntSave.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const num = (id) => { const x = box.querySelector(id).value; return x === "" ? null : Number(x); };
+        const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/next-terms`, {
+          method: "POST",
+          body: { deposit: num("#ntDep"), monthly_rent: num("#ntRent"), maintenance_fee: num("#ntFee"), pay_timing: box.querySelector("#ntPay").value },
+        });
+        Bass.updateAppAlert("success", res.message, res.hint || "");
+        await refresh();
+      });
+    });
+    const ntClear = box.querySelector("#btnNtClear");
+    if (ntClear) ntClear.addEventListener("click", function () {
+      if (!window.confirm("임시 저장한 다음 계약 조건을 지울까요? 지금 계약 조건에는 영향이 없습니다.")) return;
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/next-terms`, { method: "POST", body: { clear: true } });
+        Bass.updateAppAlert("success", res.message);
+        await refresh();
+      });
+    });
     const cancelBtn = box.querySelector("#btnCancelReserve");
     if (cancelBtn) cancelBtn.addEventListener("click", function () {
-      const why = window.prompt(`${r.room_no}호 예약 계약(${(r.reservation && r.reservation.tenant_name) || ""}님)을 취소합니다. 취소 사유를 적어 주세요(선택).\n취소하면 이 호실은 전출 예정 사전 매물로 다시 공개됩니다.`, "");
+      const isRen = Boolean(r.reservation && r.reservation.kind === "RENEWAL");
+      const why = window.prompt(isRen
+        ? `${r.room_no}호 연장 재계약 예약(${(r.reservation && r.reservation.tenant_name) || ""}님)을 취소합니다. 취소 사유를 적어 주세요(선택).\n취소해도 만기까지는 현재 계약 조건이 그대로 적용됩니다.`
+        : `${r.room_no}호 예약 계약(${(r.reservation && r.reservation.tenant_name) || ""}님)을 취소합니다. 취소 사유를 적어 주세요(선택).\n취소하면 이 호실은 전출 예정 사전 매물로 다시 공개됩니다.`, "");
       if (why === null) return;
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/reservation/cancel`, { method: "POST", body: { reason: why } });
@@ -1795,11 +1822,43 @@
   function reservationCardHtml(r) {
     const rv = r.reservation;
     if (!rv) return "";
+    if (rv.kind === "RENEWAL") {
+      const ct = r.contract || {};
+      return `<div class="room-card r3-zone" style="margin-top:10px;border-color:var(--warn);">
+      <div style="font-weight:800;">🔁 연장 재계약 예약 · ${Bass.escapeHtml(rv.tenant_name || "")}님</div>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:4px 0 8px;">새 조건 적용 시작일 <strong>${Bass.escapeHtml(rv.move_in_date || "-")}</strong><br>
+        <strong>그날까지는 현재 계약 조건</strong>(보증금 ${fmtWon(ct.deposit)} · 월세 ${fmtWon(ct.monthly_rent)} · 관리비 ${fmtWon(ct.maintenance_fee)})이 그대로 적용되고, 그날부터 <strong>새 조건</strong>(보증금 ${fmtWon(rv.deposit)} · 월세 ${fmtWon(rv.monthly_rent)} · 관리비 ${fmtWon(rv.maintenance_fee)})으로 청구됩니다.</div>
+      <button id="btnCancelReserve" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">연장 예약 취소</button>
+    </div>`;
+    }
     return `<div class="room-card r3-zone" style="margin-top:10px;border-color:var(--warn);">
       <div style="font-weight:800;">📅 다음 입주 예약 · ${Bass.escapeHtml(rv.tenant_name || "")}님</div>
       <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:4px 0 8px;">입주 예정일 <strong>${Bass.escapeHtml(rv.move_in_date || "-")}</strong> · 보증금 ${fmtWon(rv.deposit)} · 월세 ${fmtWon(rv.monthly_rent)} · 관리비 ${fmtWon(rv.maintenance_fee)}<br>
         현재 입주자가 퇴실 확정(정산 완료)되면 이 계약으로 입주가 시작됩니다. 그때까지 현재 계약·청구는 그대로입니다.</div>
       <button id="btnCancelReserve" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">예약 계약 취소</button>
+    </div>`;
+  }
+
+  // 입주 중인 호실의 '다음 계약 조건' 임시 저장: 지금 계약은 만기(퇴실)까지 그대로, 연장 예고 기본값·사전 매물 조건·퇴실 뒤 재공개 조건으로 쓰인다
+  function nextTermsCardHtml(r) {
+    if (!r.is_occupied || !r.contract || r.reservation) return "";
+    const nt = r.next_terms || {};
+    const has = Object.keys(nt).length > 0;
+    const val = (k) => (nt[k] != null ? nt[k] : (r[k] != null ? r[k] : ""));
+    const pay = nt.pay_timing || r.pay_timing || "후불";
+    return `<div class="room-card r3-zone" id="nextTermsCard" style="margin-top:10px;">
+      <div style="font-weight:800;">📝 다음 계약 조건 ${has ? '<span class="bass-badge bass-badge--info" style="font-size:12px;">임시 저장됨</span>' : ""}</div>
+      <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:4px 0 8px;">지금 계약 조건은 <strong>만기(퇴실)까지 그대로</strong> 적용됩니다. 여기에 저장한 조건은 연장 예고의 기본값, 사전 매물 공개 조건, 퇴실 뒤 재공개 조건으로 쓰이며 <strong>임차인에게는 보이지 않습니다</strong>. 연장 재계약은 법정 5% 이내만 가능합니다.</div>
+      <div class="r3-grid">
+        <label class="r3-fld">보증금(원)<input id="ntDep" class="bass-input" type="number" value="${val("deposit")}"></label>
+        <label class="r3-fld">월세(원)<input id="ntRent" class="bass-input" type="number" value="${val("monthly_rent")}"></label>
+        <label class="r3-fld">관리비(원)<input id="ntFee" class="bass-input" type="number" value="${val("maintenance_fee")}"></label>
+        <label class="r3-fld">월세 납부<select id="ntPay" class="bass-input"><option value="후불" ${pay === "후불" ? "selected" : ""}>후불</option><option value="선불" ${pay === "선불" ? "selected" : ""}>선불</option></select></label>
+      </div>
+      <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
+        <button id="btnNtSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;">💾 임시 저장</button>
+        ${has ? '<button id="btnNtClear" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;">초안 지우기</button>' : ""}
+      </div>
     </div>`;
   }
 

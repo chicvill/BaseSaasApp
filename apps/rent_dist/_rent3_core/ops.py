@@ -527,6 +527,12 @@ class ExpiryRenewalCheck(PoolObj):
             return 0
         cls._last_due_check = (today, time.time())
         n = 0
+        for ct in Contract.find(status="SCHEDULED"):        # 미리 체결한 연장 재계약: 시작일(이전 계약 만기일)이 되면 새 조건을 적용한다
+            if ct.renews_contract_id and (ct.move_in_date or "9999") <= today:
+                room = Room.get(ct.id_room)
+                if room is not None and room.reserved_contract_id == ct.id:
+                    room.activate_renewal(ct, app_source=app_source)
+                    n += 1
         for chk in cls.find(prelist_pending=True):
             if chk.status != "MOVEOUT_PLANNED" or chk.tenant_plan != "MOVE_OUT":
                 chk.prelist_pending = False
@@ -539,6 +545,7 @@ class ExpiryRenewalCheck(PoolObj):
                 room.pre_moveout_notice = True
                 room.is_published = True
                 room.available_from = f"{chk.planned_move_out_date} 입주예정(만기퇴실)"
+                room.seed_listing_from_terms()
                 room.save(action="room_prelisted_on_open_date", app_source=app_source)
             chk.prelist_pending = False
             chk.save(action="prelisting_opened", app_source=app_source)
@@ -674,11 +681,18 @@ class ExpiryRenewalCheck(PoolObj):
         self.tenant_responded_at = now_iso()
 
         room = Room.get(self.id_room)
-        if plan == "STAY" and room is not None and room.reservation() is not None:
-            raise DomainError(
-                "이미 다음 입주자와 예약 계약이 체결되어 '전출의사 없음'으로 바꿀 수 없습니다.",
-                hint="연장하려면 임대인이 먼저 예약 계약을 취소해야 합니다.",
-            )
+        if room is not None and room.reservation() is not None:
+            if room.reservation_is_renewal():
+                if plan == "MOVE_OUT":
+                    raise DomainError(
+                        "이미 연장 재계약이 체결되어 '전출 예정'으로 바꿀 수 없습니다.",
+                        hint="퇴실하려면 임대인이 먼저 연장 재계약 예약을 취소해야 합니다.",
+                    )
+            elif plan == "STAY":
+                raise DomainError(
+                    "이미 다음 입주자와 예약 계약이 체결되어 '전출의사 없음'으로 바꿀 수 없습니다.",
+                    hint="연장하려면 임대인이 먼저 예약 계약을 취소해야 합니다.",
+                )
 
         if plan == "MOVE_OUT":
             self.status = "MOVEOUT_PLANNED"
@@ -692,6 +706,7 @@ class ExpiryRenewalCheck(PoolObj):
                     room.pre_moveout_notice = True
                     room.is_published = True
                     room.available_from = f"{self.planned_move_out_date} 입주예정(만기퇴실)"
+                    room.seed_listing_from_terms()
                     room.save(action="room_prelisted_from_moveout_plan", app_source=app_source)
                     listed_now = True
                     self.prelist_pending = False
@@ -757,9 +772,14 @@ class ExpiryRenewalCheck(PoolObj):
             )
 
         ct = Contract.require(self.id_contract)
-        dep = ct.deposit if proposed_deposit is None else proposed_deposit
-        rent = ct.monthly_rent if proposed_monthly_rent is None else proposed_monthly_rent
-        maint = ct.maintenance_fee if proposed_maintenance_fee is None else proposed_maintenance_fee
+        room_now = Room.get(self.id_room)
+        if room_now is not None and room_now.reservation() is not None:
+            raise DomainError("이미 다음 계약(연장 또는 예약)이 체결되어 있어 연장 예고를 다시 보낼 수 없습니다.",
+                              hint="체결된 예약 계약을 취소한 뒤에 다시 진행해 주세요.")
+        draft = (room_now.next_terms or {}) if room_now else {}      # 임대인이 임시 저장해 둔 '다음 계약 조건'이 있으면 기본값으로 쓴다
+        dep = int(draft.get("deposit", ct.deposit)) if proposed_deposit is None else proposed_deposit
+        rent = int(draft.get("monthly_rent", ct.monthly_rent)) if proposed_monthly_rent is None else proposed_monthly_rent
+        maint = int(draft.get("maintenance_fee", ct.maintenance_fee)) if proposed_maintenance_fee is None else proposed_maintenance_fee
         months = max(1, proposed_term_months or 12)
 
         # 주택임대차보호법 제7조 법정 5% 상한 검증 (초과 시 Mismatch 422 발생)

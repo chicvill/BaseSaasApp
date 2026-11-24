@@ -633,7 +633,8 @@ def _reservation_summary(room: Room) -> Optional[Dict[str, Any]]:
     ct = room.reservation()
     if ct is None:
         return None
-    return {"contract_id": ct.id, "tenant_name": ct.tenant_name, "tenant_phone": ct.tenant_phone, "move_in_date": ct.move_in_date,
+    return {"contract_id": ct.id, "kind": "RENEWAL" if ct.renews_contract_id else "NEW",
+            "tenant_name": ct.tenant_name, "tenant_phone": ct.tenant_phone, "move_in_date": ct.move_in_date,
             "deposit": ct.deposit, "monthly_rent": ct.monthly_rent, "maintenance_fee": ct.maintenance_fee, "contract_date": ct.contract_date}
 
 
@@ -641,11 +642,57 @@ class ReservationCancelReq(BaseModel):
     reason: str = ""
 
 
+class NextTermsReq(BaseModel):
+    deposit: Optional[int] = None
+    monthly_rent: Optional[int] = None
+    maintenance_fee: Optional[int] = None
+    pay_timing: Optional[str] = None           # 후불 / 선불
+    clear: bool = False                         # 저장해 둔 다음 계약 조건 초안을 지운다
+
+
+@router.post("/rooms/{room_id}/next-terms")
+def save_room_next_terms(room_id: str, req: NextTermsReq):
+    """입주 중인 호실의 '다음 계약 조건'을 임시 저장한다(임대인). 지금 계약 조건은 만기(퇴실)까지 그대로이고, 연장 예고의 기본값·
+    사전 매물 공개 조건·퇴실 뒤 재공개 조건으로 쓰인다. 공개되거나 임차인에게 보이지 않는다."""
+    room = Room.require(room_id)
+    if not room.is_occupied:
+        raise DomainError("입주 중인 호실의 다음 계약 조건만 임시 저장할 수 있습니다.", hint="빈 호실은 임대매물 등록 화면에서 조건을 바로 고치세요.")
+    if room.reservation() is not None:
+        raise DomainError("이미 다음 계약(연장 또는 예약)이 체결되어 조건을 바꿀 수 없습니다.", hint="체결된 예약 계약을 취소한 뒤 다시 저장해 주세요.")
+    if req.clear:
+        room.next_terms = {}
+        room.save(action="room_next_terms_cleared", app_source=APP_SRC)
+        return {"success": True, "level": "success", "message": f"{room.room_no}호 다음 계약 조건 초안을 지웠습니다.", "room": room.model_dump()}
+    draft = dict(room.next_terms or {})
+    for k in ("deposit", "monthly_rent", "maintenance_fee"):
+        v = getattr(req, k)
+        if v is None:
+            continue
+        if int(v) < 0:
+            raise DomainError("금액은 0 이상이어야 합니다.")
+        draft[k] = int(v)
+    if req.pay_timing is not None:
+        if req.pay_timing not in ("후불", "선불"):
+            raise DomainError("월세 납부 시기는 후불 또는 선불이어야 합니다.")
+        draft["pay_timing"] = req.pay_timing
+    if not draft:
+        raise DomainError("저장할 조건을 입력해 주세요.")
+    room.next_terms = draft
+    room.save(action="room_next_terms_saved", app_source=APP_SRC)
+    return {"success": True, "level": "success",
+            "message": f"{room.room_no}호 다음 계약 조건을 임시 저장했습니다. 지금 계약은 만기까지 그대로 적용됩니다.",
+            "hint": "연장 예고(법정 5% 이내)·사전 매물 공개·퇴실 뒤 재공개에 이 조건을 씁니다.", "room": room.model_dump()}
+
+
 @router.post("/rooms/{room_id}/reservation/cancel")
 def cancel_room_reservation(room_id: str, req: ReservationCancelReq):
     """퇴실 전에 미리 체결한 예약 계약을 취소한다(임대인). 호실은 전출 예정 사전 매물로 다시 공개된다. 받은 계약금 반환은 당사자가 직접 처리한다."""
     room = Room.require(room_id)
     ct = room.cancel_reservation(reason=req.reason, app_source=APP_SRC)
+    if ct.renews_contract_id:
+        return {"success": True, "level": "success",
+                "message": f"{room.room_no}호 연장 재계약 예약({ct.tenant_name}님)을 취소했습니다. 만기까지는 현재 계약 조건이 그대로 적용됩니다.",
+                "hint": "연장을 다시 진행하려면 만기통보에서 연장 예고를 새로 보내 주세요.", "room": room.model_dump()}
     return {"success": True, "level": "success",
             "message": f"{room.room_no}호 예약 계약({ct.tenant_name}님)을 취소했습니다. 호실은 전출 예정 사전 매물로 다시 공개됩니다.",
             "hint": f"이미 받은 계약금({ct.contract_deposit:,}원)이 있으면 임차인에게 직접 반환해 주세요.", "room": room.model_dump()}

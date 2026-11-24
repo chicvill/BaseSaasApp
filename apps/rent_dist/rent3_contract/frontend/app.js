@@ -2117,6 +2117,12 @@
   function reservedBannerHtml() {
     const ct = sealedContract || {};
     if (ct.status !== "SCHEDULED") return "";
+    if (ct.renews_contract_id) {
+      return `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--warn);font-size:13px;line-height:1.7;">
+      <strong>🔁 연장 재계약이 체결되었습니다</strong><br>
+      <strong>${Bass.escapeHtml(ct.move_in_date || "-")}</strong>(현재 계약 만기일)부터 새 조건으로 청구됩니다. 그날까지는 <strong>현재 계약 조건이 그대로 적용</strong>되며, 그때까지 새 계약은 예약 상태입니다.
+    </div>`;
+    }
     return `<div class="bass-card" style="padding:12px 14px;margin:12px 0;border-left:4px solid var(--warn);font-size:13px;line-height:1.7;">
       <strong>📅 입주 예약 계약입니다</strong><br>
       현재 입주자가 퇴실 확정되면 입주 계약이 시작됩니다(입주 예정일 <strong>${Bass.escapeHtml(ct.move_in_date || "-")}</strong>). 월세 청구와 납부 내역은 입주가 시작된 뒤부터 계산됩니다.

@@ -343,6 +343,7 @@ def _revision() -> int:
 
 def summary(role: str, ctx: Any, key: str, use_cache: bool = True) -> Dict[str, Any]:
     """역할별 알림 요약. role: tenant|lessor|admin. key: 캐시·본인 구분용(예: 'tenant:<id>')."""
+    ExpiryRenewalCheck.activate_due()           # 시작일이 된 연장 재계약·공개일이 된 사전 매물을 먼저 반영한다(조회 때 확인, 스케줄러 없음)
     ck, rev = f"{role}:{key}", _revision()
     hit = _cache.get(ck)
     if use_cache and hit and hit["rev"] == rev and time.time() - hit["at"] < CACHE_SECONDS:
