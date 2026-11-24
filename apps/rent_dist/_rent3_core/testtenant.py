@@ -12,6 +12,11 @@ mark_prospect_verified: 가짜 번호 등으로 문자 인증을 받을 수 없�
  - 가입만 한 예비임차인(PROSPECT)만 대상이다. 입주 중인 임차인·이미 인증된 계정은 건드리지 않는다.
  - 점검(apply=False)은 바꾸지 않고, 처리(apply=True)는 먼저 풀 전체를 자동 백업한다.
  - 기록에 provider=admin_test · fake=True · assurance=test 로 남아 실제 인증과 구분되고, 이력(_events)에 'test_identity_marked' 로 남는다.
+vacate_test_room: 시험 임차인(0원 계약·시험용 인증)이 들어 있는 호실을 퇴실 정산이 끝난 것처럼 비워 공실 매물로 다시 공개한다(예: 시크빌 701호를 공동계약으로 시험).
+ - 실제 입주자 호실은 대상이 아니다: 임차인 본인인증이 assurance=test 이고 계약이 보증금·월세 0원일 때만 한다.
+ - 순서는 실제 퇴실 확정과 같다(계약 종료 → 임차인 퇴실·로그인 수단 정리 → Room.vacate). 처리 전에 풀 전체를 자동 백업한다.
+ - 호실 보증금·월세가 둘 다 0이면 입력한 값(기본 500만원·30만원)으로 채워 시험 계약 조건을 만든다.
+
  - 새 비밀번호(규칙: 8자 이상·영문+숫자)를 함께 주면 그 계정의 비밀번호도 새로 정하고(간편 비밀번호 해제·로그인 잠금 해제), 이미 인증된 계정도 비밀번호만 바꿀 수 있다.
 """
 from __future__ import annotations
@@ -120,3 +125,39 @@ def mark_prospect_verified(name: str, phone: str, apply: bool = False, new_passw
         ratelimit.clear_matching("login", lambda who: (len(_digits(who)) >= 8 and _digits(who) == digits) or who in {tid, nm} or (email and who == email))
     return {"status": "DONE", "backup": info.get("name", ""),
             "message": f"처리했습니다: {plan}. 처리 전 백업: {info.get('name', '')}. 휴대폰 번호와 {'새 ' if need_pw else '기존 '}비밀번호로 로그인하면 계약을 시작할 수 있습니다."}
+
+
+def vacate_test_room(branch: str = "main", room_no: str = "701", apply: bool = False, deposit: int = 5_000_000, monthly_rent: int = 300_000) -> Dict[str, Any]:
+    from . import connect as cn
+    from .ops import CheckOutSettlement
+    branch, room_no = str(branch).strip() or "main", str(room_no).strip()
+    room = Room.first(branch=branch, room_no=room_no)
+    if room is None:
+        return {"status": "BLOCKED", "message": f"{branch} 지점에 {room_no}호가 없습니다."}
+    if not room.is_occupied:
+        return {"status": "EXISTS", "message": f"{room_no}호는 이미 비어 있습니다({'매물 공개중' if room.is_published else '비공개'}). 아무것도 바꾸지 않았습니다."}
+    ct, tenant = Contract.get(room.active_contract_id), Tenant.get(room.id_tenant)
+    if ct is None or tenant is None:
+        return {"status": "BLOCKED", "message": f"{room_no}호의 계약 또는 임차인 기록을 찾을 수 없어 멈춥니다."}
+    is_test = (tenant.identity or {}).get("assurance") == "test" and int(ct.deposit or 0) == 0 and int(ct.monthly_rent or 0) == 0
+    if not is_test:
+        return {"status": "BLOCKED", "message": f"{room_no}호는 시험 임차인 호실이 아닙니다(임차인 {tenant.name}). 실제 입주자 자료를 보호하기 위해 멈춥니다. 시험용은 '시험 임차인 등록'으로 만든 0원 계약만 비울 수 있습니다."}
+    nl = room.next_listing or {}
+    dep, rent = int(nl.get("deposit") or room.deposit or deposit or 0), int(nl.get("monthly_rent") or room.monthly_rent or monthly_rent or 0)
+    plan = f"{room_no}호: 시험 임차인 {tenant.name}님 퇴실 처리 + 계약 종료 → 공실 매물로 공개(보증금 {dep:,}원 · 월세 {rent:,}원)"
+    if not apply:
+        return {"status": "DRY", "message": f"점검만 했습니다(바뀐 것 없음). 처리하면 → {plan}"}
+    info = backup.create()
+    ct.terminate(app_source="admin_test_vacate")
+    cn.purge_login_methods(tenant)
+    tenant.status = "MOVED_OUT"
+    tenant.current_room_id = ""
+    tenant.readonly_until = CheckOutSettlement._readonly_until(date.today())
+    tenant.save(action="test_tenant_moved_out", app_source="admin_test_vacate")
+    room.vacate(app_source="admin_test_vacate")
+    room = Room.get(room.id)
+    if not int(room.deposit or 0) and not int(room.monthly_rent or 0):
+        room.deposit, room.monthly_rent = int(deposit or 0), int(monthly_rent or 0)
+        room.save(action="test_room_terms_filled", app_source="admin_test_vacate")
+    return {"status": "DONE", "backup": info.get("name", ""),
+            "message": f"처리했습니다: {plan}. 처리 전 백업: {info.get('name', '')}. 이제 임차인 화면 '계약할 집 고르기'에 나옵니다."}

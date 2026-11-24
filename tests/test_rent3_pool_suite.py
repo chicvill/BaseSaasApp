@@ -8907,6 +8907,56 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ('id="tiPw"', "new_password", "처리 (본인인증 · 비밀번호)"):
             self.assertIn(needle, adm, needle)
 
+    def test_145_admin_vacates_test_room_and_relists_it(self):
+        """145. 관리인 앱 '시험 호실 비우기': 시험 임차인(0원 계약·시험용 인증) 호실만 퇴실 확정처럼 비워 공실 매물로 공개한다(계약 종료·임차인 퇴실·값 채움·백업). 실제 입주 호실은 멈추고, 점검은 바꾸지 않으며, 임대인은 403. 비운 호실은 계약 앱 후보 목록에 공실로 나온다."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, Lessor
+        c = self.client
+        admin, chic = self._login("admin"), self._login("chic")
+        mk, url = "/api/rent3_admin/accounts/test-tenant", "/api/rent3_admin/accounts/test-vacate"
+        body = {"branch": "main", "room_no": "798", "name": "시험이", "phone": "010-1234-0798"}
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            self.assertIn(c.post(url, headers=chic, json={"branch": "main", "room_no": "798"}).status_code, (401, 403))   # 임대인은 못 한다
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_vac_")}):
+                self.assertEqual(c.post(mk, headers=admin, json={**body, "apply": True, "raise_limit": True}).json()["status"], "DONE")
+                before = c.get("/api/rent3_contract/rooms", headers=admin).json()["rooms"]
+                self.assertTrue(next(r for r in before if r["room_no"] == "798" and r["branch"] == "main")["is_occupied"])
+                # 실제 입주 호실(201)은 건드리지 않는다
+                real = c.post(url, headers=admin, json={"branch": "main", "room_no": "201", "apply": True}).json()
+                self.assertEqual(real["status"], "BLOCKED")
+                self.assertTrue(Room.first(branch="main", room_no="201").is_occupied)
+                self.assertEqual(c.post(url, headers=admin, json={"branch": "main", "room_no": "no-such"}).json()["status"], "BLOCKED")
+                dry = c.post(url, headers=admin, json={"branch": "main", "room_no": "798"}).json()
+                self.assertEqual(dry["status"], "DRY")
+                self.assertTrue(Room.first(branch="main", room_no="798").is_occupied)                                    # 점검은 바꾸지 않는다
+                done = c.post(url, headers=admin, json={"branch": "main", "room_no": "798", "apply": True, "deposit": 4000000, "monthly_rent": 250000}).json()
+                self.assertEqual(done["status"], "DONE", done)
+                self.assertTrue(done["backup"].endswith(".tar.gz"))
+                r = Room.first(branch="main", room_no="798")
+                self.assertFalse(r.is_occupied)
+                self.assertTrue(r.is_published)                                                                         # 공실 매물로 다시 공개
+                self.assertEqual((r.deposit, r.monthly_rent), (4000000, 250000))                                        # 값이 비어 있어 입력값으로 채움
+                self.assertEqual(Tenant.get("tenant_main_798").status, "MOVED_OUT")
+                self.assertEqual(Contract.get("ct_main_798").status, "TERMINATED")
+                after = next(x for x in c.get("/api/rent3_contract/rooms", headers=admin).json()["rooms"] if x["room_no"] == "798" and x["branch"] == "main")
+                self.assertFalse(after["is_occupied"])
+                self.assertTrue(after["is_published"])                                                                  # 계약할 집 고르기에 나오는 조건
+                self.assertEqual(c.post(url, headers=admin, json={"branch": "main", "room_no": "798", "apply": True}).json()["status"], "EXISTS")   # 재실행은 그대로
+        finally:
+            for cls, oid in ((Contract, "ct_main_798"), (Tenant, "tenant_main_798"), (Room, "room_main_798")):
+                o = cls.get(oid)
+                if o:
+                    o.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
+        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        for needle in ("btnTvCheck", "btnTvApply", "/accounts/test-vacate", "시험 호실 비우기"):
+            self.assertIn(needle, adm, needle)
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

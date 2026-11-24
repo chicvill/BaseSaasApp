@@ -688,6 +688,23 @@ def test_identity(req: TestIdentityReq):
     return {"success": out["status"] != "BLOCKED", "level": "warning" if out["status"] == "BLOCKED" else "success", **out}
 
 
+class TestVacateReq(BaseModel):
+    branch: str = "main"
+    room_no: str = "701"
+    apply: bool = False
+    deposit: int = 5_000_000
+    monthly_rent: int = 300_000
+
+
+@router.post("/accounts/test-vacate", dependencies=ADMIN_ONLY)
+def test_vacate(req: TestVacateReq):
+    """시험 임차인(0원 계약·시험용 인증)이 든 호실을 퇴실 확정한 것처럼 비워 공실 매물로 다시 공개한다. apply=False 는 점검만, True 는 처리(처리 전 자동 백업)."""
+    from apps.rent_dist._rent3_core import testtenant as tt
+    ensure_pool_seeded()
+    out = tt.vacate_test_room(req.branch, req.room_no, apply=req.apply, deposit=req.deposit, monthly_rent=req.monthly_rent)
+    return {"success": out["status"] != "BLOCKED", "level": "warning" if out["status"] == "BLOCKED" else "success", **out}
+
+
 @router.get("/backups", dependencies=ADMIN_ONLY)
 def list_backups():
     from apps.rent_dist._rent3_core import backup as bk

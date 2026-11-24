@@ -773,6 +773,21 @@
           <button id="btnTiCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
           <button id="btnTiApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 처리 (본인인증 · 비밀번호)</button></div>
         <div id="tiResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
+      </div>
+      <div class="bass-card" id="tvCard" style="margin-top:14px;">
+        <h3>🧪 시험 호실 비우기 (공실 매물로 다시 공개)</h3>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin-bottom:8px;">'시험 임차인 등록'으로 만든 <strong>0원 계약</strong> 호실(예: 701호)을 퇴실 확정한 것처럼 비웁니다. 시험 임차인은 퇴실 처리, 계약은 종료되고 호실은 <strong>공실 매물</strong>로 공개되어 임차인 화면 '계약할 집 고르기'에 나옵니다. 실제 입주자 호실은 바꾸지 않습니다. 먼저 <strong>점검</strong>, 처리 전에는 풀 전체를 자동 백업합니다.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <input id="tvBranch" class="bass-input" value="main" placeholder="지점 코드" aria-label="지점 코드" style="min-height:44px;">
+          <input id="tvRoom" class="bass-input" value="701" placeholder="호실" aria-label="호실" inputmode="numeric" style="min-height:44px;">
+          <input id="tvDep" class="bass-input" type="number" value="5000000" placeholder="보증금(원)" aria-label="보증금" style="min-height:44px;">
+          <input id="tvRent" class="bass-input" type="number" value="300000" placeholder="월세(원)" aria-label="월세" style="min-height:44px;">
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:4px;">보증금·월세는 호실에 값이 없을 때만 채웁니다(전출 예정 매물등록 때 입력한 조건이 있으면 그 값을 씁니다).</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button id="btnTvCheck" class="bass-btn" type="button" style="min-height:44px;">🔎 점검(변경 없음)</button>
+          <button id="btnTvApply" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">✅ 비우고 매물 공개</button></div>
+        <div id="tvResult" style="margin-top:10px;font-size:13px;line-height:1.6;"></div>
       </div>`;
     const ttRun = (apply) => async function () {
       Bass.withLock(this, async () => {
@@ -799,6 +814,19 @@
     };
     document.getElementById("btnTiCheck").addEventListener("click", tiRun(false));
     document.getElementById("btnTiApply").addEventListener("click", tiRun(true));
+    const tvRun = (apply) => async function () {
+      Bass.withLock(this, async () => {
+        const body = { branch: document.getElementById("tvBranch").value.trim(), room_no: document.getElementById("tvRoom").value.trim(), apply,
+          deposit: Number(document.getElementById("tvDep").value || 0), monthly_rent: Number(document.getElementById("tvRent").value || 0) };
+        if (apply && !window.confirm(`${body.room_no}호의 시험 임차인을 퇴실 처리하고 공실 매물로 공개합니다. 처리 전에 자동 백업합니다. 계속할까요?`)) return;
+        const r = await Bass.api(APP_ID, "/accounts/test-vacate", { method: "POST", body });
+        const color = r.status === "BLOCKED" ? "var(--warn)" : "var(--ok)";
+        document.getElementById("tvResult").innerHTML = `<span style="color:${color};font-weight:800;">${{ DRY: "점검 결과", EXISTS: "이미 비어 있음", BLOCKED: "멈춤", DONE: "처리 완료" }[r.status] || ""}</span><br>${Bass.escapeHtml(r.message)}`;
+        if (r.status === "DONE") Bass.updateAppAlert("success", r.message);
+      });
+    };
+    document.getElementById("btnTvCheck").addEventListener("click", tvRun(false));
+    document.getElementById("btnTvApply").addEventListener("click", tvRun(true));
     // ☰ '🧪 시험 계정 도구' 바로가기(?tab=ops&focus=testtools): 처음 한 번만 시험 계정 카드 위치로 내려간다
     if (!window.__r3FocusDone && new URLSearchParams(location.search).get("focus") === "testtools") {
       window.__r3FocusDone = true;
