@@ -8604,36 +8604,57 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
 
 
-    def test_137_notification_panel_lists_recent_chats_even_without_new_alerts(self):
-        """137. 알림창에 새 알림이 없어도 '최근 대화' 목록이 있어 이전 대화로 돌아갈 수 있다(임대인=호실 대화·관리인 문의, 임차인=임대인 대화, 관리인=문의 대화 → ?user= 로 그 채팅이 열린다)."""
+    def test_137_notification_panel_lists_recent_chat_sessions_without_content(self):
+        """137. 알림창 '최근 대화'는 채팅창을 연 기록(세션)을 '채팅 : 상대(M/D HH:MM)' 제목과 이동 주소만으로 보여 준다 — 대화 내용·미리보기는 알림에 없다. 창을 열어 읽는 동안은 같은 세션, 30초 넘게 비었다 읽으면 새 세션."""
+        from apps.rent_dist._rent3_core import chatsessions as cht
         c = self.client
+        cht._last_seen.clear()
+        for x in cht.ChatSession.all():
+            x.delete(action="t")
         chic, ten = self._login("chic"), self._login("tenant_201")
-        # 읽은 상태로 만든 뒤에도 목록은 남는다
-        posted = c.post("/api/rent3_tenant/myhome/tenant_201/messages", headers=ten, json={"body": "t137 안녕하세요 임대인님"})
-        self.assertEqual(posted.status_code, 200, posted.text)
-        c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic)                    # 임대인이 읽음 처리
+        secret = "t137 비밀 내용 안녕하세요"
+        c.post("/api/rent3_tenant/myhome/tenant_201/messages", headers=ten, json={"body": secret})
+        # 임대인이 201호 대화창을 연다(열려 있는 동안의 반복 읽기는 한 세션)
+        for _ in range(3):
+            c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic)
+        self.assertEqual(len(cht.ChatSession.find(viewer="lessor:" + self._lessor_id_main())), 1)
         l = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
-        self.assertIn("recent_chats", l)
         mine = [x for x in l["recent_chats"] if "201호" in x["title"]]
         self.assertTrue(mine, l["recent_chats"])
-        self.assertIn("t137", mine[0]["preview"])
+        import re as _re
+        self.assertRegex(mine[0]["title"], r"^채팅 : 201호 임차인\(\d{1,2}/\d{1,2} \d{2}:\d{2}\)$")
+        self.assertEqual(mine[0]["preview"], "")
         self.assertIn("tab=messages&room=201", mine[0]["link"])
-        self.assertEqual(mine[0]["unread"], 0)                                                      # 읽었어도 남는다
-        c.post("/api/rent3/pool/support/messages", headers=chic, json={"body": "t137 문의"})
+        self.assertNotIn(secret, json.dumps(l, ensure_ascii=False))          # 알림 응답 어디에도 대화 내용이 없다
+        # 30초 넘게 비었다가 다시 열면 새 세션
+        cht._last_seen[("lessor:" + self._lessor_id_main(), "room", "201")] -= 100
+        c.get("/api/rent3_lessor/messages/rooms/201?branch=main", headers=chic)
+        self.assertEqual(len(cht.ChatSession.find(viewer="lessor:" + self._lessor_id_main())), 2)
+        # 임대인의 관리인 문의 창(지원 채팅 읽기)
+        c.post("/api/rent3/pool/support/messages", headers=chic, json={"body": secret})
+        c.get("/api/rent3/pool/support/thread", headers=chic)
         l2 = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
-        self.assertTrue(any(x["action"] == "support" and "t137" in x["preview"] for x in l2["recent_chats"]))
+        self.assertTrue(any(x["action"] == "support" and x["title"].startswith("채팅 : 관리인(") for x in l2["recent_chats"]))
+        # 임차인
+        c.get("/api/rent3_tenant/myhome/tenant_201/messages?mark_read=false", headers=ten)
         t = c.get("/api/rent3_tenant/myhome/tenant_201/notifications", headers=ten).json()
-        self.assertTrue(any("임대인과 메시지" in x["title"] for x in t["recent_chats"]))
+        self.assertTrue(any(x["title"].startswith("채팅 : ") and "임대인(" in x["title"] and x["preview"] == "" for x in t["recent_chats"]), t["recent_chats"])
+        # 관리인: 사용자 문의 대화를 열면 목록에 '채팅 : 건물 임대인(...)' + ?user= 딥링크
+        c.get("/api/rent3_admin/support/thread", params={"user": "lessor:lessor_chic"})
         a = c.get("/api/rent3_admin/notifications").json()
-        lk = [x for x in a["recent_chats"] if "t137" in x["preview"]]
+        lk = [x for x in a["recent_chats"] if "임대인(" in x["title"]]
         self.assertTrue(lk and "tab=support&user=lessor:" in lk[0]["link"], a["recent_chats"])
+        self.assertNotIn(secret, json.dumps(a, ensure_ascii=False))
         self.assertLessEqual(len(l["recent_chats"]), 8)
-        base = os.path.join(ROOT, "shared_ui", "r3_notify.js")
-        nj = open(base, encoding="utf-8").read()
-        for needle in ("최근 대화", "recent_chats", "bindChats"):
+        nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
+        for needle in ("최근 대화", "recent_chats", "bindChats", "openFresh"):
             self.assertIn(needle, nj, needle)
         adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
         self.assertIn('get("user")', adm)
+
+    def _lessor_id_main(self):
+        from apps.rent_dist._rent3_core import Lessor
+        return Lessor.for_branch("main").id
 
 
 if __name__ == "__main__":

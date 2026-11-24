@@ -53,7 +53,7 @@
     if (state.bell) return state.bell;
     var bell = document.createElement("button");
     bell.type = "button"; bell.className = "r3-bell"; bell.setAttribute("aria-label", "알림"); bell.textContent = "🔔";
-    bell.addEventListener("click", openPanel);
+    bell.addEventListener("click", openFresh);
     var burger = document.querySelector("[data-r3-burger]");
     if (burger && burger.parentNode) { bell.style.marginLeft = "auto"; burger.parentNode.appendChild(bell); }   // ☰ 와 같은 줄의 오른쪽 끝(건수는 🔔 에만 단다)
     else { bell.classList.add("r3-bell--float"); document.body.appendChild(bell); }
@@ -91,6 +91,17 @@
 
   function acked(it) { return it.detail === "확인하면 사라집니다" && state.opts && state.opts.seenUrl; }
 
+  // 🔔 을 누르면 최신 상태를 한 번 읽어 와서 연다(방금 연 채팅 기록 등도 바로 보이게). 1.5초 안에 못 읽으면 지금 가진 것으로 연다.
+  function openFresh() {
+    var done = false;
+    function go() { if (done) return; done = true; openPanel(); }
+    var t = setTimeout(go, 1500);
+    if (!state.opts || !global.Bass || !global.Bass.token()) { clearTimeout(t); go(); return; }
+    global.Bass.request(state.opts.url).then(function (r) {
+      if (r && Array.isArray(r.items)) { state.data = r; render(); }
+    }).catch(function () {}).then(function () { clearTimeout(t); go(); });
+  }
+
   function openPanel() {
     var d = state.data;
     if (!global.R3 || !global.R3.openModal) { return; }
@@ -100,7 +111,7 @@
     var recentHtml = recent.length
       ? '<div style="margin:14px 0 6px;font-weight:800;font-size:14px;">💬 최근 대화</div><div class="r3-nlist">' + recent.map(function (c, i) {
           var inner = '<span class="r3-nitem__n" style="' + (c.unread > 0 ? "" : "background:#e2e8f0;color:#475569;") + '">' + (c.unread > 0 ? esc(badgeText(c.unread)) : "💬") + '</span><span class="r3-nitem__t">' + esc(c.title) +
-            '<span class="r3-nitem__d">' + esc(c.preview || "") + (c.at ? " · " + esc(String(c.at).slice(5, 16).replace("T", " ").replace("-", ".")) : "") + '</span></span><span class="r3-nitem__go">열기 ›</span>';
+            (c.preview ? '<span class="r3-nitem__d">' + esc(c.preview) + "</span>" : "") + '</span><span class="r3-nitem__go">열기 ›</span>';   // 제목에 상대·시작 시각이 들어 있다(대화 내용은 알림에 싣지 않는다)
           var cls = "r3-nitem r3-nitem--normal";
           if (c.link && !c.action) return '<a class="' + cls + '" data-c="' + i + '" href="' + esc(c.link) + '">' + inner + "</a>";
           return '<button type="button" class="' + cls + '" data-c="' + i + '">' + inner + "</button>";

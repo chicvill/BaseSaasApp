@@ -11,7 +11,7 @@ from apps.rent_dist._rent3_core.ops import TransferNotice
 
 from core.errors import DomainError, NotFound
 from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
-from apps.rent_dist._rent3_core import room_messages, contract_chat
+from apps.rent_dist._rent3_core import room_messages, contract_chat, chatsessions as chat_sessions
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -275,6 +275,9 @@ def tenant_messages(tenant_id: str, request: Request, mark_read: bool = True):
     if mark_read and not (c and is_admin(c)):
         room_messages.mark_read(msgs, "tenant")
     lessor = Lessor.first(branch=t.branch)
+    if not (c and is_admin(c)):                                              # 채팅 세션(제목·시작 시각만 기록)
+        bldg = Building.first(branch=t.branch)
+        chat_sessions.touch(f"tenant:{t.id}", "room", t.room_no, f"{(bldg.building_name if bldg else '')} 임대인".strip(), t.branch)
     return {"success": True, "room_no": t.room_no, "unread": unread, "messages": [room_messages.public(m) for m in msgs],
             "lessor_name": (lessor.name if lessor else "") or "임대인", "lessor_phone": ((lessor.phone if lessor else "") or "").strip(),    # 임대인에게 전화 단추용
             "negotiation": room_messages.negotiation_history(ct)}

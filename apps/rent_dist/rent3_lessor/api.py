@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Request
 from core.errors import DomainError, Forbidden
 from apps.rent_dist._rent3_core.authz import api_headers, claims_from, is_admin, is_local_request, lessor_scope
-from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat, connect
+from apps.rent_dist._rent3_core import franchise as fr, registry_ai, room_messages, contract_chat, connect, chatsessions as chat_sessions
 from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core.ops import TransferNotice
 from fastapi.responses import FileResponse, Response
@@ -2062,6 +2062,9 @@ def messages_room(room_no: str, request: Request, branch: str = "main", mark_rea
     if mark_read and not (c and is_admin(c)):
         room_messages.mark_read(msgs, "lessor")
     tenant = Tenant.get(room.id_tenant) if room.id_tenant else None
+    lsr_me = Lessor.for_branch(b_id)
+    if lsr_me is not None and not (c and is_admin(c)):                      # 채팅 세션(제목·시작 시각만 기록)
+        chat_sessions.touch(f"lessor:{lsr_me.id}", "room", room_no, f"{room_no}호 임차인", b_id)
     return {
         "success": True, "room_no": room_no, "tenant_name": tenant.name if tenant else "", "unread": unread,
         "tenant_phone": ((tenant.phone if tenant else "") or "").strip(),          # 임차인에게 전화 단추용

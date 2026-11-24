@@ -11,7 +11,7 @@ from core.auth import require_role
 
 from core.errors import DomainError
 from apps.rent_dist._rent3_core.pool import now_iso
-from apps.rent_dist._rent3_core import franchise as fr, consent as cs, support as sup
+from apps.rent_dist._rent3_core import franchise as fr, consent as cs, support as sup, chatsessions as chat_sessions
 from apps.rent_dist._rent3_core.authz import api_headers, not_revoked
 from apps.rent_dist._rent3_core import (
     Admin,
@@ -1085,6 +1085,9 @@ def support_thread(user: str):
     sup.purge_expired()
     u = sup.user_by_thread(user)
     sup.mark_read(user, "admin")
+    _bn = Building.first(branch=u.branch)
+    _who = f"{(_bn.building_name if _bn else u.branch)} " + ("임대인" if sup.thread_role(u) == "lessor" else f"{sup._room_of(u)}호 임차인")
+    chat_sessions.touch("admin", "support", user, _who.strip(), u.branch)       # 채팅 세션(제목·시작 시각만 기록)
     return {"success": True, "user": {**_user_card(u), "phone": (u.phone or "").strip()},      # 전화 접수 칸에서 바로 걸 수 있도록 선택한 사용자 한 명의 번호만 내려 준다
             "messages": [sup.public_message(m) for m in sup.thread_messages(user)],
             "retention_days": sup.SUPPORT_CHAT_DAYS}

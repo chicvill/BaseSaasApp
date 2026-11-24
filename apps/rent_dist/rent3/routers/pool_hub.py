@@ -19,7 +19,7 @@ from apps.rent_dist._rent3_core import franchise as fr, passwords as pwd, rateli
 from apps.rent_dist._rent3_core import mfa as mfa_mod
 from apps.rent_dist._rent3_core import roomregistry as room_registry
 from apps.rent_dist._rent3_core import acquisition
-from apps.rent_dist._rent3_core import consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
+from apps.rent_dist._rent3_core import chatsessions as chat_sessions, consent as cs, support as sup, contract_chat, quicklogin as ql, invite as inv, backup as bk, connect as cn, devicebind as dbind
 
 # 원본 Data Pool(개인정보·계정 정보 포함) 열람은 본사 관리자만
 ADMIN_ONLY = [Depends(not_revoked), Depends(require_role("superadmin", "admin"))]
@@ -556,6 +556,7 @@ def support_my_thread(request: Request) -> Dict[str, Any]:
     sup.purge_expired()
     key = sup.thread_key(user)
     sup.mark_read(key, "user")
+    chat_sessions.touch(key, "support", key, "관리인", getattr(user, "branch", "main"))   # 채팅 세션(제목·시작 시각만 기록)
     return {
         "success": True,
         "messages": [sup.public_message(m) for m in sup.thread_messages(key)],
