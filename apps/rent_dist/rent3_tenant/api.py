@@ -83,6 +83,7 @@ class CheckoutDisputeReq(BaseModel):
 @router.get("/status")
 def get_status():
     ensure_pool_seeded()
+    ExpiryRenewalCheck.activate_due()           # 공개일이 된 사전 매물을 올린다
     listings = [r for r in Room.find(is_published=True) if (not r.is_occupied) or r.pre_moveout_notice]
     return {
         "success": True,
@@ -97,6 +98,7 @@ def get_status():
 @router.get("/listings")
 def list_open_listings(branch: Optional[str] = None):
     ensure_pool_seeded()
+    ExpiryRenewalCheck.activate_due()           # 공개일(퇴실 기준일 1개월 전)이 된 사전 매물을 올린다
     rooms = Room.find(branch=normalize_branch_id(branch)) if branch else Room.all()
     bldgs = {b.id: b for b in Building.all()}
     lessors = {l.id: l for l in Lessor.all()}
@@ -638,6 +640,7 @@ def submit_tenant_expiry_plan(tenant_id: str, req: TenantMoveoutPlanReq):
     )
     msg = (
         f"📦 만기 전출(퇴실) 예정일({chk.planned_move_out_date})이 임대인에게 전달되었습니다."
+        + (f" 사전 매물 공개는 퇴실 기준일 1개월 전인 {chk.prelist_open_date}부터 시작됩니다." if chk.prelist_pending else "")
         if chk.tenant_plan == "MOVE_OUT"
         else "🏠 '전출의사 없음(거주 연장 희망)'이 임대인에게 전달되었습니다. 곧 임대인의 연장 재계약 조건 예고가 도착합니다."
     )

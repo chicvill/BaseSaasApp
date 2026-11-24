@@ -3388,7 +3388,7 @@ const callBtn = (phone, label) => { const dg = String(phone || "").replace(/\D/g
         </div>
         <div id="nrMoveoutNoticeWrap" class="bass-card" style="display:none;margin:0 0 10px;padding:10px;background:var(--surface-2,#f8fafc);border-color:var(--warn,#d97706);">
           <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📦 입주 중인 호실 — 전출 예정 사전 매물 등록</div>
-          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 전출(퇴실) 계획이 확정된 경우에만 '입주가능일'을 지정해 사전 매물로 공개해 주세요.</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 전출(퇴실) 계획이 확정된 경우에만 '입주가능일'을 지정해 사전 매물로 공개해 주세요. <strong>사전 매물은 퇴실 기준일(만기) 1개월 전부터</strong> 공개할 수 있습니다(임차인이 전출 예정을 일찍 회신해도 그날 자동으로 공개됩니다).</div>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">
             <input id="nrPreMoveout" type="checkbox"> 현재 세입자의 전출(퇴실) 계획이 확정되어 사전 매물로 공개합니다
           </label>

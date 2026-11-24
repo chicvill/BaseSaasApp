@@ -413,6 +413,7 @@ def export_franchise_fees_csv(branch: str = "main", year: Optional[int] = None):
 
 @router.get("/dashboard")
 def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str] = None, as_of_date: Optional[str] = None):
+    ExpiryRenewalCheck.activate_due()           # 공개일이 된 사전 매물을 올린다(스케줄러가 없어 조회 때 확인)
     ensure_pool_seeded()
     from apps.rent_dist._rent3_core import feebilling as _fb
     _fb.ensure_notices(branch=normalize_branch_id(branch))      # 이번 달 가맹비 청구·통보가 아직 없으면 만든다(여러 번 불러도 한 번만)
@@ -551,6 +552,12 @@ def create_or_update_room(req: RoomCreateReq):
                         "입주 중인 호실은 전출 예정 확인 후 사전 매물로 등록할 수 있습니다.",
                         hint="세입자의 전출 계획이 확정되었는지 확인 체크 후 입주가능일을 지정해 주세요.",
                     )
+                open_d = existing.prelist_open_date()
+                if open_d and date_today().isoformat() < open_d and not (existing.pre_moveout_notice and existing.is_published):
+                    raise DomainError(
+                        f"입주 중인 호실은 퇴실 기준일(만기) 1개월 전인 {open_d}부터 사전 매물로 올릴 수 있습니다.",
+                        hint="전출 의사를 미리 받아 두어도 공개는 그날부터 시작되며, 임차인이 전출 예정을 회신해 두었다면 그날 자동으로 공개됩니다. 너무 일찍 공개하면 지금 사는 임차인이 불편합니다.",
+                    )
                 avail_clean = (req.available_from or "").strip()
                 if not avail_clean or avail_clean == "즉시입주":
                     raise DomainError(
@@ -660,6 +667,8 @@ def toggle_room_publish(room_id: str, req: PublishToggleReq):
     if not req.is_published and room.is_occupied:
         room.pre_moveout_notice = False
         room.next_listing = {}
+        if room.active_contract_id:
+            ExpiryRenewalCheck.cancel_pending_prelist(room.active_contract_id, app_source=APP_SRC)
     room.save(action="room_publish_toggled", app_source=APP_SRC)
     state_label = "직거래 매물 공개" if room.is_published else "매물 비공개"
     return {
@@ -2262,7 +2271,9 @@ def record_expiry_moveout_plan(req: RecordMoveoutPlanReq):
         app_source=APP_SRC,
     )
     msg = (
-        f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 공실 쇼케이스에 사전예약 매물로 게시되었습니다."
+        (f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 퇴실 기준일 1개월 전인 {chk.prelist_open_date}부터 사전 매물로 자동 공개됩니다."
+         if chk.prelist_pending else
+         f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 공실 쇼케이스에 사전예약 매물로 게시되었습니다.")
         if chk.tenant_plan == "MOVE_OUT"
         else f"🏠 {chk.room_no}호 전출의사 없음(거주 연장 희망) 확인 완료 — 이제 연장 재계약 조건을 예고하실 수 있습니다."
     )

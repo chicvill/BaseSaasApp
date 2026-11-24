@@ -6,7 +6,7 @@ apps/_rent3_core/ops.py — 1:1 직통 인앱 메신저, A/S 하자보수 대장
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from pydantic import Field
@@ -508,9 +508,49 @@ class ExpiryRenewalCheck(PoolObj):
     cosign_session_code: str = ""
     renewal_preview_sent_at: str = ""
     renewal_acknowledged_at: str = ""
+    prelist_pending: bool = False            # 전출 예정은 회신했지만 아직 사전 매물 공개일(퇴실 기준일 1개월 전) 전이라 공개를 미뤄 둔 상태
+    prelist_open_date: str = ""              # 사전 매물로 공개되는 날(YYYY-MM-DD)
 
     def summary(self) -> str:
         return f"만기확인 [{self.room_no}호 {self.tenant_name}] {self.status} (만기 {self.expiry_date})"
+
+    _last_due_check: ClassVar[Tuple[str, float]] = ("", 0.0)
+
+    @classmethod
+    def activate_due(cls, app_source: str = "rent3_system", force: bool = False) -> int:
+        """공개를 미뤄 둔 전출 예정 호실 중 공개일이 된 것을 사전 매물로 올린다(스케줄러가 없어 목록 조회·로그인 때 부른다). 올린 건수를 돌려준다.
+        같은 날 60초 안의 반복 호출은 건너뛴다(force=True 는 항상)."""
+        import time
+        today = date_today().isoformat()
+        last_day, last_at = cls._last_due_check
+        if not force and last_day == today and time.time() - last_at < 60:
+            return 0
+        cls._last_due_check = (today, time.time())
+        n = 0
+        for chk in cls.find(prelist_pending=True):
+            if chk.status != "MOVEOUT_PLANNED" or chk.tenant_plan != "MOVE_OUT":
+                chk.prelist_pending = False
+                chk.save(action="prelisting_pending_dropped", app_source=app_source)
+                continue
+            if chk.prelist_open_date and today < chk.prelist_open_date:
+                continue
+            room = Room.get(chk.id_room)
+            if room is not None and room.is_occupied and room.active_contract_id == chk.id_contract and room.reservation() is None:
+                room.pre_moveout_notice = True
+                room.is_published = True
+                room.available_from = f"{chk.planned_move_out_date} 입주예정(만기퇴실)"
+                room.save(action="room_prelisted_on_open_date", app_source=app_source)
+            chk.prelist_pending = False
+            chk.save(action="prelisting_opened", app_source=app_source)
+            n += 1
+        return n
+
+    @classmethod
+    def cancel_pending_prelist(cls, contract_id: str, app_source: str = "rent3_lessor") -> None:
+        """임대인이 사전 매물 공개를 직접 거둔 경우 미뤄 둔 자동 공개도 취소한다."""
+        for chk in cls.find(id_contract=contract_id, prelist_pending=True):
+            chk.prelist_pending = False
+            chk.save(action="prelisting_pending_cancelled", app_source=app_source)
 
     @classmethod
     def for_contract(cls, contract_id: str) -> Optional["ExpiryRenewalCheck"]:
@@ -645,11 +685,20 @@ class ExpiryRenewalCheck(PoolObj):
             self.planned_move_out_date = (planned_move_out_date or "").strip() or self.expiry_date
             self.save(action="tenant_planned_moveout", app_source=app_source)
 
+            listed_now = False
             if room and prelist_vacancy:
-                room.pre_moveout_notice = True
-                room.is_published = True
-                room.available_from = f"{self.planned_move_out_date} 입주예정(만기퇴실)"
-                room.save(action="room_prelisted_from_moveout_plan", app_source=app_source)
+                open_date = room.prelist_open_date(self.planned_move_out_date)
+                if not open_date or date_today().isoformat() >= open_date:
+                    room.pre_moveout_notice = True
+                    room.is_published = True
+                    room.available_from = f"{self.planned_move_out_date} 입주예정(만기퇴실)"
+                    room.save(action="room_prelisted_from_moveout_plan", app_source=app_source)
+                    listed_now = True
+                    self.prelist_pending = False
+                else:                           # 너무 일찍 공개하지 않는다: 공개일(퇴실 기준일 1개월 전)이 되면 자동으로 올린다
+                    self.prelist_pending = True
+                    self.prelist_open_date = open_date
+                self.save(action="prelisting_scheduled" if self.prelist_pending else "prelisting_opened", app_source=app_source)
 
             DirectChat(
                 branch=self.branch,
@@ -660,12 +709,14 @@ class ExpiryRenewalCheck(PoolObj):
                 message=(
                     f"[📦 만기 전출(퇴실) 예정 회신] {self.room_no}호 {self.tenant_name} 세입자가 "
                     f"{self.planned_move_out_date} 퇴실 예정을 회신했습니다."
-                    + (" (공실 쇼케이스에 사전예약 매물로 자동 등록됨)" if prelist_vacancy else "")
+                    + (" (공실 쇼케이스에 사전예약 매물로 자동 등록됨)" if listed_now
+                       else f" (사전 매물 공개는 퇴실 기준일 1개월 전인 {self.prelist_open_date}부터 자동으로 시작됩니다)" if self.prelist_pending else "")
                 ),
             ).save(action="chat_auto_sent", app_source=app_source)
         else:
             self.status = "STAY_CONFIRMED"
             self.planned_move_out_date = ""
+            self.prelist_pending = False
             self.save(action="tenant_confirmed_no_moveout", app_source=app_source)
 
             if room and room.pre_moveout_notice:

@@ -172,6 +172,8 @@ def get_status():
 @router.get("/rooms")
 def list_candidate_rooms(request: Request, branch: Optional[str] = None):
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+    ExpiryRenewalCheck.activate_due()           # 공개일이 된 사전 매물을 올린다
     c = claims_from(request) or {}
     staff_all = is_admin(c)
     my_branch = normalize_branch_id(c.get("b")) if c.get("r") in ("lessor", "branch_admin") else None

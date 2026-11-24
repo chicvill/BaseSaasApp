@@ -476,6 +476,30 @@ class Room(PoolObj):
         ct = Contract.get(self.active_contract_id)
         return (ct.expiry_date or "") if ct else ""
 
+    PRELIST_MONTHS_BEFORE: ClassVar[int] = 1      # 사전 매물은 퇴실 기준일(만기)의 1개월 전부터 공개한다 — 너무 일찍 공개하면 지금 사는 임차인이 불편하다
+
+    def prelist_open_date(self, planned: str = "") -> str:
+        """입주 중인 호실을 사전 매물로 공개할 수 있는 첫날(YYYY-MM-DD) = 퇴실 기준일의 1개월 전.
+        퇴실 기준일은 임차인이 회신한 전출 예정일(planned 로 직접 줄 수도 있음), 없으면 현재 계약 만기일. 모르면 ''(제한 없음)."""
+        import re as _re
+        ref = (planned or "").strip()
+        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", ref):
+            ref = ""
+            if self.active_contract_id:
+                try:
+                    from .ops import ExpiryRenewalCheck
+                    chk = ExpiryRenewalCheck.for_contract(self.active_contract_id)
+                    if chk and _re.match(r"^\d{4}-\d{2}-\d{2}$", chk.planned_move_out_date or ""):
+                        ref = chk.planned_move_out_date
+                except Exception:
+                    pass
+        if not ref and self.active_contract_id:
+            ct = Contract.get(self.active_contract_id)
+            ref = (ct.expiry_date or "") if ct else ""
+        if not _re.match(r"^\d{4}-\d{2}-\d{2}$", ref):
+            return ""
+        return add_months_str(ref, -self.PRELIST_MONTHS_BEFORE)
+
     def cancel_reservation(self, reason: str = "", app_source: str = "rent3_lessor") -> "Contract":
         """예약 계약을 취소한다(체결 후 아직 입주 전). 계약은 CANCELLED, 호실은 전출 예정 사전 매물로 다시 공개한다.
         이미 받은 계약금 반환은 당사자가 직접 처리한다(수납 기록은 지우지 않는다)."""

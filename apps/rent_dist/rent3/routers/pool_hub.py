@@ -189,6 +189,8 @@ def lessor_offer_sample():
 def portal_landing(request: Request) -> Dict[str, Any]:
     """OpenRent 스타일 직거래 포털 메인 화면용 실시간 Data Pool 집계."""
     ensure_pool_seeded()
+    from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+    ExpiryRenewalCheck.activate_due()   # 공개일(퇴실 기준일 1개월 전)이 된 사전 매물을 올린다 — 스케줄러가 없어 조회·로그인 때 확인
     meta = pool().overview()
     buildings = Building.all()
     lessors = Lessor.all()
@@ -480,6 +482,8 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
             ql.unlock_all(_t)   # 아이디·비밀번호로 정상 로그인하면 잠긴 바로가기를 푼다
     sup.purge_expired()   # 스케줄러가 없으므로 로그인 때 기한 지난 지원 채팅·접속 기록을 지운다
     bk.daily()   # 하루 한 번 풀 전체 백업(별도 스레드, 실패해도 로그인에는 영향 없음)
+    from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+    ExpiryRenewalCheck.activate_due()   # 공개일이 된 사전 매물을 올린다
     contract_chat.purge_expired()   # 계약방 대화: 취소 후 90일 · 체결 계약 종료 후 5년(10분에 한 번만 실제로 훑는다)
     out = _gate_consent(out)
     from apps.rent_dist._rent3_core.authz import unrevoke_token
