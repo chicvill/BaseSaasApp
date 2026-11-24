@@ -9941,6 +9941,22 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for needle in ("openBundleDialog", "renderWsActionBar", "refreshInlineChat", "openStepModal", "✅ 전체 수락"):
             self.assertIn(needle, capp, needle)
 
+    def test_159_bundle_is_checked_as_a_whole(self):
+        """159. 일괄 제시의 일관성(계약금≤보증금)은 함께 바뀌는 값 기준으로 검사한다: 보증금과 계약금을 같이 낮추는 제시가 옛 계약금 때문에 거절되지 않고, 계약금이 보증금을 넘으면 거절된다."""
+        c = self.client
+        sid = self._policy_session("966", 5000000, 300000)
+        self.assertEqual(self._reg(sid).status_code, 200)
+        lh, th = self._party_headers(sid)
+        url = f"/api/rent3_contract/sessions/{sid}/messages"
+        bad = c.post(url, headers=lh, json={"kind": "bundle", "bundle": {"deposit": 1000000, "contract_deposit": 2000000}})
+        self.assertEqual(bad.status_code, 400, bad.text)
+        ok = c.post(url, headers=lh, json={"kind": "bundle", "bundle": {"deposit": 4800000, "contract_deposit": 480000}})
+        self.assertEqual(ok.status_code, 200, ok.text)
+        acc = c.post(f"{url}/{ok.json()['item']['id']}/respond", headers=th, json={"action": "accept"})
+        self.assertEqual(acc.status_code, 200, acc.text)
+        t = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
+        self.assertEqual((t["deposit"], t["contract_deposit"]), (4800000, 480000))
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id
