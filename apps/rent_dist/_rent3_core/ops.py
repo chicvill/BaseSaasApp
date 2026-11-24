@@ -171,6 +171,10 @@ class CheckOutSettlement(PoolObj):
     disputed_at: str = ""
     deposit_original: int = 0
     unpaid_rent_deduction: int = 0           # Contract.ledger() 실시간 미납액 자동 반영
+    early_rent_deduction: int = 0            # 조기 전출 때 지금 달 이후 ~ 만기일(또는 새 임차인 입주 전)까지 아직 안 낸 월세 — 이전 임차인이 부담하고 보증금에서 공제
+    liability_end_date: str = ""             # 위 월세를 부담하는 마지막 날(만기일 또는 새 임차인 입주일)
+    liability_reason: str = ""               # EXPIRY(만기일까지) / NEW_TENANT(새 임차인 입주 전까지)
+    shortfall_amount: int = 0                # 공제액이 보증금보다 커서 보증금으로 못 채운 금액(임차인이 따로 부담)
     utility_settlement: int = 0              # 당일 계량기 공과금 실비
     cleaning_fee: int = 70000                # 입주 청소비 약정액
     damage_restoration_fee: int = 0          # 세입자 과실 파손 실비 (자연마모 0원)
@@ -228,10 +232,12 @@ class CheckOutSettlement(PoolObj):
             raise DomainError(f"{room_no}호는 현재 퇴실 정산할 활성 계약이 없습니다.")
 
         ct = Contract.require(room.active_contract_id)
-        ledger = ct.ledger()
-        unpaid = int(ledger["total_unpaid"])
-        total_deduct = unpaid + utility_settlement + cleaning_fee + damage_restoration_fee
+        liab = ct.checkout_liability(room)            # 만기 전 퇴실이면 만기일(또는 새 임차인 입주 전)까지의 월세도 이전 임차인이 부담한다
+        unpaid = int(liab["unpaid_now"])
+        early = int(liab["early_amount"])
+        total_deduct = unpaid + early + utility_settlement + cleaning_fee + damage_restoration_fee
         refund = max(0, ct.deposit - total_deduct)
+        shortfall = max(0, total_deduct - ct.deposit)
 
         existing = next((x for x in cls.find(id_room=room.id) if x.status in ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED")), None)
         if existing is not None and existing.status == "PAID":
@@ -239,7 +245,9 @@ class CheckOutSettlement(PoolObj):
         fields = dict(
             branch=b_id, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id,
             id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED", deposit_original=ct.deposit,
-            unpaid_rent_deduction=unpaid, utility_settlement=utility_settlement, cleaning_fee=cleaning_fee,
+            unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",
+            liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
+            utility_settlement=utility_settlement, cleaning_fee=cleaning_fee,
             damage_restoration_fee=damage_restoration_fee, refund_amount=refund, inspection_notes=inspection_notes,
         )
         if existing is not None:        # 임차인 신청·이의 건을 이어서 쓴다(동의·계좌는 다시 받는다)
@@ -251,13 +259,19 @@ class CheckOutSettlement(PoolObj):
         else:
             settlement = cls(**fields).save(action="checkout_calculated", app_source=app_source)
 
+        extra_note = ""
+        if early:
+            who = "새 임차인이 입주하기 전" if liab["reason"] == "NEW_TENANT" else "계약 만기일"
+            extra_note += f"(공제에는 만기 전 퇴실에 따른 월세 부담분 {early:,}원이 포함됩니다 — {who}({liab['end_date']})까지는 이전 임차인이 월세를 부담합니다.) "
+        if shortfall:
+            extra_note += f"공제액이 보증금보다 {shortfall:,}원 많아 이 금액은 따로 정산해야 합니다. "
         DirectChat(
             branch=b_id,
             id_room=room.id,
             room_no=room.room_no,
             sender_role="system",
             sender_name="퇴실정산 안내",
-            message=(f"[보증금 정산 명세서 도착] 원보증금 {ct.deposit:,}원 중 공제 {total_deduct:,}원을 제외한 실반환 예정액은 {refund:,}원입니다. "
+            message=(f"[보증금 정산 명세서 도착] 원보증금 {ct.deposit:,}원 중 공제 {total_deduct:,}원을 제외한 실반환 예정액은 {refund:,}원입니다. {extra_note}"
                      "임차인 앱에서 내용을 확인하고, 이의가 있으면 [이의 제기]로 채팅·통화 협의를 요청하세요. 이의가 없으면 반환받을 계좌(예금주는 계약자 본인)를 입력하고 동의 서명을 해 주세요.\n"
                      "📄 퇴실하면 로그인 수단이 정리되니 연말정산 납부확인서를 미리 내려받아 두세요."),
             quick_action_label="정산서 확인·연말정산 자료 받기",

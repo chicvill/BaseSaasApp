@@ -1006,6 +1006,40 @@ class Contract(PoolObj):
             "days_to_expiry": self.days_to_expiry(),
         }
 
+    def checkout_liability(self, room: Optional["Room"] = None) -> Dict[str, Any]:
+        """조기 전출(만기 전 퇴실) 때 임차인이 더 부담하는 월세 구간.
+        규칙: 만기 전에 나가도 '만기일 또는 새 임차인이 입주할 때까지(먼저 오는 날)' 이전 임차인이 임차료를 부담하고, 아직 내지 않은 금액은 전출 정산에서 보증금에서 공제한다.
+        - 새 임차인이 미리 계약해 둔(예약 계약, SCHEDULED) 입주일이 만기보다 빠르면 그날까지, 아니면 만기일까지.
+        - 월 단위 청구라 끝나는 달까지 센다: 만기는 만기월까지, 새 임차인 입주로 끝나면 새 계약이 후불(입주월 면제)이면 입주월까지, 선불이면 입주 전달까지.
+        - 지금 달까지의 미납(unpaid_now)과 구분해 '지금 달 이후 ~ 끝나는 달'의 미납분만 early_amount 로 돌려준다(이미 선납한 만큼은 빠진다)."""
+        today_ym = current_ym()
+        exp = (self.expiry_date or "").strip()
+        end_date, reason, end_ym = exp, "EXPIRY", ""
+        new_in = ""
+        if room is not None:
+            res = room.reservation()
+            if res is not None and not res.renews_contract_id and re.match(r"^\d{4}-\d{2}-\d{2}$", res.move_in_date or ""):
+                new_in = res.move_in_date
+                if not re.match(r"^\d{4}-\d{2}-\d{2}$", exp) or new_in < exp:
+                    end_date, reason = new_in, "NEW_TENANT"
+                    ym = parse_ym(new_in)
+                    if ym:
+                        idx = ym_index(*ym) - (0 if res.pay_timing == "후불" else 1)
+                        end_ym = index_to_ym(idx)
+        if not end_ym:
+            ym = parse_ym(end_date)
+            end_ym = f"{ym[0]:04d}-{ym[1]:02d}" if ym else today_ym
+        unpaid_now = int(self.ledger()["total_unpaid"])
+        out = {"end_date": end_date, "end_ym": end_ym, "reason": reason, "new_tenant_move_in": new_in,
+               "unpaid_now": unpaid_now, "early_amount": 0, "months": []}
+        if end_ym <= today_ym:
+            return out
+        through = self.ledger(up_to_ym=end_ym)
+        out["early_amount"] = max(0, int(through["total_unpaid"]) - unpaid_now)
+        out["months"] = [{"ym": m["ym"], "due": int(m["due"]), "unpaid": int(m.get("unpaid", 0))} for m in through.get("months", [])
+                         if m["ym"] > today_ym and int(m.get("unpaid", 0)) > 0]
+        return out
+
     def validate_renewal_cap(self, new_deposit: int, new_rent: int) -> Dict[str, Any]:
         """주택임대차보호법 제7조 5% 임대료 증액 상한선 검증."""
         old_equiv = self.monthly_rent

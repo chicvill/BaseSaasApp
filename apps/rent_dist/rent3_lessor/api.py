@@ -466,6 +466,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
             "expiry_window": exp_win,
             "expiry_check": exp_chk.model_dump() if exp_chk else None,
             "reservation": _reservation_summary(r),
+            "checkout_liability": ct.checkout_liability(r) if ct else None,       # 만기 전 퇴실 시 만기일(또는 새 임차인 입주 전)까지 이전 임차인이 부담할 월세
             "billing_schedule": bill_sched,
             "billing_notices": bill_notices,
         }
