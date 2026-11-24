@@ -975,6 +975,7 @@
         <button id="cmSave" class="bass-btn bass-btn--sm bass-btn--primary" type="button">💾 저장</button>
         ${hasPhoto ? `<button id="cmViewPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 보기</button>` : ""}
         <button id="cmPhoto" class="bass-btn bass-btn--sm" type="button">📸 계약서 사진 ${hasPhoto ? "다시 " : ""}등록</button>
+        <button id="cmNewContract" class="bass-btn bass-btn--sm" type="button">🤝 신규 계약</button>
         <button id="cmRenew" class="bass-btn bass-btn--sm" type="button">🔁 연장 계약</button>
       </div>
       ${ct.keys_released === false ? `<div class="bass-card" style="margin-top:12px;padding:10px;">
@@ -1016,6 +1017,86 @@
       });
     });
     $m("cmPhoto").addEventListener("click", () => { closeModal(); brokerTargetRoomNo = no; switchTab("broker"); });
+    const btnNewCt = $m("cmNewContract");
+    if (btnNewCt) {
+      btnNewCt.addEventListener("click", () => {
+        const nt = r.next_terms || {};
+        const dep0 = Number($m("cmDep").value || nt.deposit || ct.deposit || 0);
+        const rent0 = Number($m("cmRent").value || nt.monthly_rent || ct.monthly_rent || 0);
+        const fee0 = Number($m("cmFee").value || nt.maintenance_fee || ct.maintenance_fee || 0);
+        const clean0 = Number($m("cmClean").value || nt.cleaning_fee || ct.cleaning_fee || 0);
+        const canOpenNew = !r.is_occupied || Boolean(r.pre_moveout_notice);
+        openModal(`🤝 ${Bass.escapeHtml(no)}호 신규 계약 (다음 입주자용 조건)`, `
+          <div class="bass-muted" style="font-size:13px;margin-bottom:10px;line-height:1.6;">
+            ${r.is_occupied
+              ? `현재 입주자 계약은 <strong>전출 전까지 이전 조건 그대로 유지</strong>됩니다.<br>아래 금액은 <strong>변경희망 조건(다음 계약·매물등록용)</strong>으로 별도 저장됩니다.`
+              : `신규 입주자용 계약 조건입니다. 계약금은 보증금의 10%로 자동 설정됩니다.`}
+          </div>
+          <div class="r3-grid">
+            <label class="r3-fld">보증금(원)<input id="ncDep" class="bass-input" type="number" value="${dep0}"></label>
+            <label class="r3-fld">월세(원)<input id="ncRent" class="bass-input" type="number" value="${rent0}"></label>
+            <label class="r3-fld">관리비(원)<input id="ncFee" class="bass-input" type="number" value="${fee0}"></label>
+            <label class="r3-fld">퇴실 청소비(원)<input id="ncClean" class="bass-input" type="number" value="${clean0}"></label>
+            ${canOpenNew ? `<label class="r3-fld">새 임차인 성명(선택)<input id="ncName" class="bass-input" placeholder="예: 홍길동"></label>
+            <label class="r3-fld">새 임차인 휴대폰(선택)<input id="ncTel" class="bass-input" placeholder="010-0000-0000"></label>` : ""}
+          </div>
+          ${!canOpenNew ? `<div class="bass-card" style="margin-top:10px;padding:10px;font-size:12.5px;border-color:var(--warn);">
+            ⏳ 현재 입주 중이며 전출 예정 사전 매물로 공개되지 않아 신규 계약방을 바로 열 수 없습니다. 먼저 <strong>변경희망 조건만 별도 저장</strong>해 두면 매물 공개 및 신규 계약에 자동 적용됩니다.
+          </div>` : ""}
+          <div class="bass-row" style="gap:8px;margin-top:12px;flex-wrap:wrap;">
+            ${r.is_occupied ? `<button id="ncSaveNext" class="bass-btn ${canOpenNew ? "" : "bass-btn--primary"}" type="button" style="flex:1;">💾 변경희망 조건만 별도 저장</button>` : ""}
+            ${canOpenNew ? `<button id="ncOpen" class="bass-btn bass-btn--primary" type="button" style="flex:1;">🤝 신규 계약 채팅방 열기</button>` : ""}
+            <button id="ncBack" class="bass-btn" type="button">← 돌아가기</button>
+          </div>`);
+        $m("ncBack").addEventListener("click", () => showContractModal(no));
+        const saveNextOnly = async () => {
+          if (!r.is_occupied) return;
+          await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/next-terms`, {
+            method: "POST",
+            body: {
+              deposit: Number($m("ncDep").value || 0),
+              monthly_rent: Number($m("ncRent").value || 0),
+              maintenance_fee: Number($m("ncFee").value || 0),
+              cleaning_fee: Number($m("ncClean").value || 0),
+            },
+          });
+        };
+        const btnSaveNext = $m("ncSaveNext");
+        if (btnSaveNext) {
+          btnSaveNext.addEventListener("click", function () {
+            Bass.withLock(this, async () => {
+              await saveNextOnly();
+              Bass.updateAppAlert("success", `${no}호 변경희망 조건을 별도 저장했습니다. 현재 입주자 계약은 그대로 유지됩니다.`);
+              await refresh();
+              closeModal();
+            });
+          });
+        }
+        const btnNcOpen = $m("ncOpen");
+        if (btnNcOpen) {
+          btnNcOpen.addEventListener("click", function () {
+            Bass.withLock(this, async () => {
+              await saveNextOnly();
+              const created = await Bass.api("rent3_contract", "/sessions", {
+                method: "POST",
+                body: {
+                  branch: currentBranch,
+                  room_no: no,
+                  tenant_name: ($m("ncName") && $m("ncName").value || "").trim(),
+                  tenant_phone: ($m("ncTel") && $m("ncTel").value || "").trim(),
+                  mode: "NEW",
+                  initiated_by_role: "lessor",
+                },
+              });
+              const sess = created.session;
+              if (sess && sess.id) {
+                window.location.href = `/rent3_contract/?session=${encodeURIComponent(sess.id)}&role=lessor&chat=1`;
+              }
+            });
+          });
+        }
+      });
+    }
     const btnRenew = $m("cmRenew");
     if (btnRenew) {
       btnRenew.addEventListener("click", () => {
@@ -1029,8 +1110,9 @@
           ? editedRent
           : Math.max(Number(ct.monthly_rent || 0), Math.floor(Number(ct.monthly_rent || 0) * 1.05 / 1000) * 1000);
         openModal(`🔁 ${Bass.escapeHtml(no)}호 연장 계약 (5% 상한 범위)`, `
-          <div class="bass-muted" style="font-size:13px;margin-bottom:10px;">
-            현재 계약 조건에서 주택임대차보호법 제7조(<strong>5% 상한</strong>) 범위로 수정하여 재계약방을 엽니다. (본인·등기부·옵션 확인은 건너뛰고 바로 조건 승인·서명으로 진행됩니다.)
+          <div class="bass-muted" style="font-size:13px;margin-bottom:10px;line-height:1.6;">
+            만기 전까지는 이전 조건이 그대로 유지되고, 만기일부터 아래 새 조건(<strong>5% 상한 이내</strong>)으로 적용됩니다.<br>
+            연장 계약은 <strong>본인·등기부·옵션 확인을 건너뛰고</strong> 바로 조건 확인 체크 → 서명 날인으로 종료됩니다.
           </div>
           <div class="r3-grid">
             <label class="r3-fld">보증금(원) <span class="bass-muted">최대 ${fmtWon(maxDep)}</span><input id="rnDep" class="bass-input" type="number" value="${editedDep}"></label>
@@ -1051,6 +1133,12 @@
             const pFee = Number($m("rnFee").value || 0);
             const pClean = Number($m("rnClean").value || 0);
             const pTerm = Math.max(1, Number($m("rnTerm").value || 12));
+            if (r.is_occupied && !r.reservation) {
+              await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/next-terms`, {
+                method: "POST",
+                body: { deposit: pDep, monthly_rent: pRent, maintenance_fee: pFee, cleaning_fee: pClean },
+              });
+            }
             const res = await Bass.api(APP_ID, "/expiry/preview-renewal", {
               method: "POST",
               body: {
@@ -1060,19 +1148,14 @@
                 proposed_monthly_rent: pRent,
                 proposed_maintenance_fee: pFee,
                 proposed_term_months: pTerm,
-                proposed_cleaning_fee: pClean,
                 open_cosign_session: true,
               },
             });
             Bass.updateAppAlert("success", res.message || "연장 재계약방이 열렸습니다.");
             const sid = res.check && res.check.cosign_session_id;
-            if (sid) {
-              await refresh();
-              window.location.href = `/rent3_contract/?session=${encodeURIComponent(sid)}&role=lessor&chat=1`;
-            } else {
-              await refresh();
-              closeModal();
-            }
+            await refresh();
+            if (sid) window.location.href = `/rent3_contract/?session=${encodeURIComponent(sid)}&role=lessor&chat=1`;
+            else closeModal();
           });
         });
       });

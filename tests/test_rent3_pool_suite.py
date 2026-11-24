@@ -9957,17 +9957,35 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         t = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
         self.assertEqual((t["deposit"], t["contract_deposit"]), (4800000, 480000))
 
-    def test_160_contract_deposit_default_ten_percent_and_no_new_button(self):
-        """160. 신규 계약의 계약금 기본값은 보증금의 10%(천 원 단위)이고, 입주 중 계약 창에는 '신규 계약' 단추가 없으며 연장 계약은 청소비를 서버로 보내고 오류를 삼키지 않는다."""
+    def test_160_field_contract_flow_10pct_deposit_next_terms_and_inline_checks(self):
+        """160. 신규 계약의 계약금 기본값은 보증금의 10%(연장은 0원), 입주 중 호실의 변경희망 조건은 next_terms에 별도 저장(현재 계약 불변), 채팅방에서 신원/등기부/옵션·벽지/조건/계좌·계약금 수납 흐름을 바로 진행한다."""
+        from apps.rent_dist._rent3_core import Contract, Room
         c = self.client
-        sid = self._policy_session("967", 5000000, 300000)
-        t = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
-        self.assertEqual(t["contract_deposit"], 500000)
+        # 1) 신규 계약 기본 계약금 = 보증금의 10%
+        sid = self._policy_session("967", 7000000, 350000)
+        s = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]
+        self.assertEqual(s["terms"]["deposit"], 7000000)
+        self.assertEqual(s["terms"]["contract_deposit"], 700000)
+        # 2) 입주 중 호실의 next-terms(청소비 포함)는 현재 활성 계약을 건드리지 않는다
+        chic = self._login("chic")
+        rm = Room.first(branch="main", room_no="201")
+        ct_before = Contract.get(rm.active_contract_id)
+        keep_dep, keep_rent, keep_clean = ct_before.deposit, ct_before.monthly_rent, ct_before.cleaning_fee
+        r_nt = c.post(f"/api/rent3_lessor/rooms/{rm.id}/next-terms", headers=chic,
+                      json={"deposit": keep_dep + 1000000, "monthly_rent": keep_rent + 20000, "maintenance_fee": 80000, "cleaning_fee": 90000})
+        self.assertEqual(r_nt.status_code, 200, r_nt.text)
+        ct_after = Contract.get(rm.active_contract_id)
+        self.assertEqual((ct_after.deposit, ct_after.monthly_rent, ct_after.cleaning_fee), (keep_dep, keep_rent, keep_clean))
+        self.assertEqual(Room.get(rm.id).next_terms.get("cleaning_fee"), 90000)
+        c.post(f"/api/rent3_lessor/rooms/{rm.id}/next-terms", headers=chic, json={"clear": True})
+        # 3) 화면: 채팅방 인라인 체크 + 10% 계약금·계좌 표시 + 벽지 상태 + 임대인 모달 next-terms 분리
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        capp = rd("rent3_contract", "frontend", "app.js")
         lapp = rd("rent3_lessor", "frontend", "app.js")
-        self.assertNotIn("cmNewContract", lapp)
-        self.assertIn("proposed_cleaning_fee: pClean", lapp)
-        self.assertNotIn("catch (_) {}", lapp[lapp.index("rnGo"):lapp.index("rnGo") + 3000])
+        for needle in ("wsBtnIdCheck", "wsBtnRegCheck", "벽지 상태 등 시설 기록사항 메모", "보증금의 10%", "계약금 수납 확인 & 계약 종료"):
+            self.assertIn(needle, capp, needle)
+        for needle in ("ncSaveNext", "/next-terms", "변경희망 조건만 별도 저장"):
+            self.assertIn(needle, lapp, needle)
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

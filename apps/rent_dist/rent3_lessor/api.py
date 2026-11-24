@@ -654,6 +654,7 @@ class NextTermsReq(BaseModel):
     deposit: Optional[int] = None
     monthly_rent: Optional[int] = None
     maintenance_fee: Optional[int] = None
+    cleaning_fee: Optional[int] = None
     pay_timing: Optional[str] = None           # 후불 / 선불
     clear: bool = False                         # 저장해 둔 다음 계약 조건 초안을 지운다
 
@@ -672,7 +673,7 @@ def save_room_next_terms(room_id: str, req: NextTermsReq):
         room.save(action="room_next_terms_cleared", app_source=APP_SRC)
         return {"success": True, "level": "success", "message": f"{room.room_no}호 다음 계약 조건 초안을 지웠습니다.", "room": room.model_dump()}
     draft = dict(room.next_terms or {})
-    for k in ("deposit", "monthly_rent", "maintenance_fee"):
+    for k in ("deposit", "monthly_rent", "maintenance_fee", "cleaning_fee"):
         v = getattr(req, k)
         if v is None:
             continue
@@ -686,6 +687,12 @@ def save_room_next_terms(room_id: str, req: NextTermsReq):
     if not draft:
         raise DomainError("저장할 조건을 입력해 주세요.")
     room.next_terms = draft
+    if room.pre_moveout_notice and room.next_listing:
+        nl = dict(room.next_listing)
+        for k in ("deposit", "monthly_rent", "maintenance_fee", "pay_timing"):
+            if k in draft:
+                nl[k] = draft[k]
+        room.next_listing = nl
     room.save(action="room_next_terms_saved", app_source=APP_SRC)
     return {"success": True, "level": "success",
             "message": f"{room.room_no}호 다음 계약 조건을 임시 저장했습니다. 지금 계약은 만기까지 그대로 적용됩니다.",
@@ -2302,7 +2309,6 @@ class RenewalPreviewReq(BaseModel):
     proposed_monthly_rent: Optional[int] = None
     proposed_maintenance_fee: Optional[int] = None
     proposed_term_months: int = 12
-    proposed_cleaning_fee: Optional[int] = None
     renewal_note: str = ""
     open_cosign_session: bool = True
 
@@ -2371,7 +2377,6 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
         renewal_note=req.renewal_note,
         open_cosign_session=req.open_cosign_session,
         app_source=APP_SRC,
-        proposed_cleaning_fee=req.proposed_cleaning_fee,
     )
     code_hint = (
         f"공동 재계약방(참여코드 {chk.cosign_session_code})이 함께 개설되어 임차인 마이홈에 전달되었습니다."

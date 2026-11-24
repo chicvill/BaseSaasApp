@@ -937,11 +937,14 @@
 
   function openBundleDialog(s) {
     const t = s.terms || {};
-    const body = R3.openModal("📋 계약 조건 한꺼번에 제시", `
-      <p class="bass-muted" style="font-size:13px;margin:0 0 10px;">보증금·계약금·월세·관리비·청소비·입주일·계약기간을 한 번에 입력해 채팅방에 올립니다. 상대가 채팅방에서 <strong>[✅ 전체 수락]</strong>을 누르면 한꺼번에 반영됩니다.</p>
+    const isRen = s.mode === "RENEWAL";
+    const depVal = Number(t.deposit || 0);
+    const cdepVal = isRen ? 0 : (t.contract_deposit != null ? Number(t.contract_deposit) : Math.floor(depVal / 10));
+    const body = R3.openModal("📋 계약 조건 수정 · 일괄 반영", `
+      <p class="bass-muted" style="font-size:13px;margin:0 0 10px;">보증금·계약금(보증금의 10%)·월세·관리비·청소비·입주일·계약기간을 한 번에 조정해 채팅방에 올립니다. 상대가 채팅방에서 확인하면 한꺼번에 반영됩니다.</p>
       <div class="field-grid">
-        <div><label class="bass-label">보증금 (원)</label><input id="bdDeposit" type="number" class="bass-input" value="${Number(t.deposit || 0)}"></div>
-        <div><label class="bass-label">계약금 (원)</label><input id="bdContractDeposit" type="number" class="bass-input" value="${Number(t.contract_deposit || 0)}"></div>
+        <div><label class="bass-label">보증금 (원)</label><input id="bdDeposit" type="number" class="bass-input" value="${depVal}"></div>
+        <div><label class="bass-label">계약금 (보증금의 10%)</label><input id="bdContractDeposit" type="number" class="bass-input" value="${cdepVal}"></div>
         <div><label class="bass-label">월세 (원)</label><input id="bdMonthlyRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
         <div><label class="bass-label">관리비 (원)</label><input id="bdMaintenance" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
         <div><label class="bass-label">퇴실 청소비 (원)</label><input id="bdCleaning" type="number" class="bass-input" value="${Number(t.cleaning_fee || 0)}"></div>
@@ -949,8 +952,15 @@
         <div><label class="bass-label">계약기간 (개월)</label><input id="bdTermMonths" type="number" class="bass-input" value="${Number(t.lease_term_months || 12)}"></div>
       </div>
       <textarea id="bdNote" class="bass-input" rows="2" placeholder="안내 메모 (선택)" style="width:100%;margin-top:10px;"></textarea>
-      <button id="bdSubmit" type="button" class="bass-btn bass-btn--primary" style="width:100%;margin-top:10px;">💬 채팅방에 조건 일괄 제시하기</button>
+      <button id="bdSubmit" type="button" class="bass-btn bass-btn--primary" style="width:100%;margin-top:10px;">💬 채팅방에 조건 올리기</button>
     `);
+    const depInp = body.querySelector("#bdDeposit");
+    const cdepInp = body.querySelector("#bdContractDeposit");
+    if (depInp && cdepInp && !isRen) {
+      depInp.addEventListener("input", () => {
+        cdepInp.value = String(Math.floor(Math.max(0, Number(depInp.value || 0)) / 10));
+      });
+    }
     body.querySelector("#bdSubmit").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const bundle = {
@@ -968,7 +978,7 @@
           body: { kind: "bundle", body: note, bundle },
         });
         R3.closeModal();
-        Bass.updateAppAlert("success", "계약 조건을 채팅방에 일괄 제시했습니다.");
+        Bass.updateAppAlert("success", "계약 조건을 채팅방에 올렸습니다.");
         await refreshInlineChat(true);
         await fetchActiveSession(true);
       });
@@ -981,37 +991,67 @@
     const step = s.current_step;
     const prog = stepProgress(s, step);
     const t = turnInfo(s);
+    const tm = s.terms || {};
+    const isRen = s.mode === "RENEWAL";
     const callRow = document.getElementById("cmCall");
     if (callRow) {
-      const otherName = currentRole === "lessor" ? ((s.terms && s.terms.tenant_name) || "임차인") : (s.lessor_name || "임대인");
-      const otherPhone = currentRole === "lessor" ? ((s.terms && s.terms.tenant_phone) || "") : (s.lessor_phone || "");
+      const otherName = currentRole === "lessor" ? (tm.tenant_name || "임차인") : (s.lessor_name || "임대인");
+      const otherPhone = currentRole === "lessor" ? (tm.tenant_phone || "") : (s.lessor_phone || "");
       const dig = digits(otherPhone);
       callRow.innerHTML = !adminProxy && dig.length >= 9
         ? `<div class="r3-chat-peer"><strong>📞 ${esc(otherName)}에게 전화</strong><a class="bass-btn bass-btn--sm bass-btn--primary" href="tel:${esc(dig)}">${esc(otherPhone)}</a></div><div class="bass-muted" style="font-size:12px;margin:2px 0 4px;">💡 중요한 통화 내용은 아래 채팅에 기록을 남겨 주세요.</div>`
         : "";
     }
+    let extraInfo = "";
     let btns = "";
     if (s.call_status === "CALLING") {
       btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="0">📞 호출 응답 / 연결 확인</button>`;
     } else if (step === 1) {
-      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="1">🪪 신분증·등기부 확인 열기</button>`;
+      const myIdDone = currentRole === "lessor" ? Boolean(s.lessor_checked_tenant_id) : Boolean(s.tenant_checked_lessor_id);
+      const myRegDone = currentRole === "lessor" ? Boolean(s.step1_lessor_confirmed) : Boolean(s.step1_tenant_locked);
+      const tenantRegSubmitted = Boolean(s.tenant_registry && s.tenant_registry.submitted);
+      extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
+        상호 신원 확인: 임대인 ${s.lessor_checked_tenant_id ? "✅" : "⏳"} · 임차인 ${s.tenant_checked_lessor_id ? "✅" : "⏳"} &nbsp;|&nbsp;
+        등기부 확인: 임대인 ${s.step1_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step1_tenant_locked ? "✅" : "⏳"}
+      </div>`;
+      btns = `
+        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnIdCheck" class="bass-btn bass-btn--sm ${myIdDone ? "" : "bass-btn--primary"}">${myIdDone ? "✅ 신원 확인 완료" : "🪪 상호 신원 확인 체크"}</button>` : ""}
+        <button type="button" class="bass-btn bass-btn--sm ${myRegDone ? "" : "bass-btn--primary"} js-ws-step" data-step="1">${currentRole === "tenant" ? "📄 법원 등기부 열람 · AI 분석" : "📄 등기부 제시 · 확인"}</button>
+        ${!adminProxy && currentRole === "tenant" && tenantRegSubmitted && !myRegDone ? `<button type="button" id="wsBtnRegCheck" class="bass-btn bass-btn--sm bass-btn--primary">✅ 등기부 확인 체크</button>` : ""}`;
     } else if (step === 2) {
-      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="2">🛋️ 옵션리스트 확인 열기</button>`;
+      const myOptDone = currentRole === "lessor" ? Boolean(s.step2_lessor_confirmed) : Boolean(s.step2_tenant_locked);
+      extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
+        옵션·벽지 상태·사진 기록 확인: 임대인 ${s.step2_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step2_tenant_locked ? "✅" : "⏳"}
+      </div>`;
+      btns = `<button type="button" class="bass-btn bass-btn--sm ${myOptDone ? "" : "bass-btn--primary"} js-ws-step" data-step="2">🛋️ 옵션 확인 · 벽지 상태 메모 · 📷 사진 촬영</button>`;
     } else if (step === 3) {
       const canAgree = !adminProxy && currentRole && chatSummary.open_count === 0;
       const agreedMine = currentRole === "lessor" ? s.step3_lessor_agreed : s.step3_tenant_agreed;
+      extraInfo = isRen
+        ? `<div class="bass-muted" style="font-size:12px;margin-top:4px;">🔁 연장 계약은 본인·등기부·옵션 확인을 건너뛰고 조건 확인 체크 → 서명 날인으로 바로 종료됩니다.</div>`
+        : `<div class="bass-muted" style="font-size:12px;margin-top:4px;">조건 확인 체크: 임대인 ${s.step3_lessor_agreed ? "✅" : "⏳"} · 임차인 ${s.step3_tenant_agreed ? "✅" : "⏳"}</div>`;
       btns = `
-        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnBundle" class="bass-btn bass-btn--sm bass-btn--primary">📋 조건 일괄 제시</button>` : ""}
-        <button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="3">✏️ 세부 조건·특약 보기</button>
-        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnAgree3" class="bass-btn bass-btn--sm ${agreedMine ? "" : "bass-btn--primary"}" ${canAgree ? "" : "disabled"}>${agreedMine ? "✅ 동의 완료 (상대 대기)" : (s.mode === "RENEWAL" ? "🔒 재계약 승인" : "🔒 조건 전체 동의")}</button>` : ""}`;
+        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnAgree3" class="bass-btn bass-btn--sm ${agreedMine ? "" : "bass-btn--primary"}" ${canAgree ? "" : "disabled"}>${agreedMine ? "✅ 조건 확인 완료 (상대 대기)" : (isRen ? "✅ 연장 조건 확인 체크" : "✅ 조건 확인 체크")}</button>` : ""}
+        ${!adminProxy && currentRole === "lessor" ? `<button type="button" id="wsBtnBundle" class="bass-btn bass-btn--sm">📋 조건 수정</button>` : ""}
+        <button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="3">✏️ 특약·세부 보기</button>`;
     } else if (step === 4) {
-      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="4">✍️ 전자서명 모달 열기</button>`;
+      const mySigDone = currentRole === "lessor" ? Boolean(s.lessor_signature) : Boolean(s.tenant_signature);
+      extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
+        서명 날인: 임대인 ${s.lessor_signature ? "✅" : "⏳"} · 임차인 ${s.tenant_signature ? "✅" : "⏳"}
+      </div>`;
+      btns = `<button type="button" class="bass-btn bass-btn--sm ${mySigDone ? "" : "bass-btn--primary"} js-ws-step" data-step="4">${mySigDone ? "✅ 서명 완료 (상대 대기)" : "✍️ 서명 날인하기"}</button>`;
     } else {
-      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="5">🔏 최종 체결 모달 열기</button>`;
+      extraInfo = `<div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;font-size:12.5px;line-height:1.6;">
+        🏦 <strong>임대인 수납 계좌:</strong> ${acctLabel(s)}<br>
+        💸 <strong>계약금(보증금의 10%):</strong> <strong>${fmtWon(tm.contract_deposit)}</strong> ${currentRole === "tenant" ? "— 위 계좌로 송금 후 임대인이 수납을 확인하면 계약이 종료됩니다." : "— 실제 입금 내역을 확인한 뒤 아래 버튼으로 계약을 종료하세요."}
+      </div>`;
+      btns = currentRole === "lessor"
+        ? `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="5">💰 계약금 수납 확인 & 계약 종료</button>`
+        : `<button type="button" class="bass-btn bass-btn--sm ${s.tenant_recheck_at ? "" : "bass-btn--primary"} js-ws-step" data-step="5">${s.tenant_recheck_at ? "📄 계약금 송금 · 체결 상태 보기" : "🔍 체결 직전 등기부 재열람 확인"}</button>`;
     }
-    const tm = s.terms || {};
+    const cdepText = isRen ? "" : ` · 계약금(10%) <strong>${fmtWon(tm.contract_deposit)}</strong>`;
     const termsSummary = `<div class="bass-muted" style="font-size:12.5px;margin-top:6px;line-height:1.5;background:#f8fafc;padding:6px 10px;border-radius:10px;">
-      보증금 <strong>${fmtWon(tm.deposit)}</strong> · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · 입주 ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)
+      보증금 <strong>${fmtWon(tm.deposit)}</strong>${cdepText} · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · 입주 ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)
     </div>`;
     bar.innerHTML = `
       <div class="ws-action-card__head">
@@ -1019,6 +1059,7 @@
         <span class="bass-badge ${t.mine ? "bass-badge--warn" : "bass-badge--info"}">${esc(t.text)}</span>
       </div>
       ${termsSummary}
+      ${extraInfo}
       <div class="ws-action-card__btns">${btns}</div>`;
 
     bar.querySelectorAll(".js-ws-step").forEach((b) => {
@@ -1027,6 +1068,35 @@
         openStepModal(st || s.current_step);
       });
     });
+    const btnIdChk = document.getElementById("wsBtnIdCheck");
+    if (btnIdChk) {
+      btnIdChk.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const cur = currentRole === "lessor" ? Boolean(s.lessor_checked_tenant_id) : Boolean(s.tenant_checked_lessor_id);
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/verify-id`, {
+            method: "POST",
+            body: { role: currentRole, checked: !cur },
+          });
+          activeSession = res.session;
+          Bass.updateAppAlert("success", res.message);
+          renderWorkspace();
+        });
+      });
+    }
+    const btnRegChk = document.getElementById("wsBtnRegCheck");
+    if (btnRegChk) {
+      btnRegChk.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/step1`, {
+            method: "POST",
+            body: { role: currentRole, checked_counterparty_id: Boolean(s.tenant_checked_lessor_id) },
+          });
+          activeSession = res.session;
+          Bass.updateAppAlert("success", res.message);
+          renderWorkspace();
+        });
+      });
+    }
     const btnBundle = document.getElementById("wsBtnBundle");
     if (btnBundle) btnBundle.addEventListener("click", () => openBundleDialog(s));
     const btnAgree3 = document.getElementById("wsBtnAgree3");
@@ -2065,8 +2135,8 @@
         `).join("")}
       </div>
       <div>
-        <label class="bass-label">현장 시설 특기사항 메모</label>
-        <input id="facNotes" class="bass-input" value="${Bass.escapeHtml(pendingFacNotes !== null ? pendingFacNotes : (s.facility_notes || ""))}">
+        <label class="bass-label">벽지 상태 등 시설 기록사항 메모</label>
+        <input id="facNotes" class="bass-input" placeholder="예: 벽지 오염·찢어짐, 바닥 흠집 등 상태 기록" value="${Bass.escapeHtml(pendingFacNotes !== null ? pendingFacNotes : (s.facility_notes || ""))}">
       </div>
       ${facilityPhotosHtml(s)}
       <div class="bass-row" style="margin:12px 0;">

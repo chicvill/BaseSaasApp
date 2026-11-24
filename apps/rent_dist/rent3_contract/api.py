@@ -577,7 +577,7 @@ def contract_message_respond(session_id: str, msg_id: str, req: ContractMsgRespo
     s = CoSignSession.by_code_or_id(session_id)
     who = _chat_actor(request, s)
     res = contract_chat.respond(s, msg_id, who["role"], req.action)
-    text = {"accept": "수락했습니다." if res["item"]["kind"] == "proposal" else "확인·반영으로 표시했습니다.",
+    text = {"accept": "계약 조건을 확인·반영했습니다." if res["item"]["kind"] == "bundle" else ("수락했습니다." if res["item"]["kind"] == "proposal" else "확인·반영으로 표시했습니다."),
             "decline": "거절했습니다.", "withdraw": "철회했습니다."}[req.action]
     return {"success": True, "message": text, "session": s.model_dump(), **res, "open_count": len(contract_chat.open_items(s.id))}
 

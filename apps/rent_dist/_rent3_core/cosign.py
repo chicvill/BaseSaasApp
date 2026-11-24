@@ -533,6 +533,7 @@ class CoSignSession(PoolObj):
         ]
 
         is_renewal = (mode == "RENEWAL")
+        base_dep = int((prev_ct.deposit if prev_ct else listing.deposit) or 0)
         base_rent = prev_ct.monthly_rent if prev_ct else listing.monthly_rent
         renewal_rent_5pct = max(base_rent, (int(base_rent * 1.05) // 1000) * 1000)
         now_str = now_iso()
@@ -594,11 +595,11 @@ class CoSignSession(PoolObj):
                 "pay_timing": listing.pay_timing or "후불",
                 "vat_target": prev_ct.vat_target if prev_ct else listing.vat_applicable,
                 "vat_separate": True,
-                "contract_deposit": 0 if is_renewal else int(round(int((prev_ct.deposit if prev_ct else listing.deposit) or 0) * 0.1 / 1000.0)) * 1000,   # 계약금 = 보증금의 10%(천 원 단위)
+                "contract_deposit": 0 if is_renewal else (base_dep // 10),
                 "deposit": prev_ct.deposit if prev_ct else listing.deposit,
                 "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else listing.monthly_rent),
                 "maintenance_fee": prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee,
-                "cleaning_fee": int(prev_ct.cleaning_fee) if prev_ct else 0,        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
+                "cleaning_fee": int(prev_ct.cleaning_fee) if prev_ct else int((room.next_terms or {}).get("cleaning_fee") or 0),        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,
                 "special_terms": (
@@ -1353,7 +1354,7 @@ class CoSignSession(PoolObj):
             pay_timing=t_info.get("pay_timing", "후불"),
             vat_target=bool(t_info.get("vat_target") or t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
             vat_separate=bool(t_info.get("vat_separate", True)),
-            contract_deposit=int(t_info.get("contract_deposit", 0 if self.mode == "RENEWAL" else 300000)),
+            contract_deposit=int(t_info.get("contract_deposit", 0 if self.mode == "RENEWAL" else (int(t_info.get("deposit", room.deposit) or 0) // 10))),
             keys_released=(self.mode == "RENEWAL"),  # 재계약은 기존 입주자 도어락 유지, 신규는 잔금 입금 확인 후 교부
             insurance_proof_required=bool(self.needs_insurance_refusal_clause(t_info) and (self.tenant_registry or {}).get("guarantee_status") == "가입 예정"),
             mortgage_cleanup_required=bool(t_info.get("mortgage_cleanup_clause")),  # 잔금 시 근저당 말소 특약 — 잔금일에 말소 확인이 있어야 교부
