@@ -598,6 +598,7 @@ class CoSignSession(PoolObj):
                 "deposit": prev_ct.deposit if prev_ct else listing.deposit,
                 "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else listing.monthly_rent),
                 "maintenance_fee": prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee,
+                "cleaning_fee": int(prev_ct.cleaning_fee) if prev_ct else 0,        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,
                 "special_terms": (
@@ -921,7 +922,7 @@ class CoSignSession(PoolObj):
             self.current_step = 3
         return self.save(action=f"step2_confirmed_by_{role}", app_source=app_source)
 
-    PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee",
+    PREFILL_LESSOR_KEYS: ClassVar[tuple] = ("move_in_date", "lease_term_months", "deposit", "monthly_rent", "maintenance_fee", "cleaning_fee",
                                             "contract_deposit", "pay_timing", "lease_type", "special_terms", "mortgage_cleanup_clause",
                                             "vat_target", "vat_separate", "tax_invoice_requested",
                                             "tenant_business_number", "tenant_company_name", "tenant_ceo_name", "tenant_email")
@@ -943,7 +944,7 @@ class CoSignSession(PoolObj):
             raise DomainError(f"이 역할이 미리 적을 수 없는 항목입니다: {', '.join(bad)}",
                               hint="임대인은 계약 조건, 임차인은 이메일·차량번호만 사전 작성할 수 있습니다.")
         merged = {**self.terms}
-        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "lease_term_months"}
         for k, v in updates.items():
             if v is None:
                 continue
@@ -1038,11 +1039,11 @@ class CoSignSession(PoolObj):
         return cand, EXT_TO_MIME.get(os.path.splitext(cand.lower())[1], "application/octet-stream")
 
     # 3단계에서 '제안 → 상대 수락'으로만 바뀌는 6개 항목 (POST /terms 로는 직접 못 바꾼다 — contract_chat.respond 가 update_terms 를 부른다)
-    TERMS_LOCKED_FIELDS: ClassVar[tuple] = ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "move_in_date", "lease_term_months")
+    TERMS_LOCKED_FIELDS: ClassVar[tuple] = ("deposit", "contract_deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "move_in_date", "lease_term_months")
 
     def terms_changes(self, updates: Dict[str, Any]) -> List[str]:
         """update_terms 와 같은 값 정리를 거쳐, 지금 값과 달라지는 항목 이름 목록을 돌려준다(저장하지 않는다)."""
-        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "lease_term_months"}
         bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
         out: List[str] = []
         for k, v in (updates or {}).items():
@@ -1087,7 +1088,7 @@ class CoSignSession(PoolObj):
         self._ensure_ready_for_steps()
         merged = {**self.terms}
         changed = False
-        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "lease_term_months"}
+        int_fields = {"contract_deposit", "deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "lease_term_months"}
         bool_fields = {"vat_target", "vat_separate", "mortgage_cleanup_clause", "tax_invoice_requested"}
 
         for k, v in updates.items():
@@ -1359,6 +1360,7 @@ class CoSignSession(PoolObj):
             deposit=int(t_info.get("deposit", room.deposit)),
             monthly_rent=int(t_info.get("monthly_rent", room.monthly_rent)),
             maintenance_fee=int(t_info.get("maintenance_fee", room.maintenance_fee)),
+            cleaning_fee=int(t_info.get("cleaning_fee", 0) or 0),
             special_terms=t_info.get("special_terms", ""),
             option_snapshot=self.option_checks,
             registry_snapshot={

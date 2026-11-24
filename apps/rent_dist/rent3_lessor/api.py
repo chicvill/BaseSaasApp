@@ -123,7 +123,7 @@ class CheckoutCalcReq(BaseModel):
     branch: str = "main"
     room_no: str
     utility_settlement: int = 0
-    cleaning_fee: int = 70000
+    cleaning_fee: Optional[int] = None      # 비우면 계약서에 약정한 청소비. 약정액을 넘길 수 없다(약정 없으면 0원)
     damage_restoration_fee: int = 0
     inspection_notes: str = "6대 시설 자연마모 외 파손 없음"
 
@@ -1119,6 +1119,7 @@ class ContractEditReq(BaseModel):
     deposit: int
     monthly_rent: int
     maintenance_fee: int
+    cleaning_fee: Optional[int] = None         # 퇴실 청소비 약정(원, 0 = 약정 없음)
     move_in_date: str = ""
     expiry_date: str = ""
     tenant_phone: str = ""
@@ -1149,6 +1150,12 @@ def edit_contract(req: ContractEditReq):
     if min(req.deposit, req.monthly_rent, req.maintenance_fee) < 0:
         raise DomainError("금액은 0원 이상이어야 합니다.")
     ct.deposit, ct.monthly_rent, ct.maintenance_fee = req.deposit, req.monthly_rent, req.maintenance_fee
+    if req.cleaning_fee is not None:
+        if req.cleaning_fee < 0:
+            raise DomainError("청소비는 0원 이상이어야 합니다.")
+        if req.cleaning_fee > req.deposit:
+            raise DomainError("퇴실 청소비가 보증금보다 클 수 없습니다.", hint="청소비는 퇴실 때 보증금에서 공제하는 금액입니다.")
+        ct.cleaning_fee = int(req.cleaning_fee)
     if req.move_in_date:
         ct.move_in_date = req.move_in_date
     if req.expiry_date:
@@ -2171,6 +2178,7 @@ class BrokerContractPhotoReq(BaseModel):
     deposit: int = 5000000
     monthly_rent: int = 500000
     maintenance_fee: int = 50000
+    cleaning_fee: int = 0
     contract_deposit: int = 300000
     deposit_received: bool = True
     contract_date: Optional[str] = None
@@ -2216,6 +2224,7 @@ def register_broker_contract_photo(req: BrokerContractPhotoReq):
         deposit=req.deposit,
         monthly_rent=req.monthly_rent,
         maintenance_fee=req.maintenance_fee,
+        cleaning_fee=req.cleaning_fee,
         contract_deposit=req.contract_deposit,
         deposit_received=req.deposit_received,
         contract_date=req.contract_date,

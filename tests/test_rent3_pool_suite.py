@@ -9486,8 +9486,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             # 2) 정산서: 퇴실 후 월세가 보증금에서 공제된다
             s = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787"}).json()["settlement"]
             self.assertEqual((s["unpaid_rent_deduction"], s["early_rent_deduction"], s["liability_reason"], s["liability_end_date"]), (0, 12 * monthly, "EXPIRY", "2027-10-28"))
-            self.assertEqual(s["refund_amount"], max(0, ct.deposit - (12 * monthly + s["cleaning_fee"])))
-            self.assertEqual(s["shortfall_amount"], max(0, 12 * monthly + s["cleaning_fee"] - ct.deposit))
+            self.assertEqual(s["cleaning_fee"], 0)                                                                   # 청소비 약정이 없는 계약이라 공제하지 않는다
+            self.assertEqual(s["refund_amount"], max(0, ct.deposit - 12 * monthly))
+            self.assertEqual(s["shortfall_amount"], max(0, 12 * monthly - ct.deposit))
             from apps.rent_dist._rent3_core import DirectChat
             self.assertTrue(any("월세 부담분" in (m.message or "") for m in DirectChat.find(id_room=room.id)))
             # 3) 선납한 달은 부담분에서 빠진다
@@ -9529,7 +9530,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(ct.checkout_liability(Room.first(branch="main", room_no="787"))["early_amount"], round(15 * monthly / 30) - 100000)
             big.delete(action="t")
             # 7) 공제가 보증금보다 크면 부족분을 표시하고 반환액은 0
-            over = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "cleaning_fee": 9000000}).json()["settlement"]
+            over = c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": "787", "damage_restoration_fee": 9000000}).json()["settlement"]
             self.assertEqual(over["refund_amount"], 0)
             self.assertEqual(over["shortfall_amount"], lb2["early_amount"] + 9000000 - ct.deposit)
             # 8) 정상 만기 퇴실(만기일 당일): 미래 부담 없음, 그때까지 못 낸 것만 체납으로 공제
@@ -9565,6 +9566,81 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, tapp, needle)
         lm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "manual.html"), encoding="utf-8").read()
         self.assertIn("매달 전입일부터 다음 달 전입일 전날까지", lm)
+
+    def test_153_cleaning_fee_is_deducted_only_when_agreed_in_the_contract(self):
+        """153. 퇴실 청소비는 계약에 부담하기로 약정한 경우에만, 약정한 금액 이내로 전출 정산에서 보증금에서 공제한다. 약정이 없으면 0원, 요청해도 약정액을 넘겨 공제할 수 없고, 계약 ③단계에서 제안·수락으로 정하며 체결 계약에 남고, 기존 계약은 계약내용에서 입력한다."""
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, DirectChat
+        from apps.rent_dist._rent3_core.contract_chat import PROPOSAL_FIELDS
+        from apps.rent_dist._rent3_core.ops import CheckOutSettlement
+        c = self.client
+        calc = lambda room_no, **kw: c.post("/api/rent3_lessor/checkout/calculate", json={"branch": "main", "room_no": room_no, **kw})
+        try:
+            # 1) 약정 없는 계약: 청소비 요청이 와도 0원, 약정액 0
+            sid = self._policy_session("786", 5000000, 300000)
+            self.assertIn("cleaning_fee", PROPOSAL_FIELDS)
+            self.assertEqual(self._reg(sid).status_code, 200)
+            terms = c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]
+            self.assertEqual(terms["cleaning_fee"], 0)                                                           # 기본은 약정 없음
+            # 2) 계약 ③단계: 청소비는 제안 → 수락으로만 바뀌고(직접 수정 불가), 보증금보다 클 수 없다
+            direct = c.post(f"/api/rent3_contract/sessions/{sid}/terms", json={"role": "lessor", "updates": {"cleaning_fee": 70000}})
+            self.assertEqual(direct.status_code, 409)
+            lh, th = self._party_headers(sid)
+            url = f"/api/rent3_contract/sessions/{sid}/messages"
+            too_big = c.post(url, headers=lh, json={"kind": "proposal", "field": "cleaning_fee", "new_value": 99000000})
+            self.assertEqual(too_big.status_code, 400)
+            acc = self._propose_accept(sid, "cleaning_fee", 70000)
+            self.assertEqual(acc.status_code, 200, acc.text)
+            self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}").json()["session"]["terms"]["cleaning_fee"], 70000)
+            # 3) 체결 계약에 약정이 남는다
+            tenant = Tenant.first(phone="010-5555-9786")
+            self._complete_contract(None, None, tenant.id, "786", "정책시험", "010-5555-9786")
+            room = Room.first(branch="main", room_no="786")
+            ct = Contract.get(room.active_contract_id)
+            self.assertEqual(ct.cleaning_fee, 70000)
+            # 4) 정산: 계약에 약정한 청소비가 기본으로 공제된다
+            s = calc("786").json()["settlement"]
+            self.assertEqual((s["cleaning_fee"], s["cleaning_fee_agreed"]), (70000, 70000))
+            lb = ct.checkout_liability(room)
+            self.assertEqual(s["refund_amount"], max(0, ct.deposit - (lb["unpaid_now"] + lb["early_amount"] + 70000)))
+            self.assertTrue(any("실반환 예정액" in (m.message or "") for m in DirectChat.find(id_room=room.id)))
+            # 5) 약정액 이내로는 줄일 수 있고, 넘겨 공제할 수는 없다
+            self.assertEqual(calc("786", cleaning_fee=30000).json()["settlement"]["cleaning_fee"], 30000)
+            self.assertEqual(calc("786", cleaning_fee=500000).json()["settlement"]["cleaning_fee"], 70000)
+            self.assertEqual(calc("786", cleaning_fee=0).json()["settlement"]["cleaning_fee"], 0)
+            # 6) 기존 계약(약정 없음)은 계약내용에서 입력해야 공제된다: 입력 전 0원 → 입력 후 공제, 검증
+            ed = {"branch": "main", "contract_id": ct.id, "deposit": ct.deposit, "monthly_rent": ct.monthly_rent, "maintenance_fee": ct.maintenance_fee}
+            self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", json={**ed, "cleaning_fee": 0}).status_code, 200)
+            none = calc("786", cleaning_fee=70000).json()["settlement"]                                           # 약정 없음 → 요청해도 0원
+            self.assertEqual((none["cleaning_fee"], none["cleaning_fee_agreed"]), (0, 0))
+            self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", json={**ed, "cleaning_fee": -1}).status_code, 400)
+            self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", json={**ed, "cleaning_fee": ct.deposit + 1}).status_code, 400)
+            self.assertEqual(c.post("/api/rent3_lessor/contracts/edit", json={**ed, "cleaning_fee": 80000}).status_code, 200)
+            self.assertEqual(Contract.get(ct.id).cleaning_fee, 80000)
+            self.assertEqual(calc("786").json()["settlement"]["cleaning_fee"], 80000)
+        finally:
+            for co in CheckOutSettlement.all():
+                if co.room_no == "786" and co.branch == "main":
+                    co.delete(action="t")
+            for ct_ in Contract.find(room_no="786"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "786" and s_.branch == "main":
+                    s_.delete(action="t")
+            r_ = Room.first(branch="main", room_no="786")
+            if r_:
+                r_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone == "010-5555-9786":
+                    t_.delete(action="t")
+        rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
+        capp, lapp = rd("rent3_contract", "frontend", "app.js"), rd("rent3_lessor", "frontend", "app.js")
+        for needle in ("pfClean", '"cleaning_fee", "퇴실 청소비', "퇴실 청소비", "약정 없음"):
+            self.assertIn(needle, capp, needle)
+        for needle in ("cmClean", "cleanAgreed", "계약에 약정 없음", "계약 약정"):
+            self.assertIn(needle, lapp, needle)
+        self.assertIn("퇴실 청소비", rd("rent3_lessor", "frontend", "manual.html"))
+        self.assertIn("청소비", rd("rent3_tenant", "frontend", "manual.html"))
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

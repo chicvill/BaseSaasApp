@@ -581,7 +581,7 @@
     o.textContent = `!${chatSummary.open_count}`;
   }
 
-  const FIELD_LABEL = { deposit: "보증금", contract_deposit: "계약금", monthly_rent: "월세", maintenance_fee: "관리비", move_in_date: "입주일", lease_term_months: "계약기간" };
+  const FIELD_LABEL = { deposit: "보증금", contract_deposit: "계약금", monthly_rent: "월세", maintenance_fee: "관리비", cleaning_fee: "퇴실 청소비", move_in_date: "입주일", lease_term_months: "계약기간" };
   const fmtField = (f, v) => (f === "move_in_date" ? String(v) : f === "lease_term_months" ? `${v}개월` : fmtWon(v));
   const hhmm = (iso) => (iso ? `${iso.slice(5, 7)}.${iso.slice(8, 10)} ${iso.slice(11, 16)}` : "");
   const STATUS_KO = { open: "답 기다림", accepted: "수락됨", declined: "거절됨", withdrawn: "철회됨" };
@@ -990,6 +990,7 @@
           <div><label class="bass-label">계약금(원, 보증금 안)</label><input id="pfConDep" type="number" class="bass-input" value="${Number(t.contract_deposit || 0)}"></div>
           <div><label class="bass-label">월세(원)</label><input id="pfRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
           <div><label class="bass-label">관리비(원)</label><input id="pfFee" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
+          <div><label class="bass-label">퇴실 청소비(원, 0 = 약정 없음)</label><input id="pfClean" type="number" min="0" class="bass-input" value="${Number(t.cleaning_fee || 0)}"></div>
           <div><label class="bass-label">월세 납부</label><select id="pfPay" class="bass-select"><option value="후불" ${t.pay_timing === "후불" ? "selected" : ""}>후불</option><option value="선불" ${t.pay_timing === "선불" ? "selected" : ""}>선불</option></select></div>
         </div>
         <div class="bass-card" style="padding:10px;margin-top:8px;">
@@ -1042,7 +1043,7 @@
         const reqInv = Boolean(document.getElementById("pfTaxInvReq") && document.getElementById("pfTaxInvReq").checked);
         const updates = currentRole === "lessor"
           ? { move_in_date: v("pfMoveIn"), lease_term_months: Number(v("pfTerm")), deposit: Number(v("pfDeposit")), contract_deposit: Number(v("pfConDep")),
-              monthly_rent: Number(v("pfRent")), maintenance_fee: Number(v("pfFee")), pay_timing: v("pfPay"), special_terms: v("pfSpecial"),
+              monthly_rent: Number(v("pfRent")), maintenance_fee: Number(v("pfFee")), cleaning_fee: Number(v("pfClean") || 0), pay_timing: v("pfPay"), special_terms: v("pfSpecial"),
               tax_invoice_requested: reqInv, vat_target: reqInv,
               tenant_business_number: reqInv ? v("pfBizNo").trim() : "",
               tenant_company_name: reqInv ? v("pfCompName").trim() : "",
@@ -1829,10 +1830,10 @@
       ${s.mode === "RENEWAL" ? `<div class="call-banner" style="margin:0 0 10px;border-color:var(--primary-2);background:#f0f9ff;color:#0c4a6e;">
         <strong>🔄 비대면 재계약</strong> — 기존 계약 당사자이므로 본인 확인(신분증·등기부) 없이 바로 <strong>재계약 승인 → 전자서명</strong>으로 체결됩니다.
       </div>` : ""}
-      <p class="bass-muted" style="font-size:13px;">보증금·계약금·월세·관리비·입주일·계약기간은 상대에게 <strong>제안</strong>하고 <strong>수락</strong>을 받아야 바뀝니다. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.</p>
+      <p class="bass-muted" style="font-size:13px;">보증금·계약금·월세·관리비·<strong>퇴실 청소비(약정하면 퇴실 때 보증금에서 공제)</strong>·입주일·계약기간은 상대에게 <strong>제안</strong>하고 <strong>수락</strong>을 받아야 바뀝니다. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.</p>
       <div class="term-grid">
         ${[["deposit", "보증금", fmtWon(t.deposit)], ["contract_deposit", "계약금", fmtWon(t.contract_deposit)], ["monthly_rent", "월세", fmtWon(t.monthly_rent)],
-           ["maintenance_fee", "관리비", fmtWon(t.maintenance_fee)], ["move_in_date", "입주일", Bass.escapeHtml(t.move_in_date || "-")],
+           ["maintenance_fee", "관리비", fmtWon(t.maintenance_fee)], ["cleaning_fee", "퇴실 청소비 (퇴실 때 보증금에서 공제)", Number(t.cleaning_fee || 0) > 0 ? fmtWon(t.cleaning_fee) : "약정 없음"], ["move_in_date", "입주일", Bass.escapeHtml(t.move_in_date || "-")],
            ["lease_term_months", "계약기간", `${Number(t.lease_term_months || 0)}개월`]].map(([f, label, val]) => `
           <div class="term-row"><span class="bass-muted">${label}</span><b>${val}</b>
             <button type="button" class="bass-btn bass-btn--sm btn-propose" data-field="${f}"${currentRole && !adminProxy ? "" : " disabled"}>제안</button></div>`).join("")}
@@ -2325,6 +2326,7 @@
           <tr><th>목적물 소재지</th><td colspan="3">${Bass.escapeHtml(activeSession.building_address)} (${Bass.escapeHtml(activeSession.building_name)} ${Bass.escapeHtml(c.room_no)}호)</td></tr>
           <tr><th>보증금</th><td>${fmtWon(c.deposit)}</td><th>계약금(보증금 내)</th><td>${fmtWon(c.contract_deposit)} (영수함)</td></tr>
           <tr><th>월 임차료</th><td>${fmtWon(c.monthly_rent)} (${Bass.escapeHtml(c.pay_timing)})</td><th>월 관리비 / 부가세</th><td>${fmtWon(c.maintenance_fee)} / ${fmtWon(c.vat)}</td></tr>
+          <tr><th>퇴실 청소비</th><td colspan="3">${Number(c.cleaning_fee || 0) > 0 ? `${fmtWon(c.cleaning_fee)} — 퇴실할 때 임차인이 부담하며 전출 정산에서 보증금에서 공제함` : "약정 없음(임차인이 청소비를 부담하지 않음)"}</td></tr>
           <tr><th>임대차 기간</th><td colspan="3">${Bass.escapeHtml(c.move_in_date)} ~ ${Bass.escapeHtml(c.expiry_date)} (${c.lease_term_months}개월)</td></tr>
           <tr><th>본인인증 및 신분증·등기 확인</th><td colspan="3">양측 로그인 본인인증 완료 · 임대인↔임차인 상호 신분증 대조 본인 확인 체크 완료 · 등기부등본(${Bass.escapeHtml(regSnap.issue_number || "-")}, 소유자 ${Bass.escapeHtml(regSnap.owner_name || c.lessor_name)}) 열람 확인 필</td></tr>
           ${tdr.submitted ? `<tr><th>임차인 직접 열람 확인</th><td colspan="3">인터넷등기소 직접 열람 (${Bass.escapeHtml(tdr.viewed_at || "-")}) · 소유자 ${Bass.escapeHtml(tdr.owner_name || "-")} · 근저당 채권최고액 ${fmtWon(tdr.mortgage_amount)} · 압류/신탁 ${Bass.escapeHtml(tdr.seizure_or_trust || "-")}${tdr.guarantee_status ? ` · 보증금 반환보증 ${Bass.escapeHtml(tdr.guarantee_status)}` : ""}${regSnap.tenant_recheck_at ? ` · 체결 직전 재열람 확인 ${Bass.escapeHtml(String(regSnap.tenant_recheck_at).slice(0, 16).replace("T", " "))}` : ""}${regSnap.registry_attachment_sha256 ? `<br><span style="font-family:monospace;font-size:10.5px;">첨부 SHA-256 ${Bass.escapeHtml(regSnap.registry_attachment_sha256)}</span>` : ""}</td></tr>` : ""}

@@ -178,7 +178,8 @@ class CheckOutSettlement(PoolObj):
     early_partial_amount: int = 0            # 그 일수분 일할 금액 = 경과 일수 × 월 임차료 ÷ 30 (early_rent_deduction 에 포함)
     shortfall_amount: int = 0                # 공제액이 보증금보다 커서 보증금으로 못 채운 금액(임차인이 따로 부담)
     utility_settlement: int = 0              # 당일 계량기 공과금 실비
-    cleaning_fee: int = 70000                # 입주 청소비 약정액
+    cleaning_fee: int = 0                    # 이번 정산에서 공제하는 청소비(계약에 약정한 금액 이내)
+    cleaning_fee_agreed: int = 0             # 계약서에 약정한 퇴실 청소비(Contract.cleaning_fee) — 이 금액을 넘겨 공제할 수 없다
     damage_restoration_fee: int = 0          # 세입자 과실 파손 실비 (자연마모 0원)
     refund_amount: int = 0
     refund_bank_account: str = ""
@@ -223,7 +224,7 @@ class CheckOutSettlement(PoolObj):
         branch: str,
         room_no: str,
         utility_settlement: int = 0,
-        cleaning_fee: int = 70000,
+        cleaning_fee: Optional[int] = None,
         damage_restoration_fee: int = 0,
         inspection_notes: str = "6대 주요 시설(에어컨·세탁기·냉장고·도어락·벽지·욕실) 자연마모 외 이상 없음",
         app_source: str = "rent3_lessor",
@@ -234,6 +235,9 @@ class CheckOutSettlement(PoolObj):
             raise DomainError(f"{room_no}호는 현재 퇴실 정산할 활성 계약이 없습니다.")
 
         ct = Contract.require(room.active_contract_id)
+        # 청소비: 계약서에 퇴실 청소비를 부담하기로 약정한 경우에만, 약정한 금액 이내로 보증금에서 공제한다(약정 없으면 0원).
+        agreed = max(0, int(ct.cleaning_fee or 0))
+        cleaning_fee = agreed if cleaning_fee is None else min(max(0, int(cleaning_fee)), agreed)
         liab = ct.checkout_liability(room)            # 만기 전 퇴실이면 만기일(또는 새 임차인 입주 전)까지의 월세도 이전 임차인이 부담한다
         unpaid = int(liab["unpaid_now"])
         early = int(liab["early_amount"])
@@ -250,7 +254,7 @@ class CheckOutSettlement(PoolObj):
             unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",
             liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
             early_partial_days=int(liab["partial_days"]) if early else 0, early_partial_amount=int(liab["partial_amount"]) if early else 0,
-            utility_settlement=utility_settlement, cleaning_fee=cleaning_fee,
+            utility_settlement=utility_settlement, cleaning_fee=cleaning_fee, cleaning_fee_agreed=agreed,
             damage_restoration_fee=damage_restoration_fee, refund_amount=refund, inspection_notes=inspection_notes,
         )
         if existing is not None:        # 임차인 신청·이의 건을 이어서 쓴다(동의·계좌는 다시 받는다)

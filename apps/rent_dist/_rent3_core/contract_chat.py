@@ -31,6 +31,7 @@ PROPOSAL_FIELDS: Dict[str, tuple] = {
     "contract_deposit": ("계약금", "won"),
     "monthly_rent": ("월세", "won"),
     "maintenance_fee": ("관리비", "won"),
+    "cleaning_fee": ("퇴실 청소비(보증금에서 공제)", "won"),
     "move_in_date": ("입주일", "date"),
     "lease_term_months": ("계약기간(개월)", "months"),
 }
@@ -102,6 +103,8 @@ def _check_consistent(s: Any, field: str, new: Any) -> None:
     merged = {**(s.terms or {}), field: new}
     if int(merged.get("contract_deposit") or 0) > int(merged.get("deposit") or 0):
         raise DomainError("계약금이 보증금보다 클 수 없습니다.", hint="보증금과 계약금을 함께 확인해 주세요.")
+    if int(merged.get("cleaning_fee") or 0) > int(merged.get("deposit") or 0):
+        raise DomainError("퇴실 청소비가 보증금보다 클 수 없습니다.", hint="청소비는 퇴실 때 보증금에서 공제하는 금액입니다.")
 
 
 def _sys(s: Any, text: str, step: Optional[int] = None) -> DirectChat:

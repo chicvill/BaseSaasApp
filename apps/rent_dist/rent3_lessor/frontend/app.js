@@ -937,6 +937,7 @@
         ${f("cmDep", "보증금(원)", ct.deposit, "number")}
         ${f("cmRent", "월세(원)", ct.monthly_rent, "number")}
         ${f("cmFee", "관리비(원)", ct.maintenance_fee, "number")}
+        ${f("cmClean", "퇴실 청소비 약정(원 · 0 = 약정 없음)", ct.cleaning_fee || 0, "number")}
         ${f("cmTel", "임차인 전화번호", ct.tenant_phone || (r.tenant && r.tenant.phone) || "", "tel")}
         ${f("cmPayers", "송금자명 (임차인 이름과 다르게 입금될 때 · 쉼표로 구분, 최대 3개)", (ct.payer_names || []).join(", "), "text", "예: 홍길순, (주)시크디자인")}
       </div>
@@ -984,7 +985,7 @@
           method: "POST",
           body: {
             branch: currentBranch, contract_id: ct.id,
-            deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0),
+            deposit: Number($m("cmDep").value || 0), monthly_rent: Number($m("cmRent").value || 0), maintenance_fee: Number($m("cmFee").value || 0), cleaning_fee: Number($m("cmClean").value || 0),
             move_in_date: $m("cmIn").value, expiry_date: $m("cmEx").value, tenant_phone: $m("cmTel").value, payer_names: $m("cmPayers").value.split(/[,，、]/).map((x) => x.trim()).filter(Boolean), memo: $m("cmMemo").value,
             tax_invoice_requested: reqInv,
             vat_target: reqInv,
@@ -1160,6 +1161,7 @@
     const early = Number(lb.early_amount || 0);             // 만기 전 퇴실: 만기일(또는 새 임차인 입주 전)까지 이전 임차인이 부담하는 월세(보증금에서 공제)
     const earlyWho = lb.reason === "NEW_TENANT" ? "새 임차인 입주 전날" : "만기일";
     const dep = Number(ct.deposit || 0);
+    const cleanAgreed = Number(ct.cleaning_fee || 0);           // 계약서에 약정한 퇴실 청소비(없으면 0원 — 공제하지 않는다)
     const phone = ct.tenant_phone || (r.tenant && r.tenant.phone) || "";
     const num = (id) => Number(($m(id) && $m(id).value) || 0);
     const body = openModal(`📦 ${Bass.escapeHtml(no)}호 ${Bass.escapeHtml(ct.tenant_name || "")} · 전출`, `
@@ -1172,7 +1174,7 @@
         <label class="r3-fld">임차보증금<input class="bass-input" type="text" value="${fmtWon(dep)}" readonly></label>
         <label class="r3-fld">체납액 <span class="bass-muted">(자동)</span><input class="bass-input" type="text" value="${fmtWon(unpaid)}" readonly></label>
         ${early > 0 ? `<label class="r3-fld">퇴실 후 월세 부담 <span class="bass-muted">(자동 · ${Bass.escapeHtml(dotDate(lb.end_date))} ${earlyWho}까지)</span><input class="bass-input" type="text" value="${fmtWon(early)}" readonly></label>` : ""}
-        <label class="r3-fld">청소비(원)<input id="moClean" class="bass-input" type="number" value="70000"></label>
+        <label class="r3-fld">청소비(원) <span class="bass-muted">${cleanAgreed > 0 ? `(계약 약정 ${fmtWon(cleanAgreed)} 이내)` : "(계약에 약정 없음)"}</span><input id="moClean" class="bass-input" type="number" min="0" max="${cleanAgreed}" value="${cleanAgreed}" ${cleanAgreed > 0 ? "" : "readonly"}></label>
         <label class="r3-fld">체납 공과금(원)<input id="moUtil" class="bass-input" type="number" value="0"></label>
         <label class="r3-fld">파손 복구비(원)<input id="moDmg" class="bass-input" type="number" value="0"></label>
       </div>
@@ -1184,10 +1186,11 @@
       <div id="moState" style="margin-top:10px;"></div>
       <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산서를 보내면 임차인 앱·채팅에 도착합니다. 임차인이 확인·동의하고 <strong>본인 명의 계좌</strong>를 입력하면 여기서 <strong>송금 완료 표시</strong>를 합니다. 임차인이 받았다고 확인하거나(또는 7일 안에 이의가 없으면) 퇴실이 확정되어 공실 매물로 공개됩니다. 이의가 오면 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요.</div>`);
     void body;
-    const refund = () => Math.max(0, dep - unpaid - early - num("moClean") - num("moUtil") - num("moDmg"));
+    const clean = () => Math.min(Math.max(0, num("moClean")), cleanAgreed);          // 약정한 청소비를 넘겨 공제할 수 없다
+    const refund = () => Math.max(0, dep - unpaid - early - clean() - num("moUtil") - num("moDmg"));
     const compose = () => {
       const lines = [`[${bldgName()}] ${no}호 ${ct.tenant_name}님 전출 정산 안내 (전출일 ${dotDate($m("moDate").value)})`, `임차보증금 ${fmtWon(dep)}`];
-      [["체납 월세", unpaid], [`만기 전 퇴실 월세 부담분(${dotDate(lb.end_date)} ${earlyWho}까지)`, early], ["청소비", num("moClean")], ["체납 공과금", num("moUtil")], ["파손 복구비", num("moDmg")]].forEach(([k, v]) => { if (v > 0) lines.push(`- ${k} ${fmtWon(v)}`); });
+      [["체납 월세", unpaid], [`만기 전 퇴실 월세 부담분(${dotDate(lb.end_date)} ${earlyWho}까지)`, early], ["청소비(계약 약정)", clean()], ["체납 공과금", num("moUtil")], ["파손 복구비", num("moDmg")]].forEach(([k, v]) => { if (v > 0) lines.push(`- ${k} ${fmtWon(v)}`); });
       lines.push(`환불 예정액 ${fmtWon(refund())}`, "확인 후 말씀해 주시면 등록된 계좌로 보내드리겠습니다.");
       return lines.join("\n");
     };
@@ -1215,7 +1218,7 @@
       Bass.withLock(this, async () => {
         const res = await Bass.api(APP_ID, "/checkout/calculate", {
           method: "POST",
-          body: { branch: currentBranch, room_no: no, utility_settlement: num("moUtil"), cleaning_fee: num("moClean"), damage_restoration_fee: num("moDmg") },
+          body: { branch: currentBranch, room_no: no, utility_settlement: num("moUtil"), cleaning_fee: clean(), damage_restoration_fee: num("moDmg") },
         });
         Bass.updateAppAlert("success", res.message);
         await refresh();

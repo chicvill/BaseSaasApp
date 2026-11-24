@@ -782,7 +782,7 @@ def delete_facility_photo(session_id: str, photo_id: str, req: FacilityPhotoDele
     return {"success": True, "message": "사진을 지웠습니다.", "session": s.model_dump()}
 
 
-FIELD_KO = {"deposit": "보증금", "contract_deposit": "계약금", "monthly_rent": "월세", "maintenance_fee": "관리비",
+FIELD_KO = {"deposit": "보증금", "contract_deposit": "계약금", "monthly_rent": "월세", "maintenance_fee": "관리비", "cleaning_fee": "퇴실 청소비",
             "move_in_date": "입주일", "lease_term_months": "계약기간"}
 
 

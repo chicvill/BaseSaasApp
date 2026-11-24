@@ -386,6 +386,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
     # 5. Contracts (contracts.json)
     # 201호: 2026-07 입주, 만기 2027-03-01(8개월 약정 -> 만기 6~2개월 전 전출확인 구간 D-123일 자동 감지 시연!)
     ct201 = Contract(
+        cleaning_fee=70000,
         id="ct_main_201",
         branch="main",
         id_building="bldg_main",
@@ -414,6 +415,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
 
     # 202호: 2026-08 입주(후불 -> 8월 비과세, 9월·10월 미납 상태로 두어 FIFO 수납 테스트 즉시 가능!)
     ct202 = Contract(
+        cleaning_fee=70000,
         id="ct_main_202",
         branch="main",
         id_building="bldg_main",
@@ -441,6 +443,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
     ).save("seeded", app_source=src)
 
     ct301 = Contract(
+        cleaning_fee=70000,
         id="ct_sunho_301",
         branch="sunho",
         id_building="bldg_sunho",
@@ -468,6 +471,7 @@ def ensure_pool_seeded(force: bool = False) -> None:
     ).save("seeded", app_source=src)
 
     ct101 = Contract(
+        cleaning_fee=70000,
         id="ct_sinbi_101",
         branch="sinbi",
         id_building="bldg_sinbi",

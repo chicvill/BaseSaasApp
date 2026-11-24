@@ -679,6 +679,7 @@ class Contract(PoolObj):
     contract_photo_name: str = ""            # 원본 업로드 파일명
     broker_info: Dict[str, Any] = Field(default_factory=dict)  # 중개사무소 상호, 공인중개사명, 등록번호, 연락처 등
     fixed_date_no: str = ""                  # 대법원 확정일자 번호 (FIX-YYYYMMDD-XXXXXX)
+    cleaning_fee: int = 0                    # 퇴실 청소비 약정액: 계약서에 '퇴실할 때 임차인이 청소비를 부담'하기로 한 금액. 전출 정산 때 보증금에서 이 금액만 공제한다(0 = 약정 없음)
     renews_contract_id: str = ""             # 연장(재계약) 계약이면 이어받는 이전 계약 id. 만기 전에 미리 체결하면 SCHEDULED 로 두었다가 시작일에 이전 계약을 RENEWED 로 닫고 ACTIVE 가 된다
     status: str = "ACTIVE"                   # ACTIVE / TERMINATED / RENEWED / SCHEDULED(미리 체결한 예약 계약: 새 입주자 또는 연장) / CANCELLED(예약 취소)
 
