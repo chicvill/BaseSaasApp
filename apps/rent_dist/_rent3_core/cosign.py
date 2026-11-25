@@ -533,9 +533,28 @@ class CoSignSession(PoolObj):
         ]
 
         is_renewal = (mode == "RENEWAL")
+        nt = dict(room.next_terms or {})
         base_dep = int((prev_ct.deposit if prev_ct else listing.deposit) or 0)
         base_rent = prev_ct.monthly_rent if prev_ct else listing.monthly_rent
         renewal_rent_5pct = max(base_rent, (int(base_rent * 1.05) // 1000) * 1000)
+        # 연장 재계약 시 임대인이 '다음 계약 조건'을 미리 저장해 두었으면(법정 5% 상한 이내) 그 값을 우선 적용한다.
+        ren_dep = prev_ct.deposit if prev_ct else listing.deposit
+        ren_rent = renewal_rent_5pct
+        ren_fee = prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee
+        ren_clean = int(prev_ct.cleaning_fee) if prev_ct else int(listing.cleaning_fee or 0)
+        if is_renewal and nt and prev_ct is not None:
+            cand_dep = int(nt["deposit"]) if nt.get("deposit") is not None else ren_dep
+            cand_rent = int(nt["monthly_rent"]) if nt.get("monthly_rent") is not None else prev_ct.monthly_rent
+            try:
+                prev_ct.validate_renewal_cap(new_deposit=cand_dep, new_rent=cand_rent)
+                ren_dep, ren_rent = cand_dep, cand_rent
+            except Exception:
+                pass
+            if nt.get("maintenance_fee") is not None:
+                ren_fee = int(nt["maintenance_fee"])
+            if nt.get("cleaning_fee") is not None:
+                ren_clean = int(nt["cleaning_fee"])
+        new_clean = int(listing.cleaning_fee or nt.get("cleaning_fee") or 0)
         now_str = now_iso()
         session = cls(
             mode=mode,
@@ -592,14 +611,14 @@ class CoSignSession(PoolObj):
                 "tenant_company_name": matched_t.company_name if matched_t else (prev_ct.tenant_company_name if prev_ct else ""),
                 "tenant_ceo_name": matched_t.ceo_name if matched_t else (prev_ct.tenant_ceo_name if prev_ct else ""),
                 "lease_type": listing.lease_type or "월세",
-                "pay_timing": listing.pay_timing or "후불",
+                "pay_timing": (nt.get("pay_timing") if (is_renewal and nt.get("pay_timing") in ("후불", "선불")) else listing.pay_timing) or "후불",
                 "vat_target": prev_ct.vat_target if prev_ct else listing.vat_applicable,
                 "vat_separate": True,
                 "contract_deposit": 0 if is_renewal else (base_dep // 10),
-                "deposit": prev_ct.deposit if prev_ct else listing.deposit,
-                "monthly_rent": renewal_rent_5pct if is_renewal else (prev_ct.monthly_rent if prev_ct else listing.monthly_rent),
-                "maintenance_fee": prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee,
-                "cleaning_fee": int(prev_ct.cleaning_fee) if prev_ct else int((room.next_terms or {}).get("cleaning_fee") or 0),        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
+                "deposit": ren_dep if is_renewal else listing.deposit,
+                "monthly_rent": ren_rent if is_renewal else listing.monthly_rent,
+                "maintenance_fee": ren_fee if is_renewal else listing.maintenance_fee,
+                "cleaning_fee": ren_clean if is_renewal else new_clean,        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
                 "move_in_date": move_in_default,
                 "lease_term_months": 12,
                 "special_terms": (
@@ -1403,6 +1422,7 @@ class CoSignSession(PoolObj):
             room.deposit = ct.deposit
             room.monthly_rent = ct.monthly_rent
             room.maintenance_fee = ct.maintenance_fee
+            room.cleaning_fee = int(ct.cleaning_fee or 0)
             room.lease_type = ct.lease_type
             room.pay_timing = ct.pay_timing
             room.pre_moveout_notice = False

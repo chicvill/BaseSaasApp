@@ -656,13 +656,14 @@ class NextTermsReq(BaseModel):
     maintenance_fee: Optional[int] = None
     cleaning_fee: Optional[int] = None
     pay_timing: Optional[str] = None           # 후불 / 선불
+    enforce_renewal_cap: bool = False           # 연장 계약 시작 창에서 저장 시 법정 5% 상한 검증
     clear: bool = False                         # 저장해 둔 다음 계약 조건 초안을 지운다
 
 
 @router.post("/rooms/{room_id}/next-terms")
 def save_room_next_terms(room_id: str, req: NextTermsReq):
-    """입주 중인 호실의 '다음 계약 조건'을 임시 저장한다(임대인). 지금 계약 조건은 만기(퇴실)까지 그대로이고, 연장 예고의 기본값·
-    사전 매물 공개 조건·퇴실 뒤 재공개 조건으로 쓰인다. 공개되거나 임차인에게 보이지 않는다."""
+    """입주 중인 호실의 '다음 계약 조건'을 저장한다(임대인). 지금 계약 조건은 만기(퇴실)까지 그대로이고,
+    신규 임차인 입주 또는 연장 적용 시 현재 계약 조건을 대체한다. 공개되거나 임차인에게 보이지 않는다."""
     room = Room.require(room_id)
     if not room.is_occupied:
         raise DomainError("입주 중인 호실의 다음 계약 조건만 임시 저장할 수 있습니다.", hint="빈 호실은 임대매물 등록 화면에서 조건을 바로 고치세요.")
@@ -686,17 +687,24 @@ def save_room_next_terms(room_id: str, req: NextTermsReq):
         draft["pay_timing"] = req.pay_timing
     if not draft:
         raise DomainError("저장할 조건을 입력해 주세요.")
+    if req.enforce_renewal_cap and room.active_contract_id:
+        ct = Contract.get(room.active_contract_id)
+        if ct is not None:
+            ct.validate_renewal_cap(
+                new_deposit=int(draft.get("deposit", ct.deposit)),
+                new_rent=int(draft.get("monthly_rent", ct.monthly_rent)),
+            )
     room.next_terms = draft
     if room.pre_moveout_notice and room.next_listing:
         nl = dict(room.next_listing)
-        for k in ("deposit", "monthly_rent", "maintenance_fee", "pay_timing"):
+        for k in ("deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "pay_timing"):
             if k in draft:
                 nl[k] = draft[k]
         room.next_listing = nl
     room.save(action="room_next_terms_saved", app_source=APP_SRC)
     return {"success": True, "level": "success",
-            "message": f"{room.room_no}호 다음 계약 조건을 임시 저장했습니다. 지금 계약은 만기까지 그대로 적용됩니다.",
-            "hint": "연장 예고(법정 5% 이내)·사전 매물 공개·퇴실 뒤 재공개에 이 조건을 씁니다.", "room": room.model_dump()}
+            "message": f"{room.room_no}호 다음 계약 조건을 저장했습니다. 현재 계약은 전출·만기까지 유지되며 신규 입주·연장 시 자동 대체됩니다.",
+            "hint": "신규 입주자 계약·연장 재계약·사전 매물 공개에 이 조건이 자동 적용됩니다.", "room": room.model_dump()}
 
 
 @router.post("/rooms/{room_id}/reservation/cancel")
@@ -2308,6 +2316,7 @@ class RenewalPreviewReq(BaseModel):
     proposed_deposit: Optional[int] = None
     proposed_monthly_rent: Optional[int] = None
     proposed_maintenance_fee: Optional[int] = None
+    proposed_cleaning_fee: Optional[int] = None
     proposed_term_months: int = 12
     renewal_note: str = ""
     open_cosign_session: bool = True
@@ -2373,6 +2382,7 @@ def send_expiry_renewal_preview(req: RenewalPreviewReq):
         proposed_deposit=req.proposed_deposit,
         proposed_monthly_rent=req.proposed_monthly_rent,
         proposed_maintenance_fee=req.proposed_maintenance_fee,
+        proposed_cleaning_fee=req.proposed_cleaning_fee,
         proposed_term_months=req.proposed_term_months,
         renewal_note=req.renewal_note,
         open_cosign_session=req.open_cosign_session,

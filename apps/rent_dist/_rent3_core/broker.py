@@ -409,10 +409,12 @@ class BrokerContractOnboarding:
         room.deposit = ct.deposit
         room.monthly_rent = ct.monthly_rent
         room.maintenance_fee = ct.maintenance_fee
+        room.cleaning_fee = int(ct.cleaning_fee or 0)
         room.lease_type = ct.lease_type
         room.pay_timing = ct.pay_timing
         room.pre_moveout_notice = False
         room.next_listing = {}                  # 매물 등록 때의 임시 조건은 계약 값으로 덮였으니 삭제
+        room.next_terms = {}                    # 신규 입주가 확정되면 저장해 둔 다음 계약 조건은 적용 후 비운다
         room.available_from = "즉시입주"
         room.is_published = False
         room.save(action="room_assigned_by_broker_contract", app_source=app_source)

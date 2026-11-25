@@ -450,7 +450,7 @@ class CheckOutSettlement(PoolObj):
         self.status = "AGREED"
         self.save(action="checkout_agreed_by_tenant", app_source=app_source)
         self._chat("tenant", self.tenant_name, f"[✍️ 정산 동의·반환 계좌 접수] 반환액 {self.refund_amount:,}원 · 예금주 {self.account_holder} · 계좌 {self._mask_account(bank_account)}. "
-                   "계좌 전체는 임대인 화면에서만 보입니다. 임대인은 이 채팅창 위의 정산 카드(또는 [전출] 창)에서 계좌를 확인하고 송금한 뒤 [송금 완료 표시]를 눌러 주세요.", app_source=app_source)
+                   "계좌 전체는 임대인 화면에서만 보입니다. 임대인은 이 채팅창 위의 정산 카드(또는 [전출 정산] 창)에서 계좌를 확인하고 송금한 뒤 [송금 완료 표시]를 눌러 주세요.", app_source=app_source)
         return self
 
     def mark_paid(self, memo: str = "", app_source: str = "rent3_lessor") -> "CheckOutSettlement":
@@ -913,10 +913,11 @@ class ExpiryRenewalCheck(PoolObj):
         if room_now is not None and room_now.reservation() is not None:
             raise DomainError("이미 다음 계약(연장 또는 예약)이 체결되어 있어 연장 예고를 다시 보낼 수 없습니다.",
                               hint="체결된 예약 계약을 취소한 뒤에 다시 진행해 주세요.")
-        draft = (room_now.next_terms or {}) if room_now else {}      # 임대인이 임시 저장해 둔 '다음 계약 조건'이 있으면 기본값으로 쓴다
+        draft = (room_now.next_terms or {}) if room_now else {}      # 임대인이 저장해 둔 '다음 계약 조건'이 있으면 기본값으로 쓴다
         dep = int(draft.get("deposit", ct.deposit)) if proposed_deposit is None else proposed_deposit
         rent = int(draft.get("monthly_rent", ct.monthly_rent)) if proposed_monthly_rent is None else proposed_monthly_rent
         maint = int(draft.get("maintenance_fee", ct.maintenance_fee)) if proposed_maintenance_fee is None else proposed_maintenance_fee
+        clean = (int(draft["cleaning_fee"]) if draft.get("cleaning_fee") is not None else int(ct.cleaning_fee or 0)) if proposed_cleaning_fee is None else int(proposed_cleaning_fee)
         months = max(1, proposed_term_months or 12)
 
         # 주택임대차보호법 제7조 법정 5% 상한 검증 (초과 시 Mismatch 422 발생)
@@ -960,7 +961,7 @@ class ExpiryRenewalCheck(PoolObj):
                     "deposit": dep,
                     "monthly_rent": rent,
                     "maintenance_fee": maint,
-                    **({"cleaning_fee": int(proposed_cleaning_fee)} if proposed_cleaning_fee is not None else {}),
+                    "cleaning_fee": clean,
                     "lease_term_months": months,
                     "move_in_date": ct.expiry_date or date_today().isoformat(),
                     "special_terms": (

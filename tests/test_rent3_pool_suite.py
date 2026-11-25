@@ -9322,7 +9322,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr.room_limit = old_limit
             lsr.save(action="t")
         lapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "app.js"), encoding="utf-8").read()
-        for needle in ("nextTermsCardHtml", "btnNtSave", "btnNtClear", "/next-terms", "다음 계약 조건", "nt0.monthly_rent"):
+        self.assertNotIn("nextTermsCardHtml", lapp)
+        self.assertNotIn("btnNtSave", lapp)
+        for needle in ("ncSaveNext", "rnSaveNext", "/next-terms", "다음 계약 조건", "nt0.monthly_rent", "전출 정산"):
             self.assertIn(needle, lapp, needle)
 
     def _make_renewal_reservation(self, room_no, phone, name="연장임차", next_rent=310000):
@@ -9984,8 +9986,80 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         lapp = rd("rent3_lessor", "frontend", "app.js")
         for needle in ("wsBtnIdCheck", "wsBtnRegCheck", "벽지 상태 등 시설 기록사항 메모", "보증금의 10%", "계약금 수납 확인 & 계약 종료"):
             self.assertIn(needle, capp, needle)
-        for needle in ("ncSaveNext", "/next-terms", "변경희망 조건만 별도 저장"):
+        for needle in ("ncSaveNext", "rnSaveNext", "/next-terms", "다음 계약 조건 저장", "전출 정산"):
             self.assertIn(needle, lapp, needle)
+        self.assertNotIn("nextTermsCardHtml", lapp)
+        self.assertNotIn('data-act="moveout" type="button">전출<', lapp)
+
+    def test_161_next_terms_renewal_cap_and_movein_replacement(self):
+        """161. '전출 정산' 명칭·수납창 다음계약조건 제거, 연장 시작창 5% 상한 검증 저장(enforce_renewal_cap), 신규 입주 순간 현재 계약조건이 다음 계약조건(청소비 포함)으로 대체 적용된다."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, Lessor
+        from apps.rent_dist._rent3_core import testtenant as tt
+        from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+        c = self.client
+        chic = self._login("chic")
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_161_")}):
+                self.assertEqual(c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500}).status_code, 200)
+                self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "761", "is_published": True, "deposit": 2000000, "monthly_rent": 150000, "maintenance_fee": 100000}).status_code, 200)
+                t_old = self._new_prospect("이전임차", "010-7777-0761")
+                self._complete_contract(None, None, t_old.id, "761", "이전임차", "010-7777-0761")
+                room = Room.first(branch="main", room_no="761")
+                ct_old = Contract.get(room.active_contract_id)
+                url_nt = f"/api/rent3_lessor/rooms/{room.id}/next-terms"
+                # 1) 연장 시작창 5% 상한 검증 저장: 5% 초과 시 422 차단, 5% 이내 허용
+                over = c.post(url_nt, headers=chic, json={"deposit": 2000000, "monthly_rent": 160000, "maintenance_fee": 100000, "cleaning_fee": 50000, "enforce_renewal_cap": True})
+                self.assertEqual(over.status_code, 422, over.text)
+                ok_ren = c.post(url_nt, headers=chic, json={"deposit": 2000000, "monthly_rent": 157000, "maintenance_fee": 100000, "cleaning_fee": 50000, "enforce_renewal_cap": True})
+                self.assertEqual(ok_ren.status_code, 200, ok_ren.text)
+                # 현재 계약은 그대로 유지됨
+                self.assertEqual(Contract.get(ct_old.id).monthly_rent, 150000)
+                self.assertEqual(Room.get(room.id).monthly_rent, 150000)
+                # 연장 세션 개설 시 저장된 다음 계약 조건(157,000원, 청소비 50,000원)을 사용
+                s_ren = c.post("/api/rent3_contract/sessions", headers=chic, json={"branch": "main", "room_no": "761", "mode": "RENEWAL"}).json()["session"]
+                self.assertEqual((s_ren["terms"]["monthly_rent"], s_ren["terms"]["cleaning_fee"]), (157000, 50000))
+                CoSignSession.get(s_ren["id"]).delete(action="t")
+                # 2) 신규 계약용 다음 계약 조건 저장(청소비 80,000원 포함) → 사전 매물 공개 → 신규 임차인 예약 계약 → 전출(입주) 순간 현재 계약조건 대체
+                ok_new = c.post(url_nt, headers=chic, json={"deposit": 3000000, "monthly_rent": 220000, "maintenance_fee": 110000, "cleaning_fee": 80000, "pay_timing": "선불"})
+                self.assertEqual(ok_new.status_code, 200, ok_new.text)
+                self.assertEqual(c.post("/api/rent3_lessor/expiry/record-plan", headers=chic, json={"branch": "main", "room_no": "761", "tenant_plan": "MOVE_OUT", "planned_move_out_date": "2026-11-28"}).status_code, 200)
+                t_new = self._new_prospect("신규입주", "010-7777-1761")
+                self._complete_contract(None, None, t_new.id, "761", "신규입주", "010-7777-1761")
+                room_before = Room.first(branch="main", room_no="761")
+                # 아직 기존 임차인 전출 전: 현재 계약조건은 이전 값 유지
+                self.assertEqual((room_before.deposit, room_before.monthly_rent, room_before.maintenance_fee), (2000000, 150000, 100000))
+                self.assertTrue(bool(room_before.reserved_contract_id))
+                # 기존 임차인 전출 확정 → 신규 임차인이 입주하는 순간 현재 계약조건이 다음 계약조건으로 대체 적용
+                room_after = room_before.vacate(app_source="test_161")
+                ct_active = Contract.get(room_after.active_contract_id)
+                self.assertEqual(ct_active.id_tenant, t_new.id)
+                self.assertEqual((ct_active.deposit, ct_active.monthly_rent, ct_active.maintenance_fee, ct_active.cleaning_fee, ct_active.pay_timing),
+                                 (3000000, 220000, 110000, 80000, "선불"))
+                self.assertEqual((room_after.deposit, room_after.monthly_rent, room_after.maintenance_fee, room_after.cleaning_fee, room_after.pay_timing, room_after.next_terms),
+                                 (3000000, 220000, 110000, 80000, "선불", {}))
+        finally:
+            for ct_ in Contract.find(room_no="761"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "761" and s_.branch == "main":
+                    s_.delete(action="t")
+            for chk in ExpiryRenewalCheck.all():
+                if chk.room_no == "761" and chk.branch == "main":
+                    chk.delete(action="t")
+            rm_ = Room.first(branch="main", room_no="761")
+            if rm_:
+                rm_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone in ("010-7777-0761", "010-7777-1761"):
+                    t_.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
