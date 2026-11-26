@@ -116,7 +116,7 @@ SECTIONS: List[Dict[str, Any]] = [
     {
         "code": "LES",
         "title": "1. 임대인 페이지 (rent3_lessor)",
-        "url": "http://localhost:8000/rent3_lessor/",
+        "url": "http://localhost:8080/rent3_lessor/",
         "accent": "#059669",
         "bg": "#D1FAE5",
         "items": [
@@ -233,7 +233,7 @@ SECTIONS: List[Dict[str, Any]] = [
     {
         "code": "TEN",
         "title": "2. 임차인 페이지 (rent3_tenant)",
-        "url": "http://localhost:8000/rent3_tenant/",
+        "url": "http://localhost:8080/rent3_tenant/",
         "accent": "#D97706",
         "bg": "#FEF3C7",
         "items": [
@@ -314,7 +314,7 @@ SECTIONS: List[Dict[str, Any]] = [
     {
         "code": "ADM",
         "title": "3. 관리자 페이지 (rent3_admin)",
-        "url": "http://localhost:8000/rent3_admin/",
+        "url": "http://localhost:8080/rent3_admin/",
         "accent": "#7C3AED",
         "bg": "#EDE9FE",
         "items": [
@@ -377,7 +377,7 @@ SECTIONS: List[Dict[str, Any]] = [
     {
         "code": "CON",
         "title": "4. 스마트 계약 (rent3_contract)",
-        "url": "http://localhost:8000/rent3_contract/  (진위 확인: /rent3_contract/verify.html)",
+        "url": "http://localhost:8080/rent3_contract/  (진위 확인: /rent3_contract/verify.html)",
         "accent": "#DC2626",
         "bg": "#FEE2E2",
         "items": [
@@ -458,7 +458,7 @@ SECTIONS: List[Dict[str, Any]] = [
     {
         "code": "HUB",
         "title": "5. 포털 · 통합 인증 · Data Pool 허브 (rent3)",
-        "url": "http://localhost:8000/rent3/  (Data Pool 허브: /rent3/pool.html)",
+        "url": "http://localhost:8080/rent3/  (Data Pool 허브: /rent3/pool.html)",
         "accent": "#0284C7",
         "bg": "#E0F2FE",
         "items": [
@@ -640,7 +640,7 @@ def build_pdf(output_path: str) -> int:
                 Paragraph("테스트 일자", st_meta_lbl),
                 InteractiveNoteField("meta_date", width=meta_w[3] - 10, height=15, tooltip="예: 2026-11-26"),
                 Paragraph("실행 환경", st_meta_lbl),
-                InteractiveNoteField("meta_env", width=meta_w[5] - 10, height=15, tooltip="예: Windows / localhost:8000 / Chrome 모바일(390px)"),
+                InteractiveNoteField("meta_env", width=meta_w[5] - 10, height=15, tooltip="예: Windows / localhost:8080 / Chrome 모바일(390px)"),
             ]
         ],
         colWidths=meta_w,
@@ -674,7 +674,7 @@ def build_pdf(output_path: str) -> int:
     for sec in SECTIONS:
         items = sec["items"]
         id_range = f"{items[0][0]} ~ {items[-1][0]}"
-        short_url = sec["url"].replace("http://localhost:8000", "").strip()
+        short_url = sec["url"].replace("http://localhost:8080", "").strip()
         sum_rows.append(
             [
                 Paragraph(xml_escape(sec["title"]), st_name),
