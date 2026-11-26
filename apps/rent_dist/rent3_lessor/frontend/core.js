@@ -51,6 +51,7 @@
       { label: "📑 부가세 · 소득세 대상 호실 설정", tab: "bldgtax" },
     ] },
     { title: "내 설정", more: true, items: [
+      { label: "🔐 내 정보 · 비밀번호 변경", id: "btnMyAccount", userOnly: true },
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },
       { label: "🔓 아이디·비밀번호로 로그인", id: "btnFullLogin", pinOnly: true },

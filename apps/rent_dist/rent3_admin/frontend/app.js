@@ -62,6 +62,17 @@
     });
   }
 
+  const btnMyAcc = document.getElementById("btnMyAccount");
+  if (btnMyAcc) {
+    btnMyAcc.addEventListener("click", () => {
+      const dr = document.querySelector("[data-r3-drawer]");
+      if (dr) dr.classList.remove("is-open");
+      const ov = document.querySelector(".r3-overlay");
+      if (ov) ov.classList.remove("is-open");
+      if (window.R3Shell && R3Shell.openAccountSettings) R3Shell.openAccountSettings();
+    });
+  }
+
   syncActiveNav(S.currentTab);
   if (window.R3Notify) R3Notify.start({ url: "/api/rent3_admin/notifications" });     // 🔔 알림 센터: 문의·가맹 심사·홈택스 확인·가맹비 연체·세금계산서 발행
   refresh().catch(Bass.showError);

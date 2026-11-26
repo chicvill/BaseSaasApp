@@ -626,8 +626,109 @@
     setInterval(poll, 30000);
   }
 
+  // ── 내 정보 · 비밀번호 변경 (임대인 · 임차인 · 관리인 공용) ──
+  var ACCOUNT_API = "/api/rent3/pool/auth/me";
+
+  function openAccountSettings() {
+    function call(path, opts) {
+      return fetch(ACCOUNT_API + path, Object.assign({ headers: authHeaders(Boolean(opts && opts.body)) }, opts || {}))
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+    }
+    call("").then(function (res) {
+      if (!res.ok) { notify("error", (res.d && (res.d.message || res.d.detail)) || "내 정보를 불러오지 못했습니다."); return; }
+      var st = res.d;
+      var p = st.profile || {};
+      var locked = Boolean(st.via_pin || st.readonly);
+      var inp = "width:100%;height:44px;box-sizing:border-box;font-size:15px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;color:#0f172a;background:#ffffff;margin-top:4px;";
+      var lbl = "display:block;font-size:13px;font-weight:700;color:#334155;margin:10px 0 0;";
+      var lockNote = st.via_pin
+        ? '<div style="font-size:13px;padding:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;margin-bottom:10px;">간편 비밀번호(PIN)로 들어온 상태입니다. 개인정보·비밀번호를 바꾸려면 아이디·비밀번호로 다시 로그인해 주세요.</div>'
+        : (st.readonly ? '<div style="font-size:13px;padding:10px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:8px;margin-bottom:10px;">퇴실 후 조회 전용 상태에서는 정보를 수정할 수 없습니다.</div>' : "");
+      var pwChanged = p.password_changed_at ? "최근 변경: " + esc(p.password_changed_at.slice(0, 10)) : "비밀번호는 8자 이상, 영문+숫자 조합";
+      var html =
+        lockNote +
+        '<div style="padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;font-size:13.5px;line-height:1.6;margin-bottom:12px;">' +
+          '<div><strong>' + esc(p.name || "-") + '</strong> <span style="font-size:12px;color:#475569;">(' + esc(st.role_label || st.role) + " · ID: " + esc(p.username || p.id) + ")</span></div>" +
+          '<div style="font-size:12px;color:#64748b;margin-top:2px;">성명과 아이디는 본인인증·계약 무결성 보호를 위해 변경할 수 없습니다.</div>' +
+        "</div>" +
+        '<div style="font-weight:800;font-size:14.5px;margin:4px 0 2px;">① 내 정보 수정</div>' +
+        '<label style="' + lbl + '">휴대폰 번호<input id="r3AccPhone" type="tel" value="' + esc(p.phone || "") + '" placeholder="010-1234-5678"' + (locked ? " disabled" : "") + ' style="' + inp + '"></label>' +
+        '<label style="' + lbl + '">이메일<input id="r3AccEmail" type="email" value="' + esc(p.email || "") + '" placeholder="name@example.com"' + (locked ? " disabled" : "") + ' style="' + inp + '"></label>' +
+        (st.can_edit_account_number
+          ? '<label style="' + lbl + '">임차료 수납 계좌 (은행명 + 계좌번호)<input id="r3AccBank" type="text" value="' + esc(p.account_number || "") + '" placeholder="예: 국민 123-456-789012"' + (locked ? " disabled" : "") + ' style="' + inp + '"></label>'
+          : "") +
+        (locked ? "" : '<div style="margin-top:10px;"><button type="button" id="r3AccSaveProfile" class="bass-btn bass-btn--primary" style="min-height:44px;">💾 내 정보 저장</button></div>') +
+        '<hr style="border:0;border-top:1px solid #e2e8f0;margin:16px 0 12px;">' +
+        '<div style="font-weight:800;font-size:14.5px;margin:0 0 2px;">② 로그인 비밀번호 변경</div>' +
+        '<div style="font-size:12px;color:#64748b;margin-bottom:4px;">' + pwChanged + "</div>" +
+        (locked ? "" :
+          '<label style="' + lbl + '">현재 비밀번호<input id="r3AccCurPw" type="password" autocomplete="current-password" placeholder="현재 로그인 비밀번호" style="' + inp + '"></label>' +
+          '<label style="' + lbl + '">새 비밀번호<input id="r3AccNewPw" type="password" autocomplete="new-password" placeholder="8자 이상, 영문+숫자 포함" style="' + inp + '"></label>' +
+          '<label style="' + lbl + '">새 비밀번호 확인<input id="r3AccNewPw2" type="password" autocomplete="new-password" placeholder="새 비밀번호 한 번 더 입력" style="' + inp + '"></label>' +
+          (st.has_shortcuts
+            ? '<label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;cursor:pointer;"><input type="checkbox" id="r3AccRevokePin" style="width:20px;height:20px;margin:0;"><span>다른 기기에 등록한 간편 비밀번호(바로가기)도 함께 해제</span></label>'
+            : "") +
+          '<div style="margin-top:10px;"><button type="button" id="r3AccSavePw" class="bass-btn bass-btn--primary" style="min-height:44px;">🔑 비밀번호 변경</button></div>');
+
+      var body = global.R3.openModal("🔐 내 정보 · 비밀번호 변경", html);
+      var btnProf = body.querySelector("#r3AccSaveProfile");
+      if (btnProf) {
+        btnProf.addEventListener("click", function () {
+          var payload = {
+            phone: (body.querySelector("#r3AccPhone").value || "").trim(),
+            email: (body.querySelector("#r3AccEmail").value || "").trim(),
+          };
+          var bankEl = body.querySelector("#r3AccBank");
+          if (bankEl) payload.account_number = (bankEl.value || "").trim();
+          btnProf.disabled = true;
+          call("/profile", { method: "POST", body: JSON.stringify(payload) }).then(function (r) {
+            btnProf.disabled = false;
+            if (!r.ok) {
+              notify("error", (r.d && (r.d.message || r.d.detail)) || "저장하지 못했습니다.");
+              return;
+            }
+            try {
+              var s = readJson("rent3_session");
+              if (s && r.d.profile) {
+                s.phone = r.d.profile.phone;
+                global.localStorage.setItem("rent3_session", JSON.stringify(s));
+              }
+            } catch (e) { /* 무시 */ }
+            notify("success", r.d.message || "내 정보를 저장했습니다.");
+          }).catch(function () { btnProf.disabled = false; notify("error", "저장 중 오류가 발생했습니다."); });
+        });
+      }
+      var btnPw = body.querySelector("#r3AccSavePw");
+      if (btnPw) {
+        btnPw.addEventListener("click", function () {
+          var cur = body.querySelector("#r3AccCurPw").value || "";
+          var nw = body.querySelector("#r3AccNewPw").value || "";
+          var nw2 = body.querySelector("#r3AccNewPw2").value || "";
+          if (!cur) { notify("warning", "현재 비밀번호를 입력해 주세요."); return; }
+          if (nw !== nw2) { notify("warning", "새 비밀번호와 확인 입력이 일치하지 않습니다."); return; }
+          var revEl = body.querySelector("#r3AccRevokePin");
+          btnPw.disabled = true;
+          call("/password", {
+            method: "POST",
+            body: JSON.stringify({ current_password: cur, new_password: nw, revoke_shortcuts: Boolean(revEl && revEl.checked) }),
+          }).then(function (r) {
+            btnPw.disabled = false;
+            if (!r.ok) {
+              notify("error", (r.d && (r.d.message || r.d.detail)) || "비밀번호를 변경하지 못했습니다.");
+              return;
+            }
+            body.querySelector("#r3AccCurPw").value = "";
+            body.querySelector("#r3AccNewPw").value = "";
+            body.querySelector("#r3AccNewPw2").value = "";
+            notify("success", r.d.message || "비밀번호를 변경했습니다.");
+          }).catch(function () { btnPw.disabled = false; notify("error", "변경 중 오류가 발생했습니다."); });
+        });
+      }
+    });
+  }
+
   global.R3Shell = {
-    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings, openShortcutSettings: openShortcutSettings, pinPending: pinPending, installHelp: installHelp, isViaPin: isViaPin,
+    renderMenu: renderMenu, menuTabs: menuTabs, startClock: startClock, openSupportSettings: openSupportSettings, openShortcutSettings: openShortcutSettings, openAccountSettings: openAccountSettings, pinPending: pinPending, installHelp: installHelp, isViaPin: isViaPin,
     isAdminSession: isAdminSession, isAdminProxy: isAdminProxy, proxyBanner: proxyBanner, openSupportChat: openSupportChat, watchSupport: watchSupport
   };
 })(window);

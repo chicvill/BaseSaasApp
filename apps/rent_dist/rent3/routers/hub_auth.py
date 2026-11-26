@@ -3,7 +3,7 @@ apps/rent_dist/rent3/routers/hub_auth.py — 포털 통합 로그인 · 관리�
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from core.errors import Conflict, DomainError, NotFound
 from apps.rent_dist._rent3_core import (
     Admin,
     Building,
+    Contract,
     CoSignSession,
     Lessor,
     Tenant,
@@ -30,7 +31,9 @@ from apps.rent_dist._rent3_core import (
     quicklogin as ql,
     ratelimit,
     support as sup,
+    validate_email_format,
 )
+from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core.authz import (
     issue_claims_token,
     lessor_token,
@@ -96,6 +99,18 @@ class PasswordResetReq(BaseModel):
     code: str = ""
     new_password: str = ""
     proof: str = ""      # 임대인(본인인증 이력이 없는 기존 계정): 사업자등록번호 또는 계좌번호 끝 4자리 이상
+
+
+class AccountProfileReq(BaseModel):
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    account_number: Optional[str] = None
+
+
+class ChangePasswordReq(BaseModel):
+    current_password: str
+    new_password: str
+    revoke_shortcuts: bool = False
 
 
 def _admin_login_response(admin: Any, core_u: Any, target_hint: str, mfa_ok: bool) -> Dict[str, Any]:
@@ -486,6 +501,203 @@ def portal_logout(request: Request) -> Dict[str, Any]:
     """로그아웃: 이 토큰을 폐기한다(만료 전에도 더는 쓸 수 없다)."""
     revoke_token(raw_token(request))
     return {"success": True, "message": "로그아웃되었습니다."}
+
+
+def _resolve_self_account(claims: Dict[str, Any]) -> tuple[str, Any]:
+    """토큰 클레임으로 로그인 본인(관리인·임대인·임차인) 계정을 찾는다."""
+    ensure_pool_seeded()
+    role = str(claims.get("r") or "").lower()
+    raw_u = str(claims.get("u") or "")
+    uid = raw_u.split(":", 1)[1] if ":" in raw_u else raw_u
+    branch = str(claims.get("b") or "")
+    if role in ("admin", "superadmin"):
+        acct = Admin.first(username=uid) or (Admin.all()[0] if Admin.all() else None)
+        if acct is None:
+            raise NotFound("관리인 계정을 찾을 수 없습니다.")
+        return "admin", acct
+    if role in ("lessor", "branch_admin"):
+        acct = Lessor.get(uid) or Lessor.first(username=uid) or (Lessor.first(branch=branch) if branch else None)
+        if acct is None:
+            raise NotFound("임대인 계정을 찾을 수 없습니다.")
+        return "lessor", acct
+    if role in ("tenant", "prospect"):
+        acct = Tenant.get(uid)
+        if acct is None:
+            raise NotFound("임차인 계정을 찾을 수 없습니다.")
+        return "tenant", acct
+    raise Unauthorized("로그인 정보를 확인할 수 없습니다.")
+
+
+def _verify_self_password(role: str, acct: Any, raw_pw: str, demo: bool) -> bool:
+    """로그인 검증과 동일한 규칙으로 현재 비밀번호를 확인한다."""
+    pw = (raw_pw or "").strip()
+    if not pw:
+        return False
+    if role == "admin":
+        ensure_default_admins()
+        core_u = CoreUser.by_username(acct.username)
+        admin_pw = acct.password or "0202"
+        return (core_u.check_password(pw) if core_u else False) or (
+            demo and (pw in ("0202", "1212") or pw == admin_pw)
+        )
+    custom_pw = acct.password
+    phone_tail = _digits(acct.phone)[-4:] if len(_digits(acct.phone)) >= 4 else ""
+    stored_ok = bool(custom_pw) and custom_pw != "1212" and (demo or pw.lower() not in pwd.WEAK) and pwd.verify(custom_pw, pw)
+    if role == "lessor":
+        ensure_default_admins()
+        core_u = CoreUser.by_username(acct.username) if acct.username else None
+        if core_u is not None and core_u.check_password(pw):
+            return True
+    return stored_ok or (
+        demo and (
+            pw == "1212"
+            or (bool(custom_pw) and not pwd.is_hashed(custom_pw) and pw == custom_pw)
+            or (bool(phone_tail) and pw == phone_tail)
+        )
+    )
+
+
+def _profile_payload(role: str, acct: Any, via_pin: bool) -> Dict[str, Any]:
+    readonly = isinstance(acct, Tenant) and acct.status == "MOVED_OUT"
+    role_ko = {"admin": "총괄 관리인", "lessor": "임대인", "tenant": "임차인"}.get(role, role)
+    return {
+        "success": True,
+        "role": role,
+        "role_label": role_ko,
+        "via_pin": via_pin,
+        "readonly": readonly,
+        "can_edit_account_number": role in ("lessor", "admin"),
+        "has_shortcuts": bool(getattr(acct, "quick_devices", None)),
+        "profile": {
+            "id": acct.id,
+            "username": getattr(acct, "username", "") or acct.id,
+            "name": acct.name,
+            "phone": acct.phone,
+            "email": acct.email,
+            "account_number": acct.account_number if role in ("lessor", "admin") else "",
+            "password_changed_at": getattr(acct, "password_changed_at", "") or "",
+        },
+    }
+
+
+@router.get("/auth/me")
+def get_my_account(request: Request) -> Dict[str, Any]:
+    """로그인한 본인의 개인정보(비밀번호·해시 제외)를 조회한다."""
+    claims = need_claims(request)
+    role, acct = _resolve_self_account(claims)
+    return _profile_payload(role, acct, via_pin=claims.get("m") == "pin")
+
+
+@router.post("/auth/me/profile")
+def update_my_profile(req: AccountProfileReq, request: Request) -> Dict[str, Any]:
+    """로그인한 본인의 연락처·이메일·(임대인/관리인) 수납 계좌번호를 수정한다. 간편 비밀번호(PIN) 로그인과 퇴실 조회 전용은 차단."""
+    claims = need_claims(request)
+    if claims.get("m") == "pin":
+        raise Unauthorized(
+            "간편 비밀번호로 로그인한 상태에서는 개인정보를 수정할 수 없습니다.",
+            hint="아이디·비밀번호로 다시 로그인해 주세요.",
+        )
+    role, acct = _resolve_self_account(claims)
+    if isinstance(acct, Tenant) and acct.status == "MOVED_OUT":
+        raise DomainError("퇴실 후 조회 전용 상태에서는 개인정보를 수정할 수 없습니다.")
+
+    if req.phone is not None:
+        phone_clean = req.phone.strip()
+        d = _digits(phone_clean)
+        if len(d) < 8:
+            raise DomainError("올바른 휴대폰 번호를 입력해 주세요.", hint="예: 010-1234-5678")
+        if role == "lessor":
+            dup = next((o for o in Lessor.all() if o.id != acct.id and _digits(o.phone) == d), None)
+            if dup is not None:
+                raise Conflict("이미 다른 임대인 계정에 등록된 휴대폰 번호입니다.")
+        elif role == "tenant":
+            dup = next((o for o in Tenant.all() if o.id != acct.id and o.status != "MOVED_OUT" and _digits(o.phone) == d), None)
+            if dup is not None:
+                raise Conflict("이미 다른 임차인 계정에 등록된 휴대폰 번호입니다.")
+        acct.phone = phone_clean
+
+    if req.email is not None:
+        em = req.email.strip()
+        if em and not validate_email_format(em):
+            raise DomainError("이메일 형식이 올바르지 않습니다.", hint="예: name@example.com")
+        acct.email = em
+
+    if req.account_number is not None and role in ("lessor", "admin"):
+        acct.account_number = req.account_number.strip()
+
+    acct.save(action="profile_updated_by_self", app_source="rent3_portal")
+
+    if isinstance(acct, Tenant):
+        for ct in Contract.find(id_tenant=acct.id):
+            if ct.status in ("ACTIVE", "SCHEDULED"):
+                changed = False
+                if req.phone is not None and ct.tenant_phone != acct.phone:
+                    ct.tenant_phone = acct.phone
+                    changed = True
+                if req.email is not None and ct.tenant_email != acct.email:
+                    ct.tenant_email = acct.email
+                    changed = True
+                if changed:
+                    ct.save(action="tenant_profile_synced", app_source="rent3_portal")
+
+    return {**_profile_payload(role, acct, via_pin=False), "message": "내 정보를 저장했습니다."}
+
+
+@router.post("/auth/me/password")
+def change_my_password(req: ChangePasswordReq, request: Request) -> Dict[str, Any]:
+    """로그인한 본인의 비밀번호를 현재 비밀번호 확인 후 변경한다. 임대인·관리인은 CoreUser 해시도 함께 갱신."""
+    claims = need_claims(request)
+    if claims.get("m") == "pin":
+        raise Unauthorized(
+            "간편 비밀번호로 로그인한 상태에서는 비밀번호를 변경할 수 없습니다.",
+            hint="아이디·비밀번호로 다시 로그인해 주세요.",
+        )
+    role, acct = _resolve_self_account(claims)
+    if isinstance(acct, Tenant) and acct.status == "MOVED_OUT":
+        raise DomainError("퇴실 후 조회 전용 상태에서는 비밀번호를 변경할 수 없습니다.")
+
+    keys = [f"u:{acct.id}", f"ip:{_client_ip(request)}"]
+    ratelimit.check("pwchange", keys)
+    if not _verify_self_password(role, acct, req.current_password, demo_login_allowed(request)):
+        ratelimit.fail("pwchange", keys)
+        raise Unauthorized(
+            "현재 비밀번호가 올바르지 않습니다.",
+            hint="현재 로그인에 사용하는 비밀번호를 다시 확인해 주세요.",
+        )
+
+    new_pw = (req.new_password or "").strip()
+    pwd.validate_new_password(new_pw)
+    if new_pw == (req.current_password or "").strip():
+        raise DomainError("새 비밀번호는 현재 비밀번호와 다르게 입력해 주세요.")
+
+    now = now_iso()
+    if role in ("admin", "lessor") and getattr(acct, "username", ""):
+        ensure_default_admins()
+        core_u = CoreUser.by_username(acct.username)
+        if core_u is not None:
+            core_u.set_password(new_pw).save("password_changed_by_self")
+
+    acct.password = pwd.hash_password(new_pw)
+    if hasattr(acct, "password_changed_at"):
+        acct.password_changed_at = now
+    if hasattr(acct, "activated_at") and not acct.activated_at:
+        acct.activated_at = now
+    acct.save(action="password_changed_by_self", app_source="rent3_portal")
+
+    revoked = False
+    if req.revoke_shortcuts and isinstance(acct, (Lessor, Tenant)):
+        ql.revoke_all(acct)
+        revoked = True
+
+    ratelimit.clear("pwchange", keys[:1])
+    uname = (getattr(acct, "username", "") or acct.id).strip().lower()
+    ratelimit.clear("login", [f"u:{uname}"])
+    return {
+        "success": True,
+        "password_changed_at": now,
+        "shortcuts_revoked": revoked,
+        "message": "비밀번호를 변경했습니다. 다음 로그인부터 새 비밀번호를 사용해 주세요.",
+    }
 
 
 def _find_account(identifier: str):

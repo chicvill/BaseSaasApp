@@ -66,6 +66,7 @@
   };
   bindMenu("btnMenuListings", () => { closeDrawer(); setMode("listings"); });
   bindMenu("btnSupportChat", () => { closeDrawer(); R3Shell.openSupportChat(); });
+  bindMenu("btnMyAccount", () => { closeDrawer(); R3Shell.openAccountSettings(); });
   bindMenu("btnShortcut", () => { closeDrawer(); R3Shell.openShortcutSettings(); });
   bindMenu("btnLessorInvite", () => T.openLessorInviteModal());
   bindMenu("btnBizInfo", () => T.openTenantBizInfoModal().catch(Bass.showError));

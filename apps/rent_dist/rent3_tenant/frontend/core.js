@@ -41,6 +41,7 @@
       { label: "🔑 도어락 · 차량", id: "btnSvcDoor" },
     ] },
     { title: "내 설정", items: [
+      { label: "🔐 내 정보 · 비밀번호 변경", id: "btnMyAccount", userOnly: true },
       { label: "🏢 사업자 정보 · 세금계산서 요청", id: "btnBizInfo", userOnly: true },
       { label: "📲 바로가기 · 간편 비밀번호", id: "btnShortcut", userOnly: true },
       { label: "🛡️ 원격 지원 허용 설정", id: "btnSupportSetting", userOnly: true },

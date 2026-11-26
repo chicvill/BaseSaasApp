@@ -3548,7 +3548,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
         self.assertEqual(ids, {"btnSvcHome", "btnSvcCert", "btnSvcPaper", "btnSvcExpiry", "btnSvcCheckout", "btnSvcAs", "btnSvcDoor",
-                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo", "btnLessorInvite"})
+                               "btnSupportChat", "btnMenuListings", "btnSupportSetting", "btnSvcMsg", "btnShortcut", "btnBizInfo", "btnLessorInvite", "btnMyAccount"})
         for needle in ('href: "/rent3_contract/?role=tenant"', 'href: "manual.html"', 'href: "/rent3_lessor/", adminOnly: true',
                        'href: "/rent3_admin/", adminOnly: true', 'href: "/rent3/pool.html", adminOnly: true'):
             self.assertIn(needle, menu, needle)
@@ -10126,6 +10126,122 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr = Lessor.get(lsr.id)
             lsr.room_limit = old_limit
             lsr.save(action="t")
+
+    def test_162_self_account_profile_and_password_change(self):
+        """162. 로그인 본인 개인정보(연락처·이메일·수납계좌) 수정 & 비밀번호 변경 (임대인·임차인·관리인 공용, PIN/퇴실 차단, 활성 계약 동기화)."""
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Contract, Lessor, Tenant, passwords as pwd, quicklogin as ql
+        from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
+        c = self.client
+        lsr = Lessor.for_branch("main")
+        t201 = Tenant.first(branch="main", room_no="201", status="ACTIVE")
+        ct201 = Contract.first(id_tenant=t201.id, status="ACTIVE")
+        orig_lsr = (lsr.phone, lsr.email, lsr.account_number, lsr.password, lsr.password_changed_at)
+        orig_t = (t201.phone, t201.email, t201.password, t201.password_changed_at, t201.status)
+        orig_ct = (ct201.tenant_phone, ct201.tenant_email) if ct201 else ("", "")
+        try:
+            # 1) 임대인: GET /auth/me & 개인정보(연락처·이메일·수납계좌) 수정
+            lh = {"Authorization": f"Bearer {lessor_token(lsr)}"}
+            me = c.get("/api/rent3/pool/auth/me", headers=lh)
+            self.assertEqual(me.status_code, 200, me.text)
+            self.assertEqual(me.json()["role"], "lessor")
+            self.assertTrue(me.json()["can_edit_account_number"])
+            self.assertNotIn("password", me.json()["profile"])
+
+            bad_em = c.post("/api/rent3/pool/auth/me/profile", headers=lh, json={"email": "not-an-email"})
+            self.assertEqual(bad_em.status_code, 400)
+            ok_lp = c.post("/api/rent3/pool/auth/me/profile", headers=lh, json={
+                "phone": "010-9000-1162", "email": "chic162@example.com", "account_number": "신한 110-162-999999",
+            })
+            self.assertEqual(ok_lp.status_code, 200, ok_lp.text)
+            lsr_now = Lessor.get(lsr.id)
+            self.assertEqual((lsr_now.phone, lsr_now.email, lsr_now.account_number),
+                             ("010-9000-1162", "chic162@example.com", "신한 110-162-999999"))
+
+            # 2) 임차인: 개인정보 수정 → 활성 계약(tenant_phone/email) 자동 동기화 + 중복 전화번호 차단
+            th = {"Authorization": f"Bearer {tenant_token(t201)}"}
+            other_t = next(x for x in Tenant.all() if x.id != t201.id and x.status == "ACTIVE" and x.phone)
+            dup = c.post("/api/rent3/pool/auth/me/profile", headers=th, json={"phone": other_t.phone})
+            self.assertEqual(dup.status_code, 409)
+            ok_tp = c.post("/api/rent3/pool/auth/me/profile", headers=th, json={"phone": "010-8000-2162", "email": "t201_162@example.com"})
+            self.assertEqual(ok_tp.status_code, 200, ok_tp.text)
+            self.assertEqual(Tenant.get(t201.id).phone, "010-8000-2162")
+            if ct201:
+                ct_now = Contract.get(ct201.id)
+                self.assertEqual((ct_now.tenant_phone, ct_now.tenant_email), ("010-8000-2162", "t201_162@example.com"))
+
+            # 3) 비밀번호 변경: 운영 모드(RENT3_DEMO_LOGIN=0) 기준 현재 비번 검증·규칙 검증·해시 저장·새 비번 로그인 확인
+            t_cur = Tenant.get(t201.id)
+            t_cur.password = pwd.hash_password("OldPass162!")
+            t_cur.save("t162_seed")
+            with mock.patch.dict(os.environ, {"RENT3_DEMO_LOGIN": "0"}):
+                wrong = c.post("/api/rent3/pool/auth/me/password", headers=th, json={"current_password": "Wrong9999", "new_password": "NewPass162!"})
+                self.assertEqual(wrong.status_code, 401)
+                weak = c.post("/api/rent3/pool/auth/me/password", headers=th, json={"current_password": "OldPass162!", "new_password": "12345678"})
+                self.assertEqual(weak.status_code, 400)
+                same = c.post("/api/rent3/pool/auth/me/password", headers=th, json={"current_password": "OldPass162!", "new_password": "OldPass162!"})
+                self.assertEqual(same.status_code, 400)
+                ql.set_pin(Tenant.get(t201.id), "2468")
+                ql.new_device(Tenant.get(t201.id), "시험폰")
+                changed = c.post("/api/rent3/pool/auth/me/password", headers=th, json={
+                    "current_password": "OldPass162!", "new_password": "NewPass162!", "revoke_shortcuts": True,
+                })
+                self.assertEqual(changed.status_code, 200, changed.text)
+                self.assertTrue(changed.json()["shortcuts_revoked"])
+                t_after = Tenant.get(t201.id)
+                self.assertTrue(pwd.is_hashed(t_after.password))
+                self.assertTrue(pwd.verify(t_after.password, "NewPass162!"))
+                self.assertEqual(t_after.quick_devices, [])
+                # 옛 비번 로그인 실패, 새 비번 로그인 성공
+                r_old = c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH, json={"identifier": "010-8000-2162", "password": "OldPass162!"})
+                self.assertEqual(r_old.status_code, 401)
+                r_new = c.post("/api/rent3/pool/auth/login", headers=self.NOAUTH, json={"identifier": "010-8000-2162", "password": "NewPass162!"})
+                self.assertEqual(r_new.status_code, 200, r_new.text)
+
+            # 4) 간편 비밀번호(PIN) 로그인 토큰 차단 & 퇴실 조회 전용 차단 (authz.pin_guard / moved_out_guard)
+            ql.new_device(Tenant.get(t201.id), "핀폰")
+            dev_id = Tenant.get(t201.id).quick_devices[0]["id"]
+            pin_h = {"Authorization": f"Bearer {tenant_token(Tenant.get(t201.id), via_pin=True, device_id=dev_id)}"}
+            pin_me = c.get("/api/rent3/pool/auth/me", headers=pin_h)
+            self.assertEqual(pin_me.status_code, 200, pin_me.text)
+            self.assertTrue(pin_me.json()["via_pin"])
+            self.assertEqual(c.post("/api/rent3/pool/auth/me/profile", headers=pin_h, json={"email": "x@y.com"}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3/pool/auth/me/password", headers=pin_h, json={"current_password": "NewPass162!", "new_password": "NewPass999!"}).status_code, 403)
+
+            t_mo = Tenant.get(t201.id)
+            t_mo.status = "MOVED_OUT"
+            t_mo.save("t162_mo")
+            mo_me = c.get("/api/rent3/pool/auth/me", headers=th)
+            self.assertEqual(mo_me.status_code, 200, mo_me.text)
+            self.assertTrue(mo_me.json()["readonly"])
+            self.assertEqual(c.post("/api/rent3/pool/auth/me/profile", headers=th, json={"email": "x@y.com"}).status_code, 403)
+            self.assertEqual(c.post("/api/rent3/pool/auth/me/password", headers=th, json={"current_password": "NewPass162!", "new_password": "NewPass999!"}).status_code, 403)
+
+            # 5) 관리인: GET /auth/me 확인 + 프론트엔드 메뉴/공용 모달 연결 확인
+            ah = self._login("admin")
+            ame = c.get("/api/rent3/pool/auth/me", headers=ah)
+            self.assertEqual(ame.status_code, 200, ame.text)
+            self.assertEqual(ame.json()["role"], "admin")
+            with open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8") as f:
+                shell = f.read()
+            self.assertIn("openAccountSettings", shell)
+            self.assertIn("btnMyAccount", self._read_lessor_js())
+            self.assertIn("btnMyAccount", self._read_tenant_js())
+            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8") as f:
+                aidx = f.read()
+            self.assertIn("btnMyAccount", aidx)
+            self.assertIn("/shared/ui/r3_shell.js", aidx)
+        finally:
+            lsr_r = Lessor.get(lsr.id)
+            lsr_r.phone, lsr_r.email, lsr_r.account_number, lsr_r.password, lsr_r.password_changed_at = orig_lsr
+            lsr_r.save("t162_restore")
+            t_r = Tenant.get(t201.id)
+            t_r.phone, t_r.email, t_r.password, t_r.password_changed_at, t_r.status = orig_t
+            t_r.save("t162_restore")
+            if ct201:
+                ct_r = Contract.get(ct201.id)
+                ct_r.tenant_phone, ct_r.tenant_email = orig_ct
+                ct_r.save("t162_restore")
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor

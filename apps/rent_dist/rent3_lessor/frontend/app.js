@@ -128,6 +128,7 @@
     };
     bind("btnSupportChat", () => R3Shell.openSupportChat());
     bind("btnSupportSetting", () => R3Shell.openSupportSettings());
+    bind("btnMyAccount", () => R3Shell.openAccountSettings());
     bind("btnShortcut", () => R3Shell.openShortcutSettings());
     bind("btnFullLogin", () => fullLogin());
     bind("btnEditBuilding", () => L.showBuildingModal());
