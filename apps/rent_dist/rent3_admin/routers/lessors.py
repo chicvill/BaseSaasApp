@@ -230,7 +230,7 @@ def verify_franchise_registry(lessor_id: str, req: RegistryVerifyReq, admin=Depe
     lessor.franchise_docs = {
         **docs,
         "admin_verification": {
-            "verified": bool(req.verified),
+            "verified": req.verified,
             "issue_number": num,
             "matches_ai_number": bool(ai_num) and re.sub(r"\D", "", ai_num) == re.sub(r"\D", "", num),
             "note": req.note.strip(),
@@ -293,7 +293,7 @@ def verify_franchise_bizreg(lessor_id: str, req: BizRegVerifyReq, admin=Depends(
 
     ext_no = str(chk.get("business_number") or "")
     biz["admin_verification"] = {
-        "verified": bool(req.verified),
+        "verified": req.verified,
         "business_number": fmt_no,
         "hometax_status": ht_status,
         "matches_extracted_number": bool(ext_no) and re.sub(r"\D", "", ext_no) == re.sub(r"\D", "", fmt_no),

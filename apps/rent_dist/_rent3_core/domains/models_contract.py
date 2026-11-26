@@ -429,8 +429,8 @@ class Contract(PoolObj):
           그 기간은 (경과 일수 × 월 임차료) ÷ 30 만 추가로 징수한다(월 임차료 = 월세 + 관리비 + 부가세).
         - unpaid_now: 지금 달까지의 미납(부담 범위 안), early_amount: 지금 달 이후 ~ 마지막 날까지 아직 안 낸 금액(일할 포함, 선납분은 제외)."""
         today_ym = current_ym()
-        monthly = (0 if self.lease_type == "전세" else int(self.monthly_rent or 0)) + int(self.maintenance_fee or 0) \
-            + (int(self.compute_vat()) if (self.vat_target and self.vat_separate) else 0)
+        monthly = (0 if self.lease_type == "전세" else (self.monthly_rent or 0)) + (self.maintenance_fee or 0) \
+            + (self.compute_vat() if (self.vat_target and self.vat_separate) else 0)
         out: Dict[str, Any] = {"end_date": self.expiry_date or "", "last_liable_date": self.expiry_date or "", "reason": "EXPIRY", "new_tenant_move_in": "",
                                "unpaid_now": int(self.ledger()["total_unpaid"]), "early_amount": 0, "months": [], "full_cycles": 0,
                                "partial_from": "", "partial_days": 0, "partial_amount": 0, "monthly_total": monthly}

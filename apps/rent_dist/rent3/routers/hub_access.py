@@ -193,7 +193,7 @@ def shortcut_pay_allow(device_id: str, req: PayAllowReq, request: Request) -> Di
     if req.allow:
         keys = [f"u:{t.id}", f"ip:{_client_ip(request)}"]
         ratelimit.check("payallow", keys)
-        if not _lessor_pw_ok(t, str(req.password or ""), demo_login_allowed(request)):
+        if not _lessor_pw_ok(t, req.password or "", demo_login_allowed(request)):
             ratelimit.fail("payallow", keys)
             raise Unauthorized("비밀번호가 맞지 않습니다.", hint="수납 허용은 아이디·비밀번호를 다시 확인한 뒤 켤 수 있습니다.")
         ratelimit.clear("payallow", keys)
@@ -334,7 +334,7 @@ def pin_login(req: PinLoginReq, request: Request) -> Dict[str, Any]:
         if lessor:
             raise Unauthorized("지금은 임대인 바로가기를 쓸 수 없습니다.", hint="아이디·비밀번호로 로그인해 주세요.")
         raise Unauthorized("현재 입주 중인 계정이 아니어서 바로가기를 쓸 수 없습니다.", hint="입주 중인 호실이 있을 때만 쓸 수 있습니다.")
-    if not t.pin_hash or not pwd.verify(t.pin_hash, str(req.pin or "")):
+    if not t.pin_hash or not pwd.verify(t.pin_hash, req.pin or ""):
         ratelimit.fail("pinlogin", keys)
         info = ql.record_failure(t, d["id"])
         if info["locked"]:

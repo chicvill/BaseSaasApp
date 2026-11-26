@@ -327,7 +327,7 @@ class ExpiryRenewalCheck(PoolObj):
         dep = int(draft.get("deposit", ct.deposit)) if proposed_deposit is None else proposed_deposit
         rent = int(draft.get("monthly_rent", ct.monthly_rent)) if proposed_monthly_rent is None else proposed_monthly_rent
         maint = int(draft.get("maintenance_fee", ct.maintenance_fee)) if proposed_maintenance_fee is None else proposed_maintenance_fee
-        clean = (int(draft["cleaning_fee"]) if draft.get("cleaning_fee") is not None else int(ct.cleaning_fee or 0)) if proposed_cleaning_fee is None else int(proposed_cleaning_fee)
+        clean = (int(draft["cleaning_fee"]) if draft.get("cleaning_fee") is not None else (ct.cleaning_fee or 0)) if proposed_cleaning_fee is None else proposed_cleaning_fee
         months = max(1, proposed_term_months or 12)
 
         # 주택임대차보호법 제7조 법정 5% 상한 검증 (초과 시 Mismatch 422 발생)

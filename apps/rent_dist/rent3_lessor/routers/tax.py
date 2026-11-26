@@ -270,7 +270,7 @@ def create_outlay(req: OutlayCreateReq):
         vat_deductible=req.vat_deductible,
         evidence_type=req.evidence_type or "TAX_INVOICE",
         usage_scope=(req.usage_scope or "COMMON").strip().upper(),
-        reference_only=bool(req.reference_only),
+        reference_only=req.reference_only,
         **({"expense_date": req.expense_date} if req.expense_date else {}),
     ).save(action="outlay_recorded", app_source=APP_SRC)
     return {
@@ -299,13 +299,13 @@ def mgmt_fee_basis(branch: str = "main", year: Optional[int] = None, exclude: st
     items: list[dict[str, Any]] = []
     for code, label in EXPENSE_CATEGORIES.items():
         rows = [o for o in outs if o.category == code]
-        items.append({"category": code, "label": label, "amount": sum(int(o.amount or 0) for o in rows), "count": len(rows), "included": code not in excluded})
+        items.append({"category": code, "label": label, "amount": sum(o.amount or 0 for o in rows), "count": len(rows), "included": code not in excluded})
     total = sum(int(i["amount"]) for i in items if i["included"])
     all_rooms = [r for r in (bldg.rooms() if bldg else [])]
     tax_rooms = [r for r in all_rooms if bldg and bldg.is_income_tax_room(r.room_no)]
     n = len(tax_rooms)
     per_year = round(total / n) if n else 0
-    fees = [int(r.maintenance_fee or 0) for r in tax_rooms]
+    fees = [r.maintenance_fee or 0 for r in tax_rooms]
     return {
         "success": True,
         "year": yr,
@@ -316,8 +316,8 @@ def mgmt_fee_basis(branch: str = "main", year: Optional[int] = None, exclude: st
         "all_room_count": len(all_rooms),
         "tax_rooms_configured": bool(bldg and bldg.clean_income_tax_rooms()),
         "per_room_year": per_year,
-        "per_room_month": int(round(per_year / 12)),
-        "charged_fee_avg": int(round(sum(fees) / len(fees))) if fees else 0,
+        "per_room_month": round(per_year / 12),
+        "charged_fee_avg": round(sum(fees) / len(fees)) if fees else 0,
         "note": "계산식: 포함한 항목의 연 합계 ÷ 종합소득세 적용 호실 수 = 호실당 연 금액, 그것을 12로 나누면 월 금액입니다. 참고용 자료이며 세무 신고는 세무사와 확인하세요.",
     }
 

@@ -86,9 +86,9 @@ def set_fee_plan(lessor_id: str, req: FeePlanReq):
     lessor = Lessor.require(lessor_id)
     if req.app_fee < 0 or req.app_fee > 10_000_000:
         raise DomainError("월 가맹비는 0원 이상 1,000만 원 이하로 입력해 주세요.")
-    lessor.app_fee = int(req.app_fee)
+    lessor.app_fee = req.app_fee
     lessor.save(action="franchise_fee_plan_changed", app_source=APP_SRC)
-    return {"success": True, "message": f"{lessor.name} 임대인의 월 가맹비를 {int(req.app_fee):,}원(부가세 포함)으로 정했습니다. 다음 청구부터 적용됩니다."}
+    return {"success": True, "message": f"{lessor.name} 임대인의 월 가맹비를 {req.app_fee:,}원(부가세 포함)으로 정했습니다. 다음 청구부터 적용됩니다."}
 
 
 @router.post("/fees/{fee_id}/paid", dependencies=ADMIN_ONLY)

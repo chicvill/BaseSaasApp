@@ -177,7 +177,7 @@ def edit_contract(req: ContractEditReq):
             raise DomainError("청소비는 0원 이상이어야 합니다.")
         if req.cleaning_fee > req.deposit:
             raise DomainError("퇴실 청소비가 보증금보다 클 수 없습니다.", hint="청소비는 퇴실 때 보증금에서 공제하는 금액입니다.")
-        ct.cleaning_fee = int(req.cleaning_fee)
+        ct.cleaning_fee = req.cleaning_fee
     if req.move_in_date:
         ct.move_in_date = req.move_in_date
     if req.expiry_date:
@@ -258,7 +258,7 @@ def tenant_bizreg(req: TenantBizRegReq):
         owner_id = tenant.id if tenant else ct.id
         saved = fr.save_bizreg_file(owner_id, req.attachment_data_url)
         if req.consent:
-            used = int(getattr(tenant, "biz_ai_calls", 0) or 0) if tenant else 0
+            used = (tenant.biz_ai_calls or 0) if tenant else 0
             if used >= 6:
                 raise DomainError("AI 읽기 횟수 한도를 넘었습니다.", hint="사업자등록번호·상호·대표자를 직접 입력해 주세요.")
             binary, mime = registry_ai.decode_data_url(req.attachment_data_url)
@@ -315,7 +315,7 @@ def tenant_bizreg(req: TenantBizRegReq):
             "business_address": ct.tenant_business_address,
             "email": ct.tenant_email,
         },
-        "vat_target": bool(ct.vat_target),
+        "vat_target": ct.vat_target,
         "file_saved": bool(saved),
     }
 

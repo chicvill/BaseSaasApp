@@ -394,11 +394,11 @@ def confirm_transfer_notice(notice_id: str, req: TransferConfirmReq, request: Re
     """임대인이 통장에서 입금을 확인한 뒤 수납으로 반영한다(선입선출 수납)."""
     ensure_pool_seeded()
     n = _notice_of(notice_id, req.branch)
-    pc = _pin_pay_gate(request, int(req.amount or n.amount))
+    pc = _pin_pay_gate(request, req.amount or n.amount)
     res = FifoPaymentEngine.collect(
         branch=n.branch,
         room_no=n.room_no,
-        amount=int(req.amount or n.amount),
+        amount=req.amount or n.amount,
         payer_name=n.tenant_name,
         paid_date=req.paid_date,
         method="TRANSFER",

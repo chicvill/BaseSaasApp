@@ -122,7 +122,7 @@ def list_lessor_accounts():
             "activated": cn.activated(lsr),
             "password_changed_at": lsr.password_changed_at or lsr.activated_at,
             "days_since_change": age,
-            "due_6m": bool(lsr.status == "ACTIVE" and age is not None and age >= inv.LESSOR_REMIND_DAYS),
+            "due_6m": lsr.status == "ACTIVE" and age is not None and age >= inv.LESSOR_REMIND_DAYS,
             "invite_pending": inv.status(lsr)["pending"],
             "password_remind_sent_at": lsr.password_remind_sent_at,
         })

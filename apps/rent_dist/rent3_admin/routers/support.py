@@ -129,7 +129,7 @@ def support_phone_intake(req: PhoneIntakeReq, request: Request):
     """전화로 요청받은 경우: 사유 분류와 접수 메모를 지원 채팅에 '[전화 요청 접수]'로 남긴다."""
     u = sup.user_by_thread(req.user)
     m = sup.phone_intake(u, _admin_name(request), req.category, req.memo)
-    ok = bool(cs.support_allowed(u))
+    ok = cs.support_allowed(u)
     return {
         "success": True,
         "allowed": ok,

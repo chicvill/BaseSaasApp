@@ -93,7 +93,7 @@ def _pin_pay_gate(request: Request, amount: int) -> Optional[Dict[str, Any]]:
     c = claims_from(request) or {}
     if c.get("m") != "pin":
         return None
-    ql.pin_pay_gate(c, int(amount))
+    ql.pin_pay_gate(c, amount)
     return c
 
 

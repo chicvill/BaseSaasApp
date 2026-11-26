@@ -261,11 +261,11 @@ def _ledger_diffs(ct: Contract, sess: CoSignSession) -> List[Dict[str, Any]]:
     """
     t = sess.terms or {}
     checks = [
-        ("deposit", "보증금", int(t.get("deposit", ct.deposit)), int(ct.deposit)),
-        ("monthly_rent", "월 임차료", int(t.get("monthly_rent", ct.monthly_rent)), int(ct.monthly_rent)),
-        ("maintenance_fee", "월 관리비", int(t.get("maintenance_fee", ct.maintenance_fee)), int(ct.maintenance_fee)),
-        ("contract_deposit", "계약금", int(t.get("contract_deposit", ct.contract_deposit)), int(ct.contract_deposit)),
-        ("lease_term_months", "임대차 개월 수", int(t.get("lease_term_months", ct.lease_term_months)), int(ct.lease_term_months)),
+        ("deposit", "보증금", int(t.get("deposit", ct.deposit)), ct.deposit),
+        ("monthly_rent", "월 임차료", int(t.get("monthly_rent", ct.monthly_rent)), ct.monthly_rent),
+        ("maintenance_fee", "월 관리비", int(t.get("maintenance_fee", ct.maintenance_fee)), ct.maintenance_fee),
+        ("contract_deposit", "계약금", int(t.get("contract_deposit", ct.contract_deposit)), ct.contract_deposit),
+        ("lease_term_months", "임대차 개월 수", int(t.get("lease_term_months", ct.lease_term_months)), ct.lease_term_months),
         ("lease_type", "임대 유형", t.get("lease_type", ct.lease_type), ct.lease_type),
         ("pay_timing", "납부 시기", t.get("pay_timing", ct.pay_timing), ct.pay_timing),
         ("move_in_date", "입주일", t.get("move_in_date") or ct.move_in_date, ct.move_in_date),

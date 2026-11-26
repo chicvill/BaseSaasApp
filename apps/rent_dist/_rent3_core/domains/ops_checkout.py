@@ -130,8 +130,8 @@ class CheckOutSettlement(PoolObj):
 
         ct = Contract.require(room.active_contract_id)
         # 청소비: 계약서에 퇴실 청소비를 부담하기로 약정한 경우에만, 약정한 금액 이내로 보증금에서 공제한다(약정 없으면 0원).
-        agreed = max(0, int(ct.cleaning_fee or 0))
-        cleaning_fee = agreed if cleaning_fee is None else min(max(0, int(cleaning_fee)), agreed)
+        agreed = max(0, ct.cleaning_fee or 0)
+        cleaning_fee = agreed if cleaning_fee is None else min(max(0, cleaning_fee), agreed)
         liab = ct.checkout_liability(room)            # 만기 전 퇴실이면 만기일(또는 새 임차인 입주 전)까지의 월세도 이전 임차인이 부담한다
         unpaid = int(liab["unpaid_now"])
         early = int(liab["early_amount"])
@@ -141,15 +141,15 @@ class CheckOutSettlement(PoolObj):
         rent_prorated_auto = partial
         for label, v in (("미납 임차료", unpaid_rent), ("일할 계산 임차료", prorated_rent), ("전기 요금", utility_electric), ("수도 요금", utility_water),
                          ("가스 요금", utility_gas), ("기타 공과금", utility_other), ("파손 복구비", damage_restoration_fee)):
-            if v is not None and int(v) < 0:
+            if v is not None and v < 0:
                 raise DomainError(f"{label}은(는) 0원 이상이어야 합니다.")
-        rent_unpaid = rent_unpaid_auto if unpaid_rent is None else int(unpaid_rent)
-        rent_prorated = rent_prorated_auto if prorated_rent is None else int(prorated_rent)
-        u_el, u_wa, u_ga, u_ot = int(utility_electric or 0), int(utility_water or 0), int(utility_gas or 0), int(utility_other or 0)
-        if int(utility_settlement or 0) > 0 and not (u_el or u_wa or u_ga or u_ot):      # 예전 방식(공과금 한 칸)은 '기타'로 받는다
-            u_ot = int(utility_settlement)
+        rent_unpaid = rent_unpaid_auto if unpaid_rent is None else unpaid_rent
+        rent_prorated = rent_prorated_auto if prorated_rent is None else prorated_rent
+        u_el, u_wa, u_ga, u_ot = utility_electric or 0, utility_water or 0, utility_gas or 0, utility_other or 0
+        if (utility_settlement or 0) > 0 and not (u_el or u_wa or u_ga or u_ot):      # 예전 방식(공과금 한 칸)은 '기타'로 받는다
+            u_ot = utility_settlement
         utility_total = u_el + u_wa + u_ga + u_ot
-        total_deduct = rent_unpaid + rent_prorated + utility_total + cleaning_fee + int(damage_restoration_fee or 0)
+        total_deduct = rent_unpaid + rent_prorated + utility_total + cleaning_fee + (damage_restoration_fee or 0)
         refund = max(0, ct.deposit - total_deduct)
         shortfall = max(0, total_deduct - ct.deposit)
 
@@ -163,7 +163,7 @@ class CheckOutSettlement(PoolObj):
             liability_reason=liab["reason"] if early else "", shortfall_amount=shortfall,
             early_partial_days=int(liab["partial_days"]) if early else 0, early_partial_amount=int(liab["partial_amount"]) if early else 0,
             utility_settlement=utility_total, cleaning_fee=cleaning_fee, cleaning_fee_agreed=agreed,
-            damage_restoration_fee=int(damage_restoration_fee or 0), refund_amount=refund, inspection_notes=inspection_notes,
+            damage_restoration_fee=damage_restoration_fee or 0, refund_amount=refund, inspection_notes=inspection_notes,
             rent_unpaid_auto=rent_unpaid_auto, rent_unpaid=rent_unpaid, rent_prorated_auto=rent_prorated_auto, rent_prorated=rent_prorated,
             utility_electric=u_el, utility_water=u_wa, utility_gas=u_ga, utility_other=u_ot,
             edited_by_lessor=(rent_unpaid != rent_unpaid_auto or rent_prorated != rent_prorated_auto), tenant_checked_at="",
@@ -196,7 +196,7 @@ class CheckOutSettlement(PoolObj):
         if shortfall:
             extra_note += f"공제액이 보증금보다 {shortfall:,}원 많아 이 금액은 따로 정산해야 합니다. "
         items = [("미납 임차료", rent_unpaid), ("일할 계산 임차료", rent_prorated), ("청소비", cleaning_fee), ("미납 공과금(전기 %s·수도 %s·가스 %s·기타 %s)" % (f"{u_el:,}", f"{u_wa:,}", f"{u_ga:,}", f"{u_ot:,}"), utility_total),
-                 ("파손 복구비", int(damage_restoration_fee or 0))]
+                 ("파손 복구비", damage_restoration_fee or 0)]
         extra_note += "[명세] 임차보증금 %s원 − " % f"{ct.deposit:,}" + " − ".join(f"{k} {v:,}원" for k, v in items if v) + f" = 반환 예정액 {refund:,}원. "
         if fields["edited_by_lessor"]:
             extra_note += f"(임대인이 자동 계산값(미납 임차료 {rent_unpaid_auto:,}원·일할 임차료 {rent_prorated_auto:,}원)에서 수정했습니다.) "
@@ -220,12 +220,12 @@ class CheckOutSettlement(PoolObj):
 
     @staticmethod
     def _mask_account(acct: str) -> str:
-        digits = "".join(ch for ch in str(acct or "") if ch.isdigit())
+        digits = "".join(ch for ch in (acct or "") if ch.isdigit())
         return f"끝 4자리 {digits[-4:]}" if len(digits) >= 4 else "입력됨"
 
     @staticmethod
     def _norm(name: str) -> str:
-        return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", str(name or "")))
+        return re.sub(r"\s+", "", re.sub(r"\([^)]*\)", "", name or ""))
 
     def _chat(self, sender_role: str, sender_name: str, message: str, label: str = "", url: str = "", app_source: str = "rent3_checkout") -> None:
         DirectChat(branch=self.branch, id_room=self.id_room, room_no=self.room_no, sender_role=sender_role, sender_name=sender_name,
@@ -381,7 +381,7 @@ class CheckOutSettlement(PoolObj):
         self.status = "COMPLETED"
         self.completed_at = now_iso()
         self.received_at = self.completed_at
-        self.auto_confirmed = bool(auto)
+        self.auto_confirmed = auto
         self.save(action="checkout_completed_auto" if auto else "checkout_completed", app_source=app_source)
 
         ct = Contract.get(self.id_contract)

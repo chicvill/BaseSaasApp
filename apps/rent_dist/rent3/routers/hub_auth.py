@@ -417,7 +417,7 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     ratelimit.check("login", keys)
     try:
         out = _portal_role_login(req, request)
-    except (Unauthorized, DomainError, NotFound):
+    except DomainError:
         ratelimit.fail("login", keys)
         raise
     ratelimit.clear("login", keys[:1])
@@ -450,7 +450,7 @@ def portal_consent(req: ConsentReq) -> Dict[str, Any]:
     user = cs.find_user(kind, uid)
     if user is None:
         raise NotFound("계정을 찾을 수 없습니다.")
-    cs.record_consent(user, True, bool(req.agree_support))
+    cs.record_consent(user, True, req.agree_support)
     unrevoke_token(out.get("token", ""))
     return out
 

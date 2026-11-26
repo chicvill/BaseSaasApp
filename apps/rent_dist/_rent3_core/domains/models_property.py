@@ -244,7 +244,7 @@ class Room(PoolObj):
         ct.save(action="renewal_contract_activated", app_source=app_source)
         self.active_contract_id = ct.id
         self.deposit, self.monthly_rent, self.maintenance_fee = ct.deposit, ct.monthly_rent, ct.maintenance_fee
-        self.cleaning_fee = int(ct.cleaning_fee or 0)
+        self.cleaning_fee = ct.cleaning_fee or 0
         self.lease_type, self.pay_timing = ct.lease_type, ct.pay_timing
         self.pre_moveout_notice = False
         self.next_listing = {}
@@ -261,7 +261,7 @@ class Room(PoolObj):
         self.id_tenant = ct.id_tenant
         self.active_contract_id = ct.id
         self.deposit, self.monthly_rent, self.maintenance_fee = ct.deposit, ct.monthly_rent, ct.maintenance_fee
-        self.cleaning_fee = int(ct.cleaning_fee or 0)
+        self.cleaning_fee = ct.cleaning_fee or 0
         self.lease_type, self.pay_timing = ct.lease_type, ct.pay_timing
         self.pre_moveout_notice = False
         self.next_listing = {}
