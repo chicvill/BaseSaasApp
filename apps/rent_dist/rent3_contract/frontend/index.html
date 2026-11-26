@@ -40,21 +40,88 @@
     .step-pill.is-done { border-color: var(--ok); color: var(--ok); }
     .step-pill.is-now { background: hsl(258 90% 60% / .25); border-color: var(--primary); font-weight: 800; }
 
-    /* 단계 모달: 채팅방 위에서 필요할 때 여는 팝업 모달 */
-    .cm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .48);
-      display: flex; justify-content: center; align-items: flex-start; padding: 16px 12px 24px; overflow-y: auto; }
-    .ws-action-card { background: #ffffff; border: 1px solid #dbeafe; border-radius: 16px; padding: 12px 14px; margin: 10px 0 8px;
-      box-shadow: 0 4px 14px rgba(15, 23, 42, .05); }
+    /* 단계 모달: 채팅방 위에서 등기부등본·표준계약서를 좌우상하 스크롤로 보고 승인하는 모달 */
+    .cm-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(15, 23, 42, .56);
+      display: flex; justify-content: center; align-items: center; padding: 10px; }
+    .ws-action-card { background: #ffffff; border: 1px solid #dbeafe; border-radius: 14px; padding: 10px 12px; margin: 8px 0 8px;
+      box-shadow: 0 3px 10px rgba(15, 23, 42, .05); }
     .ws-action-card__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .ws-action-card__btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-    .cm-bundle { background: #ffffff; border: 1.5px solid #bfdbfe; border-radius: 16px; padding: 12px 14px; margin: 4px 0;
+    .ws-action-card__btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; }
+    .cm-bundle { background: #ffffff; border: 1.5px solid #bfdbfe; border-radius: 16px; padding: 12px 14px; margin: 6px 0;
       box-shadow: 0 3px 12px rgba(37, 99, 235, .08); }
     .cm-bundle__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; margin: 8px 0; font-size: 13px; }
     .cm-bundle__row { display: flex; justify-content: space-between; gap: 6px; padding: 4px 8px; background: #f8fafc; border-radius: 8px; }
     .step-pill { cursor: pointer; pointer-events: auto; }
-    .cm-card { width: 100%; max-width: 620px; background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b;
-      border-radius: 20px; padding: 18px 16px 20px; box-shadow: 0 18px 42px rgba(15, 23, 42, .16);
+    .cm-card { width: 100%; max-width: min(880px, 96vw); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;
+      background: #ffffff; border: 1px solid #e2e8f0; color: #1e293b;
+      border-radius: 20px; padding: 0; box-shadow: 0 18px 42px rgba(15, 23, 42, .22);
       transition: opacity .2s ease-in, transform .2s ease-in; }
+    .cm-modal-head { flex: none; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+      padding: 13px 16px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
+    .cm-scroll-hint { flex: none; padding: 7px 16px; background: #eff6ff; border-bottom: 1px solid #dbeafe;
+      color: #1e40af; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px; }
+    .cm-scroll-viewport { flex: 1 1 auto; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain; padding: 14px 16px 22px; }
+    /* 4방향(좌우·상하) 스크롤 문서 시트 (등기부등본 대조표 · 주택임대차 표준계약서 전문) */
+    .cm-doc-scroll-box { width: 100%; max-height: 48vh; overflow: auto; -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain; border: 1.5px solid #cbd5e1; border-radius: 12px; background: #f8fafc;
+      padding: 10px; margin: 10px 0 14px; }
+    .cm-std-sheet { min-width: 660px; background: #ffffff; color: #0f172a; border: 1px solid #94a3b8;
+      border-radius: 8px; padding: 16px 18px; line-height: 1.6; font-size: 13px; }
+    .cm-std-sheet__head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+      border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px; }
+    .cm-std-sheet__title { font-size: 16px; font-weight: 900; color: #0f172a; }
+    .cm-std-sheet__sub { font-size: 12.5px; color: #475569; margin-top: 2px; }
+    .cm-std-table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+    .cm-std-table th, .cm-std-table td { border: 1px solid #64748b; padding: 7px 9px; text-align: left; vertical-align: top; }
+    .cm-std-table th { background: #f1f5f9; width: 18%; white-space: nowrap; font-weight: 800; color: #1e293b; }
+    .cm-std-sheet__foot { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #94a3b8; text-align: center;
+      font-size: 13px; line-height: 1.75; }
+    /* 채팅창 내 당사자 헤더 & 앱 개입 스마트 계약 카드 */
+    .cg-party-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 10px 14px; border-radius: 14px; background: #ffffff; border: 1.5px solid #cbd5e1; margin-bottom: 8px; }
+    .cg-party-header__title { font-weight: 900; font-size: 15px; color: #0f172a; display: flex; align-items: center; gap: 6px; }
+    .cg-party-header__names { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; color: #1e293b; }
+    .cg-chat-stream { max-height: 60vh; min-height: 320px; overflow-y: auto; padding: 10px 10px 14px;
+      border-radius: 16px; border: 1px solid #cbd5e1; background: #f1f5f9; }
+    .cg-card { background: #ffffff; border: 1.5px solid #cbd5e1; border-left: 5px solid #64748b;
+      border-radius: 14px; padding: 12px 13px; margin: 8px 0; color: #0f172a;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, .05); }
+    .cg-card--active { border-color: #93c5fd; border-left-color: #2563eb; box-shadow: 0 4px 14px rgba(37, 99, 235, .12); }
+    .cg-card--done { border-color: #86efac; border-left-color: #16a34a; background: #f0fdf4; }
+    .cg-card__top { display: flex; justify-content: space-between; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+    .cg-card__tag { font-size: 12px; font-weight: 800; color: #1d4ed8; background: #dbeafe; padding: 3px 8px; border-radius: 999px; }
+    .cg-card--done .cg-card__tag { color: #15803d; background: #dcfce7; }
+    .cg-card__msg { font-size: 13.5px; line-height: 1.6; color: #0f172a; word-break: keep-all; }
+    .cg-check { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 9px 11px; border-radius: 10px; border: 1px solid #e2e8f0; background: #f8fafc;
+      margin-top: 6px; font-size: 13px; line-height: 1.45; }
+    .cg-check.is-actionable { cursor: pointer; border-color: #93c5fd; background: #eff6ff; }
+    .cg-check.is-checked { border-color: #86efac; background: #ecfdf5; color: #065f46; }
+    .cg-check__label { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .cg-check__hint { font-size: 12px; color: #64748b; }
+    .cg-check input[type="checkbox"] { width: 20px; height: 20px; accent-color: #16a34a; flex: none; cursor: pointer; }
+    .cg-link-row { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 6px; }
+    .cg-link-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      padding: 9px 12px; border-radius: 11px; border: 1.5px solid #2563eb; background: #eff6ff;
+      color: #1d4ed8; font-weight: 800; font-size: 13px; cursor: pointer; text-decoration: none;
+      line-height: 1.35; }
+    .cg-link-btn:hover { background: #dbeafe; }
+    .cg-link-btn--primary { background: #2563eb; color: #ffffff; border-color: #1d4ed8; }
+    .cg-link-btn--primary:hover { background: #1d4ed8; }
+    .cg-reg-list { margin: 8px 0 4px; padding: 8px 10px; border-radius: 10px; background: #f8fafc;
+      border: 1px solid #e2e8f0; display: grid; gap: 5px; font-size: 13px; }
+    .cg-reg-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    .cg-memo-chip { margin: 7px 0; padding: 8px 10px; border-radius: 10px; background: #fffbeb;
+      border: 1px solid #fde68a; font-size: 12.5px; line-height: 1.5; color: #78350f; }
+    .cg-sign-paper { margin-top: 6px; padding: 12px 14px; border-radius: 12px; background: #ffffff;
+      border: 1.5px solid #cbd5e1; }
+    .cg-sign-paper__title { font-weight: 900; font-size: 14.5px; text-align: center; color: #0f172a; }
+    .cg-sign-paper__date { font-size: 13px; text-align: center; color: #475569; margin: 3px 0 10px; }
+    .cg-sign-row { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 8px 10px; border-top: 1px solid #e2e8f0; font-size: 13.5px; }
+    .cg-sign-row__who { display: inline-flex; align-items: center; gap: 8px; }
+    .cg-sign-row__sig { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
     /* 기본 상태가 '보임'이다. 모션을 끈 환경(prefers-reduced-motion)에서도 창이 사라지지 않는다. */
     .cm-card.is-open { animation: cm-in .26s ease-out; }
     .cm-card.is-closing { opacity: 0; transform: translateY(-14px) scale(.98); }
@@ -151,10 +218,11 @@
       </header>
 
       <section id="chatWorkspace" class="no-print" style="margin-top:8px;">
+        <div id="wsPartyHeader" class="cg-party-header"></div>
         <div id="cmCall" style="margin-bottom:6px;"></div>
         <div id="wsActionBar" class="ws-action-card"></div>
-        <div id="wsChatList" class="cm-list" style="max-height:46vh;min-height:200px;"></div>
-        <div id="wsChatNote" class="bass-muted" style="font-size:12px;margin:4px 0;"></div>
+        <div id="wsChatList" class="cm-list cg-chat-stream"></div>
+        <div id="wsChatNote" class="bass-muted" style="font-size:12px;margin:5px 0;"></div>
         <div id="wsChatComposer">
           <div class="r3-chat-compose">
             <textarea id="wsChatMsg" class="bass-input" rows="2" placeholder="상대방에게 보낼 채팅을 입력하세요"></textarea>
@@ -162,18 +230,21 @@
           </div>
           <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
             <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="확인했습니다">확인했습니다</button>
-            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="조건 확인 후 승인하겠습니다">조건 확인 후 승인하겠습니다</button>
+            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="신분증 확인했습니다">신분증 확인했습니다</button>
+            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="등기부등본 확인했습니다">등기부등본 확인했습니다</button>
+            <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="표준계약서 확인 후 동의합니다">표준계약서 확인 후 동의합니다</button>
           </div>
         </div>
       </section>
 
       <div id="stepModal" class="cm-backdrop no-print" hidden>
         <div id="stepCard" class="cm-card">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid #e2e8f0;">
-            <strong style="font-size:14px;color:#0f172a;">📋 계약 단계 처리</strong>
+          <div class="cm-modal-head">
+            <strong id="stepModalTitle" style="font-size:14.5px;color:#0f172a;">📋 계약 단계 처리</strong>
             <button id="btnCloseStepModal" type="button" class="bass-btn bass-btn--sm">✕ 채팅으로 돌아가기</button>
           </div>
-          <div id="stepPanel"></div>
+          <div id="stepModalHint" class="cm-scroll-hint">↔️↕️ 좌우·상하로 스크롤하여 문서 전체 내용을 확인한 뒤 아래에서 승인하세요.</div>
+          <div id="stepPanel" class="cm-scroll-viewport"></div>
         </div>
       </div>
 

@@ -155,21 +155,77 @@
       </div>`;
   }
 
+  function buildRegistryComparisonSheetHtml(s) {
+    const lr = s.registry_data || {};
+    const tr = s.tenant_registry || {};
+    const addr = searchAddress(s);
+    const ownerTarget = lr.owner_name || s.lessor_name || "-";
+    const ownerMatch = Boolean(tr.submitted && tr.owner_name && normName(tr.owner_name) === normName(ownerTarget));
+    return `
+      <div class="cm-doc-scroll-box" role="region" aria-label="등기부등본 권리관계 대조표 (좌우상하 스크롤)">
+        <div class="cm-std-sheet">
+          <div class="cm-std-sheet__head">
+            <div>
+              <div class="cm-std-sheet__title">🏛️ 부동산 등기부등본 권리관계 확인표</div>
+              <div class="cm-std-sheet__sub">소재지: ${esc(addr)} · 임대인 ${esc(s.lessor_name || "-")} / 임차인 ${esc((s.terms && s.terms.tenant_name) || "-")}</div>
+            </div>
+            <span class="bass-badge ${s.step1_tenant_locked ? "bass-badge--ok" : "bass-badge--warn"}">${s.step1_tenant_locked ? "임차인 열람 확인 완료 ✓" : "열람·대조 필요"}</span>
+          </div>
+          <table class="cm-std-table">
+            <tr>
+              <th>확인 항목</th>
+              <th>임대인 제시 등기 정보</th>
+              <th>임차인 법원등기소 직접 열람</th>
+              <th>확인 결과</th>
+            </tr>
+            <tr>
+              <th>1. 갑구 소유자<br>(등기인 = 임대인 명의)</th>
+              <td><strong>${esc(ownerTarget)}</strong></td>
+              <td>${tr.submitted ? `<strong>${esc(tr.owner_name || "-")}</strong>` : "입력 대기"}</td>
+              <td>${ownerMatch ? "✅ 명의 일치" : (tr.submitted ? "⚠️ 확인 필요" : "⏳ 대기")}</td>
+            </tr>
+            <tr>
+              <th>2. 을구 근저당<br>(채권최고액)</th>
+              <td><strong>${fmtWon(lr.mortgage_amount)}</strong></td>
+              <td>${tr.submitted ? `<strong>${fmtWon(tr.mortgage_amount)}</strong>` : "입력 대기"}</td>
+              <td>${tr.submitted ? "✅ 열람 확인" : "⏳ 대기"}</td>
+            </tr>
+            <tr>
+              <th>3. 압류·가압류·신탁<br>(위험 권리 여부)</th>
+              <td>${esc(lr.seizure_or_trust || "없음")}</td>
+              <td>${tr.submitted ? `<strong>${esc(tr.seizure_or_trust || "-")}</strong>` : "입력 대기"}</td>
+              <td>${tr.submitted ? (tr.seizure_or_trust === "없음" ? "✅ 없음 확인" : "🛑 위험 권리 있음") : "⏳ 대기"}</td>
+            </tr>
+            <tr>
+              <th>발급확인번호 / 열람일시</th>
+              <td>${esc(lr.issue_number || "-")}</td>
+              <td>${tr.submitted ? `${esc(tr.issue_number || "-")} · ${esc(String(tr.viewed_at || "-").replace("T", " "))}` : "입력 대기"}</td>
+              <td>${tr.submitted ? "✅ 기록됨" : "⏳ 대기"}</td>
+            </tr>
+          </table>
+        </div>
+      </div>`;
+  }
+
   function renderStep1Tenant(s) {
     const lr = s.registry_data || {};
     const done = s.tenant_registry || {};
     const aiRes = s.registry_ai_result || {};
     const aiEx = (!done.submitted && aiRes.extracted) ? aiRes.extracted : null;
     const jeonse = needsGuarantee(s);
+    const ownerTarget = lr.owner_name || s.lessor_name || "";
 
     D.elStepPanel.innerHTML = `
-      <h3 style="margin:0 0 8px;">① 신분증 확인 · 등기부 직접 확인</h3>
+      <h3 style="margin:0 0 8px;">① 신분증 확인 · 법원등기소 등기부등본 직접 확인</h3>
+      ${s.step1_tenant_locked && s.tenant_checked_lessor_id ? `<div class="bass-card" style="padding:10px 12px;margin-bottom:10px;border-color:var(--ok);background:#f0fdf4;font-size:13px;">✅ 임차인 신분 확인 및 등기부등본 열람 확인을 완료했습니다.</div>` : ""}
+
+      ${buildRegistryComparisonSheetHtml(s)}
 
       <div class="call-banner" style="margin-bottom:12px;">
         <div style="font-weight:800;margin-bottom:4px;">⚠️ 임대인이 보여준 사진·PDF만 믿지 마세요</div>
         <div style="font-size:12.5px;line-height:1.55;">
           서류는 위조되거나, 진본이어도 발급 뒤에 바뀌었을 수 있습니다.
-          <strong>인터넷등기소에서 직접</strong> 아래 주소로 열람한 결과를 입력해 주세요. 열람은 소유자 동의 없이 누구나 할 수 있습니다.
+          <strong>인터넷등기소(법원등기소)에서 직접</strong> 아래 주소로 열람한 결과를 입력하고 1~3 항목을 체크해 주세요. 열람은 소유자 동의 없이 누구나 할 수 있습니다.
         </div>
         ${irosBoxHtml(searchAddress(s))}
       </div>
@@ -178,7 +234,7 @@
         <strong>🪪 임대인 신분증 확인</strong>
         <div style="font-size:13px;margin:4px 0 8px;">성명: <strong>${esc(s.lessor_name)}</strong> · 연락처: ${esc(s.lessor_phone || "-")}</div>
         <label class="check-row" style="margin-bottom:0;">
-          <span style="font-size:12.5px;">임대인의 실물 신분증을 보고 본인임을 확인함</span>
+          <span style="font-size:12.5px;">임차인이 임대인 신분 확인 (실물 신분증을 보고 본인임을 확인함)</span>
           <input type="checkbox" id="chkTenantVerifiedLessorId" ${s.tenant_checked_lessor_id ? "checked" : ""}>
         </label>
       </div>
@@ -192,16 +248,12 @@
         </div>
       </div>
 
-      <div style="font-weight:800;margin-bottom:6px;">🔎 내가 직접 열람한 결과</div>
-      <label class="check-row">
-        <span style="font-size:12.5px;"><strong>인터넷등기소에서 제가 직접 열람했습니다</strong></span>
-        <input type="checkbox" id="trViewed" ${done.viewed_directly ? "checked" : ""}>
-      </label>
+      <div style="font-weight:800;margin-bottom:6px;">🔎 내가 직접 열람한 결과 (1~3 체크)</div>
       <div class="field-grid" style="margin:8px 0;">
         <div><label class="bass-label">열람 일시 <span class="bass-muted" style="font-weight:400;">(3일 이내 열람본만 인정${aiEx && aiEx.viewed_at ? " · 올린 파일: " + esc(aiEx.viewed_at.replace("T", " ")) : ""})</span></label><input id="trAt" type="datetime-local" class="bass-input" value="${esc(done.viewed_at || (aiEx && aiEx.viewed_at) || nowLocalInput())}"></div>
-        <div><label class="bass-label">갑구 소유자 성명</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || (aiEx ? aiEx.owner_name : ""))}" placeholder="등기부에 적힌 이름"></div>
-        <div><label class="bass-label">을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : (aiEx ? aiEx.mortgage_total : "")}" placeholder="없으면 0"></div>
-        <div><label class="bass-label">압류·가압류·가처분·신탁·경매개시·임차권등기</label>
+        <div><label class="bass-label">1. 갑구 소유자 성명 (등기인 = 임대인 명의)</label><input id="trOwner" class="bass-input" value="${esc(done.owner_name || (aiEx ? aiEx.owner_name : ""))}" placeholder="등기부에 적힌 이름"></div>
+        <div><label class="bass-label">2. 을구 근저당 채권최고액(원)</label><input id="trMort" type="number" min="0" class="bass-input" value="${done.submitted ? Number(done.mortgage_amount || 0) : (aiEx ? aiEx.mortgage_total : "")}" placeholder="없으면 0"></div>
+        <div><label class="bass-label">3. 압류·가압류·가처분·신탁·경매개시·임차권등기</label>
           <select id="trSeize" class="bass-select">
             <option value="">선택</option>
             <option value="없음" ${(done.seizure_or_trust || (aiEx && aiEx.seizure_or_trust)) === "없음" ? "selected" : ""}>없음</option>
@@ -248,8 +300,28 @@
           </select>
         </div>` : ""}
 
+      <div class="bass-card" style="padding:12px;margin:10px 0;border-color:#93c5fd;background:#eff6ff;">
+        <div style="font-weight:800;margin-bottom:6px;color:#1e3a8a;">☑️ 등기부등본 필수 확인 체크</div>
+        <label class="check-row" style="background:#ffffff;">
+          <span style="font-size:12.5px;"><strong>1. 등기인 = 임대인 명의(${esc(ownerTarget || "-")}) 일치</strong>를 확인했습니다</span>
+          <input type="checkbox" id="trChk1" ${done.submitted ? "checked" : ""}>
+        </label>
+        <label class="check-row" style="background:#ffffff;">
+          <span style="font-size:12.5px;"><strong>2. 근저당 / 채권최고액</strong>을 확인했습니다</span>
+          <input type="checkbox" id="trChk2" ${done.submitted ? "checked" : ""}>
+        </label>
+        <label class="check-row" style="background:#ffffff;">
+          <span style="font-size:12.5px;"><strong>3. 압류·가압류·신탁 없음</strong>을 확인했습니다</span>
+          <input type="checkbox" id="trChk3" ${done.submitted ? "checked" : ""}>
+        </label>
+        <label class="check-row" style="margin-bottom:0;background:#ecfdf5;border-color:#86efac;">
+          <span style="font-size:13px;"><strong>임차인이 위 사실을 확인했음 (인터넷등기소에서 직접 열람)</strong></span>
+          <input type="checkbox" id="trViewed" ${done.viewed_directly ? "checked" : ""}>
+        </label>
+      </div>
+
       <button id="btnStep1Confirm" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
-        ✅ 직접 확인 완료 · 신분증 확인 저장
+        ✅ 임차인이 위 사실을 확인했음 · 승인 및 채팅으로 돌아가기
       </button>
     `;
 
@@ -371,6 +443,10 @@
           Bass.updateAppAlert("warning", "임대인의 신분증을 확인한 뒤 체크해 주세요.");
           return;
         }
+        if (!$("trChk1").checked || !$("trChk2").checked || !$("trChk3").checked) {
+          Bass.updateAppAlert("warning", "등기부등본 1~3 확인 항목(소유자 일치·근저당·압류/신탁 없음)을 모두 체크해 주세요.");
+          return;
+        }
         const reg = collect();
         reg.mismatch_ack = ackChecked;
         reg.low_deposit_risk_ack = lowAck;
@@ -393,6 +469,7 @@
         S.activeSession = res.session;
         S.viewStep = S.activeSession.current_step;
         S.isEditingForm = false;
+        if (C.closeStepModal) C.closeStepModal();
         Bass.updateAppAlert("success", res.message);
         C.renderWorkspace();
       });
@@ -451,6 +528,7 @@
 
     D.elStepPanel.innerHTML = `
       <h3>① 로그인 본인인증 · 상호 신분증 확인 체크 & 등기부등본 확인</h3>
+      ${buildRegistryComparisonSheetHtml(s)}
       <div class="bass-card" style="padding:10px 12px;margin:8px 0;font-size:12.5px;border-color:var(--warn);">🔎 임차인이 <strong>인터넷등기소에서 등기부를 직접 열람</strong>해 아래 내용과 대조합니다. 실제 등기와 다르게 입력하면 계약이 진행되지 않을 수 있으니 열람한 그대로 입력해 주세요.</div>
       <p class="bass-muted" style="font-size:13px;">
         임대인과 임차인은 로그인 본인인증을 완료했으며, <strong>서로 상대방의 신분증을 확인하여 본인 확인 체크</strong>를 완료하고 <strong>등기부등본</strong>을 확인해야 서명 자격이 부여됩니다.
@@ -593,6 +671,7 @@
         const res = await Bass.api(APP_ID, `/sessions/${s.id}/step1`, { method: "POST", body });
         S.activeSession = res.session;
         S.viewStep = S.activeSession.current_step;
+        if (C.closeStepModal) C.closeStepModal();
         Bass.updateAppAlert("success", res.message);
         C.renderWorkspace();
       });

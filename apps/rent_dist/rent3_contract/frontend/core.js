@@ -46,14 +46,14 @@
     .chat-fab { position: fixed; right: 14px; bottom: 16px; z-index: 900; width: 56px; height: 56px; border-radius: 50%; border: 1px solid var(--border); background: linear-gradient(120deg, var(--primary), var(--primary-2)); color: #fff; font-size: 24px; box-shadow: 0 6px 18px rgba(0,0,0,.4); cursor: pointer; }
     .chat-fab__n, .chat-fab__o { position: absolute; top: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; font-size: 12px; font-weight: 800; line-height: 20px; text-align: center; }
     .chat-fab__n { right: -4px; background: #ef4444; color: #fff; } .chat-fab__o { left: -4px; background: #f59e0b; color: #1f1500; }
-    .cm-list { max-height: 46vh; overflow-y: auto; padding: 2px 2px 6px; }
+    .cm-list { max-height: 60vh; overflow-y: auto; padding: 2px 2px 6px; }
     .cm-b { margin: 6px 0; display: flex; } .cm-b.is-mine { justify-content: flex-end; }
-    .cm-b > div { max-width: 88%; padding: 8px 10px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; background: rgba(148,163,184,.22); }
-    .cm-b.is-mine > div { background: rgba(99,102,241,.35); }
-    .cm-meta { font-size:12.5px; opacity: .7; margin-bottom: 2px; }
-    .cm-sys { margin: 8px 0; text-align: center; font-size: 12px; opacity: .8; }
-    .cm-card { margin: 8px 0; padding: 10px; border: 1px solid var(--border); border-radius: 12px; font-size: 13.5px; line-height: 1.55; }
-    .cm-card.is-open { border-color: #f59e0b; }
+    .cm-b > div { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 13.5px; line-height: 1.5; background: #ffffff; border: 1px solid #e2e8f0; color: #0f172a; }
+    .cm-b.is-mine > div { background: #dbeafe; border-color: #93c5fd; color: #0f172a; }
+    .cm-meta { font-size:12.5px; opacity: .75; margin-bottom: 2px; }
+    .cm-sys { margin: 8px 0; text-align: center; font-size: 12px; opacity: .82; }
+    .cm-msg-card { margin: 8px 0; padding: 10px 12px; background: #ffffff; border: 1px solid var(--border); border-radius: 12px; font-size: 13.5px; line-height: 1.55; }
+    .cm-msg-card.is-open { border-color: #f59e0b; background: #fffbeb; }
     .reopen-box { margin-top: 16px; padding-top: 10px; border-top: 1px dashed var(--border); }
     `;
     document.head.appendChild(st);
@@ -79,6 +79,7 @@
     activeSession: null,
     sealedContract: null,
     renewalContext: null,
+    roomInfo: null,
     latestChatMessages: [],
     viewStep: 1,
     lastRevision: null,
@@ -93,6 +94,8 @@
     modalAnimating: false,
     modalTimer: null,
     stepModalOpen: false,
+    modalForceDoc: false,
+    reviewedStdContractRev: null,
     wsChatLastSig: "",
     myIdentity: null,
     pendingFacNotes: null,

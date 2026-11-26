@@ -381,6 +381,21 @@ def get_session(token: str, request: Request):
                 "notice_term_months": chk.proposed_term_months if chk else None,
                 "notice_sent_at": chk.renewal_preview_sent_at if chk else "",
             }
+    room = Room.get(s.id_room) if s.id_room else None
+    room_info = None
+    if room is not None:
+        shown_r = room.as_listing() if (s.mode != "RENEWAL" and room.is_occupied) else room
+        spec = listing_pdf.normalize_listing_spec(shown_r.listing_spec, shown_r.option_list)
+        room_info = {
+            "id": room.id,
+            "room_category": shown_r.room_category,
+            "floor": shown_r.floor,
+            "total_floors": shown_r.total_floors,
+            "area_sqm": shown_r.area_sqm,
+            "direction": shown_r.direction,
+            "listing_spec": spec,
+            "terms_pdf_url": listing_pdf.listing_pdf_url(room.id),
+        }
     who = _chat_actor(request, s) if claims_from(request) else {"role": ""}
     return {
         "success": True,
@@ -388,6 +403,7 @@ def get_session(token: str, request: Request):
         "session": s.model_dump(),
         "contract": contract.model_dump() if contract else None,
         "renewal_context": renewal_ctx,
+        "room_info": room_info,
         "chat": contract_chat.summary_for(s, who["role"] or None),   # 읽음 처리 없이 안 읽은 수·열린 요청 수 (2.5초 갱신에 포함)
     }
 

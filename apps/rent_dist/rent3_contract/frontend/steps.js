@@ -293,11 +293,127 @@
     }));
   }
 
+  // ───────────── 좌우·상하 스크롤 표준계약서 전문 미리보기 ─────────────
+  function estimateExpiryDate(moveIn, months) {
+    if (!moveIn || !/^\d{4}-\d{2}-\d{2}$/.test(moveIn)) return "-";
+    const parts = moveIn.split("-").map(Number);
+    const dt = new Date(parts[0], parts[1] - 1 + Number(months || 12), parts[2] - 1);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const d = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  function buildStandardContractSheetHtml(s) {
+    const t = s.terms || {};
+    const ri = S.roomInfo || {};
+    const spec = ri.listing_spec || {};
+    const isRen = s.mode === "RENEWAL";
+    const dep = Number(t.deposit || 0);
+    const cdep = Number(t.contract_deposit || 0);
+    const bal = Math.max(dep - cdep, 0);
+    const months = Number(t.lease_term_months || 12);
+    const expiryEst = estimateExpiryDate(t.move_in_date || "", months);
+    const areaSqm = Number(ri.area_sqm || 0);
+    const areaText = areaSqm > 0 ? `${areaSqm}㎡ (약 ${(areaSqm / 3.3058).toFixed(1)}평)` : "-";
+    const floorText = ri.floor ? `${ri.floor}층${ri.total_floors ? ` / 총 ${ri.total_floors}층` : ""}` : "-";
+    const opts = s.option_checks || [];
+    const optListText = opts.length
+      ? opts.map((o) => `${o.checked ? "☑" : "☐"} ${o.item}(${o.quantity}개 · ${o.condition})`).join(", ")
+      : ((spec.options && spec.options.length) ? spec.options.join(", ") : "기본 옵션");
+    const maintInc = (spec.maintenance_includes && spec.maintenance_includes.length)
+      ? spec.maintenance_includes.join(" · ")
+      : "별도 약정";
+    const facNotes = S.pendingFacNotes !== null ? S.pendingFacNotes : (s.facility_notes || "");
+    const photosCount = (s.facility_photos || []).length;
+    const todayDot = (() => {
+      const now = new Date();
+      return `${now.getFullYear()}. ${String(now.getMonth() + 1).padStart(2, "0")}. ${String(now.getDate()).padStart(2, "0")}.`;
+    })();
+    return `
+      <div class="cm-doc-scroll-box" role="region" aria-label="주택임대차 표준계약서 미리보기 (좌우상하 스크롤)">
+        <div class="cm-std-sheet">
+          <div class="cm-std-sheet__head">
+            <div>
+              <div class="cm-std-sheet__title">📄 주택임대차 표준계약서 (${isRen ? "연장 재계약" : esc(t.lease_type || "월세")} · Revision v${s.revision})</div>
+              <div class="cm-std-sheet__sub">${esc(s.building_address || "")} (${esc(s.building_name)} ${esc(s.room_no)}호)</div>
+            </div>
+            ${ri.terms_pdf_url ? `<a class="bass-btn bass-btn--sm" href="${esc(ri.terms_pdf_url)}" target="_blank" rel="noopener">📑 매물조건 PDF ↗</a>` : ""}
+          </div>
+          <table class="cm-std-table">
+            <tr>
+              <th>목적물 소재지</th>
+              <td colspan="3"><strong>${esc(s.building_address || "-")}</strong> (${esc(s.building_name)} ${esc(s.room_no)}호)</td>
+            </tr>
+            <tr>
+              <th>유형 · 층수</th>
+              <td>${esc(ri.room_category || "주거용")} · ${esc(floorText)}</td>
+              <th>전용면적 · 방향</th>
+              <td>${esc(areaText)}${ri.direction ? ` · ${esc(ri.direction)}` : ""}</td>
+            </tr>
+            <tr>
+              <th>보증금</th>
+              <td><strong>${fmtWon(dep)}</strong></td>
+              <th>계약금(10%) / 잔금</th>
+              <td><strong>${fmtWon(cdep)}</strong> / ${fmtWon(bal)}</td>
+            </tr>
+            <tr>
+              <th>월 임차료</th>
+              <td><strong>${fmtWon(t.monthly_rent)}</strong> (${esc(t.pay_timing || "후불")})</td>
+              <th>관리비 / 퇴실 청소비</th>
+              <td><strong>${fmtWon(t.maintenance_fee)}</strong> / ${Number(t.cleaning_fee || 0) > 0 ? fmtWon(t.cleaning_fee) : "약정 없음"}</td>
+            </tr>
+            <tr>
+              <th>임대차 기간</th>
+              <td colspan="3"><strong>${esc(t.move_in_date || "-")} ~ ${esc(expiryEst)}</strong> (${months}개월)</td>
+            </tr>
+            <tr>
+              <th>시설 · 설비</th>
+              <td colspan="3">케이블 TV: ${esc(spec.cable_tv || "확인")} · 인터넷: ${esc(spec.internet || "확인")} · 엘리베이터: ${esc(spec.elevator || "확인")} · 주차: ${esc(spec.parking || "확인")} · 관리비 포함: ${esc(maintInc)}</td>
+            </tr>
+            <tr>
+              <th>옵션 내역</th>
+              <td colspan="3">${esc(optListText)}</td>
+            </tr>
+            <tr>
+              <th>도배상태 등<br>세부내역 메모</th>
+              <td colspan="3" id="stdSheetFacNotes">${esc(facNotes || "기록 없음")} <span class="bass-muted">(현장 사진 ${photosCount}장)</span></td>
+            </tr>
+            <tr>
+              <th>임차료 수납 계좌</th>
+              <td colspan="3">${acctLabel(s)}</td>
+            </tr>
+            <tr>
+              <th>특약사항</th>
+              <td colspan="3" style="white-space:pre-line;">${esc(t.special_terms || "-")}</td>
+            </tr>
+            <tr>
+              <th>임대인(갑)</th>
+              <td><strong>${esc(s.lessor_name || "-")}</strong> (${esc(s.lessor_phone || "-")})</td>
+              <th>임차인(을)</th>
+              <td><strong>${esc(t.tenant_name || "-")}</strong> (${esc(t.tenant_phone || "-")})</td>
+            </tr>
+          </table>
+          <div class="cm-std-sheet__foot">
+            <div><strong>상기 내용에 동의합니다.</strong> &nbsp; (${todayDot})</div>
+            <div>
+              임대인 <strong>${esc(s.lessor_name || "-")}</strong> (${s.step3_lessor_agreed ? "동의 완료 ✓" : "동의 대기"}${s.lessor_signature ? " · 서명 완료 ✓" : ""})
+              &nbsp;|&nbsp;
+              임차인 <strong>${esc(t.tenant_name || "-")}</strong> (${s.step3_tenant_agreed ? "동의 완료 ✓" : "동의 대기"}${s.tenant_signature ? " · 서명 완료 ✓" : ""})
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
   function renderStep2(s) {
     const opts = s.option_checks || [];
+    const myDone = currentRole === "lessor" ? s.step2_lessor_confirmed : s.step2_tenant_locked;
     D.elStepPanel.innerHTML = `
-      <h3>② 호실 상태 및 옵션 실물 공동 점검표</h3>
-      <p class="bass-muted" style="font-size:13px;">입실 시 함께 확인한 시설 상태가 퇴실 정산 비교 원본으로 박제되어 억울한 원상복구 분쟁을 차단합니다.</p>
+      <h3 style="margin:0 0 6px;">② 표준계약서 내용 확인 · 옵션 및 도배상태 세부내역 메모</h3>
+      ${myDone ? `<div class="bass-card" style="padding:10px 12px;margin-bottom:8px;border-color:var(--ok);background:#f0fdf4;font-size:13px;">✅ 내 옵션·도배상태 메모 확인이 완료되었습니다.</div>` : ""}
+      ${buildStandardContractSheetHtml(s)}
+      <p class="bass-muted" style="font-size:13px;">입실 시 함께 확인한 옵션과 도배·벽지 상태 메모가 표준계약서 세부내역 및 퇴실 정산 비교 원본으로 박제됩니다.</p>
       <div style="margin:12px 0;">
         ${opts.map((o, idx) => `
           <label class="check-row">
@@ -307,7 +423,7 @@
         `).join("")}
       </div>
       <div>
-        <label class="bass-label">벽지 상태 등 시설 기록사항 메모</label>
+        <label class="bass-label">벽지 상태 등 시설 기록사항 메모 (옵션, 도배상태 등 세부내역 메모)</label>
         <input id="facNotes" class="bass-input" placeholder="예: 벽지 오염·찢어짐, 바닥 흠집 등 상태 기록" value="${esc(S.pendingFacNotes !== null ? S.pendingFacNotes : (s.facility_notes || ""))}">
       </div>
       ${facilityPhotosHtml(s)}
@@ -315,10 +431,17 @@
         ${pairDots("시설·옵션 점검 확인", s.step2_lessor_confirmed, s.step2_tenant_locked)}
       </div>
       <button id="btnStep2Confirm" class="bass-btn bass-btn--primary" style="width:100%;" type="button">
-        ${currentRole === "lessor" ? "🏢 시설 점검표 확인 완료" : "🔑 실물 옵션 이상 없음 상호 동의 잠금"}
+        ${currentRole === "lessor" ? "🏢 옵션·도배상태 메모 확인 완료" : "🔑 옵션·도배상태 메모 확인 완료 (표준계약서 동의로 이동)"}
       </button>
     `;
     bindFacilityPhotos(s);
+    const facInp = document.getElementById("facNotes");
+    if (facInp) {
+      facInp.addEventListener("input", () => {
+        const cell = document.getElementById("stdSheetFacNotes");
+        if (cell) cell.innerHTML = `${esc(facInp.value.trim() || "기록 없음")} <span class="bass-muted">(현장 사진 ${(s.facility_photos || []).length}장)</span>`;
+      });
+    }
     document.getElementById("btnStep2Confirm").addEventListener("click", function () {
       Bass.withLock(this, async () => {
         const updatedOpts = opts.map((o, i) => ({
@@ -336,18 +459,28 @@
         S.pendingFacNotes = null;
         S.activeSession = res.session;
         S.viewStep = S.activeSession.current_step;
+        if (S.activeSession.current_step >= 3) {
+          S.modalKey = "";
+          S.modalForceDoc = true;
+        } else if (C.closeStepModal) {
+          C.closeStepModal();
+        }
         Bass.updateAppAlert("success", res.message);
         C.renderWorkspace();
       });
     });
   }
 
-  // ───────────── 3단계: 계약 조건 및 특약 ─────────────
+  // ───────────── 3단계: 계약 조건 및 특약 (표준계약서 검토·동의) ─────────────
   function renderStep3(s) {
+    S.reviewedStdContractRev = s.revision;
     const t = s.terms || {};
     const rc = s.mode === "RENEWAL" ? S.renewalContext : null;
+    const agreedMine = currentRole === "lessor" ? s.step3_lessor_agreed : s.step3_tenant_agreed;
     D.elStepPanel.innerHTML = `
-      <h3>${s.mode === "RENEWAL" ? `③ 비대면 재계약 조건 확인 및 승인 (Revision v${s.revision})` : `③ 계약 조건 및 특약사항 공동 작성 (Revision v${s.revision})`}</h3>
+      <h3 style="margin:0 0 6px;">${s.mode === "RENEWAL" ? `③ 비대면 재계약 표준계약서 내용 확인 및 동의 (Revision v${s.revision})` : `③ 표준계약서 내용 확인 및 조건·특약 동의 (Revision v${s.revision})`}</h3>
+      ${agreedMine ? `<div class="bass-card" style="padding:10px 12px;margin-bottom:8px;border-color:var(--ok);background:#f0fdf4;font-size:13px;">✅ 나는 표준계약서 내용에 동의했습니다. 상대방이 동의하면 전자서명이 열립니다.</div>` : ""}
+      ${buildStandardContractSheetHtml(s)}
       ${s.mode === "RENEWAL" ? `<div class="call-banner" style="margin:0 0 10px;border-color:var(--primary-2);background:#f0f9ff;color:#0c4a6e;">
         <strong>🔄 비대면 재계약</strong> — 기존 계약 당사자이므로 본인 확인(신분증·등기부) 없이 바로 <strong>재계약 승인 → 전자서명</strong>으로 체결됩니다.
         ${rc ? `<div style="font-size:12.5px;margin-top:4px;">기존 계약: 보증금 ${fmtWon(rc.prev_deposit)} · 월세 ${fmtWon(rc.prev_monthly_rent)} · 관리비 ${fmtWon(rc.prev_maintenance_fee)} (5% 상한: 보증금 ${fmtWon(rc.max_deposit)} · 월세 ${fmtWon(rc.max_monthly_rent)})${rc.notice_sent ? `<br>문자·예고 조건: 보증금 ${fmtWon(rc.notice_deposit)} · 월세 ${fmtWon(rc.notice_monthly_rent)} · 관리비 ${fmtWon(rc.notice_maintenance_fee)} (${Number(rc.notice_term_months || 12)}개월)` : ""}</div>` : ""}
@@ -412,7 +545,7 @@
       </div>
       ${S.chatSummary.open_count > 0 ? `<div class="call-banner" style="margin:8px 0;"><div style="font-weight:800;margin-bottom:4px;">답하지 않은 제안·수정 요청이 ${S.chatSummary.open_count}건 있습니다</div><div style="font-size:12.5px;margin-bottom:8px;">모두 처리(수락·거절·철회)해야 최종 동의할 수 있습니다.</div><button id="btnOpenChat3" type="button" class="bass-btn bass-btn--sm bass-btn--primary">💬 채팅 열기</button></div>` : ""}
       <button id="btnAgreeStep3" class="bass-btn bass-btn--primary" style="width:100%;" type="button"${S.chatSummary.open_count > 0 ? " disabled" : ""}>
-        ${s.mode === "RENEWAL" ? "🔒 재계약 승인" : "🔒 계약 조건 전체 동의"} (v${s.revision}) · ${currentRole === "lessor" ? "임대인(갑)" : "임차인(을)"}
+        ${currentRole === "lessor" ? "✅ 임대인은 표준계약서 내용에 동의" : "✅ 임차인은 표준계약서 내용에 동의"} · ${s.mode === "RENEWAL" ? "재계약 승인" : "계약 조건 전체 동의"} (v${s.revision})
       </button>
     `;
 
@@ -503,6 +636,7 @@
         S.lastRevision = S.activeSession.revision;
         S.viewStep = S.activeSession.current_step;
         S.isEditingForm = false;
+        if (C.closeStepModal) C.closeStepModal();
         Bass.updateAppAlert("success", res.message);
         C.renderWorkspace();
       });
@@ -523,7 +657,8 @@
     const canSignNow = okLogin && okMutualId && okRegistry && okStep3;
 
     D.elStepPanel.innerHTML = `
-      <h3>${s.mode === "RENEWAL" ? "④ 재계약 전자서명 (양측 서명 완료 시 즉시 체결)" : "④ 신분증·등기부 확인 검증 요약 및 자필 전자서명"}</h3>
+      <h3 style="margin:0 0 6px;">${s.mode === "RENEWAL" ? "④ 재계약 전자서명 (양측 서명 완료 시 즉시 체결)" : "④ 표준계약서 최종 확인 및 자필 전자서명"}</h3>
+      ${buildStandardContractSheetHtml(s)}
       <p class="bass-muted" style="font-size:13px;">
         로그인 본인인증, 서로 신분증 확인 체크, 등기부등본 열람 확인, 계약조건 합의가 모두 완료되어야 서명이 날인되며 SHA-256 해시로 봉인됩니다.
       </p>
@@ -643,6 +778,7 @@
         if (res.contract) S.sealedContract = res.contract;
         S.isEditingForm = false;
         S.viewStep = S.activeSession.current_step;
+        if (C.closeStepModal) C.closeStepModal();
         Bass.updateAppAlert("success", res.message);
         if (S.activeSession.status === "COMPLETED" && !S.sealedContract) await C.fetchActiveSession(true);
         C.renderWorkspace();
@@ -813,7 +949,7 @@
   Object.assign(C, {
     decoratePanel, renderCallHandshake, renderPrefill, renderJoinQr,
     shrinkPhoto, facilityPhotosHtml, bindFacilityPhotos,
-    renderStep2, renderStep3, renderStep4,
+    buildStandardContractSheetHtml, renderStep2, renderStep3, renderStep4,
     reservedBannerHtml, renderStep5, renderSigCell, renderSealedPaper,
   });
 })();

@@ -115,7 +115,7 @@
       ? `<button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="withdraw" type="button">철회</button>`
       : `<button class="bass-btn bass-btn--sm bass-btn--primary cm-act" data-id="${esc(m.id)}" data-act="accept" data-kind="${m.kind}" type="button">${isProp ? "수락" : "확인·반영"}</button>
          <button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="decline" type="button">거절</button>`);
-    return `<div class="cm-card ${m.status === "open" ? "is-open" : ""}">
+    return `<div class="cm-msg-card ${m.status === "open" ? "is-open" : ""}">
       <div class="cm-meta">${who} · ${hhmm(m.created_at)} · ${m.step}단계</div>
       <div>${head}</div>${m.body && !(isProp && m.body.includes("제안합니다.")) ? `<div class="bass-muted" style="font-size:12.5px;">${esc(m.body)}</div>` : ""}
       <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="bass-badge ${m.status === "open" ? "bass-badge--warn" : (m.status === "accepted" ? "bass-badge--ok" : "")}">${STATUS_KO[m.status] || m.status}</span>${buttons}</div>
@@ -349,7 +349,278 @@
     });
   }
 
+  function formatKoreanDateDot() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}. ${m}. ${day}.`;
+  }
+
+  function normSimpleName(v) {
+    return String(v || "").replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
+  }
+
+  function renderPartyHeader(s) {
+    const el = document.getElementById("wsPartyHeader");
+    if (!el) return;
+    const tm = s.terms || {};
+    el.innerHTML = `
+      <div class="cg-party-header__title">💬 계약 채팅 <span class="bass-muted" style="font-weight:600;font-size:12.5px;">${esc(s.building_name)} ${esc(s.room_no)}호</span></div>
+      <div class="cg-party-header__names">
+        <span>임대인: <strong>${esc(s.lessor_name || "-")}</strong></span>
+        <span>임차인: <strong>${esc(tm.tenant_name || "응답 대기")}</strong></span>
+      </div>`;
+  }
+
+  function buildSmartChatTimelineHtml(s, msgs, d) {
+    const tm = s.terms || {};
+    const lr = s.registry_data || {};
+    const tr = s.tenant_registry || {};
+    const isRen = s.mode === "RENEWAL";
+    const active = s.status === "IN_PROGRESS";
+    const canAct = !adminProxy && Boolean(currentRole) && active;
+    const renderMsg = (m) => renderChatBubble(m, d);
+    const sigHtml = (sig) => (C.renderSigCell ? C.renderSigCell(sig) : esc(sig));
+
+    if (s.call_status === "CALLING") {
+      const callee = currentRole !== s.initiated_by_role;
+      const callCard = `
+        <div class="cg-card cg-card--active">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · 연결 대기</span>
+            <span class="bass-badge bass-badge--warn">${callee ? "내 응답 필요" : "상대 응답 대기"}</span>
+          </div>
+          <div class="cg-card__msg">
+            ${callee
+              ? `<strong>${esc(s.building_name)} ${esc(s.room_no)}호</strong> 스마트 계약 호출이 도착했습니다. 호출에 응답하면 채팅창 안에서 바로 계약이 시작됩니다.`
+              : `상대방(<strong>${esc(OTHER_KO)}</strong>)의 호출 응답을 기다리고 있습니다. 연결 전에 사전 작성·초대 QR을 확인할 수 있습니다.`}
+          </div>
+          <div class="cg-link-row">
+            <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="0">
+              ${callee ? "📞 호출 응답하고 스마트 계약 시작 ↗" : "📋 초대 QR · 사전 작성 열기 ↗"}
+            </button>
+          </div>
+        </div>`;
+      return callCard + msgs.map(renderMsg).join("");
+    }
+
+    const parts = [];
+    if (s.status === "CANCELLED") {
+      parts.push(`
+        <div class="cg-card" style="border-color:var(--err);border-left-color:var(--err);background:#fef2f2;">
+          <div class="cg-card__top"><span class="cg-card__tag" style="background:#fee2e2;color:#b91c1c;">⛔ 계약 중단</span></div>
+          <div class="cg-card__msg">${esc(s.cancel_reason || "이 계약은 중단되었습니다.")}</div>
+        </div>`);
+    }
+
+    const msgs1 = msgs.filter((m) => (m.step || 1) <= 1);
+    const msgs23 = msgs.filter((m) => m.step === 2 || m.step === 3);
+    const msgs4 = msgs.filter((m) => m.step === 4);
+    const msgs5 = msgs.filter((m) => (m.step || 0) >= 5);
+
+    if (!isRen) {
+      // 앱 개입 카드 ①: 스마트 계약 시작 및 상호 신분 확인
+      const idDone = Boolean(s.lessor_checked_tenant_id && s.tenant_checked_lessor_id);
+      const canLessorId = canAct && currentRole === "lessor";
+      const canTenantId = canAct && currentRole === "tenant";
+      parts.push(`
+        <div class="cg-card ${idDone ? "cg-card--done" : "cg-card--active"}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ① 신분 확인</span>
+            <span class="bass-badge ${idDone ? "bass-badge--ok" : "bass-badge--warn"}">${idDone ? "양측 완료 ✓" : "진행 중"}</span>
+          </div>
+          <div class="cg-card__msg">
+            <strong>지금부터 스마트 계약을 시작합니다.</strong><br>
+            임대인과 임차인은 서로 신분증을 제시해 주세요.
+          </div>
+          <label class="cg-check ${s.lessor_checked_tenant_id ? "is-checked" : (canLessorId ? "is-actionable" : "")}">
+            <span class="cg-check__label">
+              <span><strong>임대인이 임차인 신분 확인</strong> (${esc(tm.tenant_name || "임차인")})</span>
+              <span class="cg-check__hint">← 임대인이 체크${s.lessor_checked_tenant_id ? " · 확인 완료" : ""}</span>
+            </span>
+            <input type="checkbox" class="js-cg-id-chk" data-role="lessor" ${s.lessor_checked_tenant_id ? "checked" : ""} ${canLessorId ? "" : "disabled"}>
+          </label>
+          <label class="cg-check ${s.tenant_checked_lessor_id ? "is-checked" : (canTenantId ? "is-actionable" : "")}">
+            <span class="cg-check__label">
+              <span><strong>임차인이 임대인 신분 확인</strong> (${esc(s.lessor_name || "임대인")})</span>
+              <span class="cg-check__hint">← 임차인이 체크${s.tenant_checked_lessor_id ? " · 확인 완료" : ""}</span>
+            </span>
+            <input type="checkbox" class="js-cg-id-chk" data-role="tenant" ${s.tenant_checked_lessor_id ? "checked" : ""} ${canTenantId ? "" : "disabled"}>
+          </label>
+        </div>`);
+
+      // 앱 개입 카드 ②: 법원등기소 등기부등본 열람 및 확인 (좌우상하 스크롤 모달 링크)
+      const regDone = Boolean(s.step1_lessor_confirmed && s.step1_tenant_locked);
+      const trSub = Boolean(tr.submitted);
+      const ownerTarget = lr.owner_name || s.lessor_name || "";
+      const ownerOk = trSub && Boolean(tr.owner_name) && (!ownerTarget || normSimpleName(tr.owner_name) === normSimpleName(ownerTarget));
+      const mortOk = trSub && tr.mortgage_amount !== undefined && tr.mortgage_amount !== "";
+      const seizeOk = trSub && tr.seizure_or_trust === "없음";
+      const canTenantRegChk = canAct && currentRole === "tenant" && !s.step1_tenant_locked;
+      parts.push(`
+        <div class="cg-card ${regDone ? "cg-card--done" : (s.current_step === 1 ? "cg-card--active" : "")}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ② 등기부등본 확인</span>
+            <span class="bass-badge ${regDone ? "bass-badge--ok" : "bass-badge--warn"}">${regDone ? "열람·확인 완료 ✓" : "임차인 열람 필요"}</span>
+          </div>
+          <div class="cg-card__msg">
+            임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람하고 아래 사항을 체크해 주세요.
+          </div>
+          <div class="cg-link-row">
+            <button type="button" class="cg-link-btn js-cg-iros">🏛️ [ 법원등기소 ] 접속 (주소복사) ↗</button>
+            <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="1">
+              ${currentRole === "tenant" ? "📄 [ 등기부등본 확인 · 승인 모달 ] ↗" : "📄 [ 등기부 제시 · 확인 모달 ] ↗"}
+            </button>
+          </div>
+          <div class="cg-reg-list">
+            <div class="cg-reg-item">
+              <span>1. 등기인 = 임대인 명의(${esc(ownerTarget || "-")}) 일치?</span>
+              <span class="bass-badge ${ownerOk ? "bass-badge--ok" : "bass-badge--warn"}">${ownerOk ? `${esc(tr.owner_name)} 일치 ✓` : "열람 대기"}</span>
+            </div>
+            <div class="cg-reg-item">
+              <span>2. 근저당 / 채권최고액 확인</span>
+              <span class="bass-badge ${mortOk ? "bass-badge--ok" : "bass-badge--warn"}">${mortOk ? `${fmtWon(tr.mortgage_amount)} ✓` : "열람 대기"}</span>
+            </div>
+            <div class="cg-reg-item">
+              <span>3. 압류·가압류·신탁 없음 확인</span>
+              <span class="bass-badge ${seizeOk ? "bass-badge--ok" : "bass-badge--warn"}">${seizeOk ? "없음 ✓" : (trSub && tr.seizure_or_trust ? esc(tr.seizure_or_trust) : "열람 대기")}</span>
+            </div>
+          </div>
+          <label class="cg-check ${s.step1_tenant_locked ? "is-checked" : (canTenantRegChk ? "is-actionable" : "")}">
+            <span class="cg-check__label">
+              <span><strong>임차인이 위 사실을 확인했음</strong></span>
+              <span class="cg-check__hint">${s.step1_tenant_locked ? "임차인 직접 열람·확인 완료" : "모달에서 등기부등본을 보고 승인하면 체크됩니다"}</span>
+            </span>
+            <input type="checkbox" class="js-cg-reg-confirm" ${s.step1_tenant_locked ? "checked" : ""} ${canTenantRegChk ? "" : "disabled"}>
+          </label>
+          <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+            임대인 등기 제시: <strong>${s.step1_lessor_confirmed ? "제시 완료 ✓" : "대기 중"}</strong> (소유자 ${esc(lr.owner_name || s.lessor_name || "-")} · 채권최고액 ${fmtWon(lr.mortgage_amount)})
+          </div>
+        </div>`);
+      parts.push(...msgs1.map(renderMsg));
+    }
+
+    // 앱 개입 카드 ③: 표준계약서 내용 확인 (옵션, 도배상태 등 세부내역 메모 포함) & 양측 동의
+    if (s.current_step >= 2 || isRen) {
+      const stdDone = Boolean(s.step3_lessor_agreed && s.step3_tenant_agreed);
+      const optCount = (s.option_checks || []).length;
+      const photoCount = (s.facility_photos || []).length;
+      const stdStepTarget = (!isRen && s.current_step === 2) ? 2 : 3;
+      const canLessorAgree = canAct && currentRole === "lessor" && !s.step3_lessor_agreed;
+      const canTenantAgree = canAct && currentRole === "tenant" && !s.step3_tenant_agreed;
+      parts.push(`
+        <div class="cg-card ${stdDone ? "cg-card--done" : ((s.current_step === 2 || s.current_step === 3) ? "cg-card--active" : "")}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "① 표준계약서 확인" : "③ 표준계약서 내용 확인"}</span>
+            <span class="bass-badge ${stdDone ? "bass-badge--ok" : "bass-badge--warn"}">${stdDone ? "양측 동의 완료 ✓" : `Revision v${s.revision}`}</span>
+          </div>
+          <div class="cg-card__msg">
+            ${isRen
+              ? "<strong>비대면 연장 재계약을 시작합니다.</strong> 아래 링크에서 표준계약서 내용을 좌우·상하로 스크롤해 확인한 뒤 동의해 주세요."
+              : "아래 <strong>[ 표준계약서 내용 확인 ]</strong> 링크를 눌러 좌우·상하 스크롤 모달에서 계약서 전문과 <strong>옵션·도배상태 등 세부내역 메모</strong>를 확인하고 동의해 주세요."}
+          </div>
+          <div class="cg-link-row">
+            <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="${stdStepTarget}">
+              📄 [ 표준계약서 내용 확인 ] ↗
+            </button>
+            ${!isRen ? `<button type="button" class="cg-link-btn js-cg-open-step" data-step="2">🛋️ 옵션·도배상태 메모 (${optCount}개·사진 ${photoCount}장) ↗</button>` : ""}
+            ${canAct && currentRole === "lessor" && s.current_step <= 3 ? `<button type="button" class="cg-link-btn js-cg-bundle">📋 조건 일괄 수정</button>` : ""}
+          </div>
+          ${!isRen ? `
+            <div class="cg-memo-chip">
+              <strong>📝 옵션 · 도배상태 등 세부내역 메모:</strong> ${esc(s.facility_notes || "기록 없음")}
+              <div style="margin-top:3px;font-size:12px;">
+                세부 점검 확인: 임대인 ${s.step2_lessor_confirmed ? "완료 ✓" : "대기"} · 임차인 ${s.step2_tenant_locked ? "완료 ✓" : "대기"}
+              </div>
+            </div>` : ""}
+          <div class="bass-muted" style="font-size:12.5px;margin:4px 0 6px;line-height:1.5;">
+            보증금 <strong>${fmtWon(tm.deposit)}</strong> · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · ${isRen ? "연장 시작" : "입주"} ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)
+          </div>
+          <label class="cg-check ${s.step3_lessor_agreed ? "is-checked" : (canLessorAgree ? "is-actionable" : "")}">
+            <span class="cg-check__label">
+              <span><strong>임대인은 표준계약서 내용에 동의</strong></span>
+              <span class="cg-check__hint">${s.step3_lessor_agreed ? "임대인 동의 완료" : "모달에서 표준계약서를 확인 후 동의해 주세요"}</span>
+            </span>
+            <input type="checkbox" class="js-cg-std-agree" data-role="lessor" ${s.step3_lessor_agreed ? "checked" : ""} ${canLessorAgree ? "" : "disabled"}>
+          </label>
+          <label class="cg-check ${s.step3_tenant_agreed ? "is-checked" : (canTenantAgree ? "is-actionable" : "")}">
+            <span class="cg-check__label">
+              <span><strong>임차인은 표준계약서 내용에 동의</strong></span>
+              <span class="cg-check__hint">${s.step3_tenant_agreed ? "임차인 동의 완료" : "모달에서 표준계약서를 확인 후 동의해 주세요"}</span>
+            </span>
+            <input type="checkbox" class="js-cg-std-agree" data-role="tenant" ${s.step3_tenant_agreed ? "checked" : ""} ${canTenantAgree ? "" : "disabled"}>
+          </label>
+        </div>`);
+      parts.push(...msgs23.map(renderMsg));
+    }
+
+    // 앱 개입 카드 ④: 상기 내용에 동의합니다 + 날짜 + 임대인/임차인 서명
+    if (s.current_step >= 4) {
+      const sigDone = Boolean(s.lessor_signature && s.tenant_signature);
+      parts.push(`
+        <div class="cg-card ${sigDone ? "cg-card--done" : (s.current_step === 4 ? "cg-card--active" : "")}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "② 전자서명" : "④ 전자서명"}</span>
+            <span class="bass-badge ${sigDone ? "bass-badge--ok" : "bass-badge--warn"}">${sigDone ? "양측 서명 완료 ✓" : "서명 진행 중"}</span>
+          </div>
+          <div class="cg-sign-paper">
+            <div class="cg-sign-paper__title">상기 내용에 동의합니다.</div>
+            <div class="cg-sign-paper__date">${formatKoreanDateDot()}</div>
+            <div class="cg-sign-row">
+              <span class="cg-sign-row__who"><span class="bass-muted">임대인</span> <strong>${esc(s.lessor_name || "-")}</strong></span>
+              <span class="cg-sign-row__sig">
+                ${s.lessor_signature
+                  ? `${sigHtml(s.lessor_signature)} <span class="bass-badge bass-badge--ok">서명 완료 ✓</span>`
+                  : (canAct && currentRole === "lessor"
+                    ? `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="4">✍️ 임대인 서명하기 ↗</button>`
+                    : `<span class="bass-muted">서명 대기</span>`)}
+              </span>
+            </div>
+            <div class="cg-sign-row">
+              <span class="cg-sign-row__who"><span class="bass-muted">임차인</span> <strong>${esc(tm.tenant_name || "임차인")}</strong></span>
+              <span class="cg-sign-row__sig">
+                ${s.tenant_signature
+                  ? `${sigHtml(s.tenant_signature)} <span class="bass-badge bass-badge--ok">서명 완료 ✓</span>`
+                  : (canAct && currentRole === "tenant"
+                    ? `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="4">✍️ 임차인 서명하기 ↗</button>`
+                    : `<span class="bass-muted">서명 대기</span>`)}
+              </span>
+            </div>
+          </div>
+          <div class="cg-link-row" style="margin-top:8px;">
+            <button type="button" class="cg-link-btn js-cg-open-step" data-step="3">📄 표준계약서 다시 보기 ↗</button>
+          </div>
+        </div>`);
+      parts.push(...msgs4.map(renderMsg));
+    }
+
+    // 앱 개입 카드 ⑤: 계약금 입금 확인 & 최종 체결
+    if (s.current_step >= 5 && active) {
+      parts.push(`
+        <div class="cg-card cg-card--active">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ⑤ 계약금 확인 및 최종 체결</span>
+            <span class="bass-badge bass-badge--warn">${s.tenant_recheck_at ? "임대인 입금 확인 대기" : "임차인 등기부 재열람 필요"}</span>
+          </div>
+          <div class="cg-card__msg">
+            🏦 <strong>임대인 수납 계좌:</strong> ${acctLabel(s)}<br>
+            💸 <strong>계약금(보증금의 10%):</strong> <strong>${fmtWon(tm.contract_deposit)}</strong>
+          </div>
+          <div class="cg-link-row">
+            ${currentRole === "lessor"
+              ? `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="5">💰 계약금 수납 확인 & 계약 종료 ↗</button>`
+              : `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="5">${s.tenant_recheck_at ? "📄 계약금 송금 · 체결 상태 보기 ↗" : "🔍 체결 직전 등기부 재열람 확인 모달 ↗"}</button>`}
+          </div>
+        </div>`);
+      parts.push(...msgs5.map(renderMsg));
+    }
+
+    return parts.join("");
+  }
+
   function renderWsActionBar(s) {
+    renderPartyHeader(s);
     const bar = document.getElementById("wsActionBar");
     if (!bar) return;
     const step = s.current_step;
@@ -374,24 +645,24 @@
       </div>`;
       btns = `
         ${!adminProxy && currentRole ? `<button type="button" id="wsBtnIdCheck" class="bass-btn bass-btn--sm ${myIdDone ? "" : "bass-btn--primary"}">${myIdDone ? "✅ 신원 확인 완료" : "🪪 상호 신원 확인 체크"}</button>` : ""}
-        <button type="button" class="bass-btn bass-btn--sm ${myRegDone ? "" : "bass-btn--primary"} js-ws-step" data-step="1">${currentRole === "tenant" ? "📄 법원 등기부 열람 · AI 분석" : "📄 등기부 제시 · 확인"}</button>
+        <button type="button" class="bass-btn bass-btn--sm ${myRegDone ? "" : "bass-btn--primary"} js-ws-step" data-step="1">${currentRole === "tenant" ? "📄 법원 등기부 열람 · 승인 모달" : "📄 등기부 제시 · 확인 모달"}</button>
         ${!adminProxy && currentRole === "tenant" && tenantRegSubmitted && !myRegDone ? `<button type="button" id="wsBtnRegCheck" class="bass-btn bass-btn--sm bass-btn--primary">✅ 등기부 확인 체크</button>` : ""}`;
     } else if (step === 2) {
       const myOptDone = currentRole === "lessor" ? Boolean(s.step2_lessor_confirmed) : Boolean(s.step2_tenant_locked);
       extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
-        옵션·벽지 상태·사진 기록 확인: 임대인 ${s.step2_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step2_tenant_locked ? "✅" : "⏳"}
+        표준계약서 · 옵션·벽지 상태 메모 확인: 임대인 ${s.step2_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step2_tenant_locked ? "✅" : "⏳"}
       </div>`;
-      btns = `<button type="button" class="bass-btn bass-btn--sm ${myOptDone ? "" : "bass-btn--primary"} js-ws-step" data-step="2">🛋️ 옵션 확인 · 벽지 상태 메모 · 📷 사진 촬영</button>`;
+      btns = `<button type="button" class="bass-btn bass-btn--sm ${myOptDone ? "" : "bass-btn--primary"} js-ws-step" data-step="2">📄 표준계약서 · 옵션·벽지 메모 확인 모달</button>`;
     } else if (step === 3) {
       const canAgree = !adminProxy && currentRole && S.chatSummary.open_count === 0;
       const agreedMine = currentRole === "lessor" ? s.step3_lessor_agreed : s.step3_tenant_agreed;
       extraInfo = isRen
-        ? `<div class="bass-muted" style="font-size:12px;margin-top:4px;">🔁 연장 계약은 본인·등기부·옵션 확인을 건너뛰고 조건 확인 체크 → 서명 날인으로 바로 종료됩니다.</div>`
-        : `<div class="bass-muted" style="font-size:12px;margin-top:4px;">조건 확인 체크: 임대인 ${s.step3_lessor_agreed ? "✅" : "⏳"} · 임차인 ${s.step3_tenant_agreed ? "✅" : "⏳"}</div>`;
+        ? `<div class="bass-muted" style="font-size:12px;margin-top:4px;">🔁 연장 계약은 표준계약서 확인 동의 → 서명 날인으로 바로 종료됩니다.</div>`
+        : `<div class="bass-muted" style="font-size:12px;margin-top:4px;">표준계약서 동의: 임대인 ${s.step3_lessor_agreed ? "✅" : "⏳"} · 임차인 ${s.step3_tenant_agreed ? "✅" : "⏳"}</div>`;
       btns = `
-        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnAgree3" class="bass-btn bass-btn--sm ${agreedMine ? "" : "bass-btn--primary"}" ${canAgree ? "" : "disabled"}>${agreedMine ? "✅ 조건 확인 완료 (상대 대기)" : (isRen ? "✅ 연장 조건 확인 체크" : "✅ 조건 확인 체크")}</button>` : ""}
-        ${!adminProxy && currentRole === "lessor" ? `<button type="button" id="wsBtnBundle" class="bass-btn bass-btn--sm">📋 조건 수정</button>` : ""}
-        <button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="3">✏️ 특약·세부 보기</button>`;
+        <button type="button" class="bass-btn bass-btn--sm ${agreedMine ? "" : "bass-btn--primary"} js-ws-step" data-step="3">📄 표준계약서 내용 확인 모달</button>
+        ${!adminProxy && currentRole ? `<button type="button" id="wsBtnAgree3" class="bass-btn bass-btn--sm" ${canAgree ? "" : "disabled"}>${agreedMine ? "✅ 동의 완료 (상대 대기)" : (isRen ? "✅ 연장 조건 동의" : "✅ 표준계약서 동의")}</button>` : ""}
+        ${!adminProxy && currentRole === "lessor" ? `<button type="button" id="wsBtnBundle" class="bass-btn bass-btn--sm">📋 조건 수정</button>` : ""}`;
     } else if (step === 4) {
       const mySigDone = currentRole === "lessor" ? Boolean(s.lessor_signature) : Boolean(s.tenant_signature);
       extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
@@ -412,12 +683,12 @@
     const cdepText = isRen ? "" : ` · 계약금(10%) <strong>${fmtWon(tm.contract_deposit)}</strong>`;
     const rcBar = isRen ? S.renewalContext : null;
     const rcLine = rcBar ? `<div class="bass-muted" style="font-size:12px;margin-top:3px;">기존 계약: 보 ${fmtWon(rcBar.prev_deposit)} · 월 ${fmtWon(rcBar.prev_monthly_rent)} · 관 ${fmtWon(rcBar.prev_maintenance_fee)}${rcBar.notice_sent ? " · <strong>문자 예고 조건 반영</strong>" : ""} (5% 상한 월 ${fmtWon(rcBar.max_monthly_rent)})</div>` : "";
-    const termsSummary = `<div class="bass-muted" style="font-size:12.5px;margin-top:6px;line-height:1.5;background:#f8fafc;padding:6px 10px;border-radius:10px;">
+    const termsSummary = `<div class="bass-muted" style="font-size:12.5px;margin-top:5px;line-height:1.5;background:#f8fafc;padding:5px 9px;border-radius:9px;">
       보증금 <strong>${fmtWon(tm.deposit)}</strong>${cdepText} · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · ${isRen ? "연장 시작" : "입주"} ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)${rcLine}
     </div>`;
     bar.innerHTML = `
       <div class="ws-action-card__head">
-        <strong style="font-size:14px;">${esc(prog.label)}</strong>
+        <strong style="font-size:13.5px;">${esc(prog.label)}</strong>
         <span class="bass-badge ${t.mine ? "bass-badge--warn" : "bass-badge--info"}">${esc(t.text)}</span>
       </div>
       ${termsSummary}
@@ -427,7 +698,7 @@
     bar.querySelectorAll(".js-ws-step").forEach((b) => {
       b.addEventListener("click", () => {
         const st = Number(b.dataset.step || 0);
-        C.openStepModal(st || s.current_step);
+        C.openStepModal(st || s.current_step, { forceDoc: true });
       });
     });
     const btnIdChk = document.getElementById("wsBtnIdCheck");
@@ -508,13 +779,30 @@
       const note = document.getElementById("wsChatNote");
       const comp = document.getElementById("wsChatComposer");
       if (comp) comp.hidden = d.read_only || adminProxy || !currentRole;
-      if (note) note.textContent = d.purged ? d.purged_note : (d.read_only ? "종료된 계약방입니다(읽기 전용)." : "상대방과 채팅하며 아래 카드 또는 상단 버튼으로 단계별 확인·승인을 진행하세요.");
-      const sig = JSON.stringify((d.messages || []).map((m) => [m.id, m.status]));
+      if (note) note.textContent = d.purged ? d.purged_note : (d.read_only ? "종료된 계약방입니다(읽기 전용)." : "채팅창 안에서 상대방과 대화하며 앱이 제시하는 링크(등기부등본·표준계약서 모달)를 눌러 확인·승인하세요.");
+      const s = S.activeSession;
+      const tr = s.tenant_registry || {};
+      const tm = s.terms || {};
+      const sessionSig = [
+        s.id, s.status, s.call_status, s.current_step, s.revision,
+        s.lessor_checked_tenant_id, s.tenant_checked_lessor_id,
+        s.step1_lessor_confirmed, s.step1_tenant_locked,
+        Boolean(tr.submitted), tr.owner_name || "", tr.mortgage_amount ?? "", tr.seizure_or_trust || "",
+        s.step2_lessor_confirmed, s.step2_tenant_locked,
+        s.facility_notes || "", (s.facility_photos || []).length,
+        s.step3_lessor_agreed, s.step3_tenant_agreed,
+        Boolean(s.lessor_signature), Boolean(s.tenant_signature),
+        s.tenant_recheck_at || "",
+        tm.deposit || 0, tm.monthly_rent || 0, tm.maintenance_fee || 0, tm.cleaning_fee || 0, tm.move_in_date || "", tm.lease_term_months || 12,
+      ].join("|");
+      const sig = sessionSig + "::" + JSON.stringify((d.messages || []).map((m) => [m.id, m.status]));
       if (sig !== S.wsChatLastSig) {
+        const firstRender = !S.wsChatLastSig;
         S.wsChatLastSig = sig;
-        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
-        list.innerHTML = (d.messages || []).map((m) => renderChatBubble(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px;">아직 채팅이 없습니다. 상단 버튼으로 조건을 제시하거나 인사를 남겨 보세요.</div>';
+        const atBottom = firstRender || (list.scrollHeight - list.scrollTop - list.clientHeight < 60);
+        list.innerHTML = buildSmartChatTimelineHtml(s, d.messages || [], d);
         if (atBottom) list.scrollTop = list.scrollHeight;
+
         list.querySelectorAll(".cm-act").forEach((btn) => btn.addEventListener("click", () => {
           Bass.withLock(btn, async () => {
             const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/messages/${btn.dataset.id}/respond`, { method: "POST", body: { action: btn.dataset.act } });
@@ -522,6 +810,104 @@
             await refreshInlineChat(true);
             await C.fetchActiveSession(true);
           });
+        }));
+
+        list.querySelectorAll(".js-cg-open-step").forEach((btn) => btn.addEventListener("click", () => {
+          const st = Number(btn.dataset.step || 0);
+          C.openStepModal(st || S.activeSession.current_step, { forceDoc: true });
+        }));
+
+        list.querySelectorAll(".js-cg-iros").forEach((btn) => btn.addEventListener("click", () => {
+          const curS = S.activeSession;
+          const addr = `${curS.building_address || ""} ${curS.room_no}호`.trim();
+          const w = window.open("https://www.iros.go.kr", "_blank");
+          if (w) { try { w.opener = null; } catch (_) {} }
+          if (window.R3 && R3.copyText) {
+            R3.copyText(addr).then((ok) => {
+              Bass.updateAppAlert("success", ok ? `주소(${addr})를 복사하고 법원등기소(iros.go.kr)를 열었습니다.` : "법원등기소(iros.go.kr)를 열었습니다.");
+            });
+          }
+        }));
+
+        list.querySelectorAll(".js-cg-id-chk").forEach((chk) => chk.addEventListener("change", () => {
+          const role = chk.dataset.role;
+          if (!role || role !== currentRole) return;
+          const nextChecked = chk.checked;
+          chk.disabled = true;
+          Bass.api(APP_ID, `/sessions/${S.activeSession.id}/verify-id`, {
+            method: "POST",
+            body: { role: currentRole, checked: nextChecked },
+          }).then((res) => {
+            S.activeSession = res.session;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          }).catch((err) => {
+            chk.checked = !nextChecked;
+            chk.disabled = false;
+            Bass.showError(err);
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-reg-confirm").forEach((chk) => chk.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          const curS = S.activeSession;
+          if (!curS || currentRole !== "tenant" || curS.step1_tenant_locked) return;
+          if (!(curS.tenant_registry && curS.tenant_registry.submitted)) {
+            Bass.updateAppAlert("info", "등기부등본 확인 모달에서 열람 내용을 입력하고 승인해 주세요.");
+            C.openStepModal(1, { forceDoc: true });
+            return;
+          }
+          chk.disabled = true;
+          Bass.api(APP_ID, `/sessions/${curS.id}/step1`, {
+            method: "POST",
+            body: { role: "tenant", checked_counterparty_id: Boolean(curS.tenant_checked_lessor_id) },
+          }).then((res) => {
+            S.activeSession = res.session;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          }).catch((err) => {
+            chk.disabled = false;
+            Bass.showError(err);
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-std-agree").forEach((chk) => chk.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          const curS = S.activeSession;
+          const role = chk.dataset.role;
+          if (!curS || role !== currentRole) return;
+          if (curS.mode !== "RENEWAL" && curS.current_step === 2) {
+            Bass.updateAppAlert("info", "표준계약서 모달에서 옵션·도배상태 메모를 먼저 확인 완료해 주세요.");
+            C.openStepModal(2, { forceDoc: true });
+            return;
+          }
+          if (S.chatSummary.open_count > 0) {
+            Bass.updateAppAlert("warning", "답하지 않은 계약 조건 제안이 있습니다. 채팅에서 먼저 수락·거절해 주세요.");
+            return;
+          }
+          if (S.reviewedStdContractRev !== curS.revision) {
+            Bass.updateAppAlert("info", "좌우·상하로 스크롤해 표준계약서 전문을 확인한 뒤 하단에서 동의해 주세요.");
+            C.openStepModal(3, { forceDoc: true });
+            return;
+          }
+          chk.disabled = true;
+          Bass.api(APP_ID, `/sessions/${curS.id}/step3/agree`, {
+            method: "POST",
+            body: { role: currentRole, expected_revision: curS.revision },
+          }).then((res) => {
+            S.activeSession = res.session;
+            S.lastRevision = S.activeSession.revision;
+            S.viewStep = S.activeSession.current_step;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          }).catch((err) => {
+            chk.disabled = false;
+            Bass.showError(err);
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-bundle").forEach((btn) => btn.addEventListener("click", () => {
+          openBundleDialog(S.activeSession);
         }));
       }
       S.chatSummary = { unread: d.unread || 0, open_count: d.open_count || 0 };

@@ -11,12 +11,15 @@
     S.activeSessionId = id;
     S.activeSession = null;
     S.renewalContext = null;
+    S.roomInfo = null;
     S.latestChatMessages = [];
     S.lastRevision = null;
     S.lastCallStatus = null;
     S.modalKey = "";
     S.lastStamp = "";
     S.modalAnimating = false;
+    S.modalForceDoc = false;
+    S.reviewedStdContractRev = null;
     S.wsChatLastSig = "";
     clearTimeout(S.modalTimer);
     D.elCard.classList.remove("is-open", "is-closing");
@@ -31,9 +34,12 @@
     S.activeSessionId = "";
     S.activeSession = null;
     S.renewalContext = null;
+    S.roomInfo = null;
     S.latestChatMessages = [];
     S.modalKey = "";
     S.stepModalOpen = false;
+    S.modalForceDoc = false;
+    S.reviewedStdContractRev = null;
     S.wsChatLastSig = "";
     clearTimeout(S.modalTimer);
     D.elModal.hidden = true;
@@ -66,6 +72,7 @@
     S.activeSession = res.session;
     S.sealedContract = res.contract;
     S.renewalContext = res.renewal_context || null;
+    S.roomInfo = res.room_info || null;
     S.chatSummary = res.chat || S.chatSummary;
     C.updateChatFab();
     C.updateTurnLine();
@@ -74,7 +81,7 @@
     if (idx >= 0) S.allSessions[idx] = S.activeSession;
 
     if (forceRender || S.activeSession.current_step !== prevStep) S.viewStep = S.activeSession.current_step;
-    if (prevStep > 0 && S.activeSession.current_step !== prevStep) S.stepModalOpen = false;
+    if (prevStep > 0 && S.activeSession.current_step !== prevStep) { S.stepModalOpen = false; S.modalForceDoc = false; }
 
     if (
       forceRender ||
@@ -91,27 +98,37 @@
   }
 
   // ───────────────────────── 단계 모달 라우팅 ─────────────────────────
+  function modalTitleFor(s, step) {
+    if (s.status === "CANCELLED") return "⛔ 계약 중단 안내";
+    if (s.call_status === "CALLING") return "📞 상대방 호출 연결";
+    if (step === 1) return "🏛️ 법원등기소 · 등기부등본 확인 및 승인";
+    if (step === 2) return "📄 표준계약서 내용 확인 (옵션 · 도배상태 세부내역 메모)";
+    if (step === 3) return "📄 표준계약서 내용 확인 및 동의";
+    if (step === 4) return "✍️ 표준계약서 최종 확인 및 전자서명";
+    return "💰 계약금 확인 및 최종 체결";
+  }
+
   function planModal(s) {
     if (s.status === "CANCELLED") {
-      return { key: `${s.id}:cancelled`, render: () => C.renderCancelled(s) };
+      return { key: `${s.id}:cancelled`, title: modalTitleFor(s, 0), showHint: false, render: () => C.renderCancelled(s) };
     }
     if (s.call_status === "CALLING") {
       const callee = currentRole !== s.initiated_by_role;
-      return { key: `${s.id}:call:${callee ? "respond" : "wait"}`, render: () => C.renderCallHandshake(s) };
+      return { key: `${s.id}:call:${callee ? "respond" : "wait"}`, title: modalTitleFor(s, 0), showHint: false, render: () => C.renderCallHandshake(s) };
     }
     const step = S.viewStep;
     if (step === 5 && s.current_step === 5 && currentRole === "tenant" && !s.tenant_recheck_at) {
-      return { key: `${s.id}:s5:recheck`, render: () => { C.renderRecheckTenant(s); C.decoratePanel(s); } };
+      return { key: `${s.id}:s5:recheck`, title: "🏛️ 체결 직전 등기부 재열람 확인", showHint: true, render: () => { C.renderRecheckTenant(s); C.decoratePanel(s); } };
     }
-    if (step === s.current_step) {
+    if (!S.modalForceDoc && step === s.current_step) {
       const prog = C.stepProgress(s, step);
       const mine = prog[currentRole];
       const blocked = C.blockedMessage(s, step);
       if (mine || blocked) {
-        return { key: `${s.id}:s${step}:wait`, render: () => { renderWaiting(s, step, prog, mine, blocked); C.decoratePanel(s); } };
+        return { key: `${s.id}:s${step}:wait`, title: modalTitleFor(s, step), showHint: false, render: () => { renderWaiting(s, step, prog, mine, blocked); C.decoratePanel(s); } };
       }
     }
-    return { key: `${s.id}:s${step}:act`, render: () => { renderStepN(s, step); C.decoratePanel(s); } };
+    return { key: `${s.id}:s${step}:${S.modalForceDoc ? "doc" : "act"}`, title: modalTitleFor(s, step), showHint: true, render: () => { renderStepN(s, step); C.decoratePanel(s); } };
   }
 
   function renderStepN(s, step) {
@@ -129,7 +146,12 @@
       <p class="bass-muted" style="font-size:13px;margin:0 0 6px;">
         ${esc(blocked || `${OTHER_KO}이 [${prog.label}]을 마치면 자동으로 다음 단계가 열립니다. 이 화면을 닫지 말고 기다려 주세요.`)}
       </p>
-      <div class="dotline">${dot("lessor", prog.lessor)}${dot("tenant", prog.tenant)}</div>`;
+      <div class="dotline">${dot("lessor", prog.lessor)}${dot("tenant", prog.tenant)}</div>
+      <div style="margin-top:12px;">
+        <button id="btnViewDocAnyway" type="button" class="bass-btn bass-btn--sm">📄 문서 내용 다시 보기</button>
+      </div>`;
+    const btnDoc = document.getElementById("btnViewDocAnyway");
+    if (btnDoc) btnDoc.addEventListener("click", () => openStepModal(step, { forceDoc: true }));
   }
 
   function positionModal() {
@@ -145,24 +167,34 @@
     D.elCard.classList.add("is-open");
   }
 
-  function openStepModal(stepNum) {
+  function closeStepModal() {
+    S.stepModalOpen = false;
+    S.modalForceDoc = false;
+    S.isEditingForm = false;
+    D.elModal.hidden = true;
+  }
+
+  function openStepModal(stepNum, opts) {
     if (stepNum) S.viewStep = stepNum;
+    S.modalForceDoc = Boolean(opts && opts.forceDoc);
     S.stepModalOpen = true;
     S.modalKey = "";
     renderWorkspace();
   }
   const btnCloseStepModal = document.getElementById("btnCloseStepModal");
   if (btnCloseStepModal) {
-    btnCloseStepModal.addEventListener("click", () => {
-      S.stepModalOpen = false;
-      D.elModal.hidden = true;
+    btnCloseStepModal.addEventListener("click", closeStepModal);
+  }
+  if (D.elModal) {
+    D.elModal.addEventListener("click", (ev) => {
+      if (ev.target === D.elModal) closeStepModal();
     });
   }
   document.querySelectorAll("#stepperBar .step-pill").forEach((pill) => {
     pill.addEventListener("click", () => {
       if (!S.activeSession || S.activeSession.status === "COMPLETED") return;
       const n = Number(pill.dataset.step);
-      if (n && n <= S.activeSession.current_step) openStepModal(n);
+      if (n && n <= S.activeSession.current_step) openStepModal(n, { forceDoc: true });
     });
   });
 
@@ -173,6 +205,10 @@
       return;
     }
     const plan = planModal(s);
+    const titleEl = document.getElementById("stepModalTitle");
+    if (titleEl && plan.title) titleEl.textContent = plan.title;
+    const hintEl = document.getElementById("stepModalHint");
+    if (hintEl) hintEl.hidden = !plan.showHint;
     D.elModal.hidden = false;
     positionModal();
     const chatSummary = S.chatSummary;
@@ -194,7 +230,8 @@
       if (!S.activeSession || !S.stepModalOpen) return;
       planModal(S.activeSession).render();
       openCardAnim();
-      D.elModal.scrollTop = 0;
+      D.elStepPanel.scrollTop = 0;
+      D.elStepPanel.scrollLeft = 0;
     }, 210);
   }
 
@@ -255,7 +292,7 @@
     C.renderSealedPaper();
   }
 
-  Object.assign(C, { openSession, goHome, fetchActiveSession, openStepModal, renderWorkspace });
+  Object.assign(C, { openSession, goHome, fetchActiveSession, openStepModal, closeStepModal, renderWorkspace });
 
   // 🔔 알림창: 홈에서는 위 줄 오른쪽, 계약 화면에서는 머리말 오른쪽. 관리인 대리 접속에서는 달지 않는다.
   if (window.R3Notify && !adminProxy) {
