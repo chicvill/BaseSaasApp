@@ -24,8 +24,8 @@ class VatTransaction(Obj):
     tax_amount: int = 0                      # 부가세액 (원)
     is_tax_exempt: bool = False              # 면세 여부 (주택 임대 등)
     period: str = ""                         # 2026-1기예정 | 2026-1기확정 | 2026-2기예정 | 2026-2기확정
-    source: str = "manual"                   # manual | rent2_sync | n8n
-    ref_id: str = ""                         # rent2 등 연동 시 중복 방지 키
+    source: str = "manual"                   # manual | rent3_sync | n8n
+    ref_id: str = ""                         # rent3 등 연동 시 중복 방지 키
 
     @classmethod
     def create_tx(
@@ -313,7 +313,7 @@ def get_five_role_intelligence(branch_id: str = "main") -> Dict[str, Dict[str, s
     # 5. Roommate (진도 요약 및 다음 액션)
     roommate_text = (
         "이번 주 세무 점검이 완료되었습니다! 👏 "
-        "다음 액션: apps/rent2의 최신 수납 내역을 'rent2 원클릭 동기화' 버튼으로 가져와 매출 원장을 최신화해 보세요."
+        "다음 액션: Rent3의 최신 수납 내역을 'rent3 원클릭 동기화' 버튼으로 가져와 매출 원장을 최신화해 보세요."
     )
 
     return {
@@ -325,49 +325,58 @@ def get_five_role_intelligence(branch_id: str = "main") -> Dict[str, Dict[str, s
     }
 
 
-def sync_from_rent2(branch_id: str = "main") -> int:
-    """apps/rent2 임대차 수납 데이터를 부가세 매출 전표로 동기화 (멱등성 보장)."""
-    # rent2 seed_data.json 경로 탐색
-    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-    rent2_seed = os.path.join(root, "apps", "rent2", "backend", "seed_data.json")
-
+def sync_from_rent3(branch_id: str = "main") -> int:
+    """Rent3 공동 Data Pool 임대차 계약·수납 데이터를 부가세 매출 전표로 동기화 (멱등성 보장)."""
     imported = 0
-    if os.path.exists(rent2_seed):
-        try:
-            with open(rent2_seed, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            
-            # 임대 계약 정보 추출
-            contracts = data.get("contracts", [])
+    try:
+        from apps.rent_dist._rent3_core import Contract, Pay, ensure_pool_seeded, normalize_branch_id
+        ensure_pool_seeded()
+        b_id = normalize_branch_id(branch_id)
+        pays = [p for p in Pay.find(branch=b_id) if not getattr(p, "voided", False) and (p.rent_amount or p.total_amount)]
+        if pays:
+            for p in pays:
+                amt = int(p.rent_amount or p.total_amount or 0)
+                if amt <= 0:
+                    continue
+                ct = Contract.get(p.id_contract) if p.id_contract else None
+                is_exempt = not bool(ct.vat_target) if ct else True
+                ref_key = f"rent3_pay_{p.id}"
+                VatTransaction.create_tx(
+                    date=(p.paid_date or "2026-01-25")[:10],
+                    tx_type="SALES",
+                    category="임대료(rent3 연동)",
+                    counterparty=f"{p.payer_name or (ct.tenant_name if ct else '임차인')} ({p.room_no}호)",
+                    item_name=f"{p.billing_month or ''}분 월세 임대료",
+                    supply_amount=amt,
+                    is_tax_exempt=is_exempt,
+                    source="rent3_sync",
+                    ref_id=ref_key,
+                    branch_id=branch_id,
+                )
+                imported += 1
+        else:
+            contracts = Contract.find(branch=b_id, status="ACTIVE")
             for c in contracts:
-                tenant = c.get("tenant_name", "미상임차인")
-                room = c.get("room_no", "원룸")
-                monthly_rent = c.get("monthly_rent", 0)
+                monthly_rent = int(c.monthly_rent or 0)
                 if monthly_rent <= 0:
                     continue
-
-                # 계약일 기준 2026년 1기, 2기 모의 월세 전표 생성
-                for m in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]:
-                    ref_key = f"rent2_{room}_{tenant}_2026_{m:02d}"
-                    date_str = f"2026-{m:02d}-25"
-                    # 주택 임대료는 부가세 면세 적용, 상가/사무실은 과세
-                    is_exempt = "상가" not in room and "오피스" not in room
-
-                    tx = VatTransaction.create_tx(
-                        date=date_str,
-                        tx_type="SALES",
-                        category="임대료(rent2 연동)",
-                        counterparty=f"{tenant} ({room}호)",
-                        item_name=f"2026년 {m}월분 월세 임대료",
-                        supply_amount=monthly_rent,
-                        is_tax_exempt=is_exempt,
-                        source="rent2_sync",
-                        ref_id=ref_key,
-                        branch_id=branch_id
-                    )
-                    imported += 1
-        except Exception as e:
-            print("rent2 동기화 중 오류 (진행 계속):", e)
+                is_exempt = not bool(c.vat_target)
+                ref_key = f"rent3_ct_{c.id}"
+                VatTransaction.create_tx(
+                    date=(c.move_in_date or "2026-01-25")[:10],
+                    tx_type="SALES",
+                    category="임대료(rent3 연동)",
+                    counterparty=f"{c.tenant_name or '임차인'} ({c.room_no}호)",
+                    item_name=f"{c.room_no}호 월세 임대료",
+                    supply_amount=monthly_rent,
+                    is_tax_exempt=is_exempt,
+                    source="rent3_sync",
+                    ref_id=ref_key,
+                    branch_id=branch_id,
+                )
+                imported += 1
+    except Exception as e:
+        print("rent3 동기화 중 오류 (진행 계속):", e)
 
     return imported
 
@@ -421,7 +430,7 @@ def seed(branch_id: str = "main") -> int:
             branch_id=branch_id
         )
 
-        # rent2 연동 시동
-        sync_from_rent2(branch_id)
+        # rent3 연동 시동
+        sync_from_rent3(branch_id)
 
     return VatTransaction.count(branch_id)

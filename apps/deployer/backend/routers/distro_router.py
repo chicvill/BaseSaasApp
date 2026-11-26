@@ -55,7 +55,7 @@ async def download_package(filename: str):
     # 만약 파일이 없으면 온디맨드 자동 빌드
     if not os.path.exists(target_path) or os.path.getsize(target_path) == 0:
         import shutil
-        app_id = "rent"
+        app_id = "rent3"
         for a_id in distro_engine.APP_CATALOG.keys():
             if a_id in safe_name.lower():
                 app_id = a_id
@@ -151,7 +151,7 @@ sudo chmod -R 777 "$TARGET_DIR/data" "$TARGET_DIR/media" 2>/dev/null || true
 # 4. 패키지 다운로드
 echo "📥 중앙 서버에서 공식 패키지 다운로드 중..."
 PKG_DOWNLOADED=0
-for PKG_URL in "http://34.31.10.12/api/deployer/download/{clean_id}_standalone.zip" "http://34.31.10.12/download/{clean_id}_standalone.zip" "http://34.31.10.12/api/deployer/download/rent_standalone.zip"; do
+for PKG_URL in "http://34.31.10.12/api/deployer/download/{clean_id}_standalone.zip" "http://34.31.10.12/download/{clean_id}_standalone.zip" "http://34.31.10.12/api/deployer/download/rent3_standalone.zip"; do
     if curl -f -sSL "$PKG_URL" -o "$TARGET_DIR/package.zip" 2>/dev/null; then
         if [ -s "$TARGET_DIR/package.zip" ] && unzip -t "$TARGET_DIR/package.zip" &>/dev/null; then
             PKG_DOWNLOADED=1

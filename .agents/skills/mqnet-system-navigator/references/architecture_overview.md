@@ -9,8 +9,7 @@ c:\Users\USER\Desktop\Workstation\integrated/
 │   ├── main.py                  # 라우팅, JWT 인증 검증, 서브앱 리버스 프록시, NoCacheStaticFiles
 │   └── portal.html              # 중앙 마스터 포털 UI (단일 대시보드)
 ├── apps/                        # 도메인별 독립 실행 가능한 비즈니스 마이크로앱
-│   ├── rent2/                   # 차세대 스마트 모바일 임차관리 솔루션 (포트 9016)
-│   ├── rent/                    # 1세대 임차/지출 관리 솔루션
+│   ├── rent_dist/               # 차세대 비대면 직거래 임차관리 플랫폼 (rent3·admin·lessor·tenant·contract)
 │   ├── studycafe/               # 1호점/2호점 무인 스터디카페 관제 솔루션 (포트 9002)
 │   ├── selfstudy/               # 관리형 독서실/셀프스터디 관제 솔루션 (포트 9005)
 │   ├── store/                   # 가맹점/매장 포스 및 키오스크 (포트 9006)
@@ -47,7 +46,7 @@ c:\Users\USER\Desktop\Workstation\integrated/
 | 포트 (Port) | 애플리케이션 (Service) | 역할 및 엔드포인트 |
 | :--- | :--- | :--- |
 | **8000 / 9000** | **통합 게이트웨이 (Gateway)** | 중앙 로그인, 포털 UI (`/portal.html`), API 프록시 |
-| **9016** | **스마트 임차관리 (rent2)** | 모바일 특화 원룸/빌딩 임대료 수납 (`/index.html`) |
+| **8000** | **스마트 직거래 임차관리 (rent3)** | 포털·임대인·임차인·관리인·공동계약 통합 (`/rent3/`, `/rent3_lessor/`, `/rent3_tenant/`, `/rent3_contract/`, `/rent3_admin/`) |
 | **9002** | **스터디카페 (studycafe)** | 무인 좌석 예약, 키오스크, 바코드 출입문 관제 |
 | **9005** | **셀프스터디 (selfstudy)** | 관리형 독서실 입실/퇴실, 부모 알림 포털 |
 | **9006** | **스마트 스토어 (store)** | 무인 매장 POS, 상품 결제 및 재고 관리 |

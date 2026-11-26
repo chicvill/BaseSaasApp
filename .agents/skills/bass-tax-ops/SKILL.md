@@ -5,7 +5,7 @@ description: Operational business rules, 5-role collaboration governance, tax ca
 
 # ⚖️ BaseSaasApp 스마트 부동산 세무 (Tax) & 5역할 협업 운영 스킬
 
-본 스킬은 부동산 임대사업자의 부가가치세(VAT) 자동 집계, 종합부동산세(종부세) 누진 산출, `apps/rent2` 수납 데이터 실시간 연동, 그리고 **5역할 협업(Five-Role Collaboration) 거버넌스**를 플랫폼 내에 안착시키기 위한 표준 운영 헌법입니다.
+본 스킬은 부동산 임대사업자의 부가가치세(VAT) 자동 집계, 종합부동산세(종부세) 누진 산출, `rent3` 공동 데이터 풀 수납 데이터 실시간 연동, 그리고 **5역할 협업(Five-Role Collaboration) 거버넌스**를 플랫폼 내에 안착시키기 위한 표준 운영 헌법입니다.
 
 ---
 
@@ -54,7 +54,7 @@ description: Operational business rules, 5-role collaboration governance, tax ca
   - 1기 확정: 1월 1일 ~ 6월 30일 (신고: 7월 25일)
   - 2기 예정: 7월 1일 ~ 9월 30일 (신고: 10월 25일)
   - 2기 확정: 7월 1일 ~ 12월 31일 (신고: 1월 25일)
-- **rent2 연동**: `apps/rent2`의 수납 원장(월세/관리비)을 읽어와 과세 대상 임대료의 공급가액과 부가세를 1초 만에 자동 원장으로 편입합니다.
+- **rent3 연동**: `apps/rent_dist/_rent3_core` 공동 데이터 풀의 수납 원장(월세/관리비)을 읽어와 과세 대상 임대료의 공급가액과 부가세를 1초 만에 자동 원장으로 편입합니다.
 
 ### 2-2. 종합부동산세(종부세) 산출 규칙
 ```text
@@ -77,4 +77,4 @@ py .agents/skills/bass-tax-ops/scripts/verify_tax_system.py
 1. **AST 무결성**: `apps/tax` 전체 백엔드 문법 0 에러 검증.
 2. **VAT 계산 정확도**: 100건 모의 전표 기준 1원 오차 없는 세액 집계 검증.
 3. **종부세 누진 시뮬레이션**: 9억 이하 비과세, 15억 다주택, 30억 고가주택 구간별 산출 공식 일치 검증.
-4. **rent2 상호 연동 멱등성**: 중복 동기화 시 중복 전표 생성 원천 방지 확인.
+4. **rent3 상호 연동 멱등성**: 중복 동기화 시 중복 전표 생성 원천 방지 확인.

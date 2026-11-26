@@ -4704,6 +4704,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                                  ("[KB] 11/13 홍길동 301 입금 290,000원 잔액 1,200,000원", "301", "홍길동")):
             got = P.parse(text)
             self.assertEqual((got["room_no"], got["payer_name"]), (room, name), text)
+        # 계좌번호·전화번호 마스킹 및 '만원' 단위 파싱(rent2 파서 영입 검증)
+        got_acct = P.parse("[신한] 11/13 110-482-998877 입금 45만원 홍길동 201호 잔액 3,500,000원")
+        self.assertEqual((got_acct["room_no"], got_acct["payer_name"], got_acct["amount"]), ("201", "홍길동", 450000))
+        got_dec = P.parse("[토스] 010-1234-5678 14:20 안동기202 45.5만원 입금")
+        self.assertEqual((got_dec["room_no"], got_dec["payer_name"], got_dec["amount"]), ("202", "안동기", 455000))
         c = self.client
         r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
         self.assertIn(r.status_code, (400, 404))

@@ -179,33 +179,32 @@ class TestScaffoldCLI(unittest.TestCase):
                 shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-class TestRent2Migration(unittest.TestCase):
-    def test_rent2_auto_mounted_and_authenticated(self):
+class TestRent3Migration(unittest.TestCase):
+    def test_rent3_auto_mounted_and_rent2_removed(self):
         app = create_gateway(db_path=":memory:")
         client = TestClient(app)
 
-        # 1. 포털 카탈로그에 rent2가 자동으로 노출되는지 검증
+        # 1. 포털 카탈로그에 rent3 계열 앱이 자동 노출되고 삭제된 rent2는 없어야 한다
         catalog = client.get("/api/apps").json()
         app_ids = [a["app_id"] for a in catalog["apps"]]
-        self.assertIn("rent2", app_ids)
+        for expected in ("rent3", "rent3_admin", "rent3_lessor", "rent3_tenant", "rent3_contract"):
+            self.assertIn(expected, app_ids)
+        self.assertNotIn("rent2", app_ids)
 
-        # 2. 미인증 시 401 차단 검증
-        unauth_res = client.get("/api/rent2/status")
-        self.assertEqual(unauth_res.status_code, 401)
+        # 2. rent3 포털 및 임대인 앱 상태 엔드포인트 응답 확인
+        r3_land = client.get("/api/rent3/pool/landing")
+        self.assertEqual(r3_land.status_code, 200)
+        self.assertIn("listings", r3_land.json())
 
-        # 3. 플랫폼 관리자 로그인 후 정상 200 반환 (전체 3개 건물 합계 64개실)
+        ls_status = client.get("/api/rent3_lessor/status")
+        self.assertEqual(ls_status.status_code, 200)
+
+        # 3. rent3_admin 미인증 차단(401) 및 관리자 로그인 후 정상 접근(200) 확인
+        self.assertEqual(client.get("/api/rent3_admin/overview").status_code, 401)
         login_res = client.post("/auth/login", json={"username": "admin", "password": SEED_PW}).json()
         token = login_res["token"]
-        auth_res = client.get("/api/rent2/status", headers={"Authorization": f"Bearer {token}"})
-        self.assertEqual(auth_res.status_code, 200)
-        self.assertEqual(auth_res.json()["app_id"], "rent2")
-        self.assertEqual(auth_res.json()["total_rooms"], 64)
-
-        # 4. 시크빌 점주(chic) 로그인 시 시크빌 29개실 전용 격리 검증
-        chic_login = client.post("/auth/login", json={"username": "chic", "password": SEED_PW}).json()
-        chic_res = client.get("/api/rent2/status", headers={"Authorization": f"Bearer {chic_login['token']}"})
-        self.assertEqual(chic_res.status_code, 200)
-        self.assertEqual(chic_res.json()["total_rooms"], 29)
+        admin_res = client.get("/api/rent3_admin/overview", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(admin_res.status_code, 200)
 
 
 if __name__ == "__main__":

@@ -108,10 +108,10 @@ def main():
     assert r2.json()["item"]["tax_amount"] == 150000
     print("  ✓ /api/tax/vat/transactions 전표 등록 및 세액 10% 자동계산 정상")
 
-    # 3-3. POST /api/tax/sync/rent2 (멱등성 확인)
-    r3 = client.post("/api/tax/sync/rent2?branch=test_branch")
+    # 3-3. POST /api/tax/sync/rent3 (멱등성 확인)
+    r3 = client.post("/api/tax/sync/rent3?branch=test_branch")
     assert r3.status_code == 200
-    print("  ✓ /api/tax/sync/rent2 rent2 크로스 동기화 정상")
+    print("  ✓ /api/tax/sync/rent3 rent3 크로스 동기화 정상")
 
     # 3-4. GET /api/tax/advisor/feedback (5역할 메시지 검증)
     r4 = client.get("/api/tax/advisor/feedback?branch=test_branch")

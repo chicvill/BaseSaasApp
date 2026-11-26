@@ -22,9 +22,9 @@ class Rent3App(BaseSaaSApp):
         "공인중개사법 안전 SaaS 구조",
         "세입자 전용 라운지 (민원/수리/수납)",
         "디지털 입퇴실 시설 점검표",
-        "rent2 FIFO 수납 엔진 100% 계승"
+        "FIFO 순차 상계 & 가짜 체납 방지 수납 엔진"
     ]
-    subdomains = ["rent3.localhost", "directrent.localhost"]
+    subdomains = ["rent3.localhost", "rent.localhost", "directrent.localhost"]
     order = 19
 
     def get_router(self) -> APIRouter:
@@ -39,7 +39,7 @@ class Rent3App(BaseSaaSApp):
         return {
             "status": "HEALTHY",
             "app_id": self.app_id,
-            "engine": "Rent3 Direct Lifecycle + Rent2 FIFO Core",
+            "engine": "Rent3 Direct Lifecycle + OOP FIFO Core",
             "version": self.version
         }
 

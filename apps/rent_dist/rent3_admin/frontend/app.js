@@ -219,8 +219,6 @@
     const list = document.getElementById("spList");
     list.scrollTop = list.scrollHeight;
     let spMsgs = msgs;
-    const renderSpRows = (arr) => arr.map((m) => `
-          <div style="margin:5px 0;font-size:13px;"><span class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(spFmt(m.created_at))} · ${m.sender_role === "user" ? Bass.escapeHtml(card.name) : (m.sender_role === "admin" ? "관리인" : "안내")}</span><br>${Bass.escapeHtml(m.body)}</div>`).join("") || '<div class="bass-muted" style="font-size:13px;">대화가 없습니다.</div>';
     clearInterval(spTimer);
     spTimer = setInterval(async () => {
       if (currentTab !== "support" || sp.user !== card.user || !document.getElementById("spList")) { clearInterval(spTimer); return; }

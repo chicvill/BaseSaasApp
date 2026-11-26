@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>스마트 부동산 세무 (Tax) & 5역할 협업 센터 | BaseSaasApp</title>
-  <meta name="description" content="부동산 임대사업자 부가세 자동 집계, 종부세 산출, rent2 수납 연동 및 5역할 AI 협업 세무 관리 솔루션.">
+  <meta name="description" content="부동산 임대사업자 부가세 자동 집계, 종부세 산출, rent3 수납 연동 및 5역할 AI 협업 세무 관리 솔루션.">
   <link rel="stylesheet" href="/shared/ui/base.css">
   <style>
     .top-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 0 12px; flex-wrap: wrap; }
@@ -60,7 +60,7 @@
         </p>
       </div>
       <div style="display:flex; gap:10px;">
-        <button id="btnSyncRent" class="btn" style="background:hsl(160 80% 30%);">🔄 rent2 수납 동기화</button>
+        <button id="btnSyncRent" class="btn" style="background:hsl(160 80% 30%);">🔄 rent3 수납 동기화</button>
         <button id="btnNewTx" class="btn btn-primary">+ 전표 등록</button>
         <a href="manual.html" class="btn" style="border:1px solid var(--border);">📖 운영 매뉴얼</a>
       </div>
@@ -468,13 +468,13 @@
       loadSummary();
     }
 
-    // rent2 수납 동기화 버튼 이벤트
+    // rent3 수납 동기화 버튼 이벤트
     document.getElementById("btnSyncRent").onclick = async () => {
       const btn = document.getElementById("btnSyncRent");
       btn.disabled = true;
       btn.innerText = "동기화 중... ⏳";
       try {
-        const res = await fetch("/api/tax/sync/rent2?branch=main", { method: "POST" });
+        const res = await fetch("/api/tax/sync/rent3?branch=main", { method: "POST" });
         const data = await res.json();
         if (data.ok) {
           showAlert("success", data.message);
@@ -484,7 +484,7 @@
         showAlert("error", "동기화 실패: " + err);
       } finally {
         btn.disabled = false;
-        btn.innerText = "🔄 rent2 수납 동기화";
+        btn.innerText = "🔄 rent3 수납 동기화";
       }
     };
 

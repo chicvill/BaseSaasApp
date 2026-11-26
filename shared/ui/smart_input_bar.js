@@ -5,7 +5,7 @@
  * 사용법 (단 1줄로 어떤 앱에서든 즉시 부착):
  *   import { mountSmartInputBar } from '/shared/ui/smart_input_bar.js';
  *   mountSmartInputBar('#myContainer', {
- *     apiBase: '/api/rent2', // 또는 /api/studycafe2, /api/selfstudy2
+ *     apiBase: '/api/rent3_lessor', // 또는 /api/studycafe2, /api/selfstudy2
  *     onSuccess: (res) => reloadData()
  *   });
  */

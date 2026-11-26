@@ -6,7 +6,7 @@ apps/_rent3_core/models.py — Rent3 전 구성 요소 도메인 객체 정의 (
   - users.json     : Admin (관리인), Lessor (임대인), Tenant (임차인)
   - buildings.json : Building (건물)
   - rooms.json     : Room (호실 / 옵션 / 등기 / 공실매물)
-  - contracts.json : Contract (체결 계약 원장 + rent2 후불 비과세/가짜체납 차단 규칙)
+  - contracts.json : Contract (체결 계약 원장 + 후불 비과세/가짜체납 차단 규칙)
   - payments.json  : Pay (월세/관리비/부가세/계약금 수납 객체)
   - outlays.json   : Outlay (8대 표준 공용 운영비 및 수선 지출 객체)
 """
@@ -851,7 +851,7 @@ class Contract(PoolObj):
         }
 
     def due_for_month(self, ym: str) -> Dict[str, Any]:
-        """rent2 핵심 불변식 계승:
+        """핵심 수납 불변식:
         - 전입일 이전 월은 절대 청구하지 않는다 (가짜 체납 Ghost Overdue 원천 차단).
         - 월세가 '후불'인 경우 입주월 당월은 청구액 0원(POSTPAID_EXEMPT)이며, 익월부터 청구한다.
         - 퇴실월 이후는 청구하지 않는다.

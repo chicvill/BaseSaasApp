@@ -20,15 +20,15 @@ SHARED_DIR = os.path.join(PROJECT_ROOT, "shared")
 DIST_DIR = os.path.join(PROJECT_ROOT, "dist")
 
 APP_CATALOG = {
-    "rent": {
-        "id": "rent",
-        "name": "부동산 임차관리 시스템 (29개실)",
-        "icon": "🏢",
+    "rent3": {
+        "id": "rent3",
+        "name": "스마트 직거래 임대차 관리 시스템 (Rent3)",
+        "icon": "🏡",
         "category": "부동산/자산관리",
-        "description": "29개실 호실 계약, 12개월 납부 장부, 만기 도래(3일/1달/3달) 자동 알림, 부가세 리포트",
+        "description": "비대면 직거래 전자계약, FIFO 월세 수납, 만기·전출 정산 및 세무 결산 올인원 플랫폼",
         "default_port": 8000,
-        "db_filename": "rent.db",
-        "possible_source_dbs": ["integrat.db", "integrated.db", "rent.db"],
+        "db_filename": "platform.db",
+        "possible_source_dbs": ["platform.db"],
         "is_ready": True
     },
     "studycafe": {
@@ -143,7 +143,7 @@ class DistroEngine:
           - package_type: 'full' | 'patch'
           - server_name: str (옵션: '고객사 전용 독립 서버')
         """
-        selected_apps = payload.get("selected_apps", ["rent"])
+        selected_apps = payload.get("selected_apps", ["rent3"])
         if not selected_apps:
             raise ValueError("최소 1개 이상의 앱을 선택해야 합니다.")
 

@@ -1,5 +1,5 @@
 """
-apps/_rent3_core/billing.py — Rent2 계승 스마트 은행문자 파서, FIFO 순차 상계 수납 엔진, 세무/증명서 산출기.
+apps/rent_dist/_rent3_core/billing.py — 스마트 은행문자 파서, FIFO 순차 상계 수납 엔진, 세무/증명서 산출기.
 """
 from __future__ import annotations
 
@@ -41,21 +41,34 @@ def _names_of(ct: Any) -> set:
 class SmsDepositParser:
     """은행 입금 알림 문자에서 [호실번호, 입금자명, 금액, 입금일]을 추출하는 순수 파서 객체."""
 
+    _ACCOUNT_RE = re.compile(
+        r"\b(?:\d{2,6}[-*]){1,4}[\d*]{2,8}\b|"
+        r"\b01[016789][-\s]?\d{3,4}[-\s]?\d{4}\b|"
+        r"\b\d{10,16}\b"
+    )
+    _TIME_RE = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
+    _MAN_WON_RE = re.compile(r"(\d+(?:\.\d+)?)\s*만\s*원?")
+
     @staticmethod
     def parse(text: str) -> Dict[str, Any]:
         s = (text or "").strip()
         if not s:
             raise DomainError("입금 문자 내용이 비어 있습니다.", hint="은행 입금 알림 문자를 복사하여 붙여넣어 주세요.")
 
-        # 1) 금액 추출 ("잔액 ..." 이전의 입금액 우선 추출)
+        # 1) 금액 추출 ("잔액 ..." 이전에서 계좌번호·전화번호·시각을 마스킹한 뒤 입금액 추출)
         before_balance = s.split("잔액")[0]
-        amt_matches = re.findall(r"(\d{1,3}(?:,\d{3})+|\d{5,})\s*원?", before_balance)
-        if not amt_matches:
-            raise DomainError(
-                "문자에서 입금 금액을 인식하지 못했습니다.",
-                hint="예: '[신한] 10/25 201호 홍길동 550,000원 입금' 형태로 입력해 주세요.",
-            )
-        amount = int(amt_matches[-1].replace(",", ""))
+        amt_zone = SmsDepositParser._TIME_RE.sub(" ", SmsDepositParser._ACCOUNT_RE.sub(" ", before_balance))
+        amt_matches = re.findall(r"(\d{1,3}(?:,\d{3})+|\d{5,})\s*원?", amt_zone)
+        if amt_matches:
+            amount = int(amt_matches[-1].replace(",", ""))
+        else:
+            man_m = SmsDepositParser._MAN_WON_RE.search(amt_zone)
+            if not man_m:
+                raise DomainError(
+                    "문자에서 입금 금액을 인식하지 못했습니다.",
+                    hint="예: '[신한] 10/25 201호 홍길동 550,000원 입금' 형태로 입력해 주세요.",
+                )
+            amount = int(round(float(man_m.group(1)) * 10000))
 
         # 2) 날짜 추출 (MM/DD 또는 YYYY-MM-DD)
         today = date_today()
@@ -68,20 +81,21 @@ class SmsDepositParser:
             if m_md:
                 paid_date = f"{today.year:04d}-{int(m_md.group(1)):02d}-{int(m_md.group(2)):02d}"
 
-        # 3) 호실 번호 추출 (예: 201호 또는 이름 뒤 3자리 호수)
+        # 3) 호실 번호 추출 (예: 201호 또는 이름 뒤 3자리 호수 — 계좌번호/시각 마스킹 적용)
+        room_zone = SmsDepositParser._TIME_RE.sub(" ", SmsDepositParser._ACCOUNT_RE.sub(" ", s))
         room_no = ""
-        m_room = re.search(r"\b([1-9]\d{2})\s*호", s)
+        m_room = re.search(r"\b([1-9]\d{2})\s*호", room_zone)
         if m_room:
             room_no = m_room.group(1)
         else:
             # 이름 바로 뒤 3자리 호수(예: '홍길동201'). 금액(440,000원)의 앞자리나 '입금 440,000' 같은 말을 호실로 읽지 않는다
-            for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", s):
+            for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", room_zone):
                 if not m_room2.group(1).endswith(("은행", "뱅크", "금고")) and m_room2.group(1) not in {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}:
                     room_no = m_room2.group(2)
                     break
 
-        # 4) 입금자 성명 추출 (은행/입금/승인/잔액 키워드 제외 한글 2~4자)
-        ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}
+        # 4) 입금자 성명 추출 (은행/입금/승인/잔액/단위 키워드 제외 한글 2~4자)
+        ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융", "만원", "천원", "백원", "월세", "관리비", "수납"}
         kor_tokens = re.findall(r"[가-힣]{2,4}", before_balance)
         # '신한은행'·'카카오뱅크'·'새마을금고' 같은 금융기관 이름은 입금자가 아니다
         is_bank = lambda tok: tok in ignore_words or tok.endswith(("은행", "뱅크", "금고", "체국", "협중앙")) or tok in {"수협", "신협", "케이뱅크", "저축은행"}
@@ -97,7 +111,7 @@ class SmsDepositParser:
 
 
 class FifoPaymentEngine:
-    """rent2 계승 FIFO(선입선출) 순차 상계 및 중복 입금 원천 차단 수납 엔진."""
+    """FIFO(선입선출) 순차 상계 및 중복 입금 원천 차단 수납 엔진."""
 
     @staticmethod
     def collect(

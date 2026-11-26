@@ -145,14 +145,14 @@ def delete_property_asset(asset_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=404, detail="부동산 자산을 찾을 수 없습니다.")
 
 
-@router.post("/sync/rent2")
-def sync_rent2_data(branch: str = "main") -> Dict[str, Any]:
-    """apps/rent2 임차 수납 데이터를 부가세 매출 전표로 원클릭 동기화."""
-    imported_count = domain.sync_from_rent2(branch_id=branch)
+@router.post("/sync/rent3")
+def sync_rent3_data(branch: str = "main") -> Dict[str, Any]:
+    """Rent3 공동 Data Pool 임차 수납 데이터를 부가세 매출 전표로 원클릭 동기화."""
+    imported_count = domain.sync_from_rent3(branch_id=branch)
     return {
         "ok": True,
         "imported_count": imported_count,
-        "message": f"rent2 수납 원장 {imported_count}건이 세무 전표로 성공적으로 동기화되었습니다."
+        "message": f"rent3 수납 원장 {imported_count}건이 세무 전표로 성공적으로 동기화되었습니다."
     }
 
 

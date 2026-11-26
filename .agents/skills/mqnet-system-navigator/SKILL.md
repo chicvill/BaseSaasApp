@@ -2,7 +2,7 @@
 name: mqnet-system-navigator
 description: >-
   Use this skill to navigate, understand, operate, and verify the entire MQnet Integrated Workspace.
-  Covers platform architecture, multi-tenant dynamic routing, domain business logic (rent2 FIFO collection,
+  Covers platform architecture, multi-tenant dynamic routing, domain business logic (rent3 FIFO collection,
   ghost overdue prevention, VAT calculation), resilient UX guidelines (alert banner standard),
   and automated 5-stage system verification.
 ---
@@ -47,9 +47,9 @@ py .agents/skills/mqnet-system-navigator/scripts/verify_system.py
              ┌───────────────────────────┼───────────────────────────┐
              ▼                           ▼                           ▼
 ┌─────────────────────────┐ ┌─────────────────────────┐ ┌─────────────────────────┐
-│ apps/rent2 (Port 9016)  │ │apps/studycafe(Port 9002)│ │  apps/store (Port 9006) │
-│ • 스마트 모바일 임차관리│ │ • 무인 스터디카페 관제  │ │ • 스마트 스토어 POS     │
-│ • FIFO 수납 / 가짜체납방│ │ • 멀티스토어 동적 라우팅│ │ • 무인 키오스크/결제    │
+│ apps/rent_dist/rent3*   │ │apps/studycafe(Port 9002)│ │  apps/store (Port 9006) │
+│ • 스마트 직거래 임차관리│ │ • 무인 스터디카페 관제  │ │ • 스마트 스토어 POS     │
+│ • FIFO 수납 / 전자계약  │ │ • 멀티스토어 동적 라우팅│ │ • 무인 키오스크/결제    │
 └────────────┬────────────┘ └────────────┬────────────┘ └────────────┬────────────┘
              │                           │                           │
              └───────────────────────────┼───────────────────────────┘
@@ -102,6 +102,6 @@ py .agents/skills/mqnet-system-navigator/scripts/verify_system.py
 
 필요 시 아래 참조 문서를 직접 확인하여 세부 기술 명세를 검토하십시오:
 - [전체 시스템 아키텍처 명세](./references/architecture_overview.md): 모노레포, 게이트웨이, 포트 맵, 듀얼 모드
-- [임차관리(Rent2) 도메인 규칙](./references/domain_rules_rent2.md): 선후불, FIFO 수납, 가짜 체납 방지, 부가세
+- [임차관리(Rent3) 도메인 규칙](./references/domain_rules_rent3.md): 선후불, FIFO 수납, 가짜 체납 방지, 부가세, 공동계약·전출정산
 - [멀티 테넌트 & 인증/등업 표준](./references/auth_and_multitenant.md): 계정 분기, 등업 심사 승인, 시딩 캐싱
 - [개발 및 Resilient UX 표준](./references/development_and_ux_standards.md): Zero-Build, 4색 배너, 이중 클릭 방지, manual.html

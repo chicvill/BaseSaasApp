@@ -15,7 +15,7 @@ class TaxApp(BaseSaaSApp):
     category = "business"
     description = "부동산 임대사업자 부가세 자동 집계, 종부세 산출 및 5역할 협업 세무 어드바이저"
     version = "1.0.0"
-    features = ["부가세 자동 집계", "종부세 정밀 시뮬레이터", "5역할 AI 협업 거버넌스", "rent2 원클릭 동기화"]
+    features = ["부가세 자동 집계", "종부세 정밀 시뮬레이터", "5역할 AI 협업 거버넌스", "rent3 원클릭 동기화"]
     subdomains = ["tax.localhost"]
     order = 25
 
