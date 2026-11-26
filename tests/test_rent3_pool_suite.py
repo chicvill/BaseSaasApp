@@ -60,6 +60,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         parts = ("core.js", "ledger.js", "contracts.js", "rooms.js", "tax.js", "comms.js", "app.js")
         return "\n".join(open(os.path.join(fe, name), encoding="utf-8").read() for name in parts)
 
+    def _read_tenant_js(self) -> str:
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
+        parts = ("core.js", "chat.js", "myhome.js", "app.js")
+        return "\n".join(open(os.path.join(fe, name), encoding="utf-8").read() for name in parts)
+
+    def _read_admin_js(self) -> str:
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend")
+        parts = ("core.js", "support.js", "lessors.js", "ops.js", "app.js")
+        return "\n".join(open(os.path.join(fe, name), encoding="utf-8").read() for name in parts)
+
     def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
         """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
         c, base = self.client, "/api/rent3_contract"
@@ -2534,7 +2544,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
     def test_43_frontends_do_not_call_staff_only_apis_as_tenant(self):
         """43. 회귀 방지: 임차인 마이홈 화면이 직원 전용 API(/tenants)를 세입자 본인 로그인으로 부르면 화면이 비어 버린다(실제로 있었던 사고). 관리자용 세입자 선택기는 관리인 앱 한 곳으로 모았으므로 임차인 앱에는 전체 세입자 목록 호출·선택기가 없다."""
-        src = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        src = self._read_tenant_js()
         for gone in ("loadTenants", "tenantList", "tenantSel", '"/tenants"'):
             self.assertNotIn(gone, src, gone)
         # 서버 쪽 약속: 임차인 토큰으로 /tenants 는 403, 본인 마이홈은 200
@@ -3496,7 +3506,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         """56. 임차인 첫 화면은 '내 집(납부 확인)' 하나뿐이고, 나머지 서비스는 모두 ☰ 메뉴에서 닿는다(빠진 기능 0개). 헤더 모드 단추·관리자용 선택기는 없다."""
         import re
         fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
-        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        app = self._read_tenant_js()
         idx = open(os.path.join(fe, "index.html"), encoding="utf-8").read()
         menu = app[app.index("const TENANT_MENU"):app.index("R3Shell.renderMenu")]
         ids = set(re.findall(r'id: "(\w+)"', menu))
@@ -3841,7 +3851,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_62_messages_screens_and_digest_display(self):
         """62. 메시지 화면(7단계): 임대인 ▸ 메시지(호실 목록·대화·접힌 협상 기록), 임차인 ▸ 임대인과 메시지, 옛 메신저 제거, 체결 계약서에 대화 해시 표시."""
         rd = lambda *parts: open(os.path.join(ROOT, "apps", "rent_dist", *parts), encoding="utf-8").read()
-        lessor, tenant, contract = self._read_lessor_js(), rd("rent3_tenant", "frontend", "app.js"), self._read_contract_js()
+        lessor, tenant, contract = self._read_lessor_js(), self._read_tenant_js(), self._read_contract_js()
         for needle in ("function renderMessagesTab", "function renderMessageThread", "btnMsgSend", "msg-room", "계약 협상 기록", "digest_ok", "/messages/rooms"):
             self.assertIn(needle, lessor, needle)
         self.assertNotIn("btnSendChat", lessor)                       # A/S 화면 안의 옛 메신저는 없어졌다
@@ -4112,7 +4122,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend")
         shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         guard = open(os.path.join(ROOT, "shared_ui", "rent3_session_guard.js"), encoding="utf-8").read()
-        app = open(os.path.join(fe, "app.js"), encoding="utf-8").read()
+        app = self._read_tenant_js()
         for needle in ("pinPending", "showPinGate", "/auth/pin-login", "/identify?qk=", "openShortcutSettings", "공유(□↑) → 홈 화면에 추가",
                        "beforeinstallprompt", "apple-mobile-web-app-title", "manifest"):
             self.assertIn(needle, shell, needle)
@@ -4343,11 +4353,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         admin_idx = rd("apps", "rent_dist", "rent3_admin", "frontend", "index.html")
         self.assertIn("/rent3/?logout=1", admin_idx)
         self.assertIn('data-tab="ops"', admin_idx)
-        self.assertIn("renderOpsTab", rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"))
+        self.assertIn("renderOpsTab", self._read_admin_js())
         self.assertIn("showInviteModal", self._read_lessor_js())
         self.assertIn("qrcode.min.js", rd("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"))
         self.assertIn("아이디·비밀번호로 다시 로그인", rd("shared_ui", "rent3_session_guard.js"))
-        self.assertIn("showInviteSetup", rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js") + shell)
+        self.assertIn("showInviteSetup", self._read_tenant_js() + shell)
 
     def test_69_phase2_pay_notice_lost_phone_pin_ttl_name_login(self):
         """69. Phase 2: 임차인 스스로 납부 처리 불가(이체 알림→임대인 확인), PIN 토큰 3시간·기기 해제 즉시 반영, 분실 폰 전체 해제(임대인·관리인), 운영 환경 성명 로그인 차단."""
@@ -4431,7 +4441,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
 
         # ── 화면: 사전 비활성·안내, 운영 입력칸 안내문, 납부 카드 문구 ──
         rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
-        tapp = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
+        tapp = self._read_tenant_js()
         for needle in ("isViaPin", "btnAgreeCo", "이체했어요", "/transfer-notice"):
             self.assertIn(needle, tapp, needle)
         self.assertNotIn("월세 즉시 납부", tapp)
@@ -4473,7 +4483,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         lapp = self._read_lessor_js()
         for needle in ("todo-row", "이체 확인 요청", "미납 호실", "adminLinkOk"):
             self.assertIn(needle, lapp, needle)
-        self.assertIn("adminLinkOk", rd("rent3_tenant", "frontend", "app.js"))
+        self.assertIn("adminLinkOk", self._read_tenant_js())
 
     def test_71_phase4_mobile_ui_polish(self):
         """71. Phase 4: 메뉴 이름 축약, 체크박스 누름 영역·긴 입력칸, 본문 글자 12px 이상(인쇄 표 제외), 공동계약 호출 띠(토큰을 실어 부른다)."""
@@ -4486,10 +4496,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         shell = rd("shared_ui", "r3_shell.js")
         self.assertIn("display:block;min-height:44px;padding:10px 0", shell)
         small = re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
-        for parts in (("shared_ui", "r3_shell.js"), ("shared_ui", "r3_modal.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "index.html"),
-                      ("apps", "rent_dist", "rent3_admin", "frontend", "app.js")):
+        for parts in (("shared_ui", "r3_shell.js"), ("shared_ui", "r3_modal.js"), ("apps", "rent_dist", "rent3_lessor", "frontend", "index.html")):
             self.assertFalse(small.search(rd(*parts)), "/".join(parts))
         self.assertFalse(small.search(self._read_lessor_js()), "rent3_lessor/frontend/*.js")
+        self.assertFalse(small.search(self._read_admin_js()), "rent3_admin/frontend/*.js")
         bar = rd("apps", "rent_dist", "rent3", "frontend", "session-bar.js")
         self.assertIn("mountCallBarOnly", bar)
         self.assertIn("Authorization: `Bearer ${tok}`", bar)               # 토큰 없이 부르면 401 → 세션 가드가 로그인을 풀어 버린다
@@ -5153,7 +5163,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr = Lessor.get(lsr.id)
             lsr.room_limit = old_limit
             lsr.save(action="t")
-        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         for needle in ("btnTtCheck", "btnTtApply", "/accounts/test-tenant", "시험 임차인 등록"):
             self.assertIn(needle, adm, needle)
 
@@ -5491,11 +5501,11 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(Tenant.get(t.id).status, "MOVED_OUT")
         # 화면: 신청·예금주·수취 확인·송금 표시, 재계약 기본 5% 인상
         rd = lambda *parts: open(os.path.join(ROOT_, *parts), encoding="utf-8").read()
-        tj = rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js")
+        tj = self._read_tenant_js()
         for needle in ("btnRequestCo", "coHolder", "btnReceivedCo", "btnDisputeCo", "view\") === \"moved", "/archive"):
             self.assertIn(needle, tj, needle)
         lj = self._read_lessor_js()
-        for needle in ("moPaid", "/mark-paid", "rent5", "기본 월세 5% 인상", "co-open", "정산 이의/미수취 확인 필요"):
+        for needle in ("moPaid", "/mark-paid", "maxRent", "법정 5% 상한 이내 직접 조정", "co-open", "정산 이의/미수취 확인 필요"):
             self.assertIn(needle, lj, needle)
 
     def test_88_lessor_bizreg_photo_upload_hometax_verify_and_approve(self):
@@ -5583,8 +5593,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lj = self._read_lessor_js()
             for needle in ("btnBizRegModal", "showBizRegModal", "/franchise/bizreg", "capture=\"environment\"", "bizPickerHtml", "📷 촬영하기", "🖼 사진·PDF 선택", "bizDataUrl"):
                 self.assertIn(needle, lj, needle)
-            with open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8") as fp:
-                aj = fp.read()
+            aj = self._read_admin_js()
             for needle in ("hometaxBizHtml", "btn-biz-verify", "/bizreg-verify", "/bizreg-attachment", "www.hometax.go.kr"):
                 self.assertIn(needle, aj, needle)
         finally:
@@ -5676,7 +5685,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(c.post(f"{AD}/lessors/{lsr.id}/fee-plan", headers=chic, json={"app_fee": 1}).status_code, (401, 403))
             # 화면 문자열
             rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
-            aj = rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js")
+            aj = self._read_admin_js()
             for needle in ("loadFeeBox", "/fees/", "fee-paid", "fee-inv", "승인번호", "/fees/export-hometax-csv", "feePlan"):
                 self.assertIn(needle, aj, needle)
             lj = self._read_lessor_js()
@@ -5829,7 +5838,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 with mock.patch.dict(os.environ, {"RENT3_BOLTA_WEBHOOK_SECRET": ""}):
                     self.assertEqual(hook(ev, "wh9").status_code, 400)
                 # 화면 문자열
-                aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+                aj = self._read_admin_js()
                 for needle in ("fee-api", "/invoice-auto", "fee-refresh", "/invoice-refresh", "API로 발행", "발행 상태 확인"):
                     self.assertIn(needle, aj, needle)
             finally:
@@ -5874,7 +5883,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for rel in (("rent3_admin",), ("rent3_lessor",)):
                 self.assertIn("/shared/ui/r3_taxinvoice.js", rd("apps", "rent_dist", rel[0], "frontend", "index.html"))
             for needle in ("fee-card", "R3Tax.openCard", "/invoice-card"):
-                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+                self.assertIn(needle, self._read_admin_js(), needle)
             for needle in ("btn-inv-card", "R3Tax.openCard", "홈택스"):
                 self.assertIn(needle, self._read_lessor_js(), needle)
         finally:
@@ -5992,9 +6001,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for needle in ("fbizEmail", "mbizEmail", "mbizType", "/tax/cash-receipt", "💵 현금영수증 정보·홈택스"):
                 self.assertIn(needle, self._read_lessor_js(), needle)
             for needle in ("recordCash", "/cash-receipt"):
-                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+                self.assertIn(needle, self._read_admin_js(), needle)
             for needle in ("btnBizInfo", "/business-registration", "tbCam", "tbEmail"):
-                self.assertIn(needle, rd("apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), needle)
+                self.assertIn(needle, self._read_tenant_js(), needle)
         finally:
             if made_pay is not None:
                 made_pay.delete(action="t")
@@ -6145,7 +6154,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             ensure_pool_seeded(force=True)
             keys = [p.idempotency_key for p in Pay.all() if p.idempotency_key.startswith("seed:")]
             self.assertEqual(len(keys), len(set(keys)))                                                                         # 같은 시드 납부가 겹치지 않는다
-            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            aj = self._read_admin_js()
             for needle in ("btnDupScan", "/pool-duplicates", "btnDupRemove", "중복 점검"):
                 self.assertIn(needle, aj, needle)
         finally:
@@ -6477,7 +6486,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(Pay.get(carry.id), None)
             self.assertEqual(Pay.get(carry.id, include_voided=True).status, "VOIDED")
             self.assertEqual(c.post(f"{AD}/carryover-split/apply", headers=admin, json={"confirm": True}).json()["split"], 0)   # 재실행: 할 일 없음
-            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            aj = self._read_admin_js()
             for needle in ("btnCarryPrev", "btnCarryApply", "/carryover-split/preview", "/carryover-split/apply", "백업 후 반영"):
                 self.assertIn(needle, aj, needle)
         finally:
@@ -6660,7 +6669,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for needle in ("resolveMfa", "/pool/auth/mfa-verify", "mfa_required"):
                 self.assertIn(needle, rd("apps", "rent_dist", "rent3", "frontend", "app.js"), needle)
             for needle in ("mfaCard", "/mfa/enroll/start", "/mfa/enroll/confirm", "복구 코드", "Bass.setToken"):
-                self.assertIn(needle, rd("apps", "rent_dist", "rent3_admin", "frontend", "app.js"), needle)
+                self.assertIn(needle, self._read_admin_js(), needle)
             self.assertTrue(os.path.isfile(os.path.join(ROOT, "scripts", "reset_admin_mfa.py")))
         finally:
             mfa.reset(Admin.get(adm.id))
@@ -6814,7 +6823,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertTrue(any("9903" in e for e in sc["ROOM_OWNER_NAME"]["examples"]) or sc["ROOM_OWNER_NAME"]["count"] >= 1)
             self.assertIn("DUP_ACTIVE_CT", sc)
             self.assertTrue(lsr is not None)
-            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            aj = self._read_admin_js()
             for needle in ("btnRdPrev", "btnRdApply", "/room-defaults/preview", "/room-defaults/apply"):
                 self.assertIn(needle, aj, needle)
         finally:
@@ -6971,7 +6980,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             js = self._read_contract_js()
             for needle in ("https://www.iros.go.kr", "openBalRegModal", "R3.openModal(\"🏛 입주 전 등기부 재확인\"", "balance-registry/${path}", 'post("read"', 'post("check"', "'확인했음'에 체크"):
                 self.assertIn(needle, js, needle)
-            tj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+            tj = self._read_tenant_js()
             self.assertIn("/rent3_contract/?role=tenant", tj)
             self.assertNotIn("balRegChecked", tj)
         finally:
@@ -7045,7 +7054,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertFalse(Contract.get("ct_t109_esign").balance_registry)                 # 전자계약은 기록하지 않음
             self.assertEqual(lg.plan()["to_mark"], 0 if not [x for x in lg.plan()["rows"]] else lg.plan()["to_mark"])
             self.assertEqual(c.post(f"{AD}/legacy-registry/apply", headers=admin, json={"confirm": True}).json()["marked"], 0)   # 다시 해도 중복 기록 없음
-            aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+            aj = self._read_admin_js()
             for needle in ("btnLgPrev", "/legacy-registry/preview", "/legacy-registry/apply"):
                 self.assertIn(needle, aj, needle)
         finally:
@@ -7329,7 +7338,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
         for needle in ('ACQ_KEY = "r3_acq"', "ACQ_DAYS = 30", "captureAcq", 'acq: $("regRole").value === "lessor"', "ACQ_OK"):
             self.assertIn(needle, js, needle)
-        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        aj = self._read_admin_js()
         for needle in ("btnAcq", "/acquisition/summary", "임대인 유입 현황"):
             self.assertIn(needle, aj, needle)
         for u in ("acq_one", "acq_two", "acq_three"):
@@ -7387,7 +7396,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 집주인 번호는 저장하지 않는다(모델·요청에 그런 칸이 없다)
         self.assertFalse([f for f in Tenant.model_fields if "landlord" in f.lower() or f in ("lessor_phone", "target_phone")])
         # 화면: 임차인 메뉴·모달, 포털의 초대 링크 처리
-        tj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        tj = self._read_tenant_js()
         for needle in ("btnLessorInvite", "lessor-invite/sent", "집주인의 번호·이름은 이 서비스로 전송되거나 저장되지 않습니다", '"sms:" + sep + "body="'):
             self.assertIn(needle, tj, needle)
         pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
@@ -7487,7 +7496,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(c.get(AD, headers=admin, params={"season": "dec"}).status_code, 400)
         self.assertEqual(c.get(AD, headers=admin, params={"campaign": "<x> y"}).status_code, 400)
         self.assertIn("campaign=my_camp1", c.get(AD, headers=admin, params={"campaign": "my_camp1"}).json()["post"]["link"])
-        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        aj = self._read_admin_js()
         for needle in ("btnLp", "/landlord-promo", "광고 표시는 지우지 말고"):
             self.assertIn(needle, aj, needle)
         self.assertIn("r3_modal.js", open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8").read())
@@ -7504,7 +7513,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, html, needle)
         for bad in ("평생 무료", "1초", "신고서 완성", "사기 걱정", "떼일", "보장합니다", "과태료 걱정", "25만", "후기"):
             self.assertNotIn(bad, html, bad)
-        aj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        aj = self._read_admin_js()
         for needle in ("btnLf", "lfRegion", "incheon-namdong", "leaflet.html?region="):
             self.assertIn(needle, aj, needle)
         # 지역 표식은 P0 기록 형식(32자 이하 영숫자)에 맞아 가입 때 그대로 귀속된다
@@ -7890,7 +7899,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         # 배지: 임대인 원장·호실 카드·KPI, 임차인 마이홈 배너·헤더·월별 현황
         for needle in ("dueSoonOf", "total_due_soon_branch", "🕒 납부 예정"):
             self.assertIn(needle, fe, needle)
-        tfe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        tfe = self._read_tenant_js()
         for needle in ("dueSoonAmt", "overdue_unpaid", "🕒 납부 예정"):
             self.assertIn(needle, tfe, needle)
         d = self.client.get("/api/rent3_lessor/dashboard", headers=self._login("chic"), params={"branch": "main"})
@@ -8611,12 +8620,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         shell = open(os.path.join(ROOT, "shared_ui", "r3_shell.js"), encoding="utf-8").read()
         for needle in ("function startPoll()", "r3SupList", "lastCount", "2500"):
             self.assertIn(needle, shell, needle)
-        admin = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        admin = self._read_admin_js()
         for needle in ("spTimer", "spList", "/support/thread?user=", "2500"):
             self.assertIn(needle, admin, needle)
         lessor = self._read_lessor_js()
         self.assertIn("2500", lessor)
-        tenant = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        tenant = self._read_tenant_js()
         for needle in ("tnMsgCount", "tnMsgList", "2500"):
             self.assertIn(needle, tenant, needle)
 
@@ -8635,7 +8644,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         tm = c.get("/api/rent3_tenant/myhome/tenant_201/messages?mark_read=false", headers=ten).json()
         self.assertTrue(tm["lessor_phone"])
         base = os.path.join(ROOT, "apps", "rent_dist")
-        adm = open(os.path.join(base, "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         self.assertIn('label: "💬 임차인과 채팅 (호실별)", tab: "messages"', self._read_lessor_js())   # 임대인 ☰ 1단계 메뉴
         for needle in ("에게 전화 :", 'href="tel:${Bass.escapeHtml(callDigits)}"', 'id="spCat"'):
             self.assertIn(needle, adm, needle)
@@ -8650,7 +8659,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         idx = open(os.path.join(base, "rent3_admin", "frontend", "index.html"), encoding="utf-8").read()
         self.assertIn("💬 임대인·임차인에게 채팅", idx)        # ☰ 메뉴에서 바로 채팅으로 간다
         self.assertIn('callBtn(d.tenant_phone, "임차인 전화")', self._read_lessor_js())
-        self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", open(os.path.join(base, "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read())
+        self.assertIn("에게 전화 ${Bass.escapeHtml(d.lessor_phone)}", self._read_tenant_js())
 
 
     def test_137_notification_panel_lists_recent_chat_sessions_without_content(self):
@@ -8703,7 +8712,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         nj = open(os.path.join(ROOT, "shared_ui", "r3_notify.js"), encoding="utf-8").read()
         for needle in ("최근 대화", "recent_chats", "bindChats", "openFresh", "r3-nitem--unread", "이력을 남기지 않습니다"):
             self.assertIn(needle, nj, needle)
-        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         self.assertIn('get("user")', adm)
 
     def test_138_contract_room_chat_gets_chat_improvements(self):
@@ -8872,7 +8881,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t = next((x for x in Tenant.all() if x.phone == "010-1111-2222"), None)
             if t:
                 t.delete(action="t")
-        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         for needle in ("btnTiCheck", "btnTiApply", "/accounts/test-identity", "시험 예비임차인 본인인증 처리", 'id="tiCard"', 'get("focus") === "testtools"'):
             self.assertIn(needle, adm, needle)
         aidx = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "index.html"), encoding="utf-8").read()
@@ -8951,7 +8960,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t = Tenant.get(tid)
             if t:
                 t.delete(action="t")
-        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         for needle in ('id="tiPw"', "new_password", "처리 (본인인증 · 비밀번호)"):
             self.assertIn(needle, adm, needle)
 
@@ -9001,7 +9010,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr = Lessor.get(lsr.id)
             lsr.room_limit = old_limit
             lsr.save(action="t")
-        adm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_admin", "frontend", "app.js"), encoding="utf-8").read()
+        adm = self._read_admin_js()
         for needle in ("btnTvCheck", "btnTvApply", "/accounts/test-vacate", "시험 호실 비우기"):
             self.assertIn(needle, adm, needle)
 
@@ -9580,7 +9589,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         lapp = self._read_lessor_js()
         for needle in ("일할 계산 임차료", "미납 임차료", "checkout_liability", "경과 일수 × 월 임차료"):
             self.assertIn(needle, lapp, needle)
-        tapp = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_tenant", "frontend", "app.js"), encoding="utf-8").read()
+        tapp = self._read_tenant_js()
         for needle in ("early_rent_deduction", "shortfall_amount", "liability_end_date", "early_partial_days"):
             self.assertIn(needle, tapp, needle)
         lm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "manual.html"), encoding="utf-8").read()
@@ -9739,7 +9748,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if t_.phone in ("010-7777-0783", "010-7777-0782"):
                     t_.delete(action="t")
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
-        lapp, tapp = self._read_lessor_js(), rd("rent3_tenant", "frontend", "app.js")
+        lapp, tapp = self._read_lessor_js(), self._read_tenant_js()
         for needle in ("moUnpaid", "moProrated", "moElec", "moWater", "moGas", "moUtilOther", "moFormula", "임차인이 정산 내역을 확인했습니다", "정산 내역"):
             self.assertIn(needle, lapp, needle)
         for needle in ("coItemsHtml", "btnCheckCo", "정산 내역 확인", "/confirm-checked", "임대인 수정" if False else "임대인이 자동 계산값"):
@@ -9829,7 +9838,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if t_.phone == "010-7777-0781":
                     t_.delete(action="t")
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
-        lapp, tapp = self._read_lessor_js(), rd("rent3_tenant", "frontend", "app.js")
+        lapp, tapp = self._read_lessor_js(), self._read_tenant_js()
         for needle in ("moPublish", "임차인에게 게시", "임시 저장 (임차인에게 안 보임)", "publish: Boolean($m(\"moPublish\").checked)", "DRAFT:"):
             self.assertIn(needle, lapp, needle)
         for needle in ("REVISING", "수정하고 있습니다", "게시되면 알려 드립니다"):
@@ -9907,7 +9916,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if t_.phone == "010-7777-0780":
                     t_.delete(action="t")
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
-        lapp, tapp = self._read_lessor_js(), rd("rent3_tenant", "frontend", "app.js")
+        lapp, tapp = self._read_lessor_js(), self._read_tenant_js()
         for needle in ("tnMsgCo", "drawTenantCheckoutCard", "tnCoBank", "tnCoAgree", "tnCoCheck", "tnCoReceived", "반환 계좌를 입력해 주세요", "/confirm-received"):
             self.assertIn(needle, tapp, needle)
         for needle in ("msgCo", "drawLessorCheckoutCard", "msgCoPaid", "msgCoCopy", "송금 완료 표시", "계좌 복사", "/mark-paid"):
@@ -9918,7 +9927,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_157_contract_shows_rent_account_and_autopay_guidance(self):
         """157. 계약서(체결본)에 임차료 수납 계좌 행과 자동이체 권유 안내가 있고, 임대인 계좌가 없을 때 가짜 계좌를 넣지 않는다(카드·페이는 추후 지원 예정으로만 안내)."""
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
-        capp, tapp, core = self._read_contract_js(), rd("rent3_tenant", "frontend", "app.js"), rd("_rent3_core", "cosign.py")
+        capp, tapp, core = self._read_contract_js(), self._read_tenant_js(), rd("_rent3_core", "cosign.py")
         for needle in ("임차료 수납 계좌", "autoPayGuideHtml", "자동이체", "추후 지원 예정", "acctLabel"):
             self.assertIn(needle, capp, needle)
         self.assertIn("자동이체", tapp)
