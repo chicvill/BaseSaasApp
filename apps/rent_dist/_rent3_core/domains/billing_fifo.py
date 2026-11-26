@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from core.errors import Conflict, DomainError, NotFound
@@ -36,30 +36,62 @@ class SmsDepositParser:
         r"\b\d{10,16}\b"
     )
     _TIME_RE = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
+    _BALANCE_RE = re.compile(
+        r"(?:거래\s*후\s*|이체\s*후\s*|입금\s*후\s*|현재\s*|계좌\s*)?"
+        r"(?:잔액|잔고)\s*[:：]?\s*"
+        r"(?:\d+(?:\.\d+)?\s*만\s*원?|\d{1,3}(?:,\d{3})+\s*원?|\d+(?![-./]\d)\s*원?)?"
+    )
+    _DEPOSIT_MAN_RE = re.compile(
+        r"(?:입금\s*[:：]?\s*(\d+(?:\.\d+)?)\s*만\s*원?|(\d+(?:\.\d+)?)\s*만\s*원?\s*입금)"
+    )
+    _DEPOSIT_AMT_RE = re.compile(
+        r"(?:입금\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{4,})\s*원?|(\d{1,3}(?:,\d{3})+|\d{4,})\s*원?\s*입금)"
+    )
     _MAN_WON_RE = re.compile(r"(\d+(?:\.\d+)?)\s*만\s*원?")
+    _IGNORE_WORDS = {
+        "입금", "출금", "승인", "체크", "잔액", "잔고", "거래후", "입금후", "이체후", "현재", "잔여", "남은",
+        "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "수협", "신협", "우체국", "새마을",
+        "케이", "케이뱅크", "저축은행", "부산", "대구", "광주", "전북", "경남", "제주", "씨티", "제일", "중앙회",
+        "발신", "웹발신", "문자", "알림", "일시", "계좌", "이체", "송금", "타행", "타행이체", "자동이체", "무통장",
+        "전자금융", "오픈뱅킹", "스마트", "모바일", "펌뱅킹", "인터넷", "금융", "거래", "완료", "내역", "금액",
+        "원금", "입출금", "바로알림", "보통예금", "저축예금", "자유저축", "만원", "천원", "백원", "월세", "관리비", "수납",
+    }
 
-    @staticmethod
-    def parse(text: str) -> Dict[str, Any]:
+    @classmethod
+    def _is_non_name(cls, tok: str) -> bool:
+        return tok in cls._IGNORE_WORDS or tok.endswith(("은행", "뱅크", "금고", "체국", "협중앙"))
+
+    @classmethod
+    def parse(cls, text: str, known_names: Optional[Iterable[str]] = None) -> Dict[str, Any]:
         s = (text or "").strip()
         if not s:
             raise DomainError("입금 문자 내용이 비어 있습니다.", hint="은행 입금 알림 문자를 복사하여 붙여넣어 주세요.")
 
-        # 1) 금액 추출 ("잔액 ..." 이전에서 계좌번호·전화번호·시각을 마스킹한 뒤 입금액 추출)
-        before_balance = s.split("잔액")[0]
-        amt_zone = SmsDepositParser._TIME_RE.sub(" ", SmsDepositParser._ACCOUNT_RE.sub(" ", before_balance))
-        amt_matches = re.findall(r"(\d{1,3}(?:,\d{3})+|\d{5,})\s*원?", amt_zone)
-        if amt_matches:
-            amount = int(amt_matches[-1].replace(",", ""))
-        else:
-            man_m = SmsDepositParser._MAN_WON_RE.search(amt_zone)
-            if not man_m:
-                raise DomainError(
-                    "문자에서 입금 금액을 인식하지 못했습니다.",
-                    hint="예: '[신한] 10/25 201호 홍길동 550,000원 입금' 형태로 입력해 주세요.",
-                )
-            amount = round(float(man_m.group(1)) * 10000)
+        # 0) 잔액/잔고 구절만 정밀 제거 — 뒤에 오는 입금자명·날짜는 보존한다
+        no_balance = cls._BALANCE_RE.sub(" ", s)
+        clean_zone = cls._TIME_RE.sub(" ", cls._ACCOUNT_RE.sub(" ", no_balance))
 
-        # 2) 날짜 추출 (MM/DD 또는 YYYY-MM-DD)
+        # 1) 금액 추출 ('입금' 바로 앞/뒤 금액 최우선 → 없으면 잔액/계좌/시각 제거 영역에서 추출)
+        dep_man = cls._DEPOSIT_MAN_RE.search(clean_zone)
+        dep_amt = cls._DEPOSIT_AMT_RE.search(clean_zone)
+        if dep_man:
+            amount = round(float(dep_man.group(1) or dep_man.group(2)) * 10000)
+        elif dep_amt:
+            amount = int((dep_amt.group(1) or dep_amt.group(2)).replace(",", ""))
+        else:
+            amt_matches = re.findall(r"(\d{1,3}(?:,\d{3})+|\d{5,})\s*원?", clean_zone)
+            if amt_matches:
+                amount = int(amt_matches[-1].replace(",", ""))
+            else:
+                man_m = cls._MAN_WON_RE.search(clean_zone)
+                if not man_m:
+                    raise DomainError(
+                        "문자에서 입금 금액을 인식하지 못했습니다.",
+                        hint="예: '[신한] 10/25 201호 홍길동 550,000원 입금' 형태로 입력해 주세요.",
+                    )
+                amount = round(float(man_m.group(1)) * 10000)
+
+        # 2) 날짜 추출 (MM/DD 또는 YYYY-MM-DD / YYYY.MM.DD)
         today = date_today()
         paid_date = today.isoformat()
         m_full = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", s)
@@ -70,25 +102,30 @@ class SmsDepositParser:
             if m_md:
                 paid_date = f"{today.year:04d}-{int(m_md.group(1)):02d}-{int(m_md.group(2)):02d}"
 
-        # 3) 호실 번호 추출 (예: 201호 또는 이름 뒤 3자리 호수 — 계좌번호/시각 마스킹 적용)
-        room_zone = SmsDepositParser._TIME_RE.sub(" ", SmsDepositParser._ACCOUNT_RE.sub(" ", s))
+        # 3) 호실 번호 추출 (예: 201호 또는 이름 뒤 3자리 호수 — 잔액/계좌번호/시각 마스킹 적용)
         room_no = ""
-        m_room = re.search(r"\b([1-9]\d{2})\s*호", room_zone)
+        m_room = re.search(r"\b([1-9]\d{2})\s*호", clean_zone)
         if m_room:
             room_no = m_room.group(1)
         else:
             # 이름 바로 뒤 3자리 호수(예: '홍길동201'). 금액(440,000원)의 앞자리나 '입금 440,000' 같은 말을 호실로 읽지 않는다
-            for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", room_zone):
-                if not m_room2.group(1).endswith(("은행", "뱅크", "금고")) and m_room2.group(1) not in {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융"}:
+            for m_room2 in re.finditer(r"([가-힣]{2,4})\s*(?<!\d)([1-9]\d{2})(?![\d,]|\s*원)", clean_zone):
+                if not cls._is_non_name(m_room2.group(1)):
                     room_no = m_room2.group(2)
                     break
 
-        # 4) 입금자 성명 추출 (은행/입금/승인/잔액/단위 키워드 제외 한글 2~4자)
-        ignore_words = {"입금", "출금", "승인", "체크", "잔액", "신한", "국민", "우리", "하나", "농협", "카카오", "토스", "기업", "발신", "문자", "알림", "일시", "계좌", "이체", "송금", "전자금융", "만원", "천원", "백원", "월세", "관리비", "수납"}
-        kor_tokens = re.findall(r"[가-힣]{2,4}", before_balance)
-        # '신한은행'·'카카오뱅크'·'새마을금고' 같은 금융기관 이름은 입금자가 아니다
-        is_bank = lambda tok: tok in ignore_words or tok.endswith(("은행", "뱅크", "금고", "체국", "협중앙")) or tok in {"수협", "신협", "케이뱅크", "저축은행"}
-        payer_name = next((tok for tok in kor_tokens if not is_bank(tok)), "입금자")
+        # 4) 입금자 성명 추출 — 건물 등록 입주자·송금자 명단 대조 우선 → 없으면 잔액·은행 키워드 제외 한글 2~4자
+        payer_name = ""
+        if known_names:
+            cands = sorted({(n or "").strip() for n in known_names if len((n or "").strip()) >= 2}, key=len, reverse=True)
+            hits = [n for n in cands if n in clean_zone]
+            # 긴 이름의 부분 문자열(예: '홍길동' vs '길동') 제외
+            top_hits = [n for n in hits if not any(n != other and n in other for other in hits)]
+            if len(top_hits) == 1:
+                payer_name = top_hits[0]
+        if not payer_name:
+            kor_tokens = re.findall(r"[가-힣]{2,4}", clean_zone)
+            payer_name = next((tok for tok in kor_tokens if not cls._is_non_name(tok)), "입금자")
 
         return {
             "room_no": room_no,
@@ -331,8 +368,9 @@ class FifoPaymentEngine:
     ) -> Dict[str, Any]:
         """문자를 읽어 수납한다. 호실·입금자명·금액 중 장부와 어긋난 것이 있으면 저장하지 않고 확인을 요청하고(needs_confirm),
         pick_if_multi=True 이고 미납 달이 2개 이상이면서 일부 금액만 입금된 경우(target_months 미지정) 어느 달에 넣을지 선택을 요청한다(needs_month_pick)."""
-        parsed = SmsDepositParser.parse(sms_text)
         b_id = normalize_branch_id(branch)
+        branch_names = {n for c in Contract.all() if c.branch == b_id and c.status == "ACTIVE" for n in _names_of(c)}
+        parsed = SmsDepositParser.parse(sms_text, known_names=branch_names)
         chk = cls.check_sms(b_id, parsed, up_to_ym)
         issues, by_name = chk["issues"], chk["by_name"]
         # 호실·입금자는 맞고 금액만 다르면(예: 3개월분) 문자 수정이 아니라 '수작업 안내'로 보낸다(아래)

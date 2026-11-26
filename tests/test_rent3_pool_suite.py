@@ -4767,6 +4767,17 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual((got_acct["room_no"], got_acct["payer_name"], got_acct["amount"]), ("201", "홍길동", 450000))
         got_dec = P.parse("[토스] 010-1234-5678 14:20 안동기202 45.5만원 입금")
         self.assertEqual((got_dec["room_no"], got_dec["payer_name"], got_dec["amount"]), ("202", "안동기", 455000))
+        # '잔고' 키워드 + 잔고/이름 순서 무관 파싱 + 등록 입주자·법인명 우선 매칭
+        for txt in (
+            "농협 입금440,000원 잔고 1100000 안동기\n2026.12.12",
+            "농협 입금440,000원 안동기 잔고 1100000\n2026.12.12",
+            "[NH농협] 입금440,000원 거래후잔액:12,340,000원 안동기 2026.12.12",
+            "농협 잔고 1,100,000원 입금 440,000원 안동기 2026.12.12",
+        ):
+            g = P.parse(txt)
+            self.assertEqual((g["payer_name"], g["amount"], g["paid_date"]), ("안동기", 440000, "2026-12-12"), txt)
+        g_corp = P.parse("신한 입금 880,000원 잔고 5,000,000원 디자인스튜디오 봄", known_names={"디자인스튜디오 봄", "이민수"})
+        self.assertEqual((g_corp["payer_name"], g_corp["amount"]), ("디자인스튜디오 봄", 880000))
         c = self.client
         r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
         self.assertIn(r.status_code, (400, 404))
