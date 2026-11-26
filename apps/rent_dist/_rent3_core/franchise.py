@@ -22,7 +22,7 @@ import re
 import secrets
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.errors import DomainError
@@ -102,7 +102,7 @@ class SmsProvider(IdentityProvider):
         key, secret, sender_no = (os.getenv("RENT3_SMS_API_KEY", ""), os.getenv("RENT3_SMS_API_SECRET", ""), os.getenv("RENT3_SMS_FROM", ""))
         if not (key and secret and sender_no):
             raise DomainError("문자 발송 키가 설정되지 않았습니다.", hint="RENT3_SMS_API_KEY / RENT3_SMS_API_SECRET / RENT3_SMS_FROM")
-        date = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         salt = secrets.token_hex(16)
         sig = _hmac.new(secret.encode(), (date + salt).encode(), hashlib.sha256).hexdigest()
         body = _json.dumps({"message": {"to": _digits(phone), "from": _digits(sender_no), "text": text}}).encode()
