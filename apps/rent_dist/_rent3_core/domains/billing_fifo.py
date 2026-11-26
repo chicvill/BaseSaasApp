@@ -4,7 +4,7 @@ apps/rent_dist/_rent3_core/domains/billing_fifo.py — 스마트 은행문자 �
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
@@ -62,6 +62,48 @@ class SmsDepositParser:
         return tok in cls._IGNORE_WORDS or tok.endswith(("은행", "뱅크", "금고", "체국", "협중앙"))
 
     @classmethod
+    def _extract_paid_date(cls, text: str, today: date) -> str:
+        """은행 문자에 적힌 입금 날짜를 그대로 추출한다(미래 날짜도 차단하지 않음).
+        지원 형식: YYYY.MM.DD / YYYY-MM-DD / YYYY/MM/DD / YYYY년 M월 D일 / YY.MM.DD / YY/MM/DD / M/D / M.D / M월 D일."""
+        def _valid(y: int, m: int, d: int) -> Optional[str]:
+            if not (2000 <= y <= 2100):
+                return None
+            try:
+                return date(y, m, d).isoformat()
+            except ValueError:
+                return None
+
+        for pat in (
+            r"(?<![\d-])(\d{4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,2})(?![\d-])",
+            r"(?<!\d)(\d{4})\s*년\s*(\d{1,2})\s*월\s*(\d{1,2})\s*일",
+        ):
+            for m in re.finditer(pat, text):
+                iso = _valid(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+                if iso:
+                    return iso
+
+        for m in re.finditer(r"(?<![\d./])(\d{2})[./](\d{1,2})[./](\d{1,2})(?![\d./])", text):
+            yy = int(m.group(1))
+            if 20 <= yy <= 99:
+                iso = _valid(2000 + yy, int(m.group(2)), int(m.group(3)))
+                if iso:
+                    return iso
+
+        for pat in (
+            r"(?<![\d/])(\d{1,2})/(\d{1,2})(?![\d/])",
+            r"(?<![A-Za-z\d.])(\d{1,2})\.(\d{1,2})(?![\d.]|\s*[만억천%])",
+            r"(?<!\d)(\d{1,2})\s*월\s*(\d{1,2})\s*일",
+        ):
+            for m in re.finditer(pat, text):
+                mo, dy = int(m.group(1)), int(m.group(2))
+                yr = today.year - 1 if (today.month == 1 and mo == 12) else today.year
+                iso = _valid(yr, mo, dy)
+                if iso:
+                    return iso
+
+        return today.isoformat()
+
+    @classmethod
     def parse(cls, text: str, known_names: Optional[Iterable[str]] = None) -> Dict[str, Any]:
         s = (text or "").strip()
         if not s:
@@ -91,16 +133,8 @@ class SmsDepositParser:
                     )
                 amount = round(float(man_m.group(1)) * 10000)
 
-        # 2) 날짜 추출 (MM/DD 또는 YYYY-MM-DD / YYYY.MM.DD)
-        today = date_today()
-        paid_date = today.isoformat()
-        m_full = re.search(r"(\d{4})[-./](\d{1,2})[-./](\d{1,2})", s)
-        if m_full:
-            paid_date = f"{int(m_full.group(1)):04d}-{int(m_full.group(2)):02d}-{int(m_full.group(3)):02d}"
-        else:
-            m_md = re.search(r"(?:^|\s)(\d{1,2})/(\d{1,2})(?:\s|$)", s)
-            if m_md:
-                paid_date = f"{today.year:04d}-{int(m_md.group(1)):02d}-{int(m_md.group(2)):02d}"
+        # 2) 날짜 추출 — 은행 문자에 적힌 날짜를 그대로 사용(미래 날짜 차단 없음)
+        paid_date = cls._extract_paid_date(s, date_today())
 
         # 3) 호실 번호 추출 (예: 201호 또는 이름 뒤 3자리 호수 — 잔액/계좌번호/시각 마스킹 적용)
         room_no = ""

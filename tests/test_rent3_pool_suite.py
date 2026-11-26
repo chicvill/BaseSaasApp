@@ -4778,6 +4778,20 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual((g["payer_name"], g["amount"], g["paid_date"]), ("안동기", 440000, "2026-12-12"), txt)
         g_corp = P.parse("신한 입금 880,000원 잔고 5,000,000원 디자인스튜디오 봄", known_names={"디자인스튜디오 봄", "이민수"})
         self.assertEqual((g_corp["payer_name"], g_corp["amount"]), ("디자인스튜디오 봄", 880000))
+        # 다양한 은행 SMS 날짜 형식(4자리/2자리 연도·한글·MM.DD·[은행]MM/DD) 그대로 반영 + 소수점 만원/계좌번호 오인 방지
+        for txt, want_date in (
+            ("농협 입금440,000원 안동기 2026. 12. 12.", "2026-12-12"),
+            ("농협 입금440,000원 안동기 2026년 12월 12일", "2026-12-12"),
+            ("[KB] 26.12.12 14:20 1234-01-123456 입금 440,000원 안동기", "2026-12-12"),
+            ("[농협]11/26 14:20 입금 440,000원 안동기", "2026-11-26"),
+            ("[KB] 11.26 14:20 입금 440,000원 안동기", "2026-11-26"),
+            ("[토스] 5.5만원 입금 안동기", "2026-10-29"),
+        ):
+            self.assertEqual(P.parse(txt)["paid_date"], want_date, txt)
+        from unittest import mock as _mock
+        with _mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-01-02"}):
+            self.assertEqual(P.parse("[신한] 12/31 23:55 입금 440,000원 안동기")["paid_date"], "2026-12-31")
+            self.assertEqual(P.parse("[신한] 2027.02.15 입금 440,000원 안동기")["paid_date"], "2027-02-15")
         c = self.client
         r = c.post("/api/rent3_lessor/payments/sms-paste", json={"branch": "main", "sms_text": "[Web발신] 신한 10/20 입금 440,000원 존재하지않는이름"})
         self.assertIn(r.status_code, (400, 404))
