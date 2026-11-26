@@ -151,7 +151,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         if tenant is None:
             reg = self.client.post("/api/rent3/pool/auth/register", headers=self.NOAUTH,
                                    json={"role": "prospect", "name": (s.get("terms") or {}).get("tenant_name") or "당사자", "phone": phone or "010-7000-0000", "password": "Pw123456"})
-            tenant = Tenant.get(reg.json()["user"]["id"])
+            tenant = Tenant.require(reg.json()["user"]["id"])
+        assert lessor is not None and tenant is not None
         tenant.identity = {"verified": True}          # 조건을 바꾸는 수락·서명은 본인인증이 필요하다
         tenant.save(action="test_verified")
         return ({"Authorization": f"Bearer {lessor_token(lessor)}"}, {"Authorization": f"Bearer {tenant_token(tenant)}"})
@@ -10159,7 +10160,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         from apps.rent_dist._rent3_core.authz import lessor_token, tenant_token
         c = self.client
         lsr = Lessor.for_branch("main")
+        assert lsr is not None
         t201 = Tenant.first(branch="main", room_no="201", status="ACTIVE")
+        assert t201 is not None
         ct201 = Contract.first(id_tenant=t201.id, status="ACTIVE")
         orig_lsr = (lsr.phone, lsr.email, lsr.account_number, lsr.password, lsr.password_changed_at)
         orig_t = (t201.phone, t201.email, t201.password, t201.password_changed_at, t201.status)
@@ -10179,7 +10182,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 "phone": "010-9000-1162", "email": "chic162@example.com", "account_number": "신한 110-162-999999",
             })
             self.assertEqual(ok_lp.status_code, 200, ok_lp.text)
-            lsr_now = Lessor.get(lsr.id)
+            lsr_now = Lessor.require(lsr.id)
             self.assertEqual((lsr_now.phone, lsr_now.email, lsr_now.account_number),
                              ("010-9000-1162", "chic162@example.com", "신한 110-162-999999"))
 
@@ -10190,13 +10193,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(dup.status_code, 409)
             ok_tp = c.post("/api/rent3/pool/auth/me/profile", headers=th, json={"phone": "010-8000-2162", "email": "t201_162@example.com"})
             self.assertEqual(ok_tp.status_code, 200, ok_tp.text)
-            self.assertEqual(Tenant.get(t201.id).phone, "010-8000-2162")
+            self.assertEqual(Tenant.require(t201.id).phone, "010-8000-2162")
             if ct201:
-                ct_now = Contract.get(ct201.id)
+                ct_now = Contract.require(ct201.id)
                 self.assertEqual((ct_now.tenant_phone, ct_now.tenant_email), ("010-8000-2162", "t201_162@example.com"))
 
             # 3) 비밀번호 변경: 운영 모드(RENT3_DEMO_LOGIN=0) 기준 현재 비번 검증·규칙 검증·해시 저장·새 비번 로그인 확인
-            t_cur = Tenant.get(t201.id)
+            t_cur = Tenant.require(t201.id)
             t_cur.password = pwd.hash_password("OldPass162!")
             t_cur.save("t162_seed")
             with mock.patch.dict(os.environ, {"RENT3_DEMO_LOGIN": "0"}):
@@ -10206,14 +10209,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(weak.status_code, 400)
                 same = c.post("/api/rent3/pool/auth/me/password", headers=th, json={"current_password": "OldPass162!", "new_password": "OldPass162!"})
                 self.assertEqual(same.status_code, 400)
-                ql.set_pin(Tenant.get(t201.id), "2468")
-                ql.new_device(Tenant.get(t201.id), "시험폰")
+                ql.set_pin(Tenant.require(t201.id), "2468")
+                ql.new_device(Tenant.require(t201.id), "시험폰")
                 changed = c.post("/api/rent3/pool/auth/me/password", headers=th, json={
                     "current_password": "OldPass162!", "new_password": "NewPass162!", "revoke_shortcuts": True,
                 })
                 self.assertEqual(changed.status_code, 200, changed.text)
                 self.assertTrue(changed.json()["shortcuts_revoked"])
-                t_after = Tenant.get(t201.id)
+                t_after = Tenant.require(t201.id)
                 self.assertTrue(pwd.is_hashed(t_after.password))
                 self.assertTrue(pwd.verify(t_after.password, "NewPass162!"))
                 self.assertEqual(t_after.quick_devices, [])
@@ -10224,16 +10227,16 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertEqual(r_new.status_code, 200, r_new.text)
 
             # 4) 간편 비밀번호(PIN) 로그인 토큰 차단 & 퇴실 조회 전용 차단 (authz.pin_guard / moved_out_guard)
-            ql.new_device(Tenant.get(t201.id), "핀폰")
-            dev_id = Tenant.get(t201.id).quick_devices[0]["id"]
-            pin_h = {"Authorization": f"Bearer {tenant_token(Tenant.get(t201.id), via_pin=True, device_id=dev_id)}"}
+            ql.new_device(Tenant.require(t201.id), "핀폰")
+            dev_id = Tenant.require(t201.id).quick_devices[0]["id"]
+            pin_h = {"Authorization": f"Bearer {tenant_token(Tenant.require(t201.id), via_pin=True, device_id=dev_id)}"}
             pin_me = c.get("/api/rent3/pool/auth/me", headers=pin_h)
             self.assertEqual(pin_me.status_code, 200, pin_me.text)
             self.assertTrue(pin_me.json()["via_pin"])
             self.assertEqual(c.post("/api/rent3/pool/auth/me/profile", headers=pin_h, json={"email": "x@y.com"}).status_code, 403)
             self.assertEqual(c.post("/api/rent3/pool/auth/me/password", headers=pin_h, json={"current_password": "NewPass162!", "new_password": "NewPass999!"}).status_code, 403)
 
-            t_mo = Tenant.get(t201.id)
+            t_mo = Tenant.require(t201.id)
             t_mo.status = "MOVED_OUT"
             t_mo.save("t162_mo")
             mo_me = c.get("/api/rent3/pool/auth/me", headers=th)
@@ -10257,14 +10260,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn("btnMyAccount", aidx)
             self.assertIn("/shared/ui/r3_shell.js", aidx)
         finally:
-            lsr_r = Lessor.get(lsr.id)
+            lsr_r = Lessor.require(lsr.id)
             lsr_r.phone, lsr_r.email, lsr_r.account_number, lsr_r.password, lsr_r.password_changed_at = orig_lsr
             lsr_r.save("t162_restore")
-            t_r = Tenant.get(t201.id)
+            t_r = Tenant.require(t201.id)
             t_r.phone, t_r.email, t_r.password, t_r.password_changed_at, t_r.status = orig_t
             t_r.save("t162_restore")
             if ct201:
-                ct_r = Contract.get(ct201.id)
+                ct_r = Contract.require(ct201.id)
                 ct_r.tenant_phone, ct_r.tenant_email = orig_ct
                 ct_r.save("t162_restore")
 
@@ -10277,12 +10280,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         c = self.client
         chic = self._login("chic")
         lsr = Lessor.first(branch="main")
+        assert lsr is not None
         old_limit = lsr.room_limit
         try:
             with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_163_")}):
                 self.assertEqual(c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500}).status_code, 200)
                 self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "763", "is_published": True, "deposit": 3000000, "monthly_rent": 290000, "maintenance_fee": 150000}).status_code, 200)
                 t_ren = self._new_prospect("연장테스트", "010-7777-0763")
+                assert t_ren is not None
                 self._complete_contract(None, None, t_ren.id, "763", "연장테스트", "010-7777-0763")
                 self.assertEqual(c.post("/api/rent3_lessor/expiry/record-plan", headers=chic, json={"branch": "main", "room_no": "763", "tenant_plan": "STAY"}).status_code, 200)
                 # 1) 1차 예고(기존 조건) 후 2차 예고(인상예정액: 보증금 310만, 월세 304,000, 24개월) 재발송 -> 기존 재계약 세션까지 즉시 동기화
@@ -10304,7 +10309,9 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 self.assertTrue(rc and rc["notice_sent"])
                 self.assertEqual((rc["prev_deposit"], rc["prev_monthly_rent"], rc["max_deposit"], rc["max_monthly_rent"]), (3000000, 290000, 3150000, 304500))
                 self.assertEqual((rc["notice_deposit"], rc["notice_monthly_rent"], rc["notice_term_months"]), (3100000, 304000, 24))
-                self.assertEqual(Room.first(branch="main", room_no="763").next_terms.get("monthly_rent"), 304000)
+                rm763 = Room.first(branch="main", room_no="763")
+                assert rm763 is not None
+                self.assertEqual(rm763.next_terms.get("monthly_rent"), 304000)
 
                 # 2) 계약방 채팅 일괄 제시: 5% 상한 초과(310,000)는 즉시 422 차단, 5% 이내 협의(300,000)는 수락 시 세션·예고장·next_terms 동기화
                 lh, th = self._party_headers(sid)
@@ -10316,7 +10323,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 acc = c.post(f"{msg_url}/{ok_b.json()['item']['id']}/respond", headers=th, json={"action": "accept"})
                 self.assertEqual(acc.status_code, 200, acc.text)
                 self.assertEqual(acc.json()["session"]["terms"]["monthly_rent"], 300000)
-                chk_now = ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="763").active_contract_id)
+                rm763_now = Room.first(branch="main", room_no="763")
+                assert rm763_now is not None
+                chk_now = ExpiryRenewalCheck.for_contract(rm763_now.active_contract_id)
+                assert chk_now is not None
                 self.assertEqual(chk_now.proposed_monthly_rent, 300000)
 
                 # 3) Step 3 합의 -> Step 4(서명 전) 도달 후 통화로 조건 재조정 필요 시 reopen-terms로 3단계 복귀, 최신 조건(300,000) 유지
@@ -10355,13 +10365,15 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             for t_ in Tenant.all():
                 if t_.phone == "010-7777-0763":
                     t_.delete(action="t")
-            lsr = Lessor.get(lsr.id)
-            lsr.room_limit = old_limit
-            lsr.save(action="t")
+            lsr_r = Lessor.require(lsr.id)
+            lsr_r.room_limit = old_limit
+            lsr_r.save(action="t")
 
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
-        return Lessor.for_branch("main").id
+        lsr = Lessor.for_branch("main")
+        assert lsr is not None
+        return lsr.id
 
 
 if __name__ == "__main__":
