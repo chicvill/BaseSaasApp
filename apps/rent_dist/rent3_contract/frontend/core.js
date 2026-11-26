@@ -78,6 +78,8 @@
     activeSessionId: "",
     activeSession: null,
     sealedContract: null,
+    renewalContext: null,
+    latestChatMessages: [],
     viewStep: 1,
     lastRevision: null,
     lastCallStatus: null,

@@ -345,11 +345,14 @@
   // ───────────── 3단계: 계약 조건 및 특약 ─────────────
   function renderStep3(s) {
     const t = s.terms || {};
+    const rc = s.mode === "RENEWAL" ? S.renewalContext : null;
     D.elStepPanel.innerHTML = `
       <h3>${s.mode === "RENEWAL" ? `③ 비대면 재계약 조건 확인 및 승인 (Revision v${s.revision})` : `③ 계약 조건 및 특약사항 공동 작성 (Revision v${s.revision})`}</h3>
       ${s.mode === "RENEWAL" ? `<div class="call-banner" style="margin:0 0 10px;border-color:var(--primary-2);background:#f0f9ff;color:#0c4a6e;">
         <strong>🔄 비대면 재계약</strong> — 기존 계약 당사자이므로 본인 확인(신분증·등기부) 없이 바로 <strong>재계약 승인 → 전자서명</strong>으로 체결됩니다.
+        ${rc ? `<div style="font-size:12.5px;margin-top:4px;">기존 계약: 보증금 ${fmtWon(rc.prev_deposit)} · 월세 ${fmtWon(rc.prev_monthly_rent)} · 관리비 ${fmtWon(rc.prev_maintenance_fee)} (5% 상한: 보증금 ${fmtWon(rc.max_deposit)} · 월세 ${fmtWon(rc.max_monthly_rent)})${rc.notice_sent ? `<br>문자·예고 조건: 보증금 ${fmtWon(rc.notice_deposit)} · 월세 ${fmtWon(rc.notice_monthly_rent)} · 관리비 ${fmtWon(rc.notice_maintenance_fee)} (${Number(rc.notice_term_months || 12)}개월)` : ""}</div>` : ""}
       </div>` : ""}
+      ${!adminProxy && currentRole === "lessor" && s.current_step <= 3 ? `<div style="margin:0 0 10px;"><button type="button" id="btnStep3Bundle" class="bass-btn bass-btn--sm" style="width:100%;">📋 조건 일괄 수정 (통화·협의 후 채팅방 제시)</button></div>` : ""}
       <p class="bass-muted" style="font-size:13px;">보증금·계약금·월세·관리비·<strong>퇴실 청소비(약정하면 퇴실 때 보증금에서 공제)</strong>·입주일·계약기간은 상대에게 <strong>제안</strong>하고 <strong>수락</strong>을 받아야 바뀝니다. 인적사항·납부 시점·세금계산서 정보·특약은 직접 고칠 수 있습니다.</p>
       <div class="term-grid">
         ${[["deposit", "보증금", fmtWon(t.deposit)], ["contract_deposit", "계약금", fmtWon(t.contract_deposit)], ["monthly_rent", "월세", fmtWon(t.monthly_rent)],
@@ -445,6 +448,14 @@
     };
 
     D.elStepPanel.querySelectorAll(".btn-propose").forEach((b) => b.addEventListener("click", () => C.openProposeDialog(s, b.dataset.field)));
+    const btnStep3Bundle = document.getElementById("btnStep3Bundle");
+    if (btnStep3Bundle) {
+      btnStep3Bundle.addEventListener("click", () => {
+        S.stepModalOpen = false;
+        D.elModal.hidden = true;
+        C.openBundleDialog(s);
+      });
+    }
     const btnReqSp = document.getElementById("btnReqSpecial");
     if (btnReqSp) btnReqSp.addEventListener("click", () => C.openRequestDialog(s));
     const btnChat3 = document.getElementById("btnOpenChat3");

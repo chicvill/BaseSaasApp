@@ -347,12 +347,33 @@ def get_session(token: str, request: Request):
         s = CoSignSession.by_code_or_id(token)
     s.ensure_renewal_ready()
     contract = Contract.get(s.created_contract_id) if s.created_contract_id else None
+    renewal_ctx = None
+    if s.mode == "RENEWAL" and s.prev_contract_id:
+        prev_ct = Contract.get(s.prev_contract_id)
+        if prev_ct is not None:
+            chk = ExpiryRenewalCheck.for_contract(prev_ct.id)
+            renewal_ctx = {
+                "prev_deposit": prev_ct.deposit,
+                "prev_monthly_rent": prev_ct.monthly_rent,
+                "prev_maintenance_fee": prev_ct.maintenance_fee,
+                "prev_cleaning_fee": prev_ct.cleaning_fee,
+                "prev_expiry_date": prev_ct.expiry_date,
+                "max_deposit": round(prev_ct.deposit * 1.05),
+                "max_monthly_rent": round(prev_ct.monthly_rent * 1.05),
+                "notice_sent": bool(chk and chk.status in ("RENEWAL_PREVIEWED", "RENEWAL_ACKNOWLEDGED")),
+                "notice_deposit": chk.proposed_deposit if chk else None,
+                "notice_monthly_rent": chk.proposed_monthly_rent if chk else None,
+                "notice_maintenance_fee": chk.proposed_maintenance_fee if chk else None,
+                "notice_term_months": chk.proposed_term_months if chk else None,
+                "notice_sent_at": chk.renewal_preview_sent_at if chk else "",
+            }
     who = _chat_actor(request, s) if claims_from(request) else {"role": ""}
     return {
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
         "session": s.model_dump(),
         "contract": contract.model_dump() if contract else None,
+        "renewal_context": renewal_ctx,
         "chat": contract_chat.summary_for(s, who["role"] or None),   # 읽음 처리 없이 안 읽은 수·열린 요청 수 (2.5초 갱신에 포함)
     }
 

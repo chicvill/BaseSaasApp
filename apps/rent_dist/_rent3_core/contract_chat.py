@@ -107,6 +107,20 @@ def _check_consistent(s: Any, field: str, new: Any, extra: Optional[Dict[str, An
         raise DomainError("퇴실 청소비가 보증금보다 클 수 없습니다.", hint="청소비는 퇴실 때 보증금에서 공제하는 금액입니다.")
 
 
+def _check_renewal_bundle_cap(s: Any, parsed: Dict[str, Any]) -> None:
+    """재계약 일괄 조건 제시(bundle)는 게시 시점에 법정 5% 상한을 즉시 검증한다."""
+    if getattr(s, "mode", "") != "RENEWAL" or not getattr(s, "prev_contract_id", ""):
+        return
+    from .models import Contract
+    prev_ct = Contract.get(s.prev_contract_id)
+    if prev_ct is not None:
+        merged = {**(s.terms or {}), **parsed}
+        prev_ct.validate_renewal_cap(
+            new_deposit=int(merged.get("deposit") or 0),
+            new_rent=int(merged.get("monthly_rent") or 0),
+        )
+
+
 def _sys(s: Any, text: str, step: Optional[int] = None) -> DirectChat:
     return DirectChat(
         branch=s.branch, id_room=getattr(s, "id_room", "") or "", room_no=s.room_no, session_id=s.id, tenant_id=s.id_tenant or "",
@@ -122,7 +136,7 @@ def system_note(session: Any, text: str, step: Optional[int] = None) -> DirectCh
 
 def _day(iso: str) -> Optional[date]:
     try:
-        return date.fromisoformat(str(iso)[:10])
+        return date.fromisoformat((iso or "")[:10])
     except ValueError:
         return None
 
@@ -287,6 +301,7 @@ def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", f
         if not items:
             raise DomainError("제시할 계약 조건이 없습니다.")
         _check_consistent(session, items[0]["field"], items[0]["new"], parsed)       # 함께 바뀌는 값 기준으로 한 번에 검사
+        _check_renewal_bundle_cap(session, parsed)
         for prev in open_items(session.id):
             if prev.kind == "bundle" and prev.sender_role == role:
                 prev.status, prev.resolved_by, prev.resolved_at = "withdrawn", "system", now_iso()

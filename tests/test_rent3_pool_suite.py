@@ -10268,6 +10268,97 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 ct_r.tenant_phone, ct_r.tenant_email = orig_ct
                 ct_r.save("t162_restore")
 
+    def test_163_renewal_sms_notice_sync_and_pre_sign_edit(self):
+        """163. 연장 재계약 예고/문자 조건(인상예정액)이 재계약 세션·다음계약조건에 항상 동기화되고, 서명 전 통화 협의 시 예고 조건에서 출발해 5% 상한 이내로 변경(Step 3 일괄 제시 & Step 4 다시 열기)할 수 있다."""
+        import tempfile
+        from unittest import mock
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, CoSignSession, Lessor
+        from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+        c = self.client
+        chic = self._login("chic")
+        lsr = Lessor.first(branch="main")
+        old_limit = lsr.room_limit
+        try:
+            with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_163_")}):
+                self.assertEqual(c.post("/api/rent3_admin/lessors/lessor_chic/room-limit", json={"room_limit": 500}).status_code, 200)
+                self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=chic, json={"branch": "main", "room_no": "763", "is_published": True, "deposit": 3000000, "monthly_rent": 290000, "maintenance_fee": 150000}).status_code, 200)
+                t_ren = self._new_prospect("연장테스트", "010-7777-0763")
+                self._complete_contract(None, None, t_ren.id, "763", "연장테스트", "010-7777-0763")
+                self.assertEqual(c.post("/api/rent3_lessor/expiry/record-plan", headers=chic, json={"branch": "main", "room_no": "763", "tenant_plan": "STAY"}).status_code, 200)
+                # 1) 1차 예고(기존 조건) 후 2차 예고(인상예정액: 보증금 310만, 월세 304,000, 24개월) 재발송 -> 기존 재계약 세션까지 즉시 동기화
+                r1 = c.post("/api/rent3_lessor/expiry/preview-renewal", headers=chic, json={
+                    "branch": "main", "room_no": "763", "proposed_deposit": 3000000, "proposed_monthly_rent": 290000,
+                    "proposed_maintenance_fee": 150000, "proposed_term_months": 12, "open_cosign_session": True,
+                })
+                self.assertEqual(r1.status_code, 200, r1.text)
+                sid = r1.json()["check"]["cosign_session_id"]
+                r2 = c.post("/api/rent3_lessor/expiry/preview-renewal", headers=chic, json={
+                    "branch": "main", "room_no": "763", "proposed_deposit": 3100000, "proposed_monthly_rent": 304000,
+                    "proposed_maintenance_fee": 150000, "proposed_term_months": 24, "open_cosign_session": True,
+                })
+                self.assertEqual(r2.status_code, 200, r2.text)
+                self.assertEqual(r2.json()["check"]["cosign_session_id"], sid)
+                got = c.get(f"/api/rent3_contract/sessions/{sid}", headers=chic).json()
+                self.assertEqual((got["session"]["terms"]["deposit"], got["session"]["terms"]["monthly_rent"], got["session"]["terms"]["lease_term_months"]), (3100000, 304000, 24))
+                rc = got["renewal_context"]
+                self.assertTrue(rc and rc["notice_sent"])
+                self.assertEqual((rc["prev_deposit"], rc["prev_monthly_rent"], rc["max_deposit"], rc["max_monthly_rent"]), (3000000, 290000, 3150000, 304500))
+                self.assertEqual((rc["notice_deposit"], rc["notice_monthly_rent"], rc["notice_term_months"]), (3100000, 304000, 24))
+                self.assertEqual(Room.first(branch="main", room_no="763").next_terms.get("monthly_rent"), 304000)
+
+                # 2) 계약방 채팅 일괄 제시: 5% 상한 초과(310,000)는 즉시 422 차단, 5% 이내 협의(300,000)는 수락 시 세션·예고장·next_terms 동기화
+                lh, th = self._party_headers(sid)
+                msg_url = f"/api/rent3_contract/sessions/{sid}/messages"
+                over_b = c.post(msg_url, headers=lh, json={"kind": "bundle", "bundle": {"deposit": 3100000, "contract_deposit": 0, "monthly_rent": 310000, "maintenance_fee": 150000, "cleaning_fee": 0, "lease_term_months": 24}})
+                self.assertEqual(over_b.status_code, 422, over_b.text)
+                ok_b = c.post(msg_url, headers=lh, json={"kind": "bundle", "body": "통화 협의 반영", "bundle": {"deposit": 3100000, "contract_deposit": 0, "monthly_rent": 300000, "maintenance_fee": 150000, "cleaning_fee": 0, "lease_term_months": 24}})
+                self.assertEqual(ok_b.status_code, 200, ok_b.text)
+                acc = c.post(f"{msg_url}/{ok_b.json()['item']['id']}/respond", headers=th, json={"action": "accept"})
+                self.assertEqual(acc.status_code, 200, acc.text)
+                self.assertEqual(acc.json()["session"]["terms"]["monthly_rent"], 300000)
+                chk_now = ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="763").active_contract_id)
+                self.assertEqual(chk_now.proposed_monthly_rent, 300000)
+
+                # 3) Step 3 합의 -> Step 4(서명 전) 도달 후 통화로 조건 재조정 필요 시 reopen-terms로 3단계 복귀, 최신 조건(300,000) 유지
+                rev = acc.json()["session"]["revision"]
+                for h_role, role in ((lh, "lessor"), (th, "tenant")):
+                    self.assertEqual(c.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", headers=h_role, json={"role": role, "expected_revision": rev}).status_code, 200)
+                self.assertEqual(c.get(f"/api/rent3_contract/sessions/{sid}", headers=lh).json()["session"]["current_step"], 4)
+                reop = c.post(f"/api/rent3_contract/sessions/{sid}/reopen-terms", headers=lh, json={"role": "lessor", "confirm": True})
+                self.assertEqual(reop.status_code, 200, reop.text)
+                self.assertEqual((reop.json()["session"]["current_step"], reop.json()["session"]["terms"]["monthly_rent"]), (3, 300000))
+
+                # 4) 세션 취소 후 새 RENEWAL 세션을 열어도 예고된 조건(300,000 / 24개월)을 승계한다
+                self.assertEqual(c.post(f"/api/rent3_contract/sessions/{sid}/cancel", headers=lh, json={"role": "lessor", "reason": "재개설 테스트"}).status_code, 200)
+                s_new = c.post("/api/rent3_contract/sessions", headers=chic, json={"branch": "main", "room_no": "763", "mode": "RENEWAL"}).json()["session"]
+                self.assertEqual((s_new["terms"]["deposit"], s_new["terms"]["monthly_rent"], s_new["terms"]["lease_term_months"]), (3100000, 300000, 24))
+
+                # 5) 프론트엔드 검증: exCopy2 항상 동기화, 조건 수정 창 최신 제안 승계 및 서명 전 조건 수정 버튼
+                lapp = self._read_lessor_js()
+                capp = self._read_contract_js()
+                self.assertIn("openOrSyncRenewal(v)", lapp)
+                for needle in ("getEditableTerms", "wsBtnReopen", "서명 전 조건 수정", "문자·예고 조건", "btnStep3Bundle"):
+                    self.assertIn(needle, capp, needle)
+        finally:
+            for ct_ in Contract.find(room_no="763"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "763" and s_.branch == "main":
+                    s_.delete(action="t")
+            for chk in ExpiryRenewalCheck.all():
+                if chk.room_no == "763" and chk.branch == "main":
+                    chk.delete(action="t")
+            rm_ = Room.first(branch="main", room_no="763")
+            if rm_:
+                rm_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone == "010-7777-0763":
+                    t_.delete(action="t")
+            lsr = Lessor.get(lsr.id)
+            lsr.room_limit = old_limit
+            lsr.save(action="t")
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         return Lessor.for_branch("main").id

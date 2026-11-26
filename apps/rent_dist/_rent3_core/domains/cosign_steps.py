@@ -222,7 +222,41 @@ def update_terms(
         self.integrity_hash = ""
         if self.current_step > 3:
             self.current_step = 3
-        return self.save(action=f"terms_edited_by_{role}_rev_{self.revision}", app_source=app_source)
+        saved = self.save(action=f"terms_edited_by_{role}_rev_{self.revision}", app_source=app_source)
+        # 연장 재계약 세션의 조건이 합의·수정되면 연결된 만기 예고(ExpiryRenewalCheck)와 다음 계약 조건(next_terms)도 최신 값으로 맞춘다
+        if self.mode == "RENEWAL" and self.prev_contract_id:
+            prev_ct = Contract.get(self.prev_contract_id)
+            dep_now = int(merged.get("deposit") or 0)
+            rent_now = int(merged.get("monthly_rent") or 0)
+            fee_now = int(merged.get("maintenance_fee") or 0)
+            clean_now = int(merged.get("cleaning_fee") or 0)
+            months_now = max(1, int(merged.get("lease_term_months") or 12))
+            from .ops_expiry import ExpiryRenewalCheck
+            chk = ExpiryRenewalCheck.for_contract(self.prev_contract_id)
+            if chk is not None and chk.cosign_session_id == self.id:
+                chk.proposed_deposit = dep_now
+                chk.proposed_monthly_rent = rent_now
+                chk.proposed_maintenance_fee = fee_now
+                chk.proposed_term_months = months_now
+                if prev_ct is not None:
+                    chk.deposit_increase_pct = round(((dep_now - prev_ct.deposit) / prev_ct.deposit) * 100, 2) if prev_ct.deposit > 0 else 0.0
+                    chk.rent_increase_pct = round(((rent_now - prev_ct.monthly_rent) / prev_ct.monthly_rent) * 100, 2) if prev_ct.monthly_rent > 0 else 0.0
+                    is_same = (dep_now == prev_ct.deposit and rent_now == prev_ct.monthly_rent and fee_now == prev_ct.maintenance_fee)
+                    chk.renewal_type = "SAME_TERMS" if is_same else "ADJUSTED_WITHIN_5PCT"
+                chk.save(action="expiry_check_synced_from_cosign", app_source=app_source)
+            room_now = Room.get(self.id_room)
+            if room_now is not None and room_now.is_occupied and room_now.reservation() is None:
+                nt_cur = dict(room_now.next_terms or {})
+                nt_cur.update({
+                    "deposit": dep_now,
+                    "monthly_rent": rent_now,
+                    "maintenance_fee": fee_now,
+                    "cleaning_fee": clean_now,
+                    "lease_term_months": months_now,
+                })
+                room_now.next_terms = nt_cur
+                room_now.save(action="room_next_terms_synced_from_cosign", app_source=app_source)
+        return saved
 
     return self
 

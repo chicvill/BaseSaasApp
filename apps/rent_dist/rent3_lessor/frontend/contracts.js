@@ -146,17 +146,20 @@
     const curPay = ct.pay_timing || r.pay_timing || "후불";
     const resolveNextDefaults = () => {
       const nt = r.next_terms || {};
+      const ec0 = r.expiry_check || null;
+      const ecPrev = Boolean(ec0 && /RENEWAL_/.test(ec0.status || ""));
       const edDep = Number($m("cmDep").value || 0);
       const edRent = Number($m("cmRent").value || 0);
       const edFee = Number($m("cmFee").value || 0);
       const edClean = Number($m("cmClean").value || 0);
       return {
-        hasNt: Object.keys(nt).length > 0,
-        dep0: edDep !== curDep ? edDep : (nt.deposit != null ? Number(nt.deposit) : curDep),
-        rent0: edRent !== curRent ? edRent : (nt.monthly_rent != null ? Number(nt.monthly_rent) : curRent),
-        fee0: edFee !== curFee ? edFee : (nt.maintenance_fee != null ? Number(nt.maintenance_fee) : curFee),
+        hasNt: Object.keys(nt).length > 0 || ecPrev,
+        dep0: edDep !== curDep ? edDep : (nt.deposit != null ? Number(nt.deposit) : (ecPrev && ec0.proposed_deposit != null ? Number(ec0.proposed_deposit) : curDep)),
+        rent0: edRent !== curRent ? edRent : (nt.monthly_rent != null ? Number(nt.monthly_rent) : (ecPrev && ec0.proposed_monthly_rent != null ? Number(ec0.proposed_monthly_rent) : curRent)),
+        fee0: edFee !== curFee ? edFee : (nt.maintenance_fee != null ? Number(nt.maintenance_fee) : (ecPrev && ec0.proposed_maintenance_fee != null ? Number(ec0.proposed_maintenance_fee) : curFee)),
         clean0: edClean !== curClean ? edClean : (nt.cleaning_fee != null ? Number(nt.cleaning_fee) : curClean),
         pay0: nt.pay_timing || curPay,
+        term0: Number((nt.lease_term_months != null ? nt.lease_term_months : (ecPrev && ec0.proposed_term_months)) || 12),
       };
     };
     const currentTermsSummaryHtml = (hasNt) => `
@@ -267,7 +270,7 @@
     const btnRenew = $m("cmRenew");
     if (btnRenew) {
       btnRenew.addEventListener("click", () => {
-        const { hasNt, dep0, rent0, fee0, clean0, pay0 } = resolveNextDefaults();
+        const { hasNt, dep0, rent0, fee0, clean0, pay0, term0 } = resolveNextDefaults();
         const hasRes = Boolean(r.reservation);
         const maxDep = Math.round(curDep * 1.05);
         const maxRent = Math.round(curRent * 1.05);
@@ -283,7 +286,7 @@
             <label class="r3-fld">관리비(원)<input id="rnFee" class="bass-input" type="number" min="0" value="${fee0}"></label>
             <label class="r3-fld">퇴실 청소비(원)<input id="rnClean" class="bass-input" type="number" min="0" value="${clean0}"></label>
             <label class="r3-fld">월세 납부<select id="rnPay" class="bass-input"><option value="후불" ${pay0 === "후불" ? "selected" : ""}>후불</option><option value="선불" ${pay0 === "선불" ? "selected" : ""}>선불</option></select></label>
-            <label class="r3-fld">연장 개월<input id="rnTerm" class="bass-input" type="number" min="1" value="12"></label>
+            <label class="r3-fld">연장 개월<input id="rnTerm" class="bass-input" type="number" min="1" value="${term0 || 12}"></label>
           </div>
           ${hasRes ? `<div class="bass-card" style="margin-top:10px;padding:10px;font-size:12.5px;border-color:var(--warn);">
             ⚠️ 이미 다음 계약(예약 또는 연장)이 체결되어 있어 조건을 변경하거나 다시 열 수 없습니다. 예약을 먼저 취소해 주세요.
@@ -473,29 +476,49 @@
     $m("exStay").addEventListener("click", plan("STAY"));
     $m("exOut").addEventListener("click", plan("MOVE_OUT"));
     if (stay) {
-      const openOrSyncRenewal = async () => {
+      const readExpiryInputs = () => {
+        const d = Number($m("exDep").value || 0);
+        const rt = Number($m("exRent").value || 0);
+        const fe = Number($m("exFee").value || 0);
+        const tm = Math.max(1, Number($m("exTerm").value || 12));
+        if (Number(r.deposit || 0) > 0 && d > maxDep) {
+          Bass.updateAppAlert("warning", `보증금은 법정 5% 상한(${fmtWon(maxDep)}) 이내로 입력해 주세요.`);
+          return null;
+        }
+        if (Number(r.monthly_rent || 0) > 0 && rt > maxRent) {
+          Bass.updateAppAlert("warning", `월세는 법정 5% 상한(${fmtWon(maxRent)}) 이내로 입력해 주세요.`);
+          return null;
+        }
+        return { d, rt, fe, tm };
+      };
+      const openOrSyncRenewal = async (v) => {
         return await Bass.api(APP_ID, "/expiry/preview-renewal", {
           method: "POST",
           body: {
             branch: S.currentBranch, room_no: no,
-            proposed_deposit: Number($m("exDep").value || 0), proposed_monthly_rent: Number($m("exRent").value || 0),
-            proposed_maintenance_fee: Number($m("exFee").value || 0), proposed_term_months: Number($m("exTerm").value || 12),
+            proposed_deposit: v.d, proposed_monthly_rent: v.rt,
+            proposed_maintenance_fee: v.fe, proposed_term_months: v.tm,
             renewal_note: "전출의사가 없으셔서 연장 재계약 조건을 사전 예고드립니다.", open_cosign_session: true,
           },
         });
       };
       $m("exCopy2").addEventListener("click", function () {
+        const v = readExpiryInputs();
+        if (!v) return;
         Bass.withLock(this, async () => {
-          const d = Number($m("exDep").value || 0), rt = Number($m("exRent").value || 0), fe = Number($m("exFee").value || 0), tm = Number($m("exTerm").value || 12);
-          let sid = ec && ec.cosign_session_id;
-          if (!sid) {
-            const res = await openOrSyncRenewal();
-            sid = res.check && res.check.cosign_session_id;
-            await L.refresh();
-          }
-          const url = `${window.location.origin}/rent3_contract/?session=${encodeURIComponent(sid || "")}&role=tenant`;
+          // 기존 세션 유무와 무관하게 입력한 재계약 조건(인상예정액)을 예고장·다음계약조건·재계약 창에 항상 동기화한다
+          const res = await openOrSyncRenewal(v);
+          const chk = (res && res.check) || {};
+          const sid = chk.cosign_session_id || (ec && ec.cosign_session_id) || "";
+          const d = chk.proposed_deposit != null ? Number(chk.proposed_deposit) : v.d;
+          const rt = chk.proposed_monthly_rent != null ? Number(chk.proposed_monthly_rent) : v.rt;
+          const fe = chk.proposed_maintenance_fee != null ? Number(chk.proposed_maintenance_fee) : v.fe;
+          const tm = chk.proposed_term_months != null ? Number(chk.proposed_term_months) : v.tm;
+          await L.refresh();
+          const url = `${window.location.origin}/rent3_contract/?session=${encodeURIComponent(sid)}&role=tenant`;
           const callMsg = `[${bldgName()}] ${no}호 ${ct.tenant_name}님, 계약 만기(${dotDate(ct.expiry_date)})를 앞두고 비대면 재계약 창으로 호출합니다.\n보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)} / 관리비 ${fmtWon(fe)} (${tm}개월 연장)\n본인 확인 없이 아래 링크에서 재계약 조건 승인 후 전자서명만 하시면 비대면 재계약이 완료됩니다.\n${url}`;
           await copyAndSms(callMsg, phone);
+          Bass.updateAppAlert("success", `${no}호 재계약 조건(보증금 ${fmtWon(d)} / 월세 ${fmtWon(rt)})을 재계약 창에 반영하고 호출 문자를 준비했습니다.`);
           showExpiryModal(no);
         });
       });
@@ -511,8 +534,10 @@
         });
       });
       $m("exSend").addEventListener("click", function () {
+        const v = readExpiryInputs();
+        if (!v) return;
         Bass.withLock(this, async () => {
-          const res = await openOrSyncRenewal();
+          const res = await openOrSyncRenewal(v);
           const sid = res && res.check && res.check.cosign_session_id;
           Bass.updateAppAlert(res.level || "success", res.message, res.hint);
           if (sid) {

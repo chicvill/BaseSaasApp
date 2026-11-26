@@ -88,23 +88,40 @@ def open_session(
     base_dep = (prev_ct.deposit if prev_ct else listing.deposit) or 0
     base_rent = prev_ct.monthly_rent if prev_ct else listing.monthly_rent
     renewal_rent_5pct = max(base_rent, (int(base_rent * 1.05) // 1000) * 1000)
-    # 연장 재계약 시 임대인이 '다음 계약 조건'을 미리 저장해 두었으면(법정 5% 상한 이내) 그 값을 우선 적용한다.
+    # 연장 재계약 시 임대인이 문자 예고(ExpiryRenewalCheck)나 '다음 계약 조건'(next_terms)에 저장해 둔 값(법정 5% 상한 이내)을 우선 적용한다.
     ren_dep = prev_ct.deposit if prev_ct else listing.deposit
     ren_rent = renewal_rent_5pct
     ren_fee = prev_ct.maintenance_fee if prev_ct else listing.maintenance_fee
     ren_clean = prev_ct.cleaning_fee if prev_ct else (listing.cleaning_fee or 0)
-    if is_renewal and nt and prev_ct is not None:
-        cand_dep = int(nt["deposit"]) if nt.get("deposit") is not None else ren_dep
-        cand_rent = int(nt["monthly_rent"]) if nt.get("monthly_rent") is not None else prev_ct.monthly_rent
-        try:
-            prev_ct.validate_renewal_cap(new_deposit=cand_dep, new_rent=cand_rent)
-            ren_dep, ren_rent = cand_dep, cand_rent
-        except Exception:
-            pass
-        if nt.get("maintenance_fee") is not None:
-            ren_fee = int(nt["maintenance_fee"])
-        if nt.get("cleaning_fee") is not None:
-            ren_clean = int(nt["cleaning_fee"])
+    ren_months = 12
+    if is_renewal and prev_ct is not None:
+        from .ops_expiry import ExpiryRenewalCheck
+        chk_prev = ExpiryRenewalCheck.for_contract(prev_ct.id)
+        has_notice = bool(chk_prev and chk_prev.status in ("RENEWAL_PREVIEWED", "RENEWAL_ACKNOWLEDGED"))
+        if nt:
+            cand_dep = int(nt["deposit"]) if nt.get("deposit") is not None else ren_dep
+            cand_rent = int(nt["monthly_rent"]) if nt.get("monthly_rent") is not None else prev_ct.monthly_rent
+            try:
+                prev_ct.validate_renewal_cap(new_deposit=cand_dep, new_rent=cand_rent)
+                ren_dep, ren_rent = cand_dep, cand_rent
+            except Exception:
+                pass
+            if nt.get("maintenance_fee") is not None:
+                ren_fee = int(nt["maintenance_fee"])
+            if nt.get("cleaning_fee") is not None:
+                ren_clean = int(nt["cleaning_fee"])
+            if nt.get("lease_term_months") is not None:
+                ren_months = max(1, int(nt["lease_term_months"]))
+        elif has_notice and chk_prev is not None:
+            cand_dep = chk_prev.proposed_deposit
+            cand_rent = chk_prev.proposed_monthly_rent
+            try:
+                prev_ct.validate_renewal_cap(new_deposit=cand_dep, new_rent=cand_rent)
+                ren_dep, ren_rent = cand_dep, cand_rent
+            except Exception:
+                pass
+            ren_fee = chk_prev.proposed_maintenance_fee
+            ren_months = max(1, chk_prev.proposed_term_months or 12)
     new_clean = int(listing.cleaning_fee or nt.get("cleaning_fee") or 0)
     now_str = now_iso()
     session = cls(
@@ -171,7 +188,7 @@ def open_session(
             "maintenance_fee": ren_fee if is_renewal else listing.maintenance_fee,
             "cleaning_fee": ren_clean if is_renewal else new_clean,        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
             "move_in_date": move_in_default,
-            "lease_term_months": 12,
+            "lease_term_months": ren_months if is_renewal else 12,
             "special_terms": (
                 "1. 본 계약은 기존 임대차 계약의 만기 연장(재계약)으로, 본인 확인 및 기존 시설·옵션을 승계하며 비대면으로 체결함.\n"
                 "2. 보증금 및 월세 조정은 주택임대차보호법 제7조(5% 상한) 범위 내에서 합의함.\n"

@@ -10,6 +10,8 @@
   async function openSession(id) {
     S.activeSessionId = id;
     S.activeSession = null;
+    S.renewalContext = null;
+    S.latestChatMessages = [];
     S.lastRevision = null;
     S.lastCallStatus = null;
     S.modalKey = "";
@@ -28,6 +30,8 @@
   function goHome() {
     S.activeSessionId = "";
     S.activeSession = null;
+    S.renewalContext = null;
+    S.latestChatMessages = [];
     S.modalKey = "";
     S.stepModalOpen = false;
     S.wsChatLastSig = "";
@@ -61,6 +65,7 @@
     const prevStatus = S.activeSession ? S.activeSession.status : "";
     S.activeSession = res.session;
     S.sealedContract = res.contract;
+    S.renewalContext = res.renewal_context || null;
     S.chatSummary = res.chat || S.chatSummary;
     C.updateChatFab();
     C.updateTurnLine();

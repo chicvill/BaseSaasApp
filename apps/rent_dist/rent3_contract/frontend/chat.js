@@ -97,7 +97,12 @@
            <button class="bass-btn bass-btn--sm cm-act" data-id="${esc(m.id)}" data-act="decline" type="button">거절</button>`);
       return `<div class="cm-bundle ${m.status === "open" ? "is-open" : ""}">
         <div class="cm-meta">${who} · ${hhmm(m.created_at)} · 📋 계약 조건 일괄 제시</div>
-        <div class="cm-bundle__grid">${items.map((it) => `<div class="cm-bundle__row"><span class="bass-muted">${esc(it.label)}</span><strong>${esc(it.new_text || fmtField(it.field, it.new))}</strong></div>`).join("")}</div>
+        <div class="cm-bundle__grid">${items.map((it) => {
+          const oldTxt = it.old_text || fmtField(it.field, it.old);
+          const newTxt = it.new_text || fmtField(it.field, it.new);
+          const diff = it.old !== undefined && it.old !== null && String(it.old) !== String(it.new);
+          return `<div class="cm-bundle__row"><span class="bass-muted">${esc(it.label)}</span><span>${diff ? `<span class="bass-muted" style="text-decoration:line-through;margin-right:4px;">${esc(oldTxt)}</span>` : ""}<strong>${esc(newTxt)}</strong></span></div>`;
+        }).join("")}</div>
         <div style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;"><span class="bass-badge ${m.status === "open" ? "bass-badge--warn" : (m.status === "accepted" ? "bass-badge--ok" : "")}">${STATUS_KO[m.status] || m.status}</span>${buttons}</div>
       </div>`;
     }
@@ -158,6 +163,7 @@
     const load = async () => {
       if (busy) return;
       const d = await Bass.api(APP_ID, `/sessions/${encodeURIComponent(sid)}/messages?mark_read=true`);
+      S.latestChatMessages = d.messages || [];
       const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
       list.innerHTML = d.messages.map((m) => renderChatBubble(m, d)).join("") || '<div class="bass-muted" style="font-size:13px;padding:8px 0;">아직 채팅이 없습니다. 궁금한 점을 남겨 보세요.</div>';
       if (atBottom) list.scrollTop = list.scrollHeight;
@@ -203,12 +209,41 @@
     }, 3000);
   }
 
+  function getEditableTerms(s) {
+    const base = { ...(s.terms || {}) };
+    const msgs = S.latestChatMessages || [];
+    let fromOpenProposal = false;
+    msgs.forEach((m) => {
+      if (m.status !== "open") return;
+      if (m.kind === "bundle" && m.proposal && Array.isArray(m.proposal.items)) {
+        m.proposal.items.forEach((it) => {
+          if (it && it.field && it.new !== undefined && it.new !== null) {
+            base[it.field] = it.new;
+            fromOpenProposal = true;
+          }
+        });
+      } else if (m.kind === "proposal" && m.proposal && m.proposal.field && m.proposal.new !== undefined && m.proposal.new !== null) {
+        base[m.proposal.field] = m.proposal.new;
+        fromOpenProposal = true;
+      }
+    });
+    return { terms: base, fromOpenProposal };
+  }
+
   function openProposeDialog(s, field) {
     const label = FIELD_LABEL[field];
-    const cur = (s.terms || {})[field];
+    const { terms: curTerms } = getEditableTerms(s);
+    const cur = curTerms[field];
     const isDate = field === "move_in_date";
+    const rc = s.mode === "RENEWAL" ? S.renewalContext : null;
+    const capHint = rc && field === "deposit" && rc.prev_deposit > 0
+      ? `<div class="bass-muted" style="font-size:12px;margin-bottom:6px;">기존 보증금 ${fmtWon(rc.prev_deposit)} · 법정 5% 상한 <strong>최대 ${fmtWon(rc.max_deposit)}</strong></div>`
+      : (rc && field === "monthly_rent" && rc.prev_monthly_rent > 0
+        ? `<div class="bass-muted" style="font-size:12px;margin-bottom:6px;">기존 월세 ${fmtWon(rc.prev_monthly_rent)} · 법정 5% 상한 <strong>최대 ${fmtWon(rc.max_monthly_rent)}</strong></div>`
+        : "");
     const body = R3.openModal(`💡 ${label} 제안`, `
-      <div style="font-size:14px;margin-bottom:8px;">현재 ${label}: <strong>${esc(fmtField(field, cur))}</strong></div>
+      <div style="font-size:14px;margin-bottom:6px;">현재 ${label}: <strong>${esc(fmtField(field, cur))}</strong></div>
+      ${capHint}
       <label class="r3-fld">제안할 값${field === "lease_term_months" ? " (개월)" : isDate ? "" : " (원)"}
         <input id="pfVal" class="bass-input" type="${isDate ? "date" : "number"}"${isDate && s.reserve_after ? ` min="${esc(s.reserve_after)}"` : ""} value="${esc(String(cur ?? ""))}"></label>
       <label class="r3-fld" style="margin-top:8px;">사유 (선택)<textarea id="pfWhy" class="bass-input" rows="2" placeholder="예: 이사 일정 때문에 5일 늦추고 싶습니다"></textarea></label>
@@ -244,22 +279,33 @@
   }
 
   function openBundleDialog(s) {
-    const t = s.terms || {};
+    const { terms: t, fromOpenProposal } = getEditableTerms(s);
     const isRen = s.mode === "RENEWAL";
+    const rc = isRen ? S.renewalContext : null;
     const depVal = Number(t.deposit || 0);
     const cdepVal = isRen ? 0 : (t.contract_deposit != null ? Number(t.contract_deposit) : Math.floor(depVal / 10));
-    const body = R3.openModal("📋 계약 조건 수정 · 일괄 반영", `
-      <p class="bass-muted" style="font-size:13px;margin:0 0 10px;">보증금·계약금(보증금의 10%)·월세·관리비·청소비·입주일·계약기간을 한 번에 조정해 채팅방에 올립니다. 상대가 채팅방에서 확인하면 한꺼번에 반영됩니다.</p>
+    const renSummary = rc ? `
+      <div class="bass-card" style="padding:8px 10px;margin:0 0 10px;font-size:12.5px;line-height:1.6;background:#f0f9ff;border-color:var(--primary-2);">
+        <div><strong>기존 계약</strong>: 보증금 ${fmtWon(rc.prev_deposit)} · 월세 ${fmtWon(rc.prev_monthly_rent)} · 관리비 ${fmtWon(rc.prev_maintenance_fee)}</div>
+        ${rc.notice_sent ? `<div><strong>문자·예고 조건</strong>: 보증금 ${fmtWon(rc.notice_deposit)} · 월세 ${fmtWon(rc.notice_monthly_rent)} · 관리비 ${fmtWon(rc.notice_maintenance_fee)} (${Number(rc.notice_term_months || 12)}개월)</div>` : ""}
+        <div class="bass-muted" style="font-size:12px;">법정 5% 상한: 보증금 최대 ${fmtWon(rc.max_deposit)} · 월세 최대 ${fmtWon(rc.max_monthly_rent)}</div>
+        ${fromOpenProposal ? `<div style="font-size:12px;color:var(--primary);margin-top:2px;">💬 방금 채팅방에 올린 최신 제안 조건을 불러왔습니다. 통화 협의 내용대로 이어서 수정하세요.</div>` : ""}
+      </div>` : (fromOpenProposal ? `<div class="bass-muted" style="font-size:12px;margin:0 0 8px;color:var(--primary);">💬 채팅방에 올려 둔 최신 제안 조건을 불러왔습니다.</div>` : "");
+    const body = R3.openModal(isRen ? "📋 재계약 조건 수정 · 일괄 반영" : "📋 계약 조건 수정 · 일괄 반영", `
+      ${renSummary}
+      <p class="bass-muted" style="font-size:13px;margin:0 0 10px;">${isRen
+        ? "문자로 안내한 재계약 조건을 기준으로 임차인과 통화·채팅 협의 후 서명 전 조건을 조정해 채팅방에 올립니다. 상대가 [전체 수락]하면 계약 조건에 즉시 반영됩니다."
+        : "보증금·계약금(보증금의 10%)·월세·관리비·청소비·입주일·계약기간을 한 번에 조정해 채팅방에 올립니다. 상대가 채팅방에서 확인하면 한꺼번에 반영됩니다."}</p>
       <div class="field-grid">
-        <div><label class="bass-label">보증금 (원)</label><input id="bdDeposit" type="number" class="bass-input" value="${depVal}"></div>
-        <div><label class="bass-label">계약금 (보증금의 10%)</label><input id="bdContractDeposit" type="number" class="bass-input" value="${cdepVal}"></div>
-        <div><label class="bass-label">월세 (원)</label><input id="bdMonthlyRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
+        <div><label class="bass-label">보증금 (원)${rc && rc.prev_deposit > 0 ? ` · 최대 ${fmtWon(rc.max_deposit)}` : ""}</label><input id="bdDeposit" type="number" class="bass-input" value="${depVal}"></div>
+        <div><label class="bass-label">${isRen ? "계약금 (재계약 0원)" : "계약금 (보증금의 10%)"}</label><input id="bdContractDeposit" type="number" class="bass-input" value="${cdepVal}" ${isRen ? "readonly" : ""}></div>
+        <div><label class="bass-label">월세 (원)${rc && rc.prev_monthly_rent > 0 ? ` · 최대 ${fmtWon(rc.max_monthly_rent)}` : ""}</label><input id="bdMonthlyRent" type="number" class="bass-input" value="${Number(t.monthly_rent || 0)}"></div>
         <div><label class="bass-label">관리비 (원)</label><input id="bdMaintenance" type="number" class="bass-input" value="${Number(t.maintenance_fee || 0)}"></div>
         <div><label class="bass-label">퇴실 청소비 (원)</label><input id="bdCleaning" type="number" class="bass-input" value="${Number(t.cleaning_fee || 0)}"></div>
-        <div><label class="bass-label">입주일</label><input id="bdMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
+        <div><label class="bass-label">${isRen ? "연장 시작일" : "입주일"}</label><input id="bdMoveIn" type="date" class="bass-input" value="${esc(t.move_in_date || "")}"></div>
         <div><label class="bass-label">계약기간 (개월)</label><input id="bdTermMonths" type="number" class="bass-input" value="${Number(t.lease_term_months || 12)}"></div>
       </div>
-      <textarea id="bdNote" class="bass-input" rows="2" placeholder="안내 메모 (선택)" style="width:100%;margin-top:10px;"></textarea>
+      <textarea id="bdNote" class="bass-input" rows="2" placeholder="${isRen ? "통화·협의 메모 (예: 임차인과 통화 협의하여 월세 300,000원으로 확정)" : "안내 메모 (선택)"}" style="width:100%;margin-top:10px;"></textarea>
       <button id="bdSubmit" type="button" class="bass-btn bass-btn--primary" style="width:100%;margin-top:10px;">💬 채팅방에 조건 올리기</button>
     `);
     const depInp = body.querySelector("#bdDeposit");
@@ -270,11 +316,21 @@
       });
     }
     body.querySelector("#bdSubmit").addEventListener("click", function () {
+      const depN = Number(body.querySelector("#bdDeposit").value || 0);
+      const rentN = Number(body.querySelector("#bdMonthlyRent").value || 0);
+      if (rc && rc.prev_deposit > 0 && depN > rc.max_deposit) {
+        Bass.updateAppAlert("warning", `보증금은 법정 5% 상한(${fmtWon(rc.max_deposit)}) 이내로 입력해 주세요.`);
+        return;
+      }
+      if (rc && rc.prev_monthly_rent > 0 && rentN > rc.max_monthly_rent) {
+        Bass.updateAppAlert("warning", `월세는 법정 5% 상한(${fmtWon(rc.max_monthly_rent)}) 이내로 입력해 주세요.`);
+        return;
+      }
       Bass.withLock(this, async () => {
         const bundle = {
-          deposit: Number(body.querySelector("#bdDeposit").value || 0),
-          contract_deposit: Number(body.querySelector("#bdContractDeposit").value || 0),
-          monthly_rent: Number(body.querySelector("#bdMonthlyRent").value || 0),
+          deposit: depN,
+          contract_deposit: isRen ? 0 : Number(body.querySelector("#bdContractDeposit").value || 0),
+          monthly_rent: rentN,
           maintenance_fee: Number(body.querySelector("#bdMaintenance").value || 0),
           cleaning_fee: Number(body.querySelector("#bdCleaning").value || 0),
           move_in_date: body.querySelector("#bdMoveIn").value,
@@ -341,7 +397,9 @@
       extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
         서명 날인: 임대인 ${s.lessor_signature ? "✅" : "⏳"} · 임차인 ${s.tenant_signature ? "✅" : "⏳"}
       </div>`;
-      btns = `<button type="button" class="bass-btn bass-btn--sm ${mySigDone ? "" : "bass-btn--primary"} js-ws-step" data-step="4">${mySigDone ? "✅ 서명 완료 (상대 대기)" : "✍️ 서명 날인하기"}</button>`;
+      btns = `
+        <button type="button" class="bass-btn bass-btn--sm ${mySigDone ? "" : "bass-btn--primary"} js-ws-step" data-step="4">${mySigDone ? "✅ 서명 완료 (상대 대기)" : "✍️ 서명 날인하기"}</button>
+        ${!adminProxy && currentRole && s.status === "IN_PROGRESS" ? `<button type="button" id="wsBtnReopen" class="bass-btn bass-btn--sm">📋 서명 전 조건 수정</button>` : ""}`;
     } else {
       extraInfo = `<div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;font-size:12.5px;line-height:1.6;">
         🏦 <strong>임대인 수납 계좌:</strong> ${acctLabel(s)}<br>
@@ -352,8 +410,10 @@
         : `<button type="button" class="bass-btn bass-btn--sm ${s.tenant_recheck_at ? "" : "bass-btn--primary"} js-ws-step" data-step="5">${s.tenant_recheck_at ? "📄 계약금 송금 · 체결 상태 보기" : "🔍 체결 직전 등기부 재열람 확인"}</button>`;
     }
     const cdepText = isRen ? "" : ` · 계약금(10%) <strong>${fmtWon(tm.contract_deposit)}</strong>`;
+    const rcBar = isRen ? S.renewalContext : null;
+    const rcLine = rcBar ? `<div class="bass-muted" style="font-size:12px;margin-top:3px;">기존 계약: 보 ${fmtWon(rcBar.prev_deposit)} · 월 ${fmtWon(rcBar.prev_monthly_rent)} · 관 ${fmtWon(rcBar.prev_maintenance_fee)}${rcBar.notice_sent ? " · <strong>문자 예고 조건 반영</strong>" : ""} (5% 상한 월 ${fmtWon(rcBar.max_monthly_rent)})</div>` : "";
     const termsSummary = `<div class="bass-muted" style="font-size:12.5px;margin-top:6px;line-height:1.5;background:#f8fafc;padding:6px 10px;border-radius:10px;">
-      보증금 <strong>${fmtWon(tm.deposit)}</strong>${cdepText} · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · 입주 ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)
+      보증금 <strong>${fmtWon(tm.deposit)}</strong>${cdepText} · 월세 <strong>${fmtWon(tm.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(tm.maintenance_fee)}</strong>${Number(tm.cleaning_fee || 0) > 0 ? ` · 청소비 <strong>${fmtWon(tm.cleaning_fee)}</strong>` : ""} · ${isRen ? "연장 시작" : "입주"} ${esc(tm.move_in_date || "-")} (${Number(tm.lease_term_months || 12)}개월)${rcLine}
     </div>`;
     bar.innerHTML = `
       <div class="ws-action-card__head">
@@ -401,6 +461,24 @@
     }
     const btnBundle = document.getElementById("wsBtnBundle");
     if (btnBundle) btnBundle.addEventListener("click", () => openBundleDialog(s));
+    const btnReopenWs = document.getElementById("wsBtnReopen");
+    if (btnReopenWs) {
+      btnReopenWs.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          if (!window.confirm("서명 전 계약 조건을 수정할까요?\n양측의 조건 확인(및 기존 서명)이 초기화되고 조건 수정 단계로 돌아갑니다.")) return;
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/reopen-terms`, {
+            method: "POST",
+            body: { role: currentRole, confirm: true },
+          });
+          S.activeSession = res.session;
+          S.lastRevision = S.activeSession.revision;
+          S.viewStep = S.activeSession.current_step;
+          Bass.updateAppAlert(res.level || "diff", res.message);
+          C.renderWorkspace();
+          if (currentRole === "lessor") openBundleDialog(S.activeSession);
+        });
+      });
+    }
     const btnAgree3 = document.getElementById("wsBtnAgree3");
     if (btnAgree3) {
       btnAgree3.addEventListener("click", function () {
@@ -426,6 +504,7 @@
     wsChatBusy = true;
     try {
       const d = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/messages?mark_read=${markRead ? "true" : "false"}`);
+      S.latestChatMessages = d.messages || [];
       const note = document.getElementById("wsChatNote");
       const comp = document.getElementById("wsChatComposer");
       if (comp) comp.hidden = d.read_only || adminProxy || !currentRole;

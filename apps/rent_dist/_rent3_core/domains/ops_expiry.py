@@ -353,10 +353,33 @@ class ExpiryRenewalCheck(PoolObj):
             if is_same else f"주택임대차보호법 5% 상한 이내(월세 {rent_inc:+.2f}%)로 조정된 연장 재계약 조건을 예고합니다."
         )
 
+        if room_now is not None and room_now.is_occupied and room_now.reservation() is None:
+            nt_next = dict(room_now.next_terms or {})
+            nt_next.update({
+                "deposit": dep,
+                "monthly_rent": rent,
+                "maintenance_fee": maint,
+                "cleaning_fee": clean,
+                "lease_term_months": months,
+            })
+            room_now.next_terms = nt_next
+            room_now.save(action="room_next_terms_synced_from_renewal", app_source=app_source)
+
         if open_cosign_session:
+            from .. import contract_chat
             from ..cosign import CoSignSession
             sess = CoSignSession.get(self.cosign_session_id) if self.cosign_session_id else None
             if not sess or sess.status != "IN_PROGRESS":
+                sess = next(
+                    (
+                        x
+                        for x in CoSignSession.find(branch=self.branch, room_no=self.room_no, status="IN_PROGRESS")
+                        if x.mode == "RENEWAL"
+                    ),
+                    None,
+                )
+            reused = sess is not None
+            if not sess:
                 sess = CoSignSession.open_session(
                     branch=self.branch,
                     room_no=self.room_no,
@@ -365,6 +388,14 @@ class ExpiryRenewalCheck(PoolObj):
                     mode="RENEWAL",
                     app_source=app_source,
                 )
+            # 새 재계약 예고 조건이 반영되면 이전에 임대인이 올려 둔 미처리 일괄 제시 카드는 자동 정리한다
+            for prev_msg in contract_chat.open_items(sess.id):
+                if prev_msg.kind == "bundle" and prev_msg.sender_role == "lessor":
+                    prev_msg.status = "withdrawn"
+                    prev_msg.resolved_by = "system"
+                    prev_msg.resolved_at = now_iso()
+                    prev_msg.save(action="contract_bundle_replaced_by_renewal_notice", app_source=app_source)
+            before_rev = sess.revision
             sess.update_terms(
                 role="lessor",
                 updates={
@@ -381,6 +412,12 @@ class ExpiryRenewalCheck(PoolObj):
                 },
                 app_source=app_source,
             )
+            if reused and sess.revision != before_rev:
+                contract_chat.system_note(
+                    sess,
+                    f"임대인이 재계약 예고 조건을 업데이트했습니다 (보증금 {dep:,}원 · 월세 {rent:,}원 · 관리비 {maint:,}원 · {months}개월).",
+                    step=min(sess.current_step, 3),
+                )
             self.cosign_session_id = sess.id
             self.cosign_session_code = sess.session_code
 
