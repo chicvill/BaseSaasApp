@@ -364,11 +364,28 @@ a {
 .r3-kpi--warn { background: #FFFBEB; border-color: #FDE68A; }
 .r3-kpi--err { background: #FEF2F2; border-color: #FECACA; }
 .r3-kpi--info { background: #EFF6FF; border-color: #BFDBFE; }
-.r3-kpi__lbl { font-size: 12px; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 5px; }
+.r3-kpi__lbl { font-size: 12px; font-weight: 700; color: #475569; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.r3-kpi__hint { font-size: 12px; font-weight: 500; font-style: normal; color: #64748B; }
 .r3-kpi__val { font-size: 15.5px; font-weight: 800; color: #0F172A; line-height: 1.25; }
+.r3-kpi__sub { font-size: 12px; font-weight: 600; color: #64748B; line-height: 1.35; white-space: normal; }
 .r3-kpi__bar { height: 5px; border-radius: 999px; background: rgba(15, 23, 42, 0.08); overflow: hidden; margin-top: 2px; }
 .r3-kpi__bar > i { display: block; height: 100%; border-radius: 999px; background: #16A34A; }
-.r3-kpi--info .r3-kpi__bar > i { background: #2563EB; }
+.r3-kpi--info .r3-kpi__bar > i,
+.r3-kpi__half--occ .r3-kpi__bar > i { background: #2563EB; }
+.r3-kpi--warn .r3-kpi__bar > i { background: #D97706; }
+.r3-kpi--err .r3-kpi__bar > i { background: #DC2626; }
+.r3-kpi--split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+.r3-kpi__half { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.r3-kpi__half--occ { border-left: 1px solid #E2E8F0; padding-left: 10px; }
+@media (max-width: 559px) {
+  .r3-kpi--split { grid-template-columns: 1fr; gap: 6px; }
+  .r3-kpi__half--occ { border-left: 0; padding-left: 0; border-top: 1px solid #E2E8F0; padding-top: 6px; }
+}
 
 /* 채팅 말풍선 & 바 */
 .r3-chat-peer {

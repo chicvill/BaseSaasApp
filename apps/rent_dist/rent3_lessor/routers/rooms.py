@@ -124,6 +124,8 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
     monthly_target = 0
     monthly_collected = 0
     monthly_unpaid = 0
+    monthly_due_soon = 0
+    monthly_overdue = 0
     for r in rooms:
         ct = Contract.get(r.active_contract_id) if r.active_contract_id else None
         ledger = ct.ledger(up_to_ym=up_to_ym) if ct else None
@@ -132,9 +134,14 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
             total_overdue_branch += int(ledger.get("overdue_unpaid", 0))
             cur_row = next((m for m in ledger.get("months", []) if m.get("ym") == target_ym), None)
             if cur_row:
+                cur_unpaid = int(cur_row.get("unpaid", 0))
                 monthly_target += int(cur_row.get("due", 0))
                 monthly_collected += int(cur_row.get("paid", 0))
-                monthly_unpaid += int(cur_row.get("unpaid", 0))
+                monthly_unpaid += cur_unpaid
+                if cur_row.get("phase") == "DUE_SOON":
+                    monthly_due_soon += cur_unpaid
+                else:
+                    monthly_overdue += cur_unpaid
         tenant = tenants_by_id.get(r.id_tenant) if r.id_tenant else None
         exp_win = ct.expiry_window_status() if ct else None
         exp_chk = ExpiryRenewalCheck.for_contract(ct.id) if ct else None
@@ -212,6 +219,8 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         "monthly_target": monthly_target,
         "monthly_collected": monthly_collected,
         "monthly_unpaid": monthly_unpaid,
+        "monthly_due_soon": monthly_due_soon,
+        "monthly_overdue": monthly_overdue,
         "monthly_collection_rate": monthly_rate,
         "total_unpaid_branch": total_unpaid_branch,
         "total_overdue_branch": total_overdue_branch,

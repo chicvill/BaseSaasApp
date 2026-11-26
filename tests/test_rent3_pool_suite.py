@@ -4553,11 +4553,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertRegex(d["target_ym"], r"^\d{4}-\d{2}$")
         self.assertGreater(d["monthly_target"], 0)
         self.assertEqual(d["monthly_collected"] + d["monthly_unpaid"], d["monthly_target"])
+        self.assertEqual(d["monthly_due_soon"] + d["monthly_overdue"], d["monthly_unpaid"])
+        self.assertEqual(d["monthly_collected"] + d["monthly_due_soon"] + d["monthly_overdue"], d["monthly_target"])
         expected_rate = round(d["monthly_collected"] * 100 / d["monthly_target"])
         self.assertEqual(d["monthly_collection_rate"], expected_rate)
         self.assertGreaterEqual(d["total_unpaid_branch"], d["monthly_unpaid"])
         lapp = self._read_lessor_js()
-        for needle in ("월 목표액", "수납액", "미납액", "monthly_collection_rate"):
+        for needle in ("월 목표액", "월 목표", "가동률", "수납액", "대기액", "미납액", "r3-kpi--split", "monthly_collection_rate"):
             self.assertIn(needle, lapp, needle)
 
     def test_73_payment_delete_recalculates_fifo_and_guards(self):

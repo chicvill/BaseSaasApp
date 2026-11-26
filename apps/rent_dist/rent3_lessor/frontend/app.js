@@ -56,20 +56,28 @@
     const mTarget = Number(S.dash.monthly_target || 0);
     const mPaid = Number(S.dash.monthly_collected || 0);
     const mRate = Number(S.dash.monthly_collection_rate ?? (mTarget > 0 ? Math.round((mPaid * 100) / mTarget) : 0));
-    const mUnpaid = Number(S.dash.monthly_unpaid || 0);
-    const dueSoon = Number(S.dash.total_due_soon_branch || 0);
-    const totalUnpaid = S.dash.total_overdue_branch != null ? Number(S.dash.total_overdue_branch) : Number(S.dash.total_unpaid_branch || 0);
-    const unpaidColor = totalUnpaid > 0 ? "var(--err)" : "var(--ok)";
-    const unpaidExtra = dueSoon > 0
-      ? ` <span class="bass-badge bass-badge--warn" style="font-size:12px;">납부 예정 ${fmtWon(dueSoon)}</span>`
-      : (totalUnpaid > mUnpaid ? ` <span class="bass-muted" style="font-size:12.5px;">(당월 ${fmtWon(mUnpaid)})</span>` : "");
+    const mDueSoon = Number(S.dash.monthly_due_soon ?? S.dash.total_due_soon_branch ?? 0);
+    const totalOverdue = S.dash.total_overdue_branch != null ? Number(S.dash.total_overdue_branch) : Number(S.dash.total_unpaid_branch || 0);
+    const mOverdue = S.dash.monthly_overdue != null ? Number(S.dash.monthly_overdue) : Math.max(0, Number(S.dash.monthly_unpaid || 0) - mDueSoon);
+    const priorOverdue = Math.max(0, totalOverdue - mOverdue);
+    const occRooms = Number(fin.occupied_rooms || 0);
+    const totRooms = Number(fin.total_rooms || 0);
     const occPct = Math.max(0, Math.min(100, Number(fin.occupancy_rate || 0)));
     const paidPct = Math.max(0, Math.min(100, mRate));
+    const dueSoonPct = mTarget > 0 ? Math.max(0, Math.min(100, Math.round((mDueSoon * 100) / mTarget))) : 0;
+    const overduePct = mTarget > 0 ? Math.max(0, Math.min(100, Math.round((mOverdue * 100) / mTarget))) : 0;
+    const overdueColor = (mOverdue > 0 || priorOverdue > 0) ? "var(--err)" : "var(--ok)";
+    const priorHtml = priorOverdue > 0
+      ? `<div class="r3-kpi__sub" style="color:var(--err);">이전 달 이월 +${fmtWon(priorOverdue)} (누적 ${fmtWon(totalOverdue)})</div>`
+      : "";
     document.getElementById("kpiGrid").innerHTML =
-      `<div class="r3-kpi"><span class="r3-kpi__lbl">🎯 ${ymMonth}월 목표액</span><strong class="r3-kpi__val">${fmtWon(mTarget)}</strong></div>` +
+      `<div class="r3-kpi r3-kpi--split">` +
+        `<div class="r3-kpi__half" aria-label="${ymMonth}월 목표액"><span class="r3-kpi__lbl">🎯 ${ymMonth}월 목표</span><strong class="r3-kpi__val">${fmtWon(mTarget)}</strong></div>` +
+        `<div class="r3-kpi__half r3-kpi__half--occ"><span class="r3-kpi__lbl">🏢 가동률</span><strong class="r3-kpi__val">${occRooms}실/${totRooms}실 (${occPct}%)</strong><div class="r3-kpi__bar"><i style="width:${occPct}%;"></i></div></div>` +
+      `</div>` +
       `<div class="r3-kpi r3-kpi--ok"><span class="r3-kpi__lbl">💰 수납액</span><strong class="r3-kpi__val" style="color:var(--ok);">${fmtWon(mPaid)} (${mRate}%)</strong><div class="r3-kpi__bar"><i style="width:${paidPct}%;"></i></div></div>` +
-      `<div class="r3-kpi ${totalUnpaid > 0 ? "r3-kpi--err" : "r3-kpi--ok"}"><span class="r3-kpi__lbl">❗ 미납액</span><strong class="r3-kpi__val" style="color:${unpaidColor};">${fmtWon(totalUnpaid)}</strong>${unpaidExtra}</div>` +
-      `<div class="r3-kpi r3-kpi--info"><span class="r3-kpi__lbl">🏢 가동률</span><strong class="r3-kpi__val">${fin.occupied_rooms || 0}/${fin.total_rooms || 0}실 (${occPct}%)</strong><div class="r3-kpi__bar"><i style="width:${occPct}%;"></i></div></div>`;
+      `<div class="r3-kpi ${mDueSoon > 0 ? "r3-kpi--warn" : ""}"><span class="r3-kpi__lbl">⏳ 대기액 <em class="r3-kpi__hint">납입일 이전/까지</em></span><strong class="r3-kpi__val" style="color:${mDueSoon > 0 ? "#B45309" : "var(--muted)"};">${fmtWon(mDueSoon)}${mTarget > 0 ? ` (${dueSoonPct}%)` : ""}</strong><div class="r3-kpi__bar"><i style="width:${dueSoonPct}%;"></i></div></div>` +
+      `<div class="r3-kpi ${(mOverdue > 0 || priorOverdue > 0) ? "r3-kpi--err" : "r3-kpi--ok"}"><span class="r3-kpi__lbl">❗ 미납액 <em class="r3-kpi__hint">납입일 경과</em></span><strong class="r3-kpi__val" style="color:${overdueColor};">${fmtWon(mOverdue)}${mTarget > 0 ? ` (${overduePct}%)` : ""}</strong><div class="r3-kpi__bar"><i style="width:${overduePct}%;"></i></div>${priorHtml}</div>`;
 
     renderTab();
   }
