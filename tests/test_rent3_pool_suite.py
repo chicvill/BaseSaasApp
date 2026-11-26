@@ -70,6 +70,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         parts = ("core.js", "support.js", "lessors.js", "ops.js", "app.js")
         return "\n".join(open(os.path.join(fe, name), encoding="utf-8").read() for name in parts)
 
+    def _read_lessor_api(self) -> str:
+        base = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor")
+        rdir = os.path.join(base, "routers")
+        parts = [open(os.path.join(base, "api.py"), encoding="utf-8").read()]
+        for name in ("_deps.py", "franchise.py", "rooms.py", "payments.py", "contracts.py", "tax.py", "comms.py"):
+            parts.append(open(os.path.join(rdir, name), encoding="utf-8").read())
+        return "\n".join(parts)
+
     def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
         """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
         c, base = self.client, "/api/rent3_contract"
@@ -3860,9 +3868,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, tenant, needle)
         self.assertIn("chat_digest", contract)                         # 체결된 계약서에 협상 대화 기록 해시 표시
         # 서버 약속: 임대인·임차인 메시지 주소와 계약 앱 해시 확인 주소
+        lessor_api_src = self._read_lessor_api()
         for fname, route in (("rent3_lessor", '"/messages/rooms"'), ("rent3_lessor", '"/messages/rooms/{room_no}"'),
                              ("rent3_tenant", '"/myhome/{tenant_id}/messages"'), ("rent3_contract", '"/sessions/{session_id}/chat-digest"')):
-            self.assertIn(route, rd(fname, "api.py"), route)
+            self.assertIn(route, lessor_api_src if fname == "rent3_lessor" else rd(fname, "api.py"), route)
         # 메시지 화면의 대화는 호실 대화(session_id 없음)만 쓰고, 계약방 협상 기록은 접어서 따로 준다
         rm = rd("_rent3_core", "room_messages.py")
         self.assertIn("not m.session_id", rm)
