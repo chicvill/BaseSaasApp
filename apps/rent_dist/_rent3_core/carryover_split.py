@@ -121,7 +121,7 @@ def apply(rows: Optional[List[Dict[str, Any]]] = None, app_source: str = "rent3_
             kid_ids.append(kid.id)
         p.status, p.void_reason, p.voided_at, p.voided_by = "VOIDED", VOID_REASON, now_iso(), app_source
         p.save(action="carryover_split_voided", app_source=app_source)
-        if before_one is not None and _snap_one(ct) != before_one:      # 합계·미납 분포가 달라지면 이 건만 되돌린다
+        if before_one is not None and ct is not None and _snap_one(ct) != before_one:      # 합계·미납 분포가 달라지면 이 건만 되돌린다
             for kid_id in kid_ids:
                 k = Pay.get(kid_id, include_voided=True)
                 if k is not None:

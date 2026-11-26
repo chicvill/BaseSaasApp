@@ -111,10 +111,12 @@ def build_payload(fee: Any, lessor: Any, building_name: str) -> Dict[str, Any]:
     issue_date = fee.paid_at or fee.billing_month + "-01"
     supplier: Dict[str, Any] = {"identificationNumber": sup_no, "organizationName": sup["name"][:70], "representativeName": sup["ceo"][:30],
                                 "manager": {"email": sup_email}}
-    if os.getenv("RENT3_PLATFORM_ADDRESS", "").strip():
-        supplier["address"] = os.getenv("RENT3_PLATFORM_ADDRESS").strip()[:150]
-    if re.fullmatch(r"010-\d{4}-\d{4}", os.getenv("RENT3_PLATFORM_PHONE", "").strip()):
-        supplier["manager"]["telephone"] = os.getenv("RENT3_PLATFORM_PHONE").strip()
+    platform_addr = os.getenv("RENT3_PLATFORM_ADDRESS", "").strip()
+    if platform_addr:
+        supplier["address"] = platform_addr[:150]
+    platform_phone = os.getenv("RENT3_PLATFORM_PHONE", "").strip()
+    if re.fullmatch(r"010-\d{4}-\d{4}", platform_phone):
+        supplier["manager"]["telephone"] = platform_phone
     return {
         "date": issue_date, "purpose": "RECEIPT", "taxType": "TAXABLE",
         "supplier": supplier,

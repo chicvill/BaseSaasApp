@@ -215,16 +215,21 @@ def apply(branch: str, year: int, text: str, replace_diffs: bool = False) -> Dic
     added = replaced = 0
     for i in todo:
         room = Room.first(branch=b, room_no=i["room_no"])
-        ct = Contract.get(room.active_contract_id)
-        rent, fee = _split(ct, i["amount"])
-        if i.get("former"):
+        if room is None:
+            continue
+        ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+        former = bool(i.get("former"))
+        if former:
             rent, fee = i["amount"], 0           # 이전 입주자의 월세·관리비 비율은 알 수 없어 합계만 월세 칸에 둔다
+        elif ct is not None:
+            rent, fee = _split(ct, i["amount"])
+        else:
+            continue
         if i["status"] == "new":
             # 이전 입주자 시기: 사람·계약 객체를 새로 만들지 않고 호실·청구월 기준으로만 보관한다('former:' 표시 → 세무 집계에는 들어가고 지금 입주자 화면에는 안 나온다)
-            former = bool(i.get("former"))
             Pay(branch=b, id_building=bldg.id if bldg else "", id_room=room.id, room_no=room.room_no,
-                id_contract=(f"former:{b}:{room.room_no}" if former else ct.id), id_tenant=("" if former else ct.id_tenant),
-                payer_name=("이전 입주자" if former else ct.tenant_name), billing_month=i["ym"], paid_date=i["date"], rent_amount=rent, maintenance_amount=fee,
+                id_contract=(f"former:{b}:{room.room_no}" if former else (ct.id if ct else "")), id_tenant=("" if former else (ct.id_tenant if ct else "")),
+                payer_name=("이전 입주자" if former else (ct.tenant_name if ct else "")), billing_month=i["ym"], paid_date=i["date"], rent_amount=rent, maintenance_amount=fee,
                 total_amount=i["amount"], payment_kind="MONTHLY_RENT", method="TRANSFER", cash_receipt_no="엑셀 올리기",
                 idempotency_key=f"csv:{b}:{i['room_no']}:{i['ym']}:{i['date']}:{i['amount']}", raw_sms="납부현황 엑셀(CSV) 올리기").save(action="payment_imported_csv", app_source=SRC)
             added += 1

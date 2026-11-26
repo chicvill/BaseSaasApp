@@ -173,7 +173,7 @@ def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
         "owner_name": ", ".join(o["name"] for o in owners),
         "mortgages": mortgages,
         "mortgage_count": len(active_m),
-        "mortgage_total": sum(m["amount"] for m in active_m),
+        "mortgage_total": sum(int(m["amount"]) for m in active_m),
         "restrictions": restrictions,
         "seizure_or_trust": "있음" if active_r else "없음",
         "ownership_transfers": transfers,

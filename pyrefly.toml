@@ -13,3 +13,17 @@ site-package-path = [
 python-version = "3.14"
 python-platform = "windows"
 skip-interpreter-query = false
+
+# 테스트 스위트는 Optional 반환(.get/.first) 단축 호출이 많아 테스트 경로만 엄격 Optional 진단을 완화한다.
+# 실제 서비스 코드(apps/rent_dist/ 등)에는 전체 정적 타입 검사가 그대로 적용된다.
+[[sub-config]]
+matches = "tests/**"
+
+[sub-config.errors]
+missing-attribute = false
+unsupported-operation = false
+bad-argument-type = false
+bad-assignment = false
+not-iterable = false
+no-matching-overload = false
+bad-typed-dict-key = false

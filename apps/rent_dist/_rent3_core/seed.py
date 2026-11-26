@@ -34,6 +34,8 @@ def _bootstrap_if_empty(p) -> None:
         root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
         for name in ("fresh_pool", "ledger_import"):
             spec = importlib.util.spec_from_file_location(name, os.path.join(root, "scripts", name + ".py"))
+            if spec is None or spec.loader is None:
+                raise RuntimeError(f"bootstrap script '{name}' could not be loaded")
             mod = importlib.util.module_from_spec(spec)
             import sys
             sys.modules[name] = mod

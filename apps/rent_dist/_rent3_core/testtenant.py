@@ -62,7 +62,7 @@ def register(branch: str = "main", room_no: str = "701", name: str = "민흥식"
     if not apply:
         return {"status": "DRY", "message": f"점검만 했습니다(바뀐 것 없음). 등록하면 → {plan}", "head": head, "need_raise_limit": over}
     info = backup.create()
-    if over:
+    if over and lessor is not None:
         lessor.room_limit = len(rooms) + 1
         lessor.save(action="room_limit_raised_for_test_tenant", app_source="add_test_tenant")
     rid, tid, cid = f"room_{branch}_{room_no}", f"tenant_{branch}_{room_no}", f"ct_{branch}_{room_no}"
@@ -76,7 +76,7 @@ def register(branch: str = "main", room_no: str = "701", name: str = "민흥식"
              lessor_name=(lessor.name if lessor else ""), id_tenant=tid, tenant_name=name, tenant_phone=phone, contract_date=today.isoformat(),
              move_in_date=today.isoformat(), expiry_date=(today + timedelta(days=365)).isoformat(), lease_term_months=12, lease_type="월세",
              pay_timing="후불", vat_target=False, deposit=0, monthly_rent=0, maintenance_fee=0, status="ACTIVE").save(action="test_contract_added", app_source="add_test_tenant")
-    unpaid = Contract.get(cid).ledger().get("total_unpaid")
+    unpaid = Contract.require(cid).ledger().get("total_unpaid")
     return {"status": "DONE", "head": head, "backup": info.get("name", ""), "unpaid": unpaid,
             "message": f"등록했습니다: {plan}. 등록 전 백업: {info.get('name', '')}. 장부 미납 {unpaid}원(0이어야 정상)."}
 
@@ -156,7 +156,7 @@ def vacate_test_room(branch: str = "main", room_no: str = "701", apply: bool = F
     tenant.save(action="test_tenant_moved_out", app_source="admin_test_vacate")
     reserved = room.reservation()
     room.vacate(app_source="admin_test_vacate")
-    room = Room.get(room.id)
+    room = Room.require(room.id)
     if reserved is not None:        # 미리 체결해 둔 예약 계약이 있으면 공실로 내놓지 않고 그 임차인이 바로 입주한다
         nt = Tenant.get(reserved.id_tenant)
         return {"status": "DONE", "backup": info.get("name", ""),

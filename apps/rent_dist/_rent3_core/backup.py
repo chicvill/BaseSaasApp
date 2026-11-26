@@ -105,11 +105,18 @@ def verify(path: str) -> Dict[str, Any]:
                     continue
                 if m.isfile() and m.name.endswith(".json"):
                     try:
-                        json.loads(tf.extractfile(m).read().decode("utf-8"))
+                        ef = tf.extractfile(m)
+                        if ef is None:
+                            raise ValueError("empty member")
+                        json.loads(ef.read().decode("utf-8"))
                     except Exception:  # noqa: BLE001
                         problems.append(f"JSON 을 읽을 수 없음: {m.name}")
                 elif m.isfile() and m.name.endswith(".jsonl"):
-                    for i, line in enumerate(tf.extractfile(m).read().decode("utf-8").splitlines(), 1):
+                    ef = tf.extractfile(m)
+                    if ef is None:
+                        problems.append(f"{m.name} 을 읽을 수 없음")
+                        continue
+                    for i, line in enumerate(ef.read().decode("utf-8").splitlines(), 1):
                         if line.strip():
                             try:
                                 json.loads(line)
@@ -138,9 +145,11 @@ def restore(path: str, target_dir: str) -> Dict[str, Any]:
             if m.isdir():
                 os.makedirs(dest, exist_ok=True)
             elif m.isfile():
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with open(dest, "wb") as out:
-                    out.write(tf.extractfile(m).read())
+                ef = tf.extractfile(m)
+                if ef is not None:
+                    os.makedirs(os.path.dirname(dest), exist_ok=True)
+                    with open(dest, "wb") as out:
+                        out.write(ef.read())
     return {"restored_to": base, "files": v["files"]}
 
 
