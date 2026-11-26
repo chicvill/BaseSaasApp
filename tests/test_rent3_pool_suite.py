@@ -99,6 +99,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             parts.append(open(os.path.join(ddir, name), encoding="utf-8").read())
         return "\n".join(parts)
 
+    def _read_core_cosign(self) -> str:
+        core = os.path.join(ROOT, "apps", "rent_dist", "_rent3_core")
+        ddir = os.path.join(core, "domains")
+        parts = [open(os.path.join(core, "cosign.py"), encoding="utf-8").read()]
+        for name in ("cosign_registry.py", "cosign_session.py", "cosign_steps.py"):
+            parts.append(open(os.path.join(ddir, name), encoding="utf-8").read())
+        return "\n".join(parts)
+
     def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
         """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
         c, base = self.client, "/api/rent3_contract"
@@ -7675,8 +7683,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                     o.delete(action="t")
         # ⑤ 연장 확정·새 계약 체결 경로가 임시 조건을 비우는 코드가 있다
         self.assertIn("room.next_listing = {}", self._read_core_ops(), "ops.py")
-        for rel, needle in (("cosign.py", "room.next_listing = {}"), ("broker.py", "room.next_listing = {}")):
-            self.assertIn(needle, open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", rel), encoding="utf-8").read(), rel)
+        self.assertIn("room.next_listing = {}", self._read_core_cosign(), "cosign.py")
+        self.assertIn("room.next_listing = {}", open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", "broker.py"), encoding="utf-8").read(), "broker.py")
 
     def test_119_naver_style_icon_menu_modal(self):
         """119. 햄버거 메뉴가 네이버 스타일의 중앙 모달 창(카테고리별 아이콘 그리드 + 기능 검색)으로 열리고, r3_shell.js 가 배지 갱신 시 타일 구조를 보존한다."""
@@ -9958,7 +9966,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_157_contract_shows_rent_account_and_autopay_guidance(self):
         """157. 계약서(체결본)에 임차료 수납 계좌 행과 자동이체 권유 안내가 있고, 임대인 계좌가 없을 때 가짜 계좌를 넣지 않는다(카드·페이는 추후 지원 예정으로만 안내)."""
         rd = lambda *p: open(os.path.join(ROOT, "apps", "rent_dist", *p), encoding="utf-8").read()
-        capp, tapp, core = self._read_contract_js(), self._read_tenant_js(), rd("_rent3_core", "cosign.py")
+        capp, tapp, core = self._read_contract_js(), self._read_tenant_js(), self._read_core_cosign()
         for needle in ("임차료 수납 계좌", "autoPayGuideHtml", "자동이체", "추후 지원 예정", "acctLabel"):
             self.assertIn(needle, capp, needle)
         self.assertIn("자동이체", tapp)
