@@ -86,6 +86,19 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             parts.append(open(os.path.join(rdir, name), encoding="utf-8").read())
         return "\n".join(parts)
 
+    def _read_portal_js(self) -> str:
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
+        parts = ("state.js", "listings.js", "auth.js", "connect.js", "app.js")
+        return "\n".join(open(os.path.join(fe, name), encoding="utf-8").read() for name in parts)
+
+    def _read_core_ops(self) -> str:
+        core = os.path.join(ROOT, "apps", "rent_dist", "_rent3_core")
+        ddir = os.path.join(core, "domains")
+        parts = [open(os.path.join(core, "ops.py"), encoding="utf-8").read()]
+        for name in ("ops_support.py", "ops_checkout.py", "ops_expiry.py", "ops_notice.py"):
+            parts.append(open(os.path.join(ddir, name), encoding="utf-8").read())
+        return "\n".join(parts)
+
     def _complete_contract(self, lessor_h, tenant_h, tid, room_no, name, phone):
         """호실에 대해 호출 → 5단계 → 체결까지 진행하고 세션 id 를 돌려준다 (기본 클라이언트 = 본사 관리자 권한으로 진행)."""
         c, base = self.client, "/api/rent3_contract"
@@ -4463,7 +4476,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertIn(needle, tapp, needle)
         self.assertNotIn("월세 즉시 납부", tapp)
         self.assertNotIn("/pay`", tapp)
-        self.assertIn("아이디, 이메일 또는 휴대폰 번호", rd("apps", "rent_dist", "rent3", "frontend", "app.js"))
+        self.assertIn("아이디, 이메일 또는 휴대폰 번호", self._read_portal_js())
         self.assertIn("nt-ok", self._read_lessor_js())
         t = Tenant.get(tid)
         t.password, t.status, t.room_no, t.consents, t.pin_hash, t.quick_devices = old
@@ -4596,7 +4609,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
     def test_72_portal_auto_enter_when_logged_in(self):
         """72. 이미 로그인한 임대인·임차인·관리인은 포털 첫 화면 대신 내 업무 화면으로 바로 들어간다(만료 토큰·?login=1·?logout=1·?home=1 은 제외). 전환 안내는 없고 ☰ 포털 홈은 ?home=1."""
         rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
-        app = rd("apps", "rent_dist", "rent3", "frontend", "app.js")
+        app = self._read_portal_js()
         for needle in ("autoEnter", 'urlParams.get("home") === "1"', "window.location.replace(u.redirect_url)", 'strip.style.display = "none"', "p.exp * 1000"):
             self.assertIn(needle, app, needle)
         self.assertNotIn('strip.style.display = "block"', app)
@@ -5023,7 +5036,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             (lsr.name, lsr.phone, lsr.status, lsr.identity, lsr.password, lsr.business_number, lsr.account_number) = old_l
             lsr.save(action="t")
         html = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "index.html"), encoding="utf-8").read()
-        js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        js = self._read_portal_js()
         self.assertEqual(html.count("js-forgot"), 4)                                          # 임차인·임대인 로그인 카드 2 + 소개 구역 2
         for needle in ("rsProof", "내 페이지 찾기"):
             self.assertIn(needle, html, needle)
@@ -5034,7 +5047,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         """80. 메인 홈: 임차인·임대인 로그인 옆과 소개 구역에 '비밀번호를 잊으셨나요? 본인 확인으로 내 페이지 찾기' 링크, 재설정 직후 새 비밀번호로 자동 입장."""
         base = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
         html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
-        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        app = self._read_portal_js()
         self.assertGreaterEqual(html.count("js-forgot"), 4)                  # 역할 카드 2 + 소개 구역 2
         self.assertIn("본인 확인으로 내 페이지 찾기", html)
         i = app.index('"/pool/auth/password-reset/confirm"')
@@ -5123,7 +5136,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t.phone, t.password, t.pin_hash, t.quick_devices, t.consents, t.invite_hash, t.invite_expires = old
             t.save(action="t")
         lapp = self._read_lessor_js()
-        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        pj = self._read_portal_js()
         for needle in ("connect_requests", "/connect-requests/", "연결 요청", "btnConnectMsg", "watchConnect", "connBar", "?connect=", "showInviteSender"):
             self.assertIn(needle, lapp, needle)
         for needle in ("/pool/connect/request", "/pool/connect/status", "/pool/connect/info", "rent3_connect_req", "find=1", "r3Connect", "__rent3ConnectOpen"):
@@ -6684,7 +6697,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(c.get(f"{AD}/pool-search/edits", headers=H(core_tok)).status_code, 401)        # 비상구를 지우면 다시 필요
             rd = lambda *parts: open(os.path.join(ROOT, *parts), encoding="utf-8").read()
             for needle in ("resolveMfa", "/pool/auth/mfa-verify", "mfa_required"):
-                self.assertIn(needle, rd("apps", "rent_dist", "rent3", "frontend", "app.js"), needle)
+                self.assertIn(needle, self._read_portal_js(), needle)
             for needle in ("mfaCard", "/mfa/enroll/start", "/mfa/enroll/confirm", "복구 코드", "Bass.setToken"):
                 self.assertIn(needle, self._read_admin_js(), needle)
             self.assertTrue(os.path.isfile(os.path.join(ROOT, "scripts", "reset_admin_mfa.py")))
@@ -7279,7 +7292,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertNotIn("r.pre_moveout_notice || r.is_published", lessor_fe)        # 입주 중인 방은 전출 예고가 있을 때만 버튼(공개 표시가 남아 있어도 아님)
         self.assertIn("r.pre_moveout_notice ? `<button", lessor_fe)
 
-        portal_fe = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        portal_fe = self._read_portal_js()
         self.assertIn('urlParams.get("room")', portal_fe)
         self.assertIn('data-room-id="${esc(l.id)}"', portal_fe)
         # 딥링크: 주소창 값을 선택자에 넣지 않고 속성 값과 비교
@@ -7352,7 +7365,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         l1.save(action="t")
         self.assertEqual({x["key"]: x for x in acquisition.summary()["by_ref"]}["daangn"]["approved"], 1)
         # 포털 화면: 처음 닿은 표식 보관(30일)·임대인 가입에만 전송·형식 검증
-        js = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        js = self._read_portal_js()
         for needle in ('ACQ_KEY = "r3_acq"', "ACQ_DAYS = 30", "captureAcq", 'acq: $("regRole").value === "lessor"', "ACQ_OK"):
             self.assertIn(needle, js, needle)
         aj = self._read_admin_js()
@@ -7416,7 +7429,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         tj = self._read_tenant_js()
         for needle in ("btnLessorInvite", "lessor-invite/sent", "집주인의 번호·이름은 이 서비스로 전송되거나 저장되지 않습니다", '"sms:" + sep + "body="'):
             self.assertIn(needle, tj, needle)
-        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        pj = self._read_portal_js()
         for needle in ('urlParams.get("invite") === "lessor"', 'urlParams.get("invite")) return;', '$("regRole").value = "lessor"'):
             self.assertIn(needle, pj, needle)
         for u in ("inv_lsr",):
@@ -7470,7 +7483,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         for bad in ("평생 무료", "1초", "신고서 완성", "사기 걱정", "떼일", "보장합니다", "과태료 걱정", "25만"):
             self.assertNotIn(bad, blob, bad)
         self.assertEqual(c.get("/rent3/lessor-intro.html", headers=self.NOAUTH).status_code, 200)   # 실제로 서빙된다
-        pj = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        pj = self._read_portal_js()
         self.assertIn("lessor-intro.html", pj)
 
     def test_115_landlord_promo_templates_p3(self):
@@ -7661,7 +7674,8 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 if o:
                     o.delete(action="t")
         # ⑤ 연장 확정·새 계약 체결 경로가 임시 조건을 비우는 코드가 있다
-        for rel, needle in (("ops.py", "room.next_listing = {}"), ("cosign.py", "room.next_listing = {}"), ("broker.py", "room.next_listing = {}")):
+        self.assertIn("room.next_listing = {}", self._read_core_ops(), "ops.py")
+        for rel, needle in (("cosign.py", "room.next_listing = {}"), ("broker.py", "room.next_listing = {}")):
             self.assertIn(needle, open(os.path.join(ROOT, "apps", "rent_dist", "_rent3_core", rel), encoding="utf-8").read(), rel)
 
     def test_119_naver_style_icon_menu_modal(self):
@@ -8819,7 +8833,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         """140. 포털 ☰ 더보기의 '월세 적정 예산 계산기'는 모달로 열린다(예전엔 페이지 위쪽 패널을 펼쳐 메뉴가 닫힌 뒤 아무 일도 없어 보였다). 같은 입력칸 id, ✕·바깥 클릭·적용·뒤로가기( < )로 닫힌다."""
         base = os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend")
         html = open(os.path.join(base, "index.html"), encoding="utf-8").read()
-        app = open(os.path.join(base, "app.js"), encoding="utf-8").read()
+        app = self._read_portal_js()
         self.assertNotIn('id="affordPanel"', html)                                   # 페이지 안 접이식 패널은 없다
         self.assertIn('id="affordModal" class="or-modal-backdrop"', html)
         for ident in ("calcIncomeMan", "calcDepositMan", "calcRecommendedText", "btnApplyBudget", "btnResetBudget", "btnCloseAfford"):
@@ -8922,7 +8936,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             t = next((x for x in Tenant.all() if x.phone == "010-1111-2222"), None)
             if t:
                 t.delete(action="t")
-        app = open(os.path.join(ROOT, "apps", "rent_dist", "rent3", "frontend", "app.js"), encoding="utf-8").read()
+        app = self._read_portal_js()
         self.assertIn('lb.textContent = "아이디 / 휴대폰 번호 / 이메일"', app)
         self.assertIn("isNotFound && rawDigits.length >= 8", app)
         self.assertNotIn("isNotFound && (rawDigits.length >= 8 || rawIdent)", app)
