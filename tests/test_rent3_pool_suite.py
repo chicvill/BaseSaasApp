@@ -6863,6 +6863,12 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         admin, chic = self._login("admin"), self._login("chic")
         AD = "/api/rent3_admin"
         # ① 새 방의 기본값
+        r0 = Room(id="room_t103_new", branch="main", room_no="9901")
+        self.assertEqual((r0.registry_info, r0.registry_checked, r0.option_list, r0.status_description, r0.doorlock_pwd), ({}, False, [], "", ""))
+        # ② 샘플 값이 든 방(예전 데이터)과 직접 고친 방을 만든다
+        a = Room(id="room_t103_a", branch="main", id_building="bldg_main", room_no="9902", is_published=True, registry_checked=True, status_description=rd.SAMPLE_STATUS, option_list=list(rd.SAMPLE_OPTIONS),
+                 registry_info={"issue_number": rd.SAMPLE_ISSUE_NUMBER, "owner_name": "김임대", "clean_title": True, "verified_at": "2026-11-09"}, doorlock_pwd="2580*").save(action="t")
+        b = Room(id="room_t103_b", branch="main", id_building="bldg_main", room_no="9903", is_published=True, registry_checked=True, status_description="리모델링 완료, 남향",
                  option_list=[{"item": "붙박이장", "quantity": 1, "condition": "정상"}], registry_info={"issue_number": "REAL-77", "owner_name": "실제소유자", "clean_title": True, "verified_at": date.today().isoformat()}).save(action="t")
         try:
             # 공개 매물: 샘플이 아닌 실제 등기부가 있는 방만 '등기클린'
