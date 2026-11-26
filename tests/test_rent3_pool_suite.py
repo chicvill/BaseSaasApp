@@ -592,7 +592,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         self.assertEqual(r_req.status_code, 200)
         self.assertEqual(r_req.json()["check"]["status"], "AWAITING_TENANT")
 
-        # [C] 임차인(tenant_201)이 우선 '만기 전출(MOVE_OUT)'로 회신 시 -> 공실 쇼케이스에 사전공개 매물로 자동 노출되는지 확인
+        # [C] 임차인(tenant_201)이 '만기 전출(MOVE_OUT)'로 회신 시 -> 자동 공개하지 않고 만기 30일 전(2027-01-30)에 임대인 알림을 보내며, 임대인이 PDF와 함께 매물 등록 시 공개된다
         r_move = self.client.post("/api/rent3_tenant/myhome/tenant_201/expiry-plan", json={
             "tenant_plan": "MOVE_OUT",
             "planned_move_out_date": "2027-03-01",
@@ -601,15 +601,25 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         })
         self.assertEqual(r_move.status_code, 200)
         self.assertEqual(r_move.json()["check"]["status"], "MOVEOUT_PLANNED")
-        # 너무 일찍 공개하지 않는다: 퇴실 기준일(2027-03-01)의 1개월 전인 2027-02-01 전에는 사전 매물로 올라가지 않는다
-        self.assertEqual((r_move.json()["check"]["prelist_pending"], r_move.json()["check"]["prelist_open_date"]), (True, "2027-02-01"))
-        self.assertIn("2027-02-01", r_move.json()["message"])
+        # 만기 30일 전(2027-01-30)에 임대인에게 PDF 작성·매물 등록 알림이 전달되도록 예약된다 (자동 공개 안 함)
+        self.assertEqual((r_move.json()["check"]["prelist_pending"], r_move.json()["check"]["prelist_open_date"]), (True, "2027-01-30"))
+        self.assertIn("2027-01-30", r_move.json()["message"])
         self.assertFalse(any(l["room_no"] == "201" for l in self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]))
         from unittest import mock as _mock
-        with _mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-02-01"}):          # 공개일이 되어 목록을 조회하면 그때 올라간다
+        with _mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-01-30"}):
+            dash_d30 = self.client.get("/api/rent3_lessor/dashboard?branch=main").json()
+            self.assertTrue(any(a["room_no"] == "201" and a["reason"] == "EXPIRY_30D" for a in dash_d30.get("listing_alerts", [])))
+            # 자동 공개되지 않으므로 임대인이 직접 PDF와 함께 매물 등록
+            self.assertFalse(any(l["room_no"] == "201" for l in self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]))
+            pub_201 = self.client.post("/api/rent3_lessor/rooms", json={
+                "branch": "main", "room_no": "201", "available_from": "2027-03-01",
+                "deposit": 5_000_000, "monthly_rent": 500_000, "maintenance_fee": 50_000,
+                "is_published": True, "pre_moveout_notice": True,
+            })
+            self.assertEqual(pub_201.status_code, 200, pub_201.text)
             listings_after_move = self.client.get("/api/rent3_tenant/listings?branch=main").json()["listings"]
         pre_item = next((l for l in listings_after_move if l["room_no"] == "201"), None)
-        self.assertIsNotNone(pre_item, "만기 전출 예정 호실이 사전공개 매물로 노출되지 않았습니다.")
+        self.assertIsNotNone(pre_item, "임대인이 PDF와 함께 등록한 만기 전출 예정 호실이 사전공개 매물로 노출되지 않았습니다.")
         self.assertTrue(pre_item["is_pre_moveout_listing"])
 
         # 전출 예정 상태에서 연장 재계약 예고 발송 시 DomainError(400) 차단 검증
@@ -6853,12 +6863,6 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         admin, chic = self._login("admin"), self._login("chic")
         AD = "/api/rent3_admin"
         # ① 새 방의 기본값
-        r0 = Room(id="room_t103_new", branch="main", room_no="9901")
-        self.assertEqual((r0.registry_info, r0.registry_checked, r0.option_list, r0.status_description, r0.doorlock_pwd), ({}, False, [], "", ""))
-        # ② 샘플 값이 든 방(예전 데이터)과 직접 고친 방을 만든다
-        a = Room(id="room_t103_a", branch="main", id_building="bldg_main", room_no="9902", is_published=True, registry_checked=True, status_description=rd.SAMPLE_STATUS, option_list=list(rd.SAMPLE_OPTIONS),
-                 registry_info={"issue_number": rd.SAMPLE_ISSUE_NUMBER, "owner_name": "김임대", "clean_title": True, "verified_at": "2026-11-09"}, doorlock_pwd="2580*").save(action="t")
-        b = Room(id="room_t103_b", branch="main", id_building="bldg_main", room_no="9903", is_published=True, registry_checked=True, status_description="리모델링 완료, 남향",
                  option_list=[{"item": "붙박이장", "quantity": 1, "condition": "정상"}], registry_info={"issue_number": "REAL-77", "owner_name": "실제소유자", "clean_title": True, "verified_at": date.today().isoformat()}).save(action="t")
         try:
             # 공개 매물: 샘플이 아닌 실제 등기부가 있는 방만 '등기클린'
@@ -7588,7 +7592,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             self.assertEqual(acquisition.sanitize({"ref": code})["ref"], code)
 
     def test_117_occupied_room_pre_moveout_listing(self):
-        """117. 입주 중인 호실도 전출 예정이 확정되면 입주가능일을 지정해 미리 매물로 등록·공개·홍보할 수 있고, 매물 내리기 시 사전공개도 해제된다."""
+        """117. 입주 중인 호실도 중도 퇴실 또는 전출 예정이 확인되면 만기까지 기다리지 않고 입주가능일을 지정해 즉시 PDF와 함께 매물로 등록·공개·홍보할 수 있고, 매물 내리기 시 사전공개도 해제된다."""
         from apps.rent_dist._rent3_core import Room
         c = self.client
         chic = self._login("chic")
@@ -7596,16 +7600,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
         occ = Room.first(branch="main", room_no="201")
         self.assertTrue(occ.is_occupied)
         old_state = (occ.is_published, occ.pre_moveout_notice, occ.available_from, occ.deposit, occ.monthly_rent, occ.next_listing)
-        from unittest import mock as _mock
-        open_d = occ.prelist_open_date()
-        self.assertTrue(open_d)
-        patcher = _mock.patch.dict(os.environ, {"RENT3_TODAY": open_d})            # 사전 매물 공개일(퇴실 기준일 1개월 전) 이후로 시험한다
         try:
-            early = c.post("/api/rent3_lessor/rooms", headers=chic, json={
-                "branch": "main", "room_no": "201", "available_from": "2026-12-31", "is_published": True, "pre_moveout_notice": True})
-            self.assertEqual(early.status_code, 400, early.text)                    # 공개일 전에는 직접 올릴 수도 없다
-            self.assertIn("1개월 전", early.json()["message"])
-            patcher.start()
             # 1) 전출 예정 확인 없이 입주 호실 공개 시도 → 거부(400)
             r1 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
                 "branch": "main", "room_no": "201", "available_from": "2026-12-31", "is_published": True,
@@ -7619,7 +7614,7 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             })
             self.assertEqual(r2.status_code, 400, r2.text)
 
-            # 3) 전출 예정 확인 + 입주가능일 지정 → 성공(200), pre_moveout_notice=True, 포털 공개 및 홍보글 생성 허용
+            # 3) 중도 퇴실/전출 예정 확인 + 입주가능일 지정 → 만기 30일 전을 기다리지 않고 즉시 성공(200), pre_moveout_notice=True, PDF 및 홍보글 생성 허용
             r3 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
                 "branch": "main", "room_no": "201", "deposit": 5000000, "monthly_rent": 480000,
                 "available_from": "2026-12-31", "is_published": True, "pre_moveout_notice": True,
@@ -7649,7 +7644,6 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             landing2 = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
             self.assertFalse(any(l["id"] == rm.id for l in landing2))
         finally:
-            patcher.stop()
             rm_f = Room.first(branch="main", room_no="201")
             rm_f.is_published, rm_f.pre_moveout_notice, rm_f.available_from, rm_f.deposit, rm_f.monthly_rent, rm_f.next_listing = old_state
             rm_f.save(action="test_117_restore")
@@ -9261,12 +9255,13 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr.save(action="t")
 
     def test_148_prelisting_opens_one_month_before_move_out_date(self):
-        """148. 전출 예정을 일찍 회신해도 사전 매물은 퇴실 기준일(만기)의 1개월 전부터 공개된다: 그 전에는 올라가지 않고(직접 올리기도 거부), 공개일에 포털·목록 조회 때 자동으로 올라가며, '전출의사 없음'으로 바뀌면 자동 공개는 취소된다. 공개일 전이므로 계약도 시작할 수 없다."""
+        """148. 중도 퇴실은 확인 즉시, 만기 전출 희망자는 만기 30일 전에 앱이 임대인에게 알림을 보내며, 자동 공개 대신 임대인이 PDF를 만들어 매물 등록 시 공개된다(1개월 전 차단 메시지 제거)."""
         import tempfile
         from unittest import mock
-        from apps.rent_dist._rent3_core import Room, Tenant, Contract, Lessor
-        from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
+        from apps.rent_dist._rent3_core import Room, Tenant, Contract, Lessor, DirectChat
+        from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck, CheckOutSettlement
         c = self.client
+        chic = self._login("chic")
         lsr = Lessor.first(branch="main")
         old_limit = lsr.room_limit
         rooms = {"794": "010-1234-0794", "793": "010-1234-0793", "792": "010-1234-0792"}
@@ -9274,56 +9269,66 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_win_")}):
                 for no, ph in rooms.items():
                     self.assertEqual(c.post("/api/rent3_admin/accounts/test-tenant", json={"branch": "main", "room_no": no, "name": "기존입주", "phone": ph, "apply": True, "raise_limit": True}).json()["status"], "DONE")
+                # 만기일을 2027-03-01 로 맞춰 만기 전출 vs 중도 퇴실을 명확히 검증한다
+                for no in rooms:
+                    rm0 = Room.first(branch="main", room_no=no)
+                    ct0 = Contract.get(rm0.active_contract_id)
+                    ct0.expiry_date = "2027-03-01"
+                    ct0.save(action="t")
+
             plan = lambda no, p="MOVE_OUT", d="2027-03-01": c.post("/api/rent3_lessor/expiry/record-plan", json={"branch": "main", "room_no": no, "tenant_plan": p, "planned_move_out_date": d if p == "MOVE_OUT" else ""})
-            # 오늘(2026-10-29)은 공개일(2027-02-01) 전: 회신은 기록되지만 사전 매물로 올라가지 않는다
-            r = plan("794")
+
+            # 1) 만기 전출(2027-03-01)을 2026-10-29 에 회신: 자동 공개 안 함, 만기 30일 전(2027-01-30) 알림 예약
+            r = plan("794", "MOVE_OUT", "2027-03-01")
             self.assertEqual(r.status_code, 200, r.text)
             chk = r.json()["check"]
-            self.assertEqual((chk["status"], chk["prelist_pending"], chk["prelist_open_date"]), ("MOVEOUT_PLANNED", True, "2027-02-01"))
-            self.assertIn("2027-02-01", r.json()["message"])
-            room = Room.first(branch="main", room_no="794")
-            self.assertFalse(room.pre_moveout_notice or room.is_published)
-            self.assertFalse(any(l["room_no"] == "794" for l in c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]))
-            # 임대인이 직접 사전 매물로 올리려 해도 공개일 전에는 거부
-            early = c.post("/api/rent3_lessor/rooms", json={"branch": "main", "room_no": "794", "is_published": True, "pre_moveout_notice": True, "available_from": "2027-03-01"})
-            self.assertEqual(early.status_code, 400)
-            self.assertIn("2027-02-01", early.json()["message"])
-            # 계약도 시작할 수 없다(입주 중이고 아직 사전 매물이 아님)
-            from apps.rent_dist._rent3_core import Tenant as _T
-            pt = self._new_prospect("너무이름", "010-7777-0794")
-            blocked = c.post("/api/rent3_contract/sessions/call", json={"caller_role": "tenant", "branch": "main", "room_no": "794", "mode": "NEW",
-                                                                        "tenant_name": "너무이름", "tenant_phone": "010-7777-0794", "id_tenant": pt.id})
-            self.assertEqual(blocked.status_code, 400)
-            # 공개일 하루 전까지는 올라가지 않는다
-            with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-01-31"}):
+            self.assertEqual((chk["status"], chk["prelist_pending"], chk["prelist_open_date"]), ("MOVEOUT_PLANNED", True, "2027-01-30"))
+            self.assertIn("2027-01-30", r.json()["message"])
+            room794 = Room.first(branch="main", room_no="794")
+            self.assertFalse(room794.pre_moveout_notice or room794.is_published)
+            self.assertFalse(any(a["room_no"] == "794" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
+
+            # 만기 30일 전 하루 전(2027-01-29)에는 알림이 뜨지 않는다
+            with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-01-29"}):
                 self.assertEqual(ExpiryRenewalCheck.activate_due(force=True), 0)
-            self.assertFalse(Room.first(branch="main", room_no="794").is_published)
-            # 공개일: 포털 조회만으로 자동 공개(스케줄러 없이 조회 때 확인)
-            plan("793")
-            with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-02-01"}):
-                landing = c.get("/api/rent3/pool/landing", headers=self.NOAUTH).json()["listings"]
-            for no in ("794", "793"):
-                self.assertTrue(any(l["room_no"] == no and l["pre_moveout_notice"] for l in landing), no)
-                rm = Room.first(branch="main", room_no=no)
-                self.assertTrue(rm.pre_moveout_notice and rm.is_published, no)
-                self.assertEqual(rm.available_from, "2027-03-01 입주예정(만기퇴실)")
-                self.assertFalse(ExpiryRenewalCheck.for_contract(rm.active_contract_id).prelist_pending)
-            # 공개일 전에 '전출의사 없음'으로 바뀌면 자동 공개는 취소된다
-            plan("792")
-            self.assertTrue(ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="792").active_contract_id).prelist_pending)
-            self.assertEqual(plan("792", "STAY").status_code, 200)
-            self.assertFalse(ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="792").active_contract_id).prelist_pending)
+                self.assertFalse(any(a["room_no"] == "794" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
+
+            # 만기 30일 전(2027-01-30): 자동 공개하지 않고 임대인에게 PDF 작성·매물 등록 알림 발송!
+            with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-01-30"}):
+                self.assertEqual(ExpiryRenewalCheck.activate_due(force=True), 1)
+                self.assertFalse(Room.first(branch="main", room_no="794").is_published)
+                alerts_30 = ExpiryRenewalCheck.lessor_listing_alerts("main")
+                self.assertTrue(any(a["room_no"] == "794" and a["reason"] == "EXPIRY_30D" for a in alerts_30))
+                notif = c.get("/api/rent3_lessor/notifications?branch=main", headers=chic).json()
+                self.assertTrue(any(it["kind"] == "listing_needed:794" and "tab=rooms" in it["link"] for it in notif["items"]))
+
+            # 2) 중도 퇴실 희망자(793호, 만기 2027-03-01 보다 이른 2026-12-15 퇴실): 만기까지 기다리지 않고 확인 즉시 알림 + 즉시 PDF 매물 등록 가능!
+            r_early = plan("793", "MOVE_OUT", "2026-12-15")
+            self.assertEqual(r_early.status_code, 200, r_early.text)
+            self.assertFalse(Room.first(branch="main", room_no="793").is_published)
+            alerts_now = ExpiryRenewalCheck.lessor_listing_alerts("main")
+            self.assertTrue(any(a["room_no"] == "793" and a["reason"] == "EARLY_MOVEOUT" for a in alerts_now))
+            # 임대인이 중도 퇴실 확인 즉시 PDF 와 함께 사전 매물 등록 -> 1개월 전 차단 없이 바로 200 성공 + 알림 자동 해소!
+            reg_793 = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main", "room_no": "793", "available_from": "2026-12-15",
+                "deposit": 5000000, "monthly_rent": 490000, "maintenance_fee": 50000,
+                "is_published": True, "pre_moveout_notice": True,
+            })
+            self.assertEqual(reg_793.status_code, 200, reg_793.text)
+            self.assertTrue(Room.first(branch="main", room_no="793").is_published)
+            self.assertFalse(any(a["room_no"] == "793" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
+            self.assertFalse(ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="793").active_contract_id).prelist_pending)
+
+            # 3) 임차인이 중도 퇴실 신청(CheckOutSettlement.tenant_request) 시에도 즉시 매물 등록 알림이 뜬다 (792호)
+            t792 = Tenant.get("tenant_main_792")
+            CheckOutSettlement.tenant_request(t792, desired_date="2026-12-01", memo="중도 퇴실 신청")
+            self.assertTrue(any(a["room_no"] == "792" and a["reason"] == "EARLY_MOVEOUT" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
+
+            # 4) 만기 전출 예정(794호)을 '전출의사 없음(STAY)'으로 바꾸면 대기 중인 30일 전 알림이 취소된다
+            self.assertEqual(plan("794", "STAY").status_code, 200)
+            self.assertFalse(ExpiryRenewalCheck.for_contract(Room.first(branch="main", room_no="794").active_contract_id).prelist_pending)
             with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-02-05"}):
-                ExpiryRenewalCheck.activate_due(force=True)
-            self.assertFalse(Room.first(branch="main", room_no="792").is_published)
-            # 이미 공개일이 지난 전출 예정(퇴실 기준일이 한 달 안쪽)은 회신 즉시 공개된다
-            with mock.patch.dict(os.environ, {"RENT3_TODAY": "2027-02-20"}):
-                now_listed = plan("792", "MOVE_OUT", "2027-03-01")
-                self.assertEqual(now_listed.status_code, 200, now_listed.text)
-                self.assertFalse(now_listed.json()["check"]["prelist_pending"])
-            self.assertTrue(Room.first(branch="main", room_no="792").is_published)
-            # 임대인이 매물을 직접 내리면 미뤄 둔 자동 공개도 취소된다(공개일 전 상태에서)
-            self.assertEqual(c.post(f"/api/rent3_lessor/rooms/{Room.first(branch='main', room_no='792').id}/publish", json={"is_published": False}).status_code, 200)
+                self.assertFalse(any(a["room_no"] == "794" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
         finally:
             for no in rooms:
                 for cls, oid in ((Contract, f"ct_main_{no}"), (Tenant, f"tenant_main_{no}"), (Room, f"room_main_{no}")):
@@ -9333,14 +9338,18 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 for chk in ExpiryRenewalCheck.all():
                     if chk.room_no == no:
                         chk.delete(action="t")
-            for t in Tenant.all():
-                if t.phone == "010-7777-0794":
-                    t.delete(action="t")
+                for co_ in CheckOutSettlement.all():
+                    if co_.room_no == no and co_.branch == "main":
+                        co_.delete(action="t")
+                for ch_ in DirectChat.all():
+                    if ch_.room_no == no and ch_.branch == "main":
+                        ch_.delete(action="t")
             lsr = Lessor.get(lsr.id)
             lsr.room_limit = old_limit
             lsr.save(action="t")
         lm = open(os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend", "manual.html"), encoding="utf-8").read()
-        self.assertIn("1개월 전", lm)
+        self.assertIn("30일 전", lm)
+        self.assertIn("중도 퇴실", lm)
 
     def test_149_lessor_saves_next_terms_draft_used_for_listing_renewal_and_relisting(self):
         """149. 임대인이 입주 중인 호실의 '다음 계약 조건'을 임시 저장한다: 빈 호실·잘못된 값·다른 임대인은 거부, 임차인·공개 목록에는 보이지 않고, 매물 내림으로 지워지지 않으며, 사전 매물 공개 조건·연장 예고 기본값·퇴실 뒤 재공개 조건으로 쓰이고, 쓰이면 비워진다."""
@@ -9381,9 +9390,14 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 oh = {"Authorization": f"Bearer {tenant_token(other)}"}
                 pub = next(r for r in c.get("/api/rent3_contract/rooms", headers=oh).json()["rooms"] if r["room_no"] == "789" and r["branch"] == "main")
                 self.assertNotIn("next_terms", pub)
-                # 사전 매물 공개(공개일 이후): 저장해 둔 조건이 매물 조건이 된다
+                # 전출 예정 확인 → 알림 발생 후 임대인이 저장해 둔 다음 조건으로 사전 매물(PDF) 등록 시 공개 목록에 반영된다
                 rec = c.post("/api/rent3_lessor/expiry/record-plan", json={"branch": "main", "room_no": "789", "tenant_plan": "MOVE_OUT", "planned_move_out_date": "2026-11-20"})
                 self.assertEqual(rec.status_code, 200, rec.text)
+                self.assertTrue(any(a["room_no"] == "789" for a in ExpiryRenewalCheck.lessor_listing_alerts("main")))
+                self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                    "branch": "main", "room_no": "789", "deposit": 7000000, "monthly_rent": 330000, "maintenance_fee": 45000,
+                    "pay_timing": "선불", "available_from": "2026-11-20", "is_published": True, "pre_moveout_notice": True,
+                }).status_code, 200)
                 room = Room.first(branch="main", room_no="789")
                 self.assertTrue(room.is_published and room.pre_moveout_notice)
                 self.assertEqual((room.next_listing["monthly_rent"], room.next_listing["pay_timing"]), (330000, "선불"))
@@ -10119,6 +10133,10 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
                 ok_new = c.post(url_nt, headers=chic, json={"deposit": 3000000, "monthly_rent": 220000, "maintenance_fee": 110000, "cleaning_fee": 80000, "pay_timing": "선불"})
                 self.assertEqual(ok_new.status_code, 200, ok_new.text)
                 self.assertEqual(c.post("/api/rent3_lessor/expiry/record-plan", headers=chic, json={"branch": "main", "room_no": "761", "tenant_plan": "MOVE_OUT", "planned_move_out_date": "2026-11-28"}).status_code, 200)
+                self.assertEqual(c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                    "branch": "main", "room_no": "761", "deposit": 3000000, "monthly_rent": 220000, "maintenance_fee": 110000,
+                    "cleaning_fee": 80000, "pay_timing": "선불", "available_from": "2026-11-28", "is_published": True, "pre_moveout_notice": True,
+                }).status_code, 200)
                 t_new = self._new_prospect("신규입주", "010-7777-1761")
                 self._complete_contract(None, None, t_new.id, "761", "신규입주", "010-7777-1761")
                 room_before = Room.first(branch="main", room_no="761")

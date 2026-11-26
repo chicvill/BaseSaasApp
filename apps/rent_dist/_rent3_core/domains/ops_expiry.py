@@ -4,7 +4,7 @@ apps/_rent3_core/domains/ops_expiry.py — 만기 6~2개월 전 전출계획 확
 from __future__ import annotations
 
 import time
-from typing import ClassVar, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from pydantic import Field
@@ -55,8 +55,9 @@ class ExpiryRenewalCheck(PoolObj):
     cosign_session_code: str = ""
     renewal_preview_sent_at: str = ""
     renewal_acknowledged_at: str = ""
-    prelist_pending: bool = False            # 전출 예정은 회신했지만 아직 사전 매물 공개일(퇴실 기준일 1개월 전) 전이라 공개를 미뤄 둔 상태
-    prelist_open_date: str = ""              # 사전 매물로 공개되는 날(YYYY-MM-DD)
+    prelist_pending: bool = False            # 전출 예정은 회신되었고, 임대인이 PDF를 만들어 매물 등록할 시점(중도 퇴실 즉시 / 만기 30일 전)을 기다리거나 알림 중
+    prelist_open_date: str = ""              # 임대인에게 매물(PDF) 등록 알림을 보내는 날(YYYY-MM-DD: 중도 퇴실은 즉시, 만기 전출은 만기 30일 전)
+    prelist_notified_at: str = ""            # 임대인에게 'PDF 작성·매물 등록' 채팅/알림을 보낸 시각
 
     def summary(self) -> str:
         return f"만기확인 [{self.room_no}호 {self.tenant_name}] {self.status} (만기 {self.expiry_date})"
@@ -84,19 +85,102 @@ class ExpiryRenewalCheck(PoolObj):
                 chk.prelist_pending = False
                 chk.save(action="prelisting_pending_dropped", app_source=app_source)
                 continue
+            room = Room.get(chk.id_room)
+            if room is None or not room.is_occupied or room.active_contract_id != chk.id_contract or room.is_published or room.reservation() is not None:
+                chk.prelist_pending = False
+                chk.save(action="prelisting_pending_cleared", app_source=app_source)
+                continue
             if chk.prelist_open_date and today < chk.prelist_open_date:
                 continue
-            room = Room.get(chk.id_room)
-            if room is not None and room.is_occupied and room.active_contract_id == chk.id_contract and room.reservation() is None:
-                room.pre_moveout_notice = True
-                room.is_published = True
-                room.available_from = f"{chk.planned_move_out_date} 입주예정(만기퇴실)"
-                room.seed_listing_from_terms()
-                room.save(action="room_prelisted_on_open_date", app_source=app_source)
-            chk.prelist_pending = False
-            chk.save(action="prelisting_opened", app_source=app_source)
-            n += 1
+            # 자동 공개하지 않고 만기 30일 전(또는 중도 퇴실 즉시) 임대인에게 PDF 작성·매물 등록 알림을 보낸다
+            if not chk.prelist_notified_at:
+                chk.prelist_notified_at = now_iso()
+                chk.save(action="prelisting_alert_notified", app_source=app_source)
+                DirectChat(
+                    branch=chk.branch,
+                    id_room=chk.id_room,
+                    room_no=chk.room_no,
+                    sender_role="system",
+                    sender_name="매물 등록 알림",
+                    message=(
+                        f"[📄 매물 등록(PDF 작성) 시점 도래] {chk.room_no}호({chk.tenant_name})의 전출 예정일"
+                        f"({chk.planned_move_out_date or chk.expiry_date})이 30일 이내로 다가왔습니다. "
+                        f"임대매물 등록 화면에서 표준 임대조건서(PDF)를 작성해 매물을 등록해 주세요."
+                    ),
+                    quick_action_label="📄 PDF 작성 · 매물 등록",
+                    quick_action_url=f"/rent3_lessor/?branch={chk.branch}&tab=rooms&room={chk.room_no}",
+                ).save(action="chat_auto_sent", app_source=app_source)
+                n += 1
         return n
+
+    @classmethod
+    def lessor_listing_alerts(cls, branch: str) -> List[Dict[str, Any]]:
+        """임대인에게 '지금 표준 임대조건 PDF를 만들어 매물을 등록해야 할' 입주 중 호실 목록을 산출한다.
+        - 중도 퇴실 신청(CheckOutSettlement) 또는 만기 이전 전출 예정(planned < expiry): 확인 즉시 알림
+        - 만기 전출 예정(MOVEOUT_PLANNED): 만기(전출 예정일) 30일 전부터 알림
+        이미 매물 공개(is_published)되었거나 예약 계약이 체결된 호실은 자동으로 제외한다."""
+        from .ops_checkout import CheckOutSettlement
+
+        b_id = normalize_branch_id(branch)
+        today = date_today().isoformat()
+        rooms = sorted(Room.find(branch=b_id), key=lambda r: r.room_no)
+        open_co_by_room: Dict[str, CheckOutSettlement] = {}
+        for co in CheckOutSettlement.find(branch=b_id):
+            if co.status in ("REQUESTED", "CALCULATED", "AGREED", "PAID", "DISPUTED") or (co.status == "DRAFT" and co.requested_at):
+                open_co_by_room[co.id_room] = co
+
+        alerts: List[Dict[str, Any]] = []
+        for room in rooms:
+            if not room.is_occupied or room.is_published or room.reservation() is not None:
+                continue
+            ct = Contract.get(room.active_contract_id) if room.active_contract_id else None
+            co = open_co_by_room.get(room.id)
+            if co is not None:
+                move_date = (co.desired_date or "").strip() or (ct.expiry_date if ct else "")
+                is_early = bool(ct and ct.expiry_date and (not co.desired_date or co.desired_date < ct.expiry_date))
+                label = "중도 퇴실 확인" if is_early else "퇴실 신청 확인"
+                alerts.append({
+                    "room_id": room.id,
+                    "room_no": room.room_no,
+                    "tenant_name": co.tenant_name or (ct.tenant_name if ct else ""),
+                    "reason": "EARLY_MOVEOUT" if is_early else "CHECKOUT_REQUESTED",
+                    "move_out_date": move_date,
+                    "alert_date": today,
+                    "title": f"📄 {room.room_no}호 {label} — PDF 작성 · 매물 등록",
+                    "detail": f"퇴실 희망일 {move_date or '미정'} · 지금 표준 임대조건 PDF를 만들어 매물을 등록해 주세요.",
+                })
+                continue
+            chk = cls.for_contract(room.active_contract_id) if room.active_contract_id else None
+            if chk is None or chk.status != "MOVEOUT_PLANNED" or chk.tenant_plan != "MOVE_OUT":
+                continue
+            planned = (chk.planned_move_out_date or chk.expiry_date or "").strip()
+            expiry = (chk.expiry_date or (ct.expiry_date if ct else "") or "").strip()
+            is_early = bool(planned and expiry and planned < expiry)
+            if is_early:
+                alerts.append({
+                    "room_id": room.id,
+                    "room_no": room.room_no,
+                    "tenant_name": chk.tenant_name or (ct.tenant_name if ct else ""),
+                    "reason": "EARLY_MOVEOUT",
+                    "move_out_date": planned,
+                    "alert_date": today,
+                    "title": f"📄 {room.room_no}호 중도 퇴실 확인 — PDF 작성 · 매물 등록",
+                    "detail": f"중도 퇴실 예정일 {planned} · 만기까지 기다리지 않고 지금 PDF를 만들어 매물을 등록해 주세요.",
+                })
+                continue
+            alert_date = (chk.prelist_open_date or room.prelist_open_date(planned)).strip()
+            if not alert_date or today >= alert_date:
+                alerts.append({
+                    "room_id": room.id,
+                    "room_no": room.room_no,
+                    "tenant_name": chk.tenant_name or (ct.tenant_name if ct else ""),
+                    "reason": "EXPIRY_30D",
+                    "move_out_date": planned,
+                    "alert_date": alert_date or today,
+                    "title": f"📄 {room.room_no}호 만기 30일 전 전출 예정 — PDF 작성 · 매물 등록",
+                    "detail": f"전출 예정일 {planned} · 표준 임대조건 PDF를 만들어 매물을 등록해 주세요.",
+                })
+        return alerts
 
     @classmethod
     def cancel_pending_prelist(cls, contract_id: str, app_source: str = "rent3_lessor") -> None:
@@ -243,41 +327,54 @@ class ExpiryRenewalCheck(PoolObj):
         if plan == "MOVE_OUT":
             self.status = "MOVEOUT_PLANNED"
             self.planned_move_out_date = (planned_move_out_date or "").strip() or self.expiry_date
+            today = date_today().isoformat()
+            is_early = bool(self.planned_move_out_date and self.expiry_date and self.planned_move_out_date < self.expiry_date)
+            alert_date = today if is_early else (room.prelist_open_date(self.planned_move_out_date) if room else "")
+            self.prelist_open_date = alert_date or today
+            already_listed = bool(room and room.is_published and room.pre_moveout_notice)
+            if room and prelist_vacancy and not already_listed:
+                self.prelist_pending = True
+                alert_now = is_early or (today >= self.prelist_open_date)
+                self.prelist_notified_at = now_iso() if alert_now else ""
+            else:
+                self.prelist_pending = False
+                self.prelist_notified_at = ""
+                alert_now = False
             self.save(action="tenant_planned_moveout", app_source=app_source)
 
-            listed_now = False
-            if room and prelist_vacancy:
-                open_date = room.prelist_open_date(self.planned_move_out_date)
-                if not open_date or date_today().isoformat() >= open_date:
-                    room.pre_moveout_notice = True
-                    room.is_published = True
-                    room.available_from = f"{self.planned_move_out_date} 입주예정(만기퇴실)"
-                    room.seed_listing_from_terms()
-                    room.save(action="room_prelisted_from_moveout_plan", app_source=app_source)
-                    listed_now = True
-                    self.prelist_pending = False
-                else:                           # 너무 일찍 공개하지 않는다: 공개일(퇴실 기준일 1개월 전)이 되면 자동으로 올린다
-                    self.prelist_pending = True
-                    self.prelist_open_date = open_date
-                self.save(action="prelisting_scheduled" if self.prelist_pending else "prelisting_opened", app_source=app_source)
-
+            if is_early:
+                chat_msg = (
+                    f"[📦 중도 퇴실 예정 확인] {self.room_no}호 {self.tenant_name} 세입자가 "
+                    f"만기({self.expiry_date}) 전인 {self.planned_move_out_date} 중도 퇴실을 회신했습니다. "
+                    f"지금 바로 표준 임대조건서(PDF)를 작성해 매물을 등록해 주세요."
+                )
+            elif alert_now:
+                chat_msg = (
+                    f"[📦 만기 전출(퇴실) 예정 확인] {self.room_no}호 {self.tenant_name} 세입자가 "
+                    f"{self.planned_move_out_date} 퇴실 예정을 회신했습니다. "
+                    f"만기 30일 이내이므로 지금 표준 임대조건서(PDF)를 작성해 매물을 등록해 주세요."
+                )
+            else:
+                chat_msg = (
+                    f"[📦 만기 전출(퇴실) 예정 회신] {self.room_no}호 {self.tenant_name} 세입자가 "
+                    f"{self.planned_move_out_date} 퇴실 예정을 회신했습니다."
+                    + (f" (만기 30일 전인 {self.prelist_open_date}에 임대인에게 PDF 작성·매물 등록 알림이 발송됩니다)" if self.prelist_pending else "")
+                )
             DirectChat(
                 branch=self.branch,
                 id_room=self.id_room,
                 room_no=self.room_no,
                 sender_role="tenant",
                 sender_name=self.tenant_name,
-                message=(
-                    f"[📦 만기 전출(퇴실) 예정 회신] {self.room_no}호 {self.tenant_name} 세입자가 "
-                    f"{self.planned_move_out_date} 퇴실 예정을 회신했습니다."
-                    + (" (공실 쇼케이스에 사전예약 매물로 자동 등록됨)" if listed_now
-                       else f" (사전 매물 공개는 퇴실 기준일 1개월 전인 {self.prelist_open_date}부터 자동으로 시작됩니다)" if self.prelist_pending else "")
-                ),
+                message=chat_msg,
+                quick_action_label="📄 PDF 작성 · 매물 등록" if alert_now else "",
+                quick_action_url=f"/rent3_lessor/?branch={self.branch}&tab=rooms&room={self.room_no}" if alert_now else "",
             ).save(action="chat_auto_sent", app_source=app_source)
         else:
             self.status = "STAY_CONFIRMED"
             self.planned_move_out_date = ""
             self.prelist_pending = False
+            self.prelist_notified_at = ""
             self.save(action="tenant_confirmed_no_moveout", app_source=app_source)
 
             if room and room.pre_moveout_notice:

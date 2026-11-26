@@ -247,13 +247,15 @@ class CheckOutSettlement(PoolObj):
             draft.tenant_request_memo = (memo or "").strip()
             draft.save(action="checkout_requested_on_draft", app_source=app_source)
             draft._chat("tenant", ct.tenant_name, f"[🚪 퇴실 신청] {room.room_no}호 {ct.tenant_name} 세입자가 퇴실을 신청했습니다. 희망일 {draft.desired_date or '미정'}."
-                        + (f" 메모: {draft.tenant_request_memo}" if draft.tenant_request_memo else "") + " 작성 중인 정산서를 게시해 주세요.", app_source=app_source)
+                        + (f" 메모: {draft.tenant_request_memo}" if draft.tenant_request_memo else "") + " 작성 중인 정산서를 게시하고, 중도 퇴실이라면 바로 표준 임대조건서(PDF)를 작성해 매물을 등록해 주세요.",
+                        "📄 PDF 작성 · 매물 등록", f"/rent3_lessor/?branch={tenant.branch}&tab=rooms&room={room.room_no}", app_source=app_source)
             return draft
         s = cls(branch=tenant.branch, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id, id_tenant=tenant.id,
                 tenant_name=ct.tenant_name, status="REQUESTED", deposit_original=ct.deposit, requested_at=now_iso(),
                 desired_date=(desired_date or "").strip(), tenant_request_memo=(memo or "").strip()).save(action="checkout_requested", app_source=app_source)
         s._chat("tenant", ct.tenant_name, f"[🚪 퇴실 신청] {room.room_no}호 {ct.tenant_name} 세입자가 퇴실을 신청했습니다. 희망일 {s.desired_date or '미정'}."
-                + (f" 메모: {s.tenant_request_memo}" if s.tenant_request_memo else "") + " 점검 후 정산서를 보내 주세요.", app_source=app_source)
+                + (f" 메모: {s.tenant_request_memo}" if s.tenant_request_memo else "") + " 점검 후 정산서를 보내 주시고, 중도 퇴실이라면 지금 바로 표준 임대조건서(PDF)를 작성해 매물을 등록하실 수 있습니다.",
+                "📄 PDF 작성 · 매물 등록", f"/rent3_lessor/?branch={tenant.branch}&tab=rooms&room={room.room_no}", app_source=app_source)
         s._chat("system", "퇴실정산 안내", "퇴실하면 로그인 수단(바로가기·간편 비밀번호·등록 기기)이 정리됩니다. 📄 연말정산 납부확인서를 지금 미리 내려받아 두세요. "
                 "(퇴실 후에도 다음 해 2월 말까지는 로그인해서 조회·내려받기만 할 수 있습니다.)", "연말정산 납부확인서 내려받기",
                 f"/rent3_tenant/?tenant={tenant.id}&svc=cert", app_source=app_source)

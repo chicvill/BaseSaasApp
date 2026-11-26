@@ -4,6 +4,7 @@ apps/_rent3_core/domains/models_property.py — 부동산 자산 객체군(Build
 from __future__ import annotations
 
 import re
+from datetime import date, timedelta
 from typing import Any, ClassVar, Dict, List, Optional
 from uuid import uuid4
 
@@ -193,11 +194,11 @@ class Room(PoolObj):
         ct = Contract.get(self.active_contract_id)
         return (ct.expiry_date or "") if ct else ""
 
-    PRELIST_MONTHS_BEFORE: ClassVar[int] = 1      # 사전 매물은 퇴실 기준일(만기)의 1개월 전부터 공개한다 — 너무 일찍 공개하면 지금 사는 임차인이 불편하다
+    PRELIST_ALERT_DAYS: ClassVar[int] = 30      # 만기 전출 예정 호실은 퇴실 기준일(만기) 30일 전에 임대인에게 매물(PDF) 등록 알림을 보낸다
 
     def prelist_open_date(self, planned: str = "") -> str:
-        """입주 중인 호실을 사전 매물로 공개할 수 있는 첫날(YYYY-MM-DD) = 퇴실 기준일의 1개월 전.
-        퇴실 기준일은 임차인이 회신한 전출 예정일(planned 로 직접 줄 수도 있음), 없으면 현재 계약 만기일. 모르면 ''(제한 없음)."""
+        """만기 전출 예정 호실의 매물(PDF) 등록 알림 기준일(YYYY-MM-DD) = 퇴실 기준일(만기)의 30일 전.
+        퇴실 기준일은 임차인이 회신한 전출 예정일(planned 로 직접 줄 수도 있음), 없으면 현재 계약 만기일. 모르면 ''."""
         ref = (planned or "").strip()
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", ref):
             ref = ""
@@ -214,7 +215,10 @@ class Room(PoolObj):
             ref = (ct.expiry_date or "") if ct else ""
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", ref):
             return ""
-        return add_months_str(ref, -self.PRELIST_MONTHS_BEFORE)
+        try:
+            return (date.fromisoformat(ref) - timedelta(days=self.PRELIST_ALERT_DAYS)).isoformat()
+        except ValueError:
+            return add_months_str(ref, -1)
 
     def cancel_reservation(self, reason: str = "", app_source: str = "rent3_lessor") -> "Contract":
         """예약 계약을 취소한다(체결 후 아직 입주 전). 계약은 CANCELLED, 호실은 전출 예정 사전 매물로 다시 공개한다.

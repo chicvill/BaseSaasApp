@@ -237,6 +237,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
         "pin": _pin_info(request),
         "connect_requests": connect.pending_for_branch(b_id),
         "expiry_notice_rooms": expiry_notice_rooms,
+        "listing_alerts": ExpiryRenewalCheck.lessor_listing_alerts(b_id),
         "recent_billing_notices": [bn.model_dump() for bn in recent_billing_notices],
         "payments": [p.model_dump() for p in payments[:30]],
         "outlays": [{**o.model_dump(), "category_label": o.category_label} for o in outlays],
@@ -279,20 +280,14 @@ def create_or_update_room(req: RoomCreateReq):
             if req.is_published:
                 if not (req.pre_moveout_notice is True or existing.pre_moveout_notice):
                     raise DomainError(
-                        "입주 중인 호실은 전출 예정 확인 후 사전 매물로 등록할 수 있습니다.",
-                        hint="세입자의 전출 계획이 확정되었는지 확인 체크 후 입주가능일을 지정해 주세요.",
-                    )
-                open_d = existing.prelist_open_date()
-                if open_d and date_today().isoformat() < open_d and not (existing.pre_moveout_notice and existing.is_published):
-                    raise DomainError(
-                        f"입주 중인 호실은 퇴실 기준일(만기) 1개월 전인 {open_d}부터 사전 매물로 올릴 수 있습니다.",
-                        hint="전출 의사를 미리 받아 두어도 공개는 그날부터 시작되며, 임차인이 전출 예정을 회신해 두었다면 그날 자동으로 공개됩니다. 너무 일찍 공개하면 지금 사는 임차인이 불편합니다.",
+                        "입주 중인 호실은 중도 퇴실 또는 만기 전출 확인 후 사전 매물로 등록할 수 있습니다.",
+                        hint="세입자의 중도 퇴실 또는 전출 계획이 확인되었는지 체크하고 입주가능일을 지정해 주세요.",
                     )
                 avail_clean = (req.available_from or "").strip()
                 if not avail_clean or avail_clean == "즉시입주":
                     raise DomainError(
                         "입주 중인 호실은 '즉시입주'로 등록할 수 없습니다.",
-                        hint="세입자 전출 예정일 이후의 입주가능일을 지정해 주세요.",
+                        hint="세입자 퇴실(전출) 예정일 이후의 입주가능일을 지정해 주세요.",
                     )
                 existing.pre_moveout_notice = True
             elif req.pre_moveout_notice is False:
@@ -346,6 +341,8 @@ def create_or_update_room(req: RoomCreateReq):
             existing.save(action="room_prelisting_saved", app_source=APP_SRC)
             if req.is_published:
                 listing_pdf.save_listing_pdf(existing, building=bldg, lessor=lsr)
+                if existing.active_contract_id:
+                    ExpiryRenewalCheck.cancel_pending_prelist(existing.active_contract_id, app_source=APP_SRC)
             msg = (
                 f"{req.room_no}호가 전출 예정 사전 매물로 등록되었습니다. (현재 계약·방 값은 그대로이며, 퇴실이 확정되면 이 조건이 적용됩니다)"
                 if existing.pre_moveout_notice

@@ -19,6 +19,7 @@ from apps.rent_dist._rent3_core import (
     Lessor,
     Room,
     Tenant,
+    date_today,
     ensure_pool_seeded,
     franchise as fr,
     normalize_branch_id,
@@ -423,11 +424,17 @@ def record_expiry_moveout_plan(req: RecordMoveoutPlanReq):
         prelist_vacancy=req.prelist_vacancy,
         app_source=APP_SRC,
     )
+    today_iso = date_today().isoformat()
+    is_early_out = bool(chk.planned_move_out_date and chk.expiry_date and chk.planned_move_out_date < chk.expiry_date)
     msg = (
         (
-            f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 퇴실 기준일 1개월 전인 {chk.prelist_open_date}부터 사전 매물로 자동 공개됩니다."
-            if chk.prelist_pending
-            else f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 공실 쇼케이스에 사전예약 매물로 게시되었습니다."
+            f"📦 {chk.room_no}호 중도 퇴실 예정({chk.planned_move_out_date}) 기록 완료 — 지금 바로 [임대매물 등록]에서 표준 임대조건 PDF를 만들어 매물을 등록하실 수 있습니다."
+            if is_early_out
+            else (
+                f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 만기 30일 전({chk.prelist_open_date})에 매물(PDF) 등록 알림을 보내 드립니다."
+                if chk.prelist_pending and chk.prelist_open_date and today_iso < chk.prelist_open_date
+                else f"📦 {chk.room_no}호 전출 예정({chk.planned_move_out_date}) 기록 완료 — 지금 [임대매물 등록]에서 표준 임대조건 PDF를 만들어 매물을 등록해 주세요."
+            )
         )
         if chk.tenant_plan == "MOVE_OUT"
         else f"🏠 {chk.room_no}호 전출의사 없음(거주 연장 희망) 확인 완료 — 이제 연장 재계약 조건을 예고하실 수 있습니다."

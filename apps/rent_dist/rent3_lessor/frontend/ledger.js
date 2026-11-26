@@ -338,11 +338,22 @@
         <span class="rl-day">${day ? `${day}일` : "-"}</span></button>`;
     };
     const conn = S.dash.connect_requests || [];
+    const listingAlerts = S.dash.listing_alerts || [];
+    const listingAlertsHtml = listingAlerts.length ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-left:4px solid var(--primary,#2563eb);background:rgba(37,99,235,.06);">
+        <div style="font-weight:800;font-size:14px;margin-bottom:6px;">📄 매물 등록(표준 임대조건 PDF 작성) 알림 ${listingAlerts.length}건</div>
+        ${listingAlerts.map((a) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.5;">
+            <div><strong>${Bass.escapeHtml(a.title || `${a.room_no}호 매물 등록 필요`)}</strong><div class="bass-muted" style="font-size:12.5px;">${Bass.escapeHtml(a.detail || "")}</div></div>
+            <button type="button" class="bass-btn bass-btn--sm bass-btn--primary btn-go-listing-pdf" data-room="${Bass.escapeHtml(a.room_no)}" style="min-height:40px;white-space:nowrap;">📄 PDF 작성 · 매물 등록 →</button>
+          </div>
+        `).join("")}
+      </div>` : "";
     const coAlerts = (S.dash.checkouts || []).filter((x) => ["DISPUTED", "REQUESTED", "AGREED"].includes(x.status));
     const coHtml = coAlerts.length ? `
       <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
         <div style="font-weight:800;font-size:14px;margin-bottom:4px;">🚪 퇴실 정산 확인 필요 ${coAlerts.length}건</div>
-        ${coAlerts.map((x) => `<div style="font-size:13px;line-height:1.6;">${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.tenant_name || "")} — ${x.status === "DISPUTED" ? `<strong>⚠️ 정산 이의/미수취 확인 필요</strong>: ${Bass.escapeHtml(x.dispute_note || "")}` : x.status === "AGREED" ? "✍️ 동의 완료 — 송금 후 표시하세요" : "🚪 퇴실 신청 — 정산서를 보내세요"} <button type="button" class="bass-btn bass-btn--sm co-open" data-room="${Bass.escapeHtml(x.room_no)}" style="min-height:40px;">열기</button></div>`).join("")}
+        ${coAlerts.map((x) => `<div style="font-size:13px;line-height:1.6;">${Bass.escapeHtml(x.room_no)}호 ${Bass.escapeHtml(x.tenant_name || "")} — ${x.status === "DISPUTED" ? `<strong>⚠️ 정산 이의/미수취 확인 필요</strong>: ${Bass.escapeHtml(x.dispute_note || "")}` : x.status === "AGREED" ? "✍️ 동의 완료 — 송금 후 표시하세요" : "🚪 퇴실 신청 — 정산서를 보내세요"} <button type="button" class="bass-btn bass-btn--sm co-open" data-room="${Bass.escapeHtml(x.room_no)}" style="min-height:40px;">열기</button> <button type="button" class="bass-btn bass-btn--sm btn-go-listing-pdf" data-room="${Bass.escapeHtml(x.room_no)}" style="min-height:40px;">📄 PDF · 매물 등록</button></div>`).join("")}
       </div>` : "";
     const connHtml = conn.length ? `
       <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-color:var(--warn);">
@@ -367,6 +378,7 @@
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:40px;margin-top:6px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>
+      ${listingAlertsHtml}
       ${coHtml}
       ${connHtml}
       ${pendHtml}
@@ -377,6 +389,10 @@
     elTabContent.querySelectorAll(".rl-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
     elTabContent.querySelectorAll(".co-open").forEach((b) => b.addEventListener("click", () => L.showMoveOutModal(b.dataset.room)));
+    elTabContent.querySelectorAll(".btn-go-listing-pdf").forEach((b) => b.addEventListener("click", () => {
+      S.listingTargetRoomNo = b.dataset.room;
+      L.switchTab("rooms");
+    }));
     elTabContent.querySelectorAll("[data-conn]").forEach((card) => {
       const id = card.dataset.conn;
       card.querySelector(".cn-ok").addEventListener("click", function () {

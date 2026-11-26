@@ -245,7 +245,17 @@ def _l_mail(l: Lessor) -> List[Optional[Dict[str, Any]]]:
     ]
 
 
-LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_mail, _l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid, _l_contract]
+def _l_prelist_alerts(l: Lessor) -> List[Optional[Dict[str, Any]]]:
+    """중도 퇴실 확인 즉시 또는 만기 전출 예정 30일 전 — 임대인에게 PDF 작성·매물 등록을 알린다."""
+    from urllib.parse import quote
+    out: List[Optional[Dict[str, Any]]] = []
+    for a in ExpiryRenewalCheck.lessor_listing_alerts(l.branch):
+        link = _l_base(l) + f"&tab=rooms&room={quote(str(a['room_no']))}"
+        out.append(_item(f"listing_needed:{a['room_no']}", a["title"], 1, link, "urgent", detail=a["detail"]))
+    return out
+
+
+LESSOR_COLLECTORS: List[Callable[[Lessor], Any]] = [_l_prelist_alerts, _l_mail, _l_checkout, _l_ops, _l_expiry, _l_keys, _l_franchise, _l_messages, _l_support, _l_unpaid, _l_contract]
 
 
 # ───────────────────────── 관리인 ─────────────────────────

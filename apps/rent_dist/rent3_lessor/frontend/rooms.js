@@ -448,7 +448,16 @@
     const OPTION_PRESETS = ["시스템 에어컨", "드럼 세탁기", "빌트인 냉장고", "인덕션", "디지털 도어락", "옷장", "침대", "책상", "전자레인지", "신발장"];
     const MAINT_PRESETS = ["수도료", "인터넷", "케이블TV", "공용전기", "건물청소", "승강기유지비"];
     const E = Bass.escapeHtml;
+    const listingAlerts = S.dash.listing_alerts || [];
+    const alertBannerHtml = listingAlerts.length ? `
+      <div class="bass-card" style="margin-bottom:12px;padding:10px 12px;border-left:4px solid var(--primary,#2563eb);background:rgba(37,99,235,.06);">
+        <div style="font-weight:800;font-size:13.5px;margin-bottom:6px;">🔔 PDF 작성 · 매물 등록 대기 호실 (${listingAlerts.length}실)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${listingAlerts.map((a) => `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary nr-alert-pick" data-room="${E(a.room_no)}">📄 ${E(a.room_no)}호 선택 (${a.reason === "EARLY_MOVEOUT" ? "중도 퇴실" : "만기 30일 전"} · ${E(a.move_out_date || "예정")})</button>`).join("")}
+        </div>
+      </div>` : "";
     elTabContent.innerHTML = `
+      ${alertBannerHtml}
       <div class="bass-card" style="margin-bottom:14px;">
         <h3>🏷️ 임대매물 등록 · 표준 임대조건서(PDF) 생성</h3>
         <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">표준임대차계약서를 참조해 주소·전용면적·보증금·옵션·설비·관리비 포함내역·특약을 입력하고 등록하면 <strong>표준 임대조건 안내서 PDF</strong>가 자동 생성되어 예비 임차인이 매물 사진에서 바로 열람할 수 있습니다.</p>
@@ -573,11 +582,11 @@
         </details>
 
         <div id="nrMoveoutNoticeWrap" class="bass-card" style="display:none;margin:0 0 10px;padding:10px;background:var(--surface-2,#f8fafc);border-color:var(--warn,#d97706);">
-          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📦 입주 중인 호실 — 전출 예정 사전 매물 등록</div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📦 입주 중인 호실 — 중도 퇴실 · 만기 전출 사전 매물 등록</div>
           <div id="nrCurTermsHint" style="font-size:12.5px;margin-bottom:6px;line-height:1.55;"></div>
-          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 위 금액은 <strong>다음 새 임차인용 매물·예약 계약 조건</strong>으로 별도 저장되며 현재 계약에는 영향을 주지 않습니다. <strong>사전 매물은 퇴실 기준일(만기) 1개월 전부터</strong> 공개할 수 있습니다.</div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. <strong>중도 퇴실 확인 즉시</strong> 또는 <strong>만기 전출 예정(만기 30일 전 알림 수신 시)</strong> 아래 표준 임대조건을 작성해 PDF와 함께 사전 매물로 등록해 주세요. 위 금액은 다음 새 임차인용 조건으로 별도 저장되며 현재 계약에는 영향을 주지 않습니다.</div>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">
-            <input id="nrPreMoveout" type="checkbox"> 현재 세입자의 전출(퇴실) 계획이 확정되어 사전 매물로 공개합니다
+            <input id="nrPreMoveout" type="checkbox"> 현재 세입자의 중도 퇴실 또는 만기 전출이 확인되어 표준 임대조건서(PDF)와 함께 사전 매물로 공개합니다
           </label>
         </div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
@@ -737,11 +746,18 @@
       applyListingSpecToForm(lm);
       const af = lm.available_from || "";
       const mDate = af.match(/\d{4}-\d{2}-\d{2}/);
+      const alertHit = listingAlerts.find((a) => a.room_no === r.room_no);
+      const plannedDate = (alertHit && /^\d{4}-\d{2}-\d{2}$/.test(alertHit.move_out_date || ""))
+        ? alertHit.move_out_date
+        : (r.expiry_check && /^\d{4}-\d{2}-\d{2}$/.test(r.expiry_check.planned_move_out_date || "") ? r.expiry_check.planned_move_out_date : "");
       const expDate = r.contract && /^\d{4}-\d{2}-\d{2}$/.test(r.contract.expiry_date || "") ? r.contract.expiry_date : "";
       if (isOcc) {
         $nr("nrAvailNow").checked = false;
         $nr("nrAvailNow").disabled = true;
-        $nr("nrAvail").value = mDate ? mDate[0] : expDate;
+        $nr("nrAvail").value = mDate ? mDate[0] : (plannedDate || expDate);
+        if (alertHit || (r.expiry_check && r.expiry_check.tenant_plan === "MOVE_OUT")) {
+          $nr("nrPreMoveout").checked = true;
+        }
       } else {
         $nr("nrAvailNow").disabled = false;
         const isDate = Boolean(mDate);
@@ -750,6 +766,22 @@
       }
       syncAvailInputs();
     });
+
+    const pickRoomByNo = (roomNo) => {
+      const target = rooms.find((x) => x.room_no === roomNo);
+      if (!target) return;
+      $nr("nrRoom").value = target.id;
+      $nr("nrRoom").dispatchEvent(new Event("change"));
+      $nr("nrRoom").scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    elTabContent.querySelectorAll(".nr-alert-pick").forEach((btn) => {
+      btn.addEventListener("click", () => pickRoomByNo(btn.dataset.room));
+    });
+    if (S.listingTargetRoomNo) {
+      const targetNo = S.listingTargetRoomNo;
+      S.listingTargetRoomNo = "";
+      pickRoomByNo(targetNo);
+    }
 
     $nr("btnPreviewListingPdf").addEventListener("click", function () {
       const r = roomById($nr("nrRoom").value);

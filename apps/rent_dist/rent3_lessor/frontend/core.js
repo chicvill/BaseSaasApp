@@ -98,6 +98,7 @@
     taxView: "hub",             // hub | income | vat | invoice | expense
     taxCache: null,
     msgRoom: initialTab === "messages" ? (params.get("room") || "") : "",
+    listingTargetRoomNo: initialTab === "rooms" ? (params.get("room") || "") : "",
     msgTimer: null,
     msgCoSig: "",
     bizPicked: {},

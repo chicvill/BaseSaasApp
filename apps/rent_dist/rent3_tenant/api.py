@@ -28,6 +28,7 @@ from apps.rent_dist._rent3_core import (
     Room,
     TaxAndCertificateService,
     Tenant,
+    date_today,
     ensure_pool_seeded,
     normalize_branch_id,
     pool,
@@ -666,9 +667,19 @@ def submit_tenant_expiry_plan(tenant_id: str, req: TenantMoveoutPlanReq):
         prelist_vacancy=req.prelist_vacancy,
         app_source=APP_SRC,
     )
+    today_iso = date_today().isoformat()
+    is_early_out = bool(chk.planned_move_out_date and chk.expiry_date and chk.planned_move_out_date < chk.expiry_date)
     msg = (
-        f"📦 만기 전출(퇴실) 예정일({chk.planned_move_out_date})이 임대인에게 전달되었습니다."
-        + (f" 사전 매물 공개는 퇴실 기준일 1개월 전인 {chk.prelist_open_date}부터 시작됩니다." if chk.prelist_pending else "")
+        f"📦 {'중도 퇴실' if is_early_out else '만기 전출(퇴실)'} 예정일({chk.planned_move_out_date})이 임대인에게 전달되었습니다."
+        + (
+            " 임대인이 중도 퇴실 확인 즉시 표준 임대조건 PDF를 작성해 매물을 등록할 수 있도록 알림을 보냈습니다."
+            if is_early_out
+            else (
+                f" 만기 30일 전({chk.prelist_open_date})에 임대인에게 매물(PDF) 등록 알림이 전달됩니다."
+                if chk.prelist_pending and chk.prelist_open_date and today_iso < chk.prelist_open_date
+                else " 임대인에게 매물(PDF) 등록 알림이 전달되었습니다."
+            )
+        )
         if chk.tenant_plan == "MOVE_OUT"
         else "🏠 '전출의사 없음(거주 연장 희망)'이 임대인에게 전달되었습니다. 곧 임대인의 연장 재계약 조건 예고가 도착합니다."
     )

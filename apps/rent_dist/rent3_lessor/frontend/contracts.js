@@ -431,7 +431,10 @@
         <input id="exOutDate" class="bass-input" type="date" style="width:150px;" value="${Bass.escapeHtml(ct.expiry_date || "")}" aria-label="전출 예정일">
         <button id="exOut" class="bass-btn bass-btn--sm" type="button">📦 전출 예정</button>
       </div>
-      ${moveOut ? `<div class="bass-muted" style="font-size:12.5px;">📦 전출 예정(${Bass.escapeHtml(ec.planned_move_out_date || "")})으로 기록되어 있습니다. 전출 정산은 [전출 정산] 버튼에서 하세요.</div>` : ""}
+      ${moveOut ? `<div class="bass-card" style="padding:8px 10px;margin:6px 0;font-size:12.5px;border-color:var(--primary,#2563eb);background:rgba(37,99,235,.06);">
+        📦 전출 예정(${Bass.escapeHtml(ec.planned_move_out_date || "")})으로 기록되어 있습니다.${ec.prelist_open_date ? ` (알림 기준일: ${Bass.escapeHtml(ec.prelist_open_date)})` : ""}
+        <div style="margin-top:6px;"><button id="exGoListingPdf" class="bass-btn bass-btn--sm bass-btn--primary" type="button">📄 표준 임대조건 PDF 작성 · 매물 등록 →</button></div>
+      </div>` : ""}
       ${stay ? `
         <div class="r3-lbl" style="margin-top:12px;">③ 재계약 안내 (현재 조건 기준 · 법정 5% 상한 이내 직접 조정)</div>
         <div class="r3-grid">
@@ -475,6 +478,13 @@
     };
     $m("exStay").addEventListener("click", plan("STAY"));
     $m("exOut").addEventListener("click", plan("MOVE_OUT"));
+    if ($m("exGoListingPdf")) {
+      $m("exGoListingPdf").addEventListener("click", () => {
+        closeModal();
+        S.listingTargetRoomNo = no;
+        L.switchTab("rooms");
+      });
+    }
     if (stay) {
       const readExpiryInputs = () => {
         const d = Number($m("exDep").value || 0);
@@ -595,6 +605,7 @@
       <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-top:8px;">
         <button id="moCopy" class="bass-btn bass-btn--sm" type="button">📋 복사 → 임차인 문자창</button>
         <button id="moDone" class="bass-btn bass-btn--sm bass-btn--primary" type="button">${published ? "📤 정산서 게시" : "💾 임시 저장 (임차인에게 안 보임)"}</button>
+        ${!r.is_published ? `<button id="moGoListingPdf" class="bass-btn bass-btn--sm" type="button">📄 표준 임대조건 PDF · 매물 등록</button>` : ""}
       </div>
       <div id="moState" style="margin-top:10px;"></div>
       <div class="bass-muted" style="font-size:12px;margin-top:6px;">정산서를 보내면 임차인 앱·채팅에 도착하고, 임차인이 <strong>[정산 내역 확인]</strong>을 누르면 여기에 확인 표시가 뜹니다. 이어서 임차인이 <strong>본인 명의 계좌</strong>를 입력하고 동의하면 <strong>송금 완료 표시</strong>를 합니다. 임차인이 받았다고 확인하거나(또는 7일 안에 이의가 없으면) 퇴실이 확정되어 공실 매물로 공개됩니다. 이의가 오면 채팅·통화로 협의한 뒤 금액을 고쳐 다시 보내세요.</div>`);
@@ -619,6 +630,13 @@
       return lines.join("\n");
     };
     $m("moCopy").addEventListener("click", () => copyAndSms(compose(), phone));
+    if ($m("moGoListingPdf")) {
+      $m("moGoListingPdf").addEventListener("click", () => {
+        closeModal();
+        S.listingTargetRoomNo = no;
+        L.switchTab("rooms");
+      });
+    }
     const stateOf = () => ((S.dash && S.dash.checkouts) || []).find((x) => x.room_no === no && x.status !== "COMPLETED");
     const drawState = () => {
       const co = stateOf(), box = $m("moState");
