@@ -2,7 +2,14 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Rent3">
+  <link rel="manifest" href="/rent3/manifest.json">
+  <link rel="apple-touch-icon" href="/rent3_tenant/icons/apple-touch-icon.png">
   <title>OpenRent · Rent3 — 중개수수료 0원 소유주 직거래 & 올인원 임대관리 포털</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
   <link rel="stylesheet" href="/shared/ui/base.css">
@@ -55,6 +62,7 @@
     <div class="r3-drawer__group">안내</div>
     <button type="button" class="r3-item" id="menuForTenants">🔑 임차인 안내</button>
     <button type="button" class="r3-item" id="menuForLandlords">🏢 임대인 안내</button>
+    <button type="button" class="r3-item" id="btnPwaGuide">📲 앱 설치 · PWA/TWA 안내</button>
     <div class="r3-drawer__group">도구</div>
     <button type="button" class="or-chip r3-item" id="btnToggleAfford">🧮 월세 적정 예산 계산기</button>
     <div class="r3-drawer__group">임대인 가맹 가입 · 문의</div>
@@ -521,6 +529,7 @@
   <script src="/shared/ui/r3_modal.js"></script>
   <script src="/shared/ui/r3_notify.js"></script>
   <script src="hamburger.js"></script>
+  <script src="pwa.js"></script>
   <script>
     (function () {
       function showInfo(id) {

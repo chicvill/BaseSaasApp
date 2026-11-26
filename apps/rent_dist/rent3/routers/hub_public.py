@@ -358,6 +358,30 @@ def open_or_join_rent_now(req: PortalRentNowReq) -> Dict[str, Any]:
     }
 
 
+@router.get("/pwa/assetlinks.json")
+def get_pwa_assetlinks():
+    """Google Play TWA(Trusted Web Activity) 디지털 자산 연결(Digital Asset Links) JSON.
+
+    환경변수 RENT3_TWA_PACKAGE_NAME(기본 io.mqnet.rent3), RENT3_TWA_SHA256_CERT(쉼표 구분 지문 목록)을
+    설정하고 리버스 프록시(Coolify/Traefik)에서 /.well-known/assetlinks.json 으로 연결하면
+    안드로이드 앱 실행 시 브라우저 주소창이 완전히 제거된다.
+    """
+    pkg = (os.environ.get("RENT3_TWA_PACKAGE_NAME") or "io.mqnet.rent3").strip()
+    raw_certs = os.environ.get("RENT3_TWA_SHA256_CERT") or ""
+    fingerprints = [c.strip() for c in raw_certs.split(",") if c.strip()]
+    payload = [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": pkg,
+                "sha256_cert_fingerprints": fingerprints,
+            },
+        }
+    ]
+    return Response(content=json.dumps(payload, ensure_ascii=False, indent=2), media_type="application/json")
+
+
 @router.get("/rooms/files", dependencies=ADMIN_ONLY)
 def list_room_partition_files() -> Dict[str, Any]:
     """분리 보관된 개별 호실 JSON 파일 목록 조회."""
