@@ -12,6 +12,9 @@ from uuid import uuid4
 
 from pydantic import Field
 
+from .domains import cosign_registry as _reg
+from .domains import cosign_session as _sess
+from .domains import cosign_steps as _steps
 from .domains.cosign_registry import (
     CLEANUP_CLAUSE,
     HIGH_DEPOSIT,
@@ -19,11 +22,9 @@ from .domains.cosign_registry import (
     INSURED_STATUS,
     LOW_DEPOSIT,
     RegistryBlocked,
-    _CoSignRegistryMixin,
     re_is_date,
 )
-from .domains.cosign_session import MAX_LIVE_PER_TENANT, _CoSignSessionMixin
-from .domains.cosign_steps import _CoSignStepsMixin
+from .domains.cosign_session import MAX_LIVE_PER_TENANT
 from .pool import PoolObj, now_iso
 
 # 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다. (테스트·E2E 하네스에서 동적 변경 가능)
@@ -31,7 +32,7 @@ IDLE_EXPIRE = timedelta(hours=24)
 IDLE_EXPIRE_DRAFT = timedelta(hours=72)  # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
 
 
-class CoSignSession(_CoSignRegistryMixin, _CoSignSessionMixin, _CoSignStepsMixin, PoolObj):
+class CoSignSession(PoolObj):
     normalize_phones = False  # 무결성 해시 대상: 입력 원문 보존
     """임대인·임차인 실시간 호출·응답 및 상호 신분·등기 확인 기반 공동 임대계약 세션 객체."""
     collection: ClassVar[str] = "cosign_sessions"
@@ -143,6 +144,59 @@ class CoSignSession(_CoSignRegistryMixin, _CoSignSessionMixin, _CoSignStepsMixin
             return False
         window = IDLE_EXPIRE_DRAFT if (self.draft_prefilled_at and self.call_status == "CALLING") else IDLE_EXPIRE
         return (now or datetime.now()) - last >= max(window, IDLE_EXPIRE)
+
+    # ── 등기부 검증·위험 차단·취소·재열람 (`domains/cosign_registry.py`) ──
+    summary = _reg.summary
+    compute_integrity_hash = _reg.compute_integrity_hash
+    is_jeonse = _reg.is_jeonse
+    _norm_name = staticmethod(_reg._norm_name)
+    needs_insurance_refusal_clause = _reg.needs_insurance_refusal_clause
+    _sync_cleanup_clause = _reg._sync_cleanup_clause
+    deposit_amount = _reg.deposit_amount
+    needs_guarantee_info = _reg.needs_guarantee_info
+    is_low_deposit_monthly = _reg.is_low_deposit_monthly
+    mortgage_exposure = _reg.mortgage_exposure
+    hard_block_reasons = _reg.hard_block_reasons
+    risk_blockers = _reg.risk_blockers
+    _ensure_risk_ok = _reg._ensure_risk_ok
+    registry_mismatches = _reg.registry_mismatches
+    submit_tenant_registry = _reg.submit_tenant_registry
+    _save_registry_attachment = staticmethod(_reg._save_registry_attachment)
+    registry_attachment_path = _reg.registry_attachment_path
+    cancel = _reg.cancel
+    recheck_registry = _reg.recheck_registry
+    is_step1_fully_verified = _reg.is_step1_fully_verified
+    ensure_renewal_ready = _reg.ensure_renewal_ready
+
+    # ── 세션 개설·호출/응답·신분확인·1~2단계 (`domains/cosign_session.py`) ──
+    open_session = classmethod(_sess.open_session)
+    expire_idle = classmethod(_sess.expire_idle)
+    ai_calls_this_month = classmethod(_sess.ai_calls_this_month)
+    live_for_room = classmethod(_sess.live_for_room)
+    _tenant_identity_evidence = _sess._tenant_identity_evidence
+    is_tenant_party = _sess.is_tenant_party
+    call_counterparty = classmethod(_sess.call_counterparty)
+    respond_to_call = _sess.respond_to_call
+    by_code_or_id = classmethod(_sess.by_code_or_id)
+    verify_counterparty_id = _sess.verify_counterparty_id
+    confirm_step1 = _sess.confirm_step1
+    confirm_step2 = _sess.confirm_step2
+
+    # ── 사전작성·시설사진·3~5단계 합의/서명/봉인 (`domains/cosign_steps.py`) ──
+    prefill = _steps.prefill
+    add_facility_photo = _steps.add_facility_photo
+    remove_facility_photo = _steps.remove_facility_photo
+    facility_photo_path = _steps.facility_photo_path
+    terms_changes = _steps.terms_changes
+    reopen_terms = _steps.reopen_terms
+    update_terms = _steps.update_terms
+    pre_contract_min_move_in = _steps.pre_contract_min_move_in
+    _check_pre_contract_move_in = _steps._check_pre_contract_move_in
+    agree_step3 = _steps.agree_step3
+    sign_step4 = _steps.sign_step4
+    complete_step5_and_seal = _steps.complete_step5_and_seal
+    _ensure_in_progress = _steps._ensure_in_progress
+    _ensure_ready_for_steps = _steps._ensure_ready_for_steps
 
 
 __all__ = [

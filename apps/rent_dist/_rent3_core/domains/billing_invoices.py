@@ -23,9 +23,10 @@ from ..models import (
     validate_kr_business_number,
 )
 from ..pool import now_iso
+from .billing_tax import TaxSummaryMixin
 
 
-class TaxInvoiceAndCertMixin:
+class TaxInvoiceAndCertMixin(TaxSummaryMixin):
     """전자세금계산서 대장·상태 갱신·홈택스 CSV 및 임차인 월세 세액공제 납부확인서 생성."""
 
     @classmethod

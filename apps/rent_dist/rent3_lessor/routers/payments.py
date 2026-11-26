@@ -230,7 +230,7 @@ def payment_ledger_state(branch: str = "main", room_no: str = ""):
     )[:30]
     return {
         "success": True,
-        "room_no": room.room_no,
+        "room_no": room.room_no if room else ct.room_no,
         "tenant_name": ct.tenant_name,
         "total_due": lg["total_due"],
         "voided": [

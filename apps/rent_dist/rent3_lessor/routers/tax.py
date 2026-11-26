@@ -296,15 +296,15 @@ def mgmt_fee_basis(branch: str = "main", year: Optional[int] = None, exclude: st
     bldg = Building.first(branch=b_id)
     excluded = {x.strip() for x in (exclude or "").split(",") if x.strip()} if exclude else set(MGMT_FEE_EXCLUDED)
     outs = [o for o in Outlay.find(branch=b_id) if o.expense_date.startswith(f"{yr:04d}")]
-    items = []
+    items: list[dict[str, Any]] = []
     for code, label in EXPENSE_CATEGORIES.items():
         rows = [o for o in outs if o.category == code]
         items.append({"category": code, "label": label, "amount": sum(int(o.amount or 0) for o in rows), "count": len(rows), "included": code not in excluded})
-    total = sum(i["amount"] for i in items if i["included"])
+    total = sum(int(i["amount"]) for i in items if i["included"])
     all_rooms = [r for r in (bldg.rooms() if bldg else [])]
-    tax_rooms = [r for r in all_rooms if bldg.is_income_tax_room(r.room_no)]
+    tax_rooms = [r for r in all_rooms if bldg and bldg.is_income_tax_room(r.room_no)]
     n = len(tax_rooms)
-    per_year = int(round(total / n)) if n else 0
+    per_year = round(total / n) if n else 0
     fees = [int(r.maintenance_fee or 0) for r in tax_rooms]
     return {
         "success": True,

@@ -537,7 +537,7 @@ def _reset_target(req: PasswordResetReq):
     same = (
         fr._norm_name(idn.get("name")) == fr._norm_name(req.name)
         and idn.get("birth6") == birth6
-        and _digits(idn.get("phone")) == _digits(req.phone)
+        and _digits(str(idn.get("phone") or "")) == _digits(req.phone)
     )
     return acct if same else None
 

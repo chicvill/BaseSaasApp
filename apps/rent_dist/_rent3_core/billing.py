@@ -5,11 +5,10 @@ from __future__ import annotations
 
 from .domains.billing_fifo import FifoPaymentEngine, SmsDepositParser, _names_of
 from .domains.billing_invoices import TaxInvoiceAndCertMixin
-from .domains.billing_tax import TaxSummaryMixin
 from .models import validate_email_format, validate_kr_business_number
 
 
-class TaxAndCertificateService(TaxSummaryMixin, TaxInvoiceAndCertMixin):
+class TaxAndCertificateService(TaxInvoiceAndCertMixin):
     """공용 운영비 NOI 결산, 5월 종소세·2월 사업장현황신고·부가세 홈택스 CSV, 세입자 월세 세액공제 납부확인서 생성기."""
 
 

@@ -77,7 +77,7 @@ def _notice_owner(request: Request):
     if is_admin(c):
         return None
     if c.get("r") in LESSOR_ROLES:
-        me = Lessor.for_branch(c.get("b"))
+        me = Lessor.for_branch(str(c.get("b") or ""))
         return ("lessor", me) if me else None
     t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
     return ("tenant", t) if t else None

@@ -57,7 +57,7 @@ class SmsDepositParser:
                     "문자에서 입금 금액을 인식하지 못했습니다.",
                     hint="예: '[신한] 10/25 201호 홍길동 550,000원 입금' 형태로 입력해 주세요.",
                 )
-            amount = int(round(float(man_m.group(1)) * 10000))
+            amount = round(float(man_m.group(1)) * 10000)
 
         # 2) 날짜 추출 (MM/DD 또는 YYYY-MM-DD)
         today = date_today()

@@ -156,7 +156,7 @@ class CheckOutSettlement(PoolObj):
         existing = next((x for x in cls.find(id_room=room.id) if x.status in cls.OPEN_STATES), None)
         if existing is not None and existing.status == "PAID":
             raise DomainError("이미 송금을 표시한 정산서입니다.", hint="임차인이 이의를 제기하면 수정해서 다시 보낼 수 있습니다.")
-        fields = dict(
+        fields: Dict[str, Any] = dict(
             branch=b_id, id_building=room.id_building, id_room=room.id, room_no=room.room_no, id_contract=ct.id,
             id_tenant=ct.id_tenant, tenant_name=ct.tenant_name, status="CALCULATED" if publish else "DRAFT", deposit_original=ct.deposit,
             unpaid_rent_deduction=unpaid, early_rent_deduction=early, liability_end_date=liab["end_date"] if early else "",

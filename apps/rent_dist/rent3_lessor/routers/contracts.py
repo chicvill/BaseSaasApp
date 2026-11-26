@@ -500,8 +500,8 @@ def remind_tenant_renewal_password(req: ExpiryRemindReq, request: Request):
     )
     DirectChat(
         branch=b_id,
-        id_room=room.id,
-        room_no=room.room_no,
+        id_room=room.id if room else "",
+        room_no=room.room_no if room else t.room_no,
         sender_role="lessor",
         sender_name=lsr.name if lsr else "임대인",
         message=f"[🔒 재계약 새 비밀번호 설정 안내] {sms_text}",
