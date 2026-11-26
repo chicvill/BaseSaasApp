@@ -596,6 +596,41 @@ body.or-body {
   z-index: 2;
 }
 
+.or-prop-photo-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 20px 12px 10px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 0%, rgba(15, 23, 42, 0.78) 100%);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  z-index: 2;
+}
+
+.or-photo-pdf-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  font-size: 12.5px;
+  font-weight: 800;
+  padding: 6px 12px;
+  border-radius: var(--ab-radius-pill);
+  text-decoration: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.or-photo-pdf-link:hover {
+  background: #1d4ed8;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
 .or-pill {
   font-size: 12px;
   font-weight: 800;
@@ -1051,6 +1086,15 @@ body.or-body {
     top: 6px;
     left: 6px;
     gap: 4px;
+  }
+  .or-prop-photo-bar {
+    padding: 12px 6px 6px;
+    justify-content: center;
+  }
+  .or-photo-pdf-link {
+    font-size: 12px;
+    padding: 3px 8px;
+    white-space: nowrap;
   }
   .or-pill {
     font-size: 12px;

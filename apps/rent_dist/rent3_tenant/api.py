@@ -11,7 +11,7 @@ from apps.rent_dist._rent3_core.ops import TransferNotice
 
 from core.errors import DomainError, NotFound
 from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
-from apps.rent_dist._rent3_core import room_messages, contract_chat, chatsessions as chat_sessions
+from apps.rent_dist._rent3_core import room_messages, contract_chat, chatsessions as chat_sessions, listing_pdf, roomregistry as room_registry
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
     Building,
@@ -106,8 +106,14 @@ def list_open_listings(branch: Optional[str] = None):
         s.id_room: s for s in CoSignSession.find(status="IN_PROGRESS")
     }
 
+    default_imgs = (
+        "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80",
+        "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=80",
+        "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&q=80",
+        "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=80",
+    )
     cards = []
-    for r in sorted(rooms, key=lambda x: (x.branch, x.room_no)):
+    for idx, r in enumerate(sorted(rooms, key=lambda x: (x.branch, x.room_no))):
         if (r.is_occupied and not r.pre_moveout_notice) or not r.is_published:
             continue
         if not Lessor.franchise_open(r.branch):
@@ -116,13 +122,21 @@ def list_open_listings(branch: Optional[str] = None):
         b = bldgs.get(r.id_building)
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)
+        img_url = r.images[0] if r.images else default_imgs[idx % len(default_imgs)]
+        spec = listing_pdf.normalize_listing_spec(r.listing_spec, r.option_list)
         cards.append({
             **public_room(r.model_dump()),  # 도어락·등기·입주자 정보는 공개 목록에 싣지 않는다
             "is_pre_moveout_listing": r.is_occupied and r.pre_moveout_notice,
+            "clean_title": room_registry.public_clean(r),
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lessor.name if lessor else "임대인",
             "lessor_phone": lessor.phone if lessor else "",
+            "options": spec["options"],
+            "listing_spec": spec,
+            "terms_pdf_url": listing_pdf.listing_pdf_url(r.id),
+            "image": img_url,
+            "images": list(r.images) if r.images else [img_url],
             "active_cosign_session": {"id": sess.id, "session_code": sess.session_code} if sess else None,
         })
 

@@ -671,36 +671,63 @@
         <h3>📢 지금 계약 가능한 빈 집 (${list.length}실)</h3>
         <p class="bass-muted" style="font-size:13px;">임대인 공실 호실 및 만기 전출 확정 호실이 실시간으로 표시되며, 계약 체결 즉시 자동으로 목록에서 마감됩니다.</p>
       </div>
-      ${list.map((r) => `
+      ${list.map((r) => {
+        const pdfUrl = r.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(r.id)}/terms.pdf`;
+        const imgUrl = r.image || "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80";
+        return `
         <div class="listing-card">
-          <div class="bass-row" style="justify-content:space-between;">
-            <div>
-              <strong style="font-size:17px;">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.name || `${r.room_no}호`)}</strong>
-              <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.address)} · ${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${Bass.escapeHtml(r.direction)}` : ""} · 입주 ${Bass.escapeHtml(r.available_from)}</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;">
+            <div class="js-tn-detail" data-room-id="${Bass.escapeHtml(r.id)}" role="button" tabindex="0" style="position:relative;flex:0 0 180px;width:180px;aspect-ratio:4/3;border-radius:12px;overflow:hidden;cursor:pointer;background:#f1f5f9;">
+              <img src="${Bass.escapeHtml(imgUrl)}" alt="${Bass.escapeHtml(r.building_name)} ${Bass.escapeHtml(r.room_no)}호" style="width:100%;height:100%;object-fit:cover;display:block;">
+              <a href="${Bass.escapeHtml(pdfUrl)}" class="js-tn-detail" data-room-id="${Bass.escapeHtml(r.id)}" style="position:absolute;left:6px;right:6px;bottom:6px;background:rgba(15,23,42,.88);color:#fff;font-size:12px;font-weight:700;padding:5px 8px;border-radius:9999px;text-align:center;text-decoration:none;">📄 임대조건 PDF · 상세</a>
             </div>
-            <div class="bass-row" style="gap:6px;">
-              ${r.is_pre_moveout_listing ? `<span class="bass-badge bass-badge--warn">📅 만기퇴실 예정 사전공개</span>` : ""}
-              <span class="bass-badge bass-badge--ok">등기부 근저당 0원 클린</span>
+            <div style="flex:1;min-width:200px;">
+              <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
+                <strong style="font-size:17px;">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.name || `${r.room_no}호`)}</strong>
+                <div class="bass-row" style="gap:6px;">
+                  ${r.is_pre_moveout_listing ? `<span class="bass-badge bass-badge--warn">📅 만기퇴실 예정 사전공개</span>` : ""}
+                  ${r.clean_title ? `<span class="bass-badge bass-badge--ok">🛡️ 등기클린</span>` : ""}
+                </div>
+              </div>
+              <div class="bass-muted" style="font-size:13px;margin-top:3px;">${Bass.escapeHtml(r.address)} · ${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${Bass.escapeHtml(r.direction)}` : ""} · 입주 ${Bass.escapeHtml(r.available_from)}</div>
+              <div style="font-size:16px;font-weight:800;margin:8px 0;color:var(--primary-2);">
+                보증금 ${fmtWon(r.deposit)} / 월세 ${fmtWon(r.monthly_rent)} (관리비 ${fmtWon(r.maintenance_fee)}, ${Bass.escapeHtml(r.pay_timing)})
+              </div>
+              <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.status_description)}</div>
             </div>
           </div>
-          <div style="font-size:16px;font-weight:800;margin:8px 0;color:var(--primary-2);">
-            보증금 ${fmtWon(r.deposit)} / 월세 ${fmtWon(r.monthly_rent)} (관리비 ${fmtWon(r.maintenance_fee)}, ${Bass.escapeHtml(r.pay_timing)})
-          </div>
-          <div class="bass-muted" style="font-size:13px;margin-bottom:10px;">${Bass.escapeHtml(r.status_description)}</div>
-          <div class="bass-row">
+          <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
             <input class="bass-input inq-name" data-room="${r.room_no}" style="width:120px;" placeholder="내 이름">
-            <input class="bass-input inq-msg" data-room="${r.room_no}" style="flex:1;" value="이번 주말 현장 방문투어 예약하고 싶습니다!">
+            <input class="bass-input inq-msg" data-room="${r.room_no}" style="flex:1;min-width:160px;" value="이번 주말 현장 방문투어 예약하고 싶습니다!">
             <button class="bass-btn bass-btn--sm btn-send-inq" data-branch="${r.branch}" data-room="${r.room_no}" type="button">💬 1:1 방문문의</button>
             ${r.active_cosign_session
               ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${r.active_cosign_session.id}&role=tenant">🤝 열린 계약방 입장(코드 ${r.active_cosign_session.session_code})</a>`
               : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant">🤝 공동 임대계약 앱 이동</a>`
             }
           </div>
-        </div>
-      `).join("")}
+        </div>`;
+      }).join("")}
     `;
 
     document.getElementById("btnBackHome").addEventListener("click", () => T.go("home"));
+    elListings.querySelectorAll(".js-tn-detail").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const item = list.find((x) => x.id === el.dataset.roomId);
+        if (item && window.R3ListingModal) {
+          window.R3ListingModal.open(item, {
+            rentNowLabel: item.active_cosign_session ? "🤝 열린 계약방 입장" : "🤝 공동 임대계약 앱 이동",
+            onRentNow: (r) => {
+              window.location.href = r.active_cosign_session
+                ? `/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant`
+                : "/rent3_contract/?role=tenant";
+            },
+          });
+        }
+      });
+    });
     elListings.querySelectorAll(".btn-send-inq").forEach((btn) => {
       btn.addEventListener("click", function () {
         Bass.withLock(this, async () => {

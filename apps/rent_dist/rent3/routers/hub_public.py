@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 from typing import Any, Dict, List
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import Response
@@ -22,11 +23,12 @@ from apps.rent_dist._rent3_core import (
     Room,
     Tenant,
     ensure_pool_seeded,
+    listing_pdf,
     normalize_branch_id,
     pool,
     roomregistry as room_registry,
 )
-from apps.rent_dist._rent3_core.authz import contract_scope
+from apps.rent_dist._rent3_core.authz import LESSOR_ROLES, claims_from, contract_scope, is_admin
 from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
 from ._hub_deps import ADMIN_ONLY, demo_login_allowed
 
@@ -133,7 +135,8 @@ def portal_landing(request: Request) -> Dict[str, Any]:
         b = bldg_by_branch.get(r.branch)
         lsr = lessor_by_branch.get(r.branch)
         img_url = r.images[0] if r.images else DEFAULT_ROOM_IMAGES[idx % len(DEFAULT_ROOM_IMAGES)]
-        opts = [str(o.get("item", "")) for o in (r.option_list or []) if o.get("item")]
+        spec = listing_pdf.normalize_listing_spec(r.listing_spec, r.option_list)
+        opts = spec["options"] or [str(o.get("item", "")) for o in (r.option_list or []) if o.get("item")]
         listings.append({
             "id": r.id,
             "branch": r.branch,
@@ -143,19 +146,25 @@ def portal_landing(request: Request) -> Dict[str, Any]:
             "name": r.name or f"{r.room_no}호",
             "room_category": r.room_category,
             "floor": r.floor,
+            "total_floors": r.total_floors,
+            "direction": r.direction,
             "area_sqm": r.area_sqm,
             "lease_type": r.lease_type,
             "pay_timing": r.pay_timing,
             "deposit": r.deposit,
             "monthly_rent": r.monthly_rent,
             "maintenance_fee": r.maintenance_fee,
+            "cleaning_fee": r.cleaning_fee,
             "vat_applicable": r.vat_applicable,
             "available_from": r.available_from or "즉시입주",
             "pre_moveout_notice": r.pre_moveout_notice,
             "clean_title": room_registry.public_clean(r),       # 임대인이 확정한 최근 등기부가 있고 코드가 깨끗하다고 계산할 때만 '등기클린'
             "status_description": r.status_description,
             "options": opts,
+            "listing_spec": spec,
+            "terms_pdf_url": listing_pdf.listing_pdf_url(r.id),
             "image": img_url,
+            "images": list(r.images) if r.images else [img_url],
             "contract_in_progress": CoSignSession.live_for_room(r.branch, r.room_no) is not None,
             "lessor_name": lsr.name if lsr else "건물 소유주",
             "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "")),
@@ -244,6 +253,41 @@ def portal_landing(request: Request) -> Dict[str, Any]:
         "open_sessions": open_sessions,
         "demo_accounts": demo_accounts if demo_login_allowed(request) else [],  # 공통 비밀번호는 로컬에서만 안내
     }
+
+
+@router.get("/listings/{room_id}/terms.pdf")
+def get_public_listing_terms_pdf(room_id: str, request: Request, download: int = 0):
+    """공개 매물(공실 공개 또는 전출예정 사전공개)의 표준 임대조건 안내서 PDF 를 반환한다."""
+    ensure_pool_seeded()
+    room = Room.get(room_id)
+    if not room:
+        raise NotFound("매물을 찾을 수 없습니다.")
+    is_public = (
+        ((not room.is_occupied and room.is_published) or room.pre_moveout_notice)
+        and Lessor.franchise_open(room.branch)
+    )
+    if not is_public:
+        c = claims_from(request) or {}
+        can_staff = is_admin(c) or (
+            c.get("r") in LESSOR_ROLES
+            and normalize_branch_id(str(c.get("b") or "")) == room.branch
+        )
+        if not can_staff:
+            raise NotFound("공개된 매물이 아닙니다.")
+    bldg = Building.get(room.id_building) if room.id_building else Building.first(branch=room.branch)
+    lsr = Lessor.get(bldg.id_lessor) if (bldg and bldg.id_lessor) else Lessor.first(branch=room.branch)
+    pdf_bytes = listing_pdf.build_listing_terms_pdf(room, building=bldg, lessor=lsr)
+    disp = "attachment" if download else "inline"
+    fname_ascii = f"rent3_terms_{room.room_no}.pdf"
+    fname_utf8 = quote(f"{(bldg.building_name if bldg else room.branch)}_{room.room_no}호_표준임대조건서.pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{fname_ascii}"; filename*=UTF-8\'\'{fname_utf8}',
+            "X-Frame-Options": "SAMEORIGIN",
+        },
+    )
 
 
 @router.post("/inquiries")

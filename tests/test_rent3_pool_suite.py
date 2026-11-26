@@ -10369,6 +10369,208 @@ class TestRent3JsonDataPoolSuite(unittest.TestCase):
             lsr_r.room_limit = old_limit
             lsr_r.save(action="t")
 
+    def test_164_listing_standard_terms_pdf_and_scroll_modal(self):
+        """매물 등록 시 표준임대차계약서 항목(옵션·케이블TV·인터넷·엘리베이터·관리비포함·특약) 저장, PDF 생성/권한, 신규 계약 승계, 사진 PDF 링크 & 좌우 스크롤 모달 검증."""
+        import os
+        import tempfile
+        from datetime import timedelta
+        from unittest import mock
+        from apps.rent_dist._rent3_core import CoSignSession, Contract, Lessor, Room, Tenant, date_today, listing_pdf
+
+        lsr = Lessor.for_branch("main")
+        assert lsr is not None
+        old_limit = lsr.room_limit
+        lsr.room_limit = max(old_limit, 99)
+        lsr.save(action="t")
+        c = self.client
+        chic = self._login("chic")
+        spec_payload = {
+            "options": ["시스템 에어컨", "드럼 세탁기", "빌트인 냉장고", "인덕션", "디지털 도어락"],
+            "cable_tv": "설치됨",
+            "internet": "설치됨",
+            "elevator": "설치됨",
+            "parking": "가능",
+            "maintenance_includes": ["수도료", "인터넷", "케이블TV", "공용전기"],
+            "maintenance_extra": "전기·가스 개별계량 별도",
+            "lease_term_months": 24,
+            "no_pets": True,
+            "no_smoking": True,
+            "terminate_on_2m_arrears": True,
+            "no_sublease": True,
+            "restore_clause": True,
+            "custom_clauses": "벽면 못질 금지",
+        }
+        try:
+          with mock.patch.dict(os.environ, {"RENT3_BACKUP_DIR": tempfile.mkdtemp(prefix="rent3_bk_164_")}):
+            # 1) 공실 매물 등록 + 표준 임대조건서 PDF 자동 생성
+            cr = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main",
+                "room_no": "764",
+                "room_category": "주거용 원룸",
+                "floor": 4,
+                "total_floors": 7,
+                "area_sqm": 26.5,
+                "direction": "남향",
+                "deposit": 10000000,
+                "monthly_rent": 550000,
+                "maintenance_fee": 70000,
+                "cleaning_fee": 120000,
+                "pay_timing": "후불",
+                "available_from": "즉시입주",
+                "status_description": "채광 좋은 풀옵션 원룸",
+                "listing_spec": spec_payload,
+                "is_published": True,
+            })
+            self.assertEqual(cr.status_code, 200, cr.text)
+            body = cr.json()
+            rid = body["room"]["id"]
+            pdf_url = body["terms_pdf_url"]
+            self.assertEqual(pdf_url, f"/api/rent3/pool/listings/{rid}/terms.pdf")
+            saved_path = listing_pdf.listing_pdf_path(rid)
+            self.assertTrue(os.path.exists(saved_path))
+            with open(saved_path, "rb") as fp:
+                self.assertTrue(fp.read(5) == b"%PDF-")
+
+            # 2) 공개 PDF 열람 및 다운로드 + SAMEORIGIN 허용 확인
+            pub_pdf = c.get(pdf_url)
+            self.assertEqual(pub_pdf.status_code, 200)
+            self.assertEqual(pub_pdf.headers.get("content-type"), "application/pdf")
+            self.assertTrue(pub_pdf.content.startswith(b"%PDF-"))
+            self.assertGreater(len(pub_pdf.content), 2000)
+            self.assertEqual(pub_pdf.headers.get("x-frame-options"), "SAMEORIGIN")
+            dl_pdf = c.get(pdf_url + "?download=1")
+            self.assertEqual(dl_pdf.status_code, 200)
+            self.assertIn("attachment", dl_pdf.headers.get("content-disposition", ""))
+
+            # 3) 포털 · 임차인 · 공동계약 목록 API 에 listing_spec / terms_pdf_url / cleaning_fee 노출
+            landing_items = c.get("/api/rent3/pool/landing").json()["listings"]
+            it_portal = next((x for x in landing_items if x["id"] == rid), None)
+            assert it_portal is not None
+            self.assertEqual(it_portal["cleaning_fee"], 120000)
+            self.assertEqual(it_portal["terms_pdf_url"], pdf_url)
+            self.assertEqual(it_portal["listing_spec"]["elevator"], "설치됨")
+            self.assertEqual(it_portal["listing_spec"]["cable_tv"], "설치됨")
+            self.assertTrue(it_portal["listing_spec"]["no_pets"])
+            self.assertTrue(it_portal["listing_spec"]["terminate_on_2m_arrears"])
+            self.assertIn("수도료", it_portal["listing_spec"]["maintenance_includes"])
+
+            tn_items = c.get("/api/rent3_tenant/listings").json()["listings"]
+            it_tn = next((x for x in tn_items if x["id"] == rid), None)
+            assert it_tn is not None
+            self.assertEqual(it_tn["terms_pdf_url"], pdf_url)
+            self.assertTrue(it_tn["image"])
+
+            ct_items = c.get("/api/rent3_contract/rooms", headers=chic).json()["rooms"]
+            it_ct = next((x for x in ct_items if x["id"] == rid), None)
+            assert it_ct is not None
+            self.assertEqual(it_ct["terms_pdf_url"], pdf_url)
+            self.assertEqual(it_ct["listing_spec"]["internet"], "설치됨")
+
+            # 4) 신규 공동계약 세션 개설 시 청소비·기간·표준 특약 자동 반영 확인
+            s_new = c.post("/api/rent3_contract/sessions", headers=chic, json={
+                "branch": "main", "room_no": "764", "mode": "NEW",
+                "tenant_name": "신규세입자", "tenant_phone": "010-7764-0764",
+            }).json()["session"]
+            self.assertEqual(s_new["terms"]["cleaning_fee"], 120000)
+            self.assertEqual(s_new["terms"]["lease_term_months"], 24)
+            st_txt = s_new["terms"]["special_terms"]
+            self.assertIn("반려동물(동물) 사육", st_txt)
+            self.assertIn("2기(2개월)", st_txt)
+            self.assertIn("관리비 포함 내역", st_txt)
+            self.assertIn("벽면 못질 금지", st_txt)
+            c.post(f"/api/rent3_contract/sessions/{s_new['id']}/cancel", headers=chic, json={"role": "lessor", "reason": "cleanup"})
+
+            # 5) 비공개 전환 시 익명 접근 404 차단 + 임대인 전용 미리보기 200 허용
+            self.assertEqual(c.post(f"/api/rent3_lessor/rooms/{rid}/publish", headers=chic, json={"is_published": False}).status_code, 200)
+            self.assertEqual(c.get(pdf_url, headers={"Authorization": ""}).status_code, 404)
+            self.assertEqual(c.get(pdf_url, headers=chic).status_code, 200)
+            lsr_pdf = c.get(f"/api/rent3_lessor/rooms/{rid}/terms.pdf", headers=chic)
+            self.assertEqual(lsr_pdf.status_code, 200)
+            self.assertTrue(lsr_pdf.content.startswith(b"%PDF-"))
+
+            # 6) 입주 중 호실 사전 매물 등록 시 현재 계약 미변경 + next_listing/next_terms 동기화
+            t_occ = self._new_prospect("기존입주자764", "010-7764-1111")
+            assert t_occ is not None
+            self._complete_contract(None, None, t_occ.id, "764", "기존입주자764", "010-7764-1111")
+            rm_occ = Room.first(branch="main", room_no="764")
+            assert rm_occ is not None
+            ct_occ = Contract.get(rm_occ.active_contract_id)
+            assert ct_occ is not None
+            ct_occ.expiry_date = (date_today() + timedelta(days=15)).isoformat()
+            ct_occ.save(action="t")
+            next_avail = (date_today() + timedelta(days=16)).isoformat()
+            pre_r = c.post("/api/rent3_lessor/rooms", headers=chic, json={
+                "branch": "main",
+                "room_no": "764",
+                "room_category": "주거용 원룸",
+                "floor": 4,
+                "total_floors": 7,
+                "area_sqm": 26.5,
+                "deposit": 11000000,
+                "monthly_rent": 580000,
+                "maintenance_fee": 80000,
+                "cleaning_fee": 150000,
+                "pay_timing": "선불",
+                "available_from": next_avail,
+                "listing_spec": {**spec_payload, "cable_tv": "별도신청"},
+                "is_published": True,
+                "pre_moveout_notice": True,
+            })
+            self.assertEqual(pre_r.status_code, 200, pre_r.text)
+            rm_after = Room.first(branch="main", room_no="764")
+            assert rm_after is not None
+            self.assertEqual(rm_after.monthly_rent, 550000)  # 현재 계약 값 보존
+            self.assertEqual(rm_after.next_listing.get("monthly_rent"), 580000)
+            self.assertEqual(rm_after.next_listing.get("cleaning_fee"), 150000)
+            self.assertEqual(rm_after.next_terms.get("monthly_rent"), 580000)
+            self.assertEqual(rm_after.next_terms.get("cleaning_fee"), 150000)
+            self.assertEqual(rm_after.next_terms.get("pay_timing"), "선불")
+            self.assertEqual(c.get(pdf_url).status_code, 200)
+
+            # 7) 프론트엔드 검증: 사진 위 PDF 링크, 좌우 스크롤 모달, 임대인 표준조건 폼, 폰트 >= 12px
+            root_f = os.path.join("apps", "rent_dist")
+            with open(os.path.join(root_f, "rent3", "frontend", "listing_modal.js"), encoding="utf-8") as fp:
+                lmod = fp.read()
+            with open(os.path.join(root_f, "rent3", "frontend", "listings.js"), encoding="utf-8") as fp:
+                plist = fp.read()
+            with open(os.path.join(root_f, "rent3", "frontend", "openrent.css"), encoding="utf-8") as fp:
+                ocss = fp.read()
+            lapp = self._read_lessor_js()
+            tapp = self._read_tenant_js()
+            capp = self._read_contract_js()
+            for needle in ("scroll-snap-type: x mandatory", "r3-lm-track", "표준 임대조건서 PDF", "케이블 TV", "인터넷", "엘리베이터", "관리비 포함 내역", "2개월(2기) 이상 차임 체납", "반려동물(동물) 사육"):
+                self.assertIn(needle, lmod, needle)
+            self.assertNotRegex(lmod, r"font-size:\s*(?:9|10|11)(?:\.\d)?px")
+            self.assertIn("or-photo-pdf-link", plist)
+            self.assertIn("R3ListingModal.open", plist)
+            self.assertIn(".or-photo-pdf-link", ocss)
+            self.assertIn("R3ListingModal.open", tapp)
+            self.assertIn("R3ListingModal.open", capp)
+            for needle in ("nrClean", "nrPayTiming", "nrCableTv", "nrInternet", "nrElevator", "nrNoPets", "nrTerm2m", "btnPreviewListingPdf"):
+                self.assertIn(needle, lapp, needle)
+        finally:
+            for ct_ in Contract.find(room_no="764"):
+                if ct_.branch == "main":
+                    ct_.delete(action="t")
+            for s_ in CoSignSession.all():
+                if s_.room_no == "764" and s_.branch == "main":
+                    s_.delete(action="t")
+            rm_ = Room.first(branch="main", room_no="764")
+            if rm_:
+                p_pdf = listing_pdf.listing_pdf_path(rm_.id)
+                if os.path.exists(p_pdf):
+                    try:
+                        os.remove(p_pdf)
+                    except OSError:
+                        pass
+                rm_.delete(action="t")
+            for t_ in Tenant.all():
+                if t_.phone in ("010-7764-0764", "010-7764-1111"):
+                    t_.delete(action="t")
+            lsr_r = Lessor.require(lsr.id)
+            lsr_r.room_limit = old_limit
+            lsr_r.save(action="t")
+
     def _lessor_id_main(self):
         from apps.rent_dist._rent3_core import Lessor
         lsr = Lessor.for_branch("main")

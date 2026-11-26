@@ -79,10 +79,12 @@
       return;
     }
 
-    grid.innerHTML = list.map((l) => `
+    grid.innerHTML = list.map((l) => {
+      const pdfUrl = l.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(l.id)}/terms.pdf`;
+      return `
       <article class="or-prop-card" data-room-id="${esc(l.id)}" data-room-no="${esc(l.room_no)}">
         <div class="or-prop-main">
-          <div class="or-prop-media">
+          <div class="or-prop-media js-open-detail" data-room-id="${esc(l.id)}" role="button" tabindex="0" aria-label="${esc(l.building_name)} ${esc(l.room_no)}호 표준 임대조건 상세 보기">
             <img src="${esc(l.image)}" alt="${esc(l.building_name)} ${esc(l.room_no)}호">
             <div class="or-prop-badges">
               <span class="or-pill or-pill--green">복비 0원</span>
@@ -90,6 +92,9 @@
                 ? `<span class="or-pill or-pill--amber">📦 만기전출 사전공개 (${esc(l.available_from)})</span>`
                 : `<span class="or-pill or-pill--navy">⚡ ${esc(l.available_from || "즉시입주")}</span>`}
               ${l.clean_title ? `<span class="or-pill or-pill--navy">🛡️ 등기클린</span>` : ""}
+            </div>
+            <div class="or-prop-photo-bar">
+              <a href="${esc(pdfUrl)}" class="or-photo-pdf-link js-open-detail" data-room-id="${esc(l.id)}" title="표준 임대조건 상세 및 PDF 열기">📄 임대조건 PDF · 상세보기</a>
             </div>
           </div>
           <div class="or-prop-body">
@@ -125,44 +130,84 @@
           </button>
         </div>
       </article>
-    `).join("");
+    `;
+    }).join("");
+
+    function openInquiryFor(l) {
+      $("inqBranch").value = l.branch;
+      $("inqRoomNo").value = l.room_no;
+      $("inqModalTitle").textContent = `💬 [${l.building_name} ${l.room_no}호] 집주인 1:1 방문문의`;
+      const u = getSession();
+      if (u && u.name) $("inqSenderName").value = u.name;
+      if (u && u.phone) $("inqSenderPhone").value = u.phone;
+      $("inquiryModal").classList.add("is-open");
+    }
+
+    function openRentNowFor(l) {
+      const u = getSession();
+      if (!u || !u.name) {
+        // 비로그인 시: 본인인증 로그인 후 해당 매물 호출 화면으로 즉시 이동!
+        P.openAuthModal({
+          tab: "login",
+          preset: "cosign",
+          targetHint: `contract:${l.branch}:${l.room_no}`,
+        });
+        return;
+      }
+      $("rnBranch").value = l.branch;
+      $("rnRoomNo").value = l.room_no;
+      const isLessor = u.role === "lessor" || u.role === "admin";
+      $("rnCallerRole").value = isLessor ? "lessor" : "tenant";
+      $("rnModalTitle").textContent = `📞 [${l.building_name} ${l.room_no}호] 상대방 호출 및 공동계약 시작`;
+      $("rnVerifiedNotice").innerHTML =
+        `🛡️ <strong>${esc(u.name)}</strong>님(본인인증 완료) 계정으로 <strong>${isLessor ? "임차인" : "임대인"}</strong>을 호출합니다.`;
+      if (!isLessor) {
+        $("rnTenantName").value = u.name || "";
+        $("rnTenantPhone").value = u.phone || "";
+      }
+      $("rentNowModal").classList.add("is-open");
+    }
+
+    grid.querySelectorAll(".js-open-detail").forEach((el) => {
+      const openIt = (e) => {
+        if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1)) return;
+        if (e) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        const item = list.find((x) => x.id === el.dataset.roomId);
+        if (item && window.R3ListingModal) {
+          window.R3ListingModal.open(item, {
+            onInquiry: openInquiryFor,
+            onRentNow: openRentNowFor,
+          });
+        }
+      };
+      el.addEventListener("click", openIt);
+      if (el.tagName !== "A") {
+        el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") openIt(e);
+        });
+      }
+    });
 
     grid.querySelectorAll(".js-open-inquiry").forEach((btn) => {
       btn.addEventListener("click", () => {
-        $("inqBranch").value = btn.dataset.branch;
-        $("inqRoomNo").value = btn.dataset.room;
-        $("inqModalTitle").textContent = `💬 [${btn.dataset.bldg} ${btn.dataset.room}호] 집주인 1:1 방문문의`;
-        const u = getSession();
-        if (u && u.name) $("inqSenderName").value = u.name;
-        if (u && u.phone) $("inqSenderPhone").value = u.phone;
-        $("inquiryModal").classList.add("is-open");
+        openInquiryFor({
+          branch: btn.dataset.branch,
+          room_no: btn.dataset.room,
+          building_name: btn.dataset.bldg,
+        });
       });
     });
 
     grid.querySelectorAll(".js-open-rentnow").forEach((btn) => {
       btn.addEventListener("click", () => {
-        const u = getSession();
-        if (!u || !u.name) {
-          // 비로그인 시: 본인인증 로그인 후 해당 매물 호출 화면으로 즉시 이동!
-          P.openAuthModal({
-            tab: "login",
-            preset: "cosign",
-            targetHint: `contract:${btn.dataset.branch}:${btn.dataset.room}`,
-          });
-          return;
-        }
-        $("rnBranch").value = btn.dataset.branch;
-        $("rnRoomNo").value = btn.dataset.room;
-        const isLessor = u.role === "lessor" || u.role === "admin";
-        $("rnCallerRole").value = isLessor ? "lessor" : "tenant";
-        $("rnModalTitle").textContent = `📞 [${btn.dataset.bldg} ${btn.dataset.room}호] 상대방 호출 및 공동계약 시작`;
-        $("rnVerifiedNotice").innerHTML =
-          `🛡️ <strong>${esc(u.name)}</strong>님(본인인증 완료) 계정으로 <strong>${isLessor ? "임차인" : "임대인"}</strong>을 호출합니다.`;
-        if (!isLessor) {
-          $("rnTenantName").value = u.name || "";
-          $("rnTenantPhone").value = u.phone || "";
-        }
-        $("rentNowModal").classList.add("is-open");
+        openRentNowFor({
+          branch: btn.dataset.branch,
+          room_no: btn.dataset.room,
+          building_name: btn.dataset.bldg,
+        });
       });
     });
   }

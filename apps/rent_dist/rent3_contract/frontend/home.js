@@ -240,28 +240,49 @@
     const bd = openDialog(`
       <h3 style="margin:0 0 4px;">계약할 집 고르기</h3>
       <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다. 입주 중이어도 퇴실이 예정된 집은 <strong>퇴실 전에 미리 계약</strong>할 수 있습니다.</div>
-      ${listings.length ? listings.map((r) => `
-        <div class="room-row">
-          <div class="room-row__main">
+      ${listings.length ? listings.map((r) => {
+        const pdfUrl = r.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(r.id)}/terms.pdf`;
+        const imgUrl = r.image || "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80";
+        return `
+        <div class="room-row" style="align-items:flex-start;">
+          <div class="js-ct-detail" data-room-id="${esc(r.id)}" role="button" tabindex="0" style="position:relative;flex:0 0 92px;width:92px;height:76px;border-radius:10px;overflow:hidden;cursor:pointer;background:#f1f5f9;">
+            <img src="${esc(imgUrl)}" alt="${esc(r.building_name)} ${esc(r.room_no)}호" style="width:100%;height:100%;object-fit:cover;display:block;">
+            <a href="${esc(pdfUrl)}" class="js-ct-detail" data-room-id="${esc(r.id)}" style="position:absolute;left:3px;right:3px;bottom:3px;background:rgba(15,23,42,.88);color:#fff;font-size:12px;font-weight:700;padding:2px 4px;border-radius:6px;text-align:center;text-decoration:none;">📄 PDF</a>
+          </div>
+          <div class="room-row__main" style="flex:1;">
             <div class="room-row__title">${esc(r.building_name)} ${esc(r.room_no)}호${r.is_occupied ? ' <span class="bass-badge bass-badge--warn" style="font-size:12px;">📅 퇴실 전 미리 계약</span>' : ""}</div>
             ${r.is_occupied ? `<div class="bass-muted" style="font-size:12px;">현재 입주 중 · ${r.expected_vacate_date ? `<strong>${esc(r.expected_vacate_date)}</strong> 이후 입주` : "퇴실 확정 후 입주"} (전입일과 전출일은 같은 날까지 가능)</div>` : ""}
             <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}<br>${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${esc(r.direction)}` : ""} · 입주 ${esc(r.available_from || "즉시")}</div>
           </div>
           <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">이 집으로</button>
-        </div>`).join("") : `<div class="bass-muted" style="padding:10px 0;">지금 공개된 매물이 없습니다.</div>`}
+        </div>`;
+      }).join("") : `<div class="bass-muted" style="padding:10px 0;">지금 공개된 매물이 없습니다.</div>`}
       <button id="dlgCancel" class="bass-btn" style="width:100%;margin-top:8px;" type="button">닫기</button>`);
     bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
+    const startCallForRoom = async (room) => {
+      const res = await Bass.api(APP_ID, "/sessions/call", {
+        method: "POST",
+        body: { caller_role: "tenant", branch: room.branch, room_no: room.room_no, mode: "NEW",
+                tenant_name: loggedUser.name || "", tenant_phone: loggedUser.phone || "", id_tenant: myTenantId },
+      });
+      D.elDlgHost.innerHTML = "";
+      await afterCall(res);
+    };
+    bd.querySelectorAll(".js-ct-detail").forEach((el) => el.addEventListener("click", (e) => {
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const room = listings.find((x) => x.id === el.dataset.roomId);
+      if (room && window.R3ListingModal) {
+        window.R3ListingModal.open(room, {
+          rentNowLabel: "🤝 이 집으로 계약 요청",
+          onRentNow: (pickedRoom) => { startCallForRoom(pickedRoom).catch(Bass.showError); },
+        });
+      }
+    }));
     bd.querySelectorAll(".js-pick").forEach((b) => b.addEventListener("click", function () {
       const room = findRoom(this.dataset.room);
-      Bass.withLock(this, async () => {
-        const res = await Bass.api(APP_ID, "/sessions/call", {
-          method: "POST",
-          body: { caller_role: "tenant", branch: room.branch, room_no: room.room_no, mode: "NEW",
-                  tenant_name: loggedUser.name || "", tenant_phone: loggedUser.phone || "", id_tenant: myTenantId },
-        });
-        D.elDlgHost.innerHTML = "";
-        await afterCall(res);
-      }, "요청 보내는 중... ⏳");
+      Bass.withLock(this, () => startCallForRoom(room), "요청 보내는 중... ⏳");
     }));
   }
 

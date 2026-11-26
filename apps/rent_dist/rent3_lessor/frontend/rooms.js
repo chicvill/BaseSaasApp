@@ -215,6 +215,7 @@
           </div>
           <textarea id="promoTextarea" class="bass-input" rows="12" style="width:100%;font-size:13px;line-height:1.6;font-family:inherit;padding:10px;border-radius:8px;resize:vertical;"></textarea>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;justify-content:flex-end;">
+            <button type="button" id="btnOpenTermsPdfPromo" class="bass-btn bass-btn--sm" style="min-height:40px;">📄 표준 임대조건서 PDF 보기</button>
             <button type="button" id="btnCopyLinkOnly" class="bass-btn bass-btn--sm" style="min-height:40px;">🔗 안심 링크만 복사</button>
             <button type="button" id="btnOpenDaangnApp" class="bass-btn bass-btn--sm" style="min-height:40px;background:hsla(28,95%,55%,.15);border-color:hsla(28,95%,50%,.4);display:none;">🥕 당근 앱 열기</button>
             <button type="button" id="btnCopyAllPromo" class="bass-btn bass-btn--sm bass-btn--primary" style="min-height:40px;font-weight:600;">📋 홍보글 전체 복사</button>
@@ -256,6 +257,10 @@
           copyText(text);
           Bass.updateAppAlert("success", "클립보드에 복사되었습니다.");
         }
+      });
+
+      body.querySelector("#btnOpenTermsPdfPromo").addEventListener("click", () => {
+        openLessorTermsPdf(roomId).catch(Bass.showError);
       });
 
       body.querySelector("#btnCopyLinkOnly").addEventListener("click", async () => {
@@ -422,14 +427,34 @@
     });
   }
 
+  async function openLessorTermsPdf(roomId) {
+    if (!roomId) return;
+    const headers = {};
+    const tk = Bass.token();
+    if (tk) headers["Authorization"] = "Bearer " + tk;
+    const resp = await fetch(`${Bass.apiBase(APP_ID)}/rooms/${encodeURIComponent(roomId)}/terms.pdf`, { headers });
+    if (!resp.ok) throw new Error("표준 임대조건서 PDF를 불러올 수 없습니다.");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   function renderRoomsTab() {
     const rooms = S.dash.rooms || [];
+    const bldg = (S.dash && S.dash.building) || {};
     const sortedRooms = rooms.slice().sort((a, b) => String(a.room_no).localeCompare(String(b.room_no), "ko", { numeric: true }));
     const DIRECTIONS = ["", "남향", "남동향", "남서향", "동향", "서향", "북향", "북동향", "북서향"];
+    const OPTION_PRESETS = ["시스템 에어컨", "드럼 세탁기", "빌트인 냉장고", "인덕션", "디지털 도어락", "옷장", "침대", "책상", "전자레인지", "신발장"];
+    const MAINT_PRESETS = ["수도료", "인터넷", "케이블TV", "공용전기", "건물청소", "승강기유지비"];
+    const E = Bass.escapeHtml;
     elTabContent.innerHTML = `
       <div class="bass-card" style="margin-bottom:14px;">
-        <h3>🏷️ 임대매물 등록</h3>
-        <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">호실을 고르고 조건을 확인한 뒤 등록하면 임차인 화면에 공개됩니다. 입주 중인 호실도 전출(퇴실) 계획이 확정된 경우 입주가능일을 지정해 미리 매물로 등록할 수 있습니다.</p>
+        <h3>🏷️ 임대매물 등록 · 표준 임대조건서(PDF) 생성</h3>
+        <p class="bass-muted" style="font-size:13px;margin:4px 0 10px;">표준임대차계약서를 참조해 주소·전용면적·보증금·옵션·설비·관리비 포함내역·특약을 입력하고 등록하면 <strong>표준 임대조건 안내서 PDF</strong>가 자동 생성되어 예비 임차인이 매물 사진에서 바로 열람할 수 있습니다.</p>
+        <div style="font-size:13px;background:var(--surface-2,#f8fafc);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin-bottom:10px;">
+          📍 건물 소재지: <strong>${E(bldg.address || "주소 미등록 (더보기 ▸ 건물 정보 수정에서 입력)")}</strong> · ${E(bldg.building_name || S.currentBranch)}
+        </div>
         <div class="field-grid" style="margin:10px 0;">
           <div>
             <label class="bass-label">호실</label>
@@ -439,7 +464,7 @@
                 const st = r.is_occupied
                   ? (r.pre_moveout_notice ? "입주중 · 전출예정 공개중" : "입주중 (전출예정 사전등록)")
                   : (r.is_published ? "공실 · 매물 공개중" : "공실");
-                return `<option value="${Bass.escapeHtml(r.id)}">${Bass.escapeHtml(r.room_no)}호 — ${st}</option>`;
+                return `<option value="${E(r.id)}">${E(r.room_no)}호 — ${st}</option>`;
               }).join("")}
               <option value="__new__">➕ 목록에 없는 새 호실 추가…</option>
             </select>
@@ -460,6 +485,15 @@
           <div><label class="bass-label">보증금(원)</label><input id="nrDep" type="number" class="bass-input" value="5000000"></div>
           <div><label class="bass-label">월세(원)</label><input id="nrRent" type="number" class="bass-input" value="500000"></div>
           <div><label class="bass-label">관리비(원)</label><input id="nrMaint" type="number" class="bass-input" value="50000"></div>
+          <div><label class="bass-label">퇴실 청소비(원, 약정 시)</label><input id="nrClean" type="number" class="bass-input" value="0" min="0" step="10000"></div>
+          <div>
+            <label class="bass-label">월세 납부 시기</label>
+            <select id="nrPayTiming" class="bass-select">
+              <option value="후불">후불 (입주월 비과세 · 익월 납부)</option>
+              <option value="선불">선불 (매월 선납)</option>
+            </select>
+          </div>
+          <div><label class="bass-label">임대기간(개월)</label><input id="nrTermMonths" type="number" class="bass-input" value="12" min="1" max="60"></div>
           <div><label class="bass-label">전용면적(㎡)</label><input id="nrArea" type="number" step="0.1" class="bass-input" value="23"></div>
           <div><label class="bass-label">향</label>
             <select id="nrDir" class="bass-select">${DIRECTIONS.map((d) => `<option value="${d}">${d || "선택 안 함"}</option>`).join("")}</select>
@@ -471,15 +505,84 @@
           <label class="bass-label">매물 소개 (선택)</label>
           <input id="nrDesc" class="bass-input" placeholder="예: 남향 풀옵션, 도배·장판 새로 시공">
         </div>
+
+        <details open style="border:1px solid var(--border);border-radius:12px;padding:12px;margin:0 0 12px;background:var(--surface-2,#f8fafc);">
+          <summary style="cursor:pointer;font-weight:800;font-size:14px;">📄 표준 임대조건서(PDF) 상세 항목 (옵션 · 설비 · 관리비 포함 · 표준 특약)</summary>
+          <div style="margin-top:10px;">
+            <div class="bass-label" style="margin-bottom:6px;">🛋️ 옵션 리스트 (해당 항목 체크)</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-bottom:8px;">
+              ${OPTION_PRESETS.map((opt) => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;min-height:30px;"><input type="checkbox" class="nr-opt-chk" value="${E(opt)}"> ${E(opt)}</label>`).join("")}
+            </div>
+            <input id="nrOptExtra" class="bass-input" placeholder="추가 옵션 직접 입력 (쉼표 구분, 예: TV, 식탁, 블라인드)" style="margin-bottom:10px;">
+
+            <div class="bass-label" style="margin-bottom:6px;">🏢 건물 · 호실 설비 설치 여부</div>
+            <div class="field-grid" style="margin-bottom:10px;">
+              <div>
+                <label class="bass-label">📺 케이블 TV</label>
+                <select id="nrCableTv" class="bass-select">
+                  <option value="설치됨">설치됨</option>
+                  <option value="미설치">미설치</option>
+                  <option value="별도신청">별도신청</option>
+                  <option value="미확인">미확인</option>
+                </select>
+              </div>
+              <div>
+                <label class="bass-label">🌐 인터넷 / Wi-Fi</label>
+                <select id="nrInternet" class="bass-select">
+                  <option value="설치됨">설치됨</option>
+                  <option value="미설치">미설치</option>
+                  <option value="별도신청">별도신청</option>
+                  <option value="미확인">미확인</option>
+                </select>
+              </div>
+              <div>
+                <label class="bass-label">🛗 엘리베이터</label>
+                <select id="nrElevator" class="bass-select">
+                  <option value="설치됨">설치됨</option>
+                  <option value="없음">없음</option>
+                  <option value="미확인">미확인</option>
+                </select>
+              </div>
+              <div>
+                <label class="bass-label">🚗 주차 가능 여부</label>
+                <select id="nrParking" class="bass-select">
+                  <option value="가능">가능</option>
+                  <option value="불가">불가</option>
+                  <option value="협의">협의</option>
+                  <option value="미확인">미확인</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="bass-label" style="margin-bottom:6px;">🧾 관리비 포함 내역</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin-bottom:8px;">
+              ${MAINT_PRESETS.map((it) => `<label style="display:inline-flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;min-height:30px;"><input type="checkbox" class="nr-maint-chk" value="${E(it)}"> ${E(it)}</label>`).join("")}
+            </div>
+            <input id="nrMaintExtra" class="bass-input" placeholder="관리비 비고 (예: 전기·가스 개별계량 별도 부담)" style="margin-bottom:10px;">
+
+            <div class="bass-label" style="margin-bottom:6px;">⚖️ 표준 임대조건 · 특약 및 계약 해지 사유</div>
+            <div style="display:grid;gap:4px;margin-bottom:8px;">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-height:30px;"><input id="nrNoPets" type="checkbox" checked> 🐾 반려동물(동물) 사육 금지</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-height:30px;"><input id="nrNoSmoking" type="checkbox" checked> 🚭 실내 흡연 금지 (호실 내부 및 공용부)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-height:30px;"><input id="nrTerm2m" type="checkbox" checked> ⚖️ 2개월(2기) 이상 차임 체납 시 계약 해지 (주택임대차보호법 제10조의8 · 민법 제640조)</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-height:30px;"><input id="nrNoSublease" type="checkbox" checked> 🚫 무단 전대 · 양도 및 용도변경 금지</label>
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;min-height:30px;"><input id="nrRestore" type="checkbox" checked> 🧹 퇴실 시 원상복구(자연 마모 제외) 및 약정 퇴실 청소비 공제</label>
+            </div>
+            <textarea id="nrCustomClauses" class="bass-input" rows="2" placeholder="추가 특약 사항 (선택, 줄바꿈으로 구분 · 예: 퇴실 1개월 전 통보, 벽면 못질 금지)"></textarea>
+          </div>
+        </details>
+
         <div id="nrMoveoutNoticeWrap" class="bass-card" style="display:none;margin:0 0 10px;padding:10px;background:var(--surface-2,#f8fafc);border-color:var(--warn,#d97706);">
           <div style="font-size:13px;font-weight:700;margin-bottom:4px;">📦 입주 중인 호실 — 전출 예정 사전 매물 등록</div>
-          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 전출(퇴실) 계획이 확정된 경우에만 '입주가능일'을 지정해 사전 매물로 공개해 주세요. <strong>사전 매물은 퇴실 기준일(만기) 1개월 전부터</strong> 공개할 수 있습니다(임차인이 전출 예정을 일찍 회신해도 그날 자동으로 공개됩니다).</div>
+          <div id="nrCurTermsHint" style="font-size:12.5px;margin-bottom:6px;line-height:1.55;"></div>
+          <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">현재 세입자가 입주 중입니다. 위 금액은 <strong>다음 새 임차인용 매물·예약 계약 조건</strong>으로 별도 저장되며 현재 계약에는 영향을 주지 않습니다. <strong>사전 매물은 퇴실 기준일(만기) 1개월 전부터</strong> 공개할 수 있습니다.</div>
           <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;cursor:pointer;min-height:36px;">
             <input id="nrPreMoveout" type="checkbox"> 현재 세입자의 전출(퇴실) 계획이 확정되어 사전 매물로 공개합니다
           </label>
         </div>
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
-          <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">📢 임대매물 등록</button>
+          <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">📢 임대매물 등록 (PDF 자동 생성)</button>
+          <button id="btnPreviewListingPdf" class="bass-btn" type="button" style="display:none;">📄 표준 임대조건서 PDF 보기</button>
           <button id="btnUnpublishRoom" class="bass-btn" type="button" style="display:none;">매물 내리기</button>
         </div>
       </div>
@@ -541,6 +644,53 @@
     $nr("nrAvailNow").addEventListener("change", syncAvailInputs);
     syncAvailInputs();
 
+    function applyListingSpecToForm(lm) {
+      const spec = (lm && lm.listing_spec) || {};
+      const optNames = Array.isArray(spec.options) && spec.options.length
+        ? spec.options
+        : ((lm && Array.isArray(lm.option_list)) ? lm.option_list.map((o) => (typeof o === "string" ? o : (o && (o.item || o.name)) || "")).filter(Boolean) : []);
+      const presetSet = new Set(OPTION_PRESETS);
+      elTabContent.querySelectorAll(".nr-opt-chk").forEach((el) => { el.checked = optNames.includes(el.value); });
+      $nr("nrOptExtra").value = optNames.filter((x) => !presetSet.has(x)).join(", ");
+      $nr("nrCableTv").value = spec.cable_tv || "설치됨";
+      $nr("nrInternet").value = spec.internet || "설치됨";
+      $nr("nrElevator").value = spec.elevator || "설치됨";
+      $nr("nrParking").value = spec.parking || "가능";
+      const maintInc = Array.isArray(spec.maintenance_includes) ? spec.maintenance_includes : [];
+      elTabContent.querySelectorAll(".nr-maint-chk").forEach((el) => { el.checked = maintInc.includes(el.value); });
+      $nr("nrMaintExtra").value = spec.maintenance_extra || "";
+      $nr("nrTermMonths").value = Number(spec.lease_term_months || 12);
+      $nr("nrNoPets").checked = spec.no_pets !== false;
+      $nr("nrNoSmoking").checked = spec.no_smoking !== false;
+      $nr("nrTerm2m").checked = spec.terminate_on_2m_arrears !== false;
+      $nr("nrNoSublease").checked = spec.no_sublease !== false;
+      $nr("nrRestore").checked = spec.restore_clause !== false;
+      $nr("nrCustomClauses").value = spec.custom_clauses || "";
+    }
+
+    function collectListingSpecFromForm() {
+      const checkedOpts = [...elTabContent.querySelectorAll(".nr-opt-chk:checked")].map((el) => el.value);
+      const extraOpts = ($nr("nrOptExtra").value || "").split(/[,/\n]+/).map((s) => s.trim()).filter(Boolean);
+      const options = [...new Set([...checkedOpts, ...extraOpts])];
+      const maintenance_includes = [...elTabContent.querySelectorAll(".nr-maint-chk:checked")].map((el) => el.value);
+      return {
+        options,
+        cable_tv: $nr("nrCableTv").value,
+        internet: $nr("nrInternet").value,
+        elevator: $nr("nrElevator").value,
+        parking: $nr("nrParking").value,
+        maintenance_includes,
+        maintenance_extra: ($nr("nrMaintExtra").value || "").trim(),
+        lease_term_months: Math.max(1, Number($nr("nrTermMonths").value || 12)),
+        no_pets: $nr("nrNoPets").checked,
+        no_smoking: $nr("nrNoSmoking").checked,
+        terminate_on_2m_arrears: $nr("nrTerm2m").checked,
+        no_sublease: $nr("nrNoSublease").checked,
+        restore_clause: $nr("nrRestore").checked,
+        custom_clauses: ($nr("nrCustomClauses").value || "").trim(),
+      };
+    }
+
     $nr("nrRoom").addEventListener("change", () => {
       const v = $nr("nrRoom").value;
       $nr("nrNewWrap").style.display = v === "__new__" ? "block" : "none";
@@ -550,24 +700,41 @@
       $nr("nrMoveoutNoticeWrap").style.display = isOcc ? "block" : "none";
       $nr("nrPreMoveout").checked = Boolean(r && r.pre_moveout_notice);
       $nr("btnUnpublishRoom").style.display = isLive ? "inline-flex" : "none";
-      $nr("btnCreateRoom").textContent = isLive ? "📢 변경 내용으로 다시 등록" : (isOcc ? "📢 전출예정 사전 매물 등록" : "📢 임대매물 등록");
+      $nr("btnPreviewListingPdf").style.display = r ? "inline-flex" : "none";
+      $nr("btnCreateRoom").textContent = isLive ? "📢 변경 내용으로 다시 등록 (PDF 갱신)" : (isOcc ? "📢 전출예정 사전 매물 등록 (PDF 생성)" : "📢 임대매물 등록 (PDF 자동 생성)");
       if (!r) {
         $nr("nrAvailNow").disabled = false;
         $nr("nrAvailNow").checked = true;
         $nr("nrAvail").value = "";
+        $nr("nrClean").value = 0;
+        $nr("nrPayTiming").value = "후불";
+        applyListingSpecToForm(null);
         syncAvailInputs();
         return;
+      }
+      if (isOcc && r.contract) {
+        const c = r.contract;
+        const maxDep5 = Math.round(Number(c.deposit || 0) * 1.05);
+        const maxRent5 = Math.round(Number(c.monthly_rent || 0) * 1.05);
+        $nr("nrCurTermsHint").innerHTML =
+          `현재 계약: 보증금 <strong>${Number(c.deposit || 0).toLocaleString()}원</strong> / 월세 <strong>${Number(c.monthly_rent || 0).toLocaleString()}원</strong> / 관리비 ${Number(c.maintenance_fee || 0).toLocaleString()}원 / 청소비 ${Number(c.cleaning_fee || 0).toLocaleString()}원<br>` +
+          `<span class="bass-muted">참고(+5% 기준): 보증금 ${maxDep5.toLocaleString()}원 · 월세 ${maxRent5.toLocaleString()}원 (신규 임차인용 매물 조건은 자유롭게 입력 가능)</span>`;
+      } else {
+        $nr("nrCurTermsHint").innerHTML = "";
       }
       const lm = isOcc ? { ...r, ...(r.next_terms || {}), ...(r.next_listing || {}) } : r;
       $nr("nrCat").value = lm.room_category || "주거용 원룸";
       $nr("nrDep").value = lm.deposit;
       $nr("nrRent").value = lm.monthly_rent;
       $nr("nrMaint").value = lm.maintenance_fee;
+      $nr("nrClean").value = Number(lm.cleaning_fee || 0);
+      $nr("nrPayTiming").value = lm.pay_timing === "선불" ? "선불" : "후불";
       $nr("nrArea").value = lm.area_sqm;
       $nr("nrDir").value = lm.direction || "";
       $nr("nrFloor").value = lm.floor;
       $nr("nrTotalFloors").value = lm.total_floors || 0;
       $nr("nrDesc").value = lm.status_description || "";
+      applyListingSpecToForm(lm);
       const af = lm.available_from || "";
       const mDate = af.match(/\d{4}-\d{2}-\d{2}/);
       const expDate = r.contract && /^\d{4}-\d{2}-\d{2}$/.test(r.contract.expiry_date || "") ? r.contract.expiry_date : "";
@@ -582,6 +749,12 @@
         $nr("nrAvail").value = isDate ? mDate[0] : "";
       }
       syncAvailInputs();
+    });
+
+    $nr("btnPreviewListingPdf").addEventListener("click", function () {
+      const r = roomById($nr("nrRoom").value);
+      if (!r) return;
+      Bass.withLock(this, () => openLessorTermsPdf(r.id), "PDF 생성 중...");
     });
 
     $nr("btnUnpublishRoom").addEventListener("click", function () {
@@ -617,6 +790,7 @@
           return;
         }
         const cat = $nr("nrCat").value;
+        const listing_spec = collectListingSpecFromForm();
         const res = await Bass.api(APP_ID, "/rooms", {
           method: "POST",
           body: {
@@ -627,12 +801,15 @@
             deposit: Number($nr("nrDep").value || 0),
             monthly_rent: Number($nr("nrRent").value || 0),
             maintenance_fee: Number($nr("nrMaint").value || 0),
+            cleaning_fee: Number($nr("nrClean").value || 0),
+            pay_timing: $nr("nrPayTiming").value || "후불",
             area_sqm: Number($nr("nrArea").value || 0),
             direction: $nr("nrDir").value,
             floor: Number($nr("nrFloor").value || 0),
             total_floors: Number($nr("nrTotalFloors").value || 0),
             available_from: avail,
             status_description: $nr("nrDesc").value.trim() || "신규 등록 호실",
+            listing_spec,
             is_published: true,
             pre_moveout_notice: isOcc ? Boolean($nr("nrPreMoveout").checked) : null,
           },

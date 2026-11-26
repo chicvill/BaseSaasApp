@@ -151,11 +151,11 @@ def not_revoked(request: Request) -> None:
         raise Unauthorized("2단계 인증이 필요합니다.", hint="관리인 계정은 2단계 인증을 켠 상태라, 포털에서 비밀번호 다음에 인증 코드를 입력해 로그인해 주세요.")
 
 
-def api_headers(response: Response) -> None:
+def api_headers(request: Request, response: Response) -> None:
     """API 응답에 보안 헤더: 개인정보가 캐시에 남지 않게 하고, 형식 추측·프레임 삽입을 막는다."""
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN" if request.url.path.endswith("/terms.pdf") else "DENY"
     response.headers["Referrer-Policy"] = "no-referrer"
 
 

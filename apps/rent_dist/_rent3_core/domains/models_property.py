@@ -116,6 +116,7 @@ class Room(PoolObj):
     registry_info: Dict[str, Any] = Field(default_factory=dict)
     status_description: str = ""
     option_list: List[Dict[str, Any]] = Field(default_factory=list)
+    listing_spec: Dict[str, Any] = Field(default_factory=dict)  # 표준임대차계약서 참조 매물 세부조건(케이블TV·인터넷·엘리베이터·관리비포함·특약 등)
     lease_type: str = "월세"
     pay_timing: str = "후불"
     deposit: int = 5000000
@@ -152,8 +153,11 @@ class Room(PoolObj):
                 t.save(action="doorlock_synced", app_source=app_source)
         return self.save(action="doorlock_updated", app_source=app_source)
 
-    LISTING_FIELDS: ClassVar[tuple] = ("name", "room_category", "floor", "area_sqm", "total_floors", "direction", "deposit", "monthly_rent",
-                                       "maintenance_fee", "cleaning_fee", "pay_timing", "vat_applicable", "available_from", "status_description")
+    LISTING_FIELDS: ClassVar[tuple] = (
+        "name", "room_category", "floor", "area_sqm", "total_floors", "direction",
+        "deposit", "monthly_rent", "maintenance_fee", "cleaning_fee", "pay_timing",
+        "vat_applicable", "available_from", "status_description", "option_list", "listing_spec",
+    )
 
     def as_listing(self) -> "Room":
         """공개 목록·홍보글이 읽는 값: 입주 중이고 다음 세입자용 조건이 있으면 그 조건을 덮어쓴 복사본(저장하지 않는다)."""

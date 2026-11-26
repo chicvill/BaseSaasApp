@@ -2,7 +2,9 @@
 apps/rent_dist/rent3_lessor/routers/rooms.py — 대시보드 · 호실 등록/공개/다음조건/예약취소 · 등기부 · 출입교부/도어락 · 건물 수정.
 """
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 from fastapi import APIRouter, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from core.errors import DomainError, Forbidden
@@ -25,6 +27,7 @@ from apps.rent_dist._rent3_core import (
     connect,
     date_today,
     ensure_pool_seeded,
+    listing_pdf,
     mailpay,
     normalize_branch_id,
     pool,
@@ -48,6 +51,7 @@ class RoomCreateReq(BaseModel):
     deposit: int = 5000000
     monthly_rent: int = 500000
     maintenance_fee: int = 50000
+    cleaning_fee: int = 0
     pay_timing: str = "후불"
     status_description: str = "신규 등록 풀옵션 호실"
     total_floors: int = 0
@@ -55,6 +59,8 @@ class RoomCreateReq(BaseModel):
     available_from: str = "즉시입주"
     is_published: bool = True
     pre_moveout_notice: Optional[bool] = None
+    option_list: Optional[List[Any]] = None
+    listing_spec: Optional[Dict[str, Any]] = None
 
 
 class PublishToggleReq(BaseModel):
@@ -179,6 +185,7 @@ def get_dashboard(request: Request, branch: str = "main", up_to_ym: Optional[str
             "checkout_liability": ct.checkout_liability(r) if ct else None,       # 만기 전 퇴실 시 만기일(또는 새 임차인 입주 전)까지 이전 임차인이 부담할 월세
             "billing_schedule": bill_sched,
             "billing_notices": bill_notices,
+            "terms_pdf_url": listing_pdf.listing_pdf_url(r.id),
         }
         room_cards.append(card)
         if ct and ((exp_win and exp_win["in_6_to_2_months_window"]) or exp_chk is not None):
@@ -257,6 +264,16 @@ def create_or_update_room(req: RoomCreateReq):
             f"가맹점당 등록 가능 호실 수({lsr.room_limit}실)를 넘었습니다.",
             hint="더 등록하려면 관리자에게 한도 상향을 요청해 주세요.",
         )
+    clean_fee = max(0, int(req.cleaning_fee or 0))
+    spec_norm: Optional[Dict[str, Any]] = None
+    opts_norm: Optional[List[Dict[str, Any]]] = None
+    if req.listing_spec is not None:
+        base_opts = existing.option_list if existing else None
+        spec_norm = listing_pdf.normalize_listing_spec(req.listing_spec, base_opts)
+        opts_norm = listing_pdf.options_to_room_list(spec_norm["options"])
+    elif req.option_list is not None:
+        opts_norm = listing_pdf.options_to_room_list(listing_pdf._clean_str_list(req.option_list))
+
     if existing:
         if existing.is_occupied:
             if req.is_published:
@@ -283,7 +300,8 @@ def create_or_update_room(req: RoomCreateReq):
         if existing.is_occupied:
             # 입주 중: 현재 계약·방 값은 그대로 두고 '다음 세입자용 조건'만 임시로 저장한다(퇴실 확정 때 반영, 새 계약 체결 때 삭제)
             if req.is_published:
-                existing.next_listing = {
+                prev_nl = dict(existing.next_listing or {})
+                nl_doc: Dict[str, Any] = {
                     "name": req.name or existing.name,
                     "room_category": req.room_category,
                     "floor": req.floor,
@@ -293,21 +311,52 @@ def create_or_update_room(req: RoomCreateReq):
                     "deposit": req.deposit,
                     "monthly_rent": req.monthly_rent,
                     "maintenance_fee": req.maintenance_fee,
+                    "cleaning_fee": clean_fee,
                     "pay_timing": req.pay_timing,
                     "vat_applicable": req.vat_applicable,
                     "available_from": req.available_from,
                     "status_description": req.status_description,
                 }
+                if spec_norm is not None:
+                    nl_doc["listing_spec"] = spec_norm
+                    nl_doc["option_list"] = opts_norm
+                else:
+                    if prev_nl.get("listing_spec"):
+                        nl_doc["listing_spec"] = prev_nl["listing_spec"]
+                    if opts_norm is not None:
+                        nl_doc["option_list"] = opts_norm
+                    elif prev_nl.get("option_list"):
+                        nl_doc["option_list"] = prev_nl["option_list"]
+                existing.next_listing = nl_doc
+                if existing.reservation() is None:
+                    nt_sync = dict(existing.next_terms or {})
+                    nt_sync.update({
+                        "deposit": req.deposit,
+                        "monthly_rent": req.monthly_rent,
+                        "maintenance_fee": req.maintenance_fee,
+                        "cleaning_fee": clean_fee,
+                        "pay_timing": req.pay_timing,
+                    })
+                    if spec_norm is not None:
+                        nt_sync["lease_term_months"] = spec_norm["lease_term_months"]
+                    existing.next_terms = nt_sync
             else:
                 existing.next_listing = {}
             existing.is_published = req.is_published
             existing.save(action="room_prelisting_saved", app_source=APP_SRC)
+            if req.is_published:
+                listing_pdf.save_listing_pdf(existing, building=bldg, lessor=lsr)
             msg = (
                 f"{req.room_no}호가 전출 예정 사전 매물로 등록되었습니다. (현재 계약·방 값은 그대로이며, 퇴실이 확정되면 이 조건이 적용됩니다)"
                 if existing.pre_moveout_notice
                 else f"{req.room_no}호 정보가 저장되었습니다."
             )
-            return {"success": True, "message": msg, "room": existing.model_dump()}
+            return {
+                "success": True,
+                "message": msg,
+                "room": existing.model_dump(),
+                "terms_pdf_url": listing_pdf.listing_pdf_url(existing.id),
+            }
         existing.name = req.name or existing.name
         existing.floor = req.floor
         existing.area_sqm = req.area_sqm
@@ -319,16 +368,28 @@ def create_or_update_room(req: RoomCreateReq):
         existing.deposit = req.deposit
         existing.monthly_rent = req.monthly_rent
         existing.maintenance_fee = req.maintenance_fee
+        existing.cleaning_fee = clean_fee
         existing.pay_timing = req.pay_timing
         existing.status_description = req.status_description
+        if spec_norm is not None:
+            existing.listing_spec = spec_norm
+            existing.option_list = opts_norm or []
+        elif opts_norm is not None:
+            existing.option_list = opts_norm
         existing.is_published = req.is_published
         existing.save(action="room_updated", app_source=APP_SRC)
+        listing_pdf.save_listing_pdf(existing, building=bldg, lessor=lsr)
         msg = (
             f"{req.room_no}호가 전출 예정 사전 매물로 등록되었습니다."
             if existing.is_occupied and existing.pre_moveout_notice
             else f"{req.room_no}호 정보가 저장되었습니다."
         )
-        return {"success": True, "message": msg, "room": existing.model_dump()}
+        return {
+            "success": True,
+            "message": msg,
+            "room": existing.model_dump(),
+            "terms_pdf_url": listing_pdf.listing_pdf_url(existing.id),
+        }
 
     room = Room(
         id=f"room_{b_id}_{req.room_no}",
@@ -346,11 +407,20 @@ def create_or_update_room(req: RoomCreateReq):
         deposit=req.deposit,
         monthly_rent=req.monthly_rent,
         maintenance_fee=req.maintenance_fee,
+        cleaning_fee=clean_fee,
         pay_timing=req.pay_timing,
         status_description=req.status_description,
+        option_list=opts_norm or [],
+        listing_spec=spec_norm or {},
         is_published=req.is_published,
     ).save(action="room_created", app_source=APP_SRC)
-    return {"success": True, "message": f"신규 {room.room_no}호가 등록되었습니다.", "room": room.model_dump()}
+    listing_pdf.save_listing_pdf(room, building=bldg, lessor=lsr)
+    return {
+        "success": True,
+        "message": f"신규 {room.room_no}호가 등록되었습니다.",
+        "room": room.model_dump(),
+        "terms_pdf_url": listing_pdf.listing_pdf_url(room.id),
+    }
 
 
 @router.post("/rooms/{room_id}/next-terms")
@@ -466,7 +536,28 @@ def get_room_promo(room_id: str, request: Request):
 
     from apps.rent_dist._rent3_core import promo
     data = promo.generate_promo(room, building=bldg, lessor=lsr, base_url=base_url)
-    return {"success": True, "promo": data}
+    return {"success": True, "promo": data, "terms_pdf_url": listing_pdf.listing_pdf_url(room.id)}
+
+
+@router.get("/rooms/{room_id}/terms.pdf")
+def get_lessor_room_terms_pdf(room_id: str, download: int = 0):
+    """임대인이 본인 호실의 표준 임대조건 안내서 PDF 를 미리보기/다운로드한다(비공개 호실도 허용)."""
+    ensure_pool_seeded()
+    room = Room.require(room_id)
+    bldg = Building.get(room.id_building) if room.id_building else Building.first(branch=room.branch)
+    lsr = _my_lessor(room.branch)
+    pdf_bytes = listing_pdf.build_listing_terms_pdf(room, building=bldg, lessor=lsr)
+    disp = "attachment" if download else "inline"
+    fname_ascii = f"rent3_terms_{room.room_no}.pdf"
+    fname_utf8 = quote(f"{(bldg.building_name if bldg else room.branch)}_{room.room_no}호_표준임대조건서.pdf")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'{disp}; filename="{fname_ascii}"; filename*=UTF-8\'\'{fname_utf8}',
+            "X-Frame-Options": "SAMEORIGIN",
+        },
+    )
 
 
 @router.post("/rooms/{room_id}/registry/read")

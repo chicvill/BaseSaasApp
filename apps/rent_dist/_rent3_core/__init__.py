@@ -4,6 +4,7 @@ apps/_rent3_core — Rent3 5대 분리 앱이 공동으로 사용하는 객체�
 언더스코어(`_`)로 시작하는 패키지이므로 `core/loader.py`의 `SaaSAppManager`가 앱 마운트 대상에서 자동 제외하며,
 불변의 BaseSaasApp 코어를 1줄도 수정하지 않고 모든 분리 앱이 동일한 JSON Data Pool을 공유한다.
 """
+from . import listing_pdf
 from .billing import FifoPaymentEngine, SmsDepositParser, TaxAndCertificateService
 from .broker import BrokerContractOnboarding, BrokerContractTextParser
 from .cosign import CoSignSession
@@ -75,5 +76,6 @@ __all__ = [
     "RtmsReport",
     "ExpiryRenewalCheck",
     "RentBillingNotice",
+    "listing_pdf",
 ]
 

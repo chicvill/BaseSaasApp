@@ -80,7 +80,7 @@ def open_session(
             "condition": o.get("condition", "정상"),
             "checked": True,
         }
-        for o in (room.option_list or [])
+        for o in (listing.option_list or [])
     ]
 
     is_renewal = (mode == "RENEWAL")
@@ -123,6 +123,21 @@ def open_session(
             ren_fee = chk_prev.proposed_maintenance_fee
             ren_months = max(1, chk_prev.proposed_term_months or 12)
     new_clean = int(listing.cleaning_fee or nt.get("cleaning_fee") or 0)
+    new_months = 12
+    extra_spec_terms: List[str] = []
+    if not is_renewal and listing.listing_spec:
+        from .. import listing_pdf as _lpdf
+        norm_spec = _lpdf.normalize_listing_spec(listing.listing_spec, listing.option_list)
+        new_months = norm_spec["lease_term_months"]
+        extra_spec_terms = _lpdf.build_special_terms_from_spec(norm_spec, cleaning_fee=new_clean)
+    base_new_terms = [
+        "본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.",
+        "임대인과 임차인은 각자 본인인증 로그인 후 서로의 실물 신분증과 등기부등본을 대조·확인하였음.",
+        "자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.",
+        "월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함.",
+        *extra_spec_terms,
+    ]
+    new_special_terms = "\n".join(f"{i}. {line}" for i, line in enumerate(base_new_terms, start=1))
     now_str = now_iso()
     session = cls(
         mode=mode,
@@ -188,17 +203,12 @@ def open_session(
             "maintenance_fee": ren_fee if is_renewal else listing.maintenance_fee,
             "cleaning_fee": ren_clean if is_renewal else new_clean,        # 퇴실 청소비 약정(0 = 약정 없음): 협의해 정하면 전출 정산 때 보증금에서 공제
             "move_in_date": move_in_default,
-            "lease_term_months": ren_months if is_renewal else 12,
+            "lease_term_months": ren_months if is_renewal else new_months,
             "special_terms": (
                 "1. 본 계약은 기존 임대차 계약의 만기 연장(재계약)으로, 본인 확인 및 기존 시설·옵션을 승계하며 비대면으로 체결함.\n"
                 "2. 보증금 및 월세 조정은 주택임대차보호법 제7조(5% 상한) 범위 내에서 합의함.\n"
                 "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음."
-            ) if is_renewal else (
-                "1. 본 계약은 공인중개사 중개수수료 없는 당사자 직접 계약임.\n"
-                "2. 임대인과 임차인은 각자 본인인증 로그인 후 서로의 실물 신분증과 등기부등본을 대조·확인하였음.\n"
-                "3. 자연 마모에 의한 시설 고장은 임대인이 무상 수리하며, 퇴실 시 통상 손모는 공제하지 않음.\n"
-                "4. 월세 후불 약정 시 입주 당월은 비과세이며 익월부터 전월 사용분을 납부함."
-            ),
+            ) if is_renewal else new_special_terms,
         },
     ).save(action="cosign_session_opened", app_source=app_source)
 

@@ -17,6 +17,7 @@ from apps.rent_dist._rent3_core import (
     contract_chat,
     ensure_pool_seeded,
     franchise as fr,
+    listing_pdf,
     normalize_branch_id,
     notifications as nf,
     pool,
@@ -111,12 +112,20 @@ def list_candidate_rooms(request: Request, branch: Optional[str] = None):
     bldgs = {b.id: b for b in Building.all()}
     lessors_by_branch = {lsr.branch: lsr for lsr in Lessor.all()}
     tenants_by_room = {t.current_room_id: t for t in Tenant.all() if t.status == "ACTIVE" and t.current_room_id}
+    default_imgs = (
+        "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80",
+        "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=80",
+        "https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=800&q=80",
+        "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800&q=80",
+    )
     items: List[Dict[str, Any]] = []
-    for r in sorted(rooms, key=lambda x: (x.branch, x.room_no)):
+    for idx, r in enumerate(sorted(rooms, key=lambda x: (x.branch, x.room_no))):
         b = bldgs.get(r.id_building)
         lsr = lessors_by_branch.get(r.branch)
         occ_t = tenants_by_room.get(r.id)
         shown = r.as_listing() if r.is_occupied else r          # 입주 중인 전출 예정 호실은 사전 매물로 올린 다음 세입자용 조건을 보여 준다
+        img_url = shown.images[0] if shown.images else default_imgs[idx % len(default_imgs)]
+        spec = listing_pdf.normalize_listing_spec(shown.listing_spec, shown.option_list)
         items.append({
             **(shown.model_dump() if (staff_all or r.branch == my_branch) else public_room(shown.model_dump())),
             "is_occupied": r.is_occupied,
@@ -126,6 +135,11 @@ def list_candidate_rooms(request: Request, branch: Optional[str] = None):
             "address": b.address if b else "",
             "lessor_name": lsr.name if lsr else "건물 소유주",
             "lessor_phone": (lsr.phone if lsr and lsr.phone else (b.manager_phone if b else "")),
+            "options": spec["options"],
+            "listing_spec": spec,
+            "terms_pdf_url": listing_pdf.listing_pdf_url(r.id),
+            "image": img_url,
+            "images": list(shown.images) if shown.images else [img_url],
             **(
                 {
                     "active_tenant_id": occ_t.id if occ_t else "",
