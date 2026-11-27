@@ -5,60 +5,214 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>임대인 안내 리플릿</title>
   <style>
-    :root { --ink:#1e293b; --mute:#64748b; --line:#cbd5e1; --pri:#e11d48; }
-    * { box-sizing:border-box; }
-    body { margin:0; background:#e2e8f0; color:var(--ink); font:14.5px/1.6 -apple-system,"Pretendard","Malgun Gothic",sans-serif; }
-    .bar { max-width:210mm; margin:12px auto; padding:0 12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .bar button { min-height:46px; padding:0 18px; border-radius:12px; border:1px solid var(--line); background:#fff; font-size:15px; font-weight:700; cursor:pointer; }
-    .bar .pri { background:var(--pri); border-color:var(--pri); color:#fff; }
-    .page { width:210mm; min-height:297mm; margin:0 auto 20px; background:#fff; padding:14mm 16mm 12mm; position:relative; }
-    .ad { font-size:12px; color:var(--mute); border:1px solid var(--line); display:inline-block; padding:1px 8px; border-radius:6px; }
-    h1 { font-size:28px; line-height:1.3; margin:10px 0 6px; }
-    h2 { font-size:17.5px; margin:14px 0 6px; border-bottom:2px solid var(--pri); padding-bottom:3px; }
-    ul { margin:6px 0; padding-left:22px; }
-    li { margin:4px 0; }
-    .qrbox { display:flex; gap:18px; align-items:center; border:2px solid var(--ink); border-radius:14px; padding:12px 14px; margin-top:16px; }
-    .qrbox svg { width:40mm; height:40mm; flex:none; }
-    .fee { font-size:19px; font-weight:800; }
-    .note { font-size:12.5px; color:var(--mute); }
-    .foot { position:absolute; left:16mm; right:16mm; bottom:10mm; font-size:12px; color:var(--mute); border-top:1px solid var(--line); padding-top:6px; }
-    @media print { body { background:#fff; } .bar { display:none; } .page { margin:0; box-shadow:none; width:auto; min-height:auto; } @page { size:A4; margin:0; } }
+    :root {
+      color-scheme: light;
+      --ink:#0f172a; --mute:#475569; --line:#cbd5e1;
+      --pri:#e11d48; --blue:#2563eb; --mint:#059669; --amber:#d97706;
+    }
+    * { box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    body {
+      margin:0;
+      background:linear-gradient(135deg, #dbeafe 0%, #fce7f3 50%, #dcfce7 100%);
+      color:var(--ink);
+      font:13.8px/1.55 -apple-system,"Pretendard","Malgun Gothic",sans-serif;
+    }
+    .bar {
+      max-width:210mm; margin:12px auto; padding:0 12px;
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+    }
+    .bar button {
+      min-height:46px; padding:0 18px; border-radius:12px;
+      border:1px solid var(--line); background:#fff; font-size:15px; font-weight:700; cursor:pointer;
+      box-shadow:0 2px 8px rgba(15,23,42,.08);
+    }
+    .bar .pri { background:linear-gradient(135deg, #e11d48, #f97316); border-color:transparent; color:#fff; }
+
+    .page {
+      width:210mm; min-height:297mm; margin:0 auto 24px;
+      background:#ffffff url("leaflet-bg.jpg") center / cover no-repeat;
+      padding:12mm 14mm 10mm;
+      position:relative;
+      display:flex; flex-direction:column; justify-content:space-between; gap:10px;
+      box-shadow:0 16px 40px rgba(15,23,42,.18);
+      overflow:hidden;
+    }
+    .hero {
+      background:rgba(255,255,255,.78);
+      backdrop-filter:blur(4px);
+      border:1.5px solid rgba(255,255,255,.95);
+      border-radius:18px;
+      padding:14px 18px 13px;
+      box-shadow:0 6px 20px rgba(15,23,42,.07);
+    }
+    .ad {
+      font-size:12px; font-weight:700; color:#be123c;
+      background:#fff1f2; border:1px solid #fda4af;
+      display:inline-block; padding:2px 10px; border-radius:999px;
+    }
+    h1 {
+      font-size:28px; line-height:1.25; font-weight:900;
+      margin:8px 0 5px; color:#0f172a; letter-spacing:-0.02em;
+    }
+    #regionLabel { color:#e11d48; }
+    .hero-sub { font-size:13.5px; color:#334155; font-weight:600; margin:0 0 9px; }
+    .pills { display:flex; flex-wrap:wrap; gap:6px; }
+    .pill {
+      font-size:12px; font-weight:800; padding:3px 10px; border-radius:999px;
+      display:inline-flex; align-items:center; gap:4px;
+    }
+    .pill--blue { background:#dbeafe; color:#1e40af; }
+    .pill--mint { background:#d1fae5; color:#065f46; }
+    .pill--amber { background:#fef3c7; color:#92400e; }
+    .pill--rose { background:#ffe4e6; color:#9f1239; }
+
+    .sec-head {
+      display:inline-flex; align-items:center; gap:6px;
+      font-size:15.5px; font-weight:900; color:#0f172a;
+      background:rgba(255,255,255,.9);
+      padding:4px 12px; border-radius:999px;
+      border-left:5px solid var(--pri);
+      margin:0 0 8px;
+      box-shadow:0 2px 6px rgba(15,23,42,.06);
+    }
+    .feat-grid {
+      display:grid; grid-template-columns:1fr 1fr; gap:9px;
+    }
+    .fcard {
+      background:rgba(255,255,255,.93);
+      border-radius:14px; padding:11px 13px;
+      border:1.5px solid #e2e8f0;
+      box-shadow:0 4px 14px rgba(15,23,42,.06);
+    }
+    .fcard--blue { border-top:4px solid #2563eb; background:rgba(239,246,255,.94); border-color:#bfdbfe; border-top-color:#2563eb; }
+    .fcard--mint { border-top:4px solid #10b981; background:rgba(236,253,245,.94); border-color:#a7f3d0; border-top-color:#10b981; }
+    .fcard--amber { border-top:4px solid #f59e0b; background:rgba(255,251,235,.94); border-color:#fde68a; border-top-color:#f59e0b; }
+    .fcard--rose { border-top:4px solid #f43f5e; background:rgba(255,241,242,.94); border-color:#fecdd3; border-top-color:#f43f5e; }
+    .fcard__title { font-size:14.5px; font-weight:800; margin:0 0 4px; color:#0f172a; }
+    .fcard__desc { font-size:12.6px; line-height:1.52; color:#334155; margin:0; }
+
+    .fee-card {
+      background:rgba(255,255,255,.95);
+      border:1.5px solid #fecdd3;
+      border-left:6px solid #e11d48;
+      border-radius:16px;
+      padding:12px 16px;
+      box-shadow:0 6px 18px rgba(15,23,42,.08);
+    }
+    .fee-head {
+      font-size:15px; font-weight:800; color:#be123c; margin:0 0 4px;
+    }
+    .fee { font-size:20px; font-weight:900; color:#0f172a; margin-bottom:4px; }
+    .fee-card ul { margin:4px 0 4px; padding-left:18px; font-size:12.8px; color:#1e293b; }
+    .fee-card li { margin:2px 0; }
+    .note { font-size:12.2px; color:var(--mute); }
+
+    .qrbox {
+      display:flex; gap:16px; align-items:center;
+      background:linear-gradient(135deg, rgba(255,255,255,.96) 0%, rgba(239,246,255,.96) 100%);
+      border:2.5px solid #2563eb;
+      border-radius:18px;
+      padding:12px 16px;
+      box-shadow:0 10px 24px rgba(15,23,42,.15);
+    }
+    .qr-frame {
+      background:#ffffff; padding:6px; border-radius:12px;
+      border:1.5px solid #bfdbfe; flex:none; line-height:0;
+    }
+    .qrbox svg { width:36mm; height:36mm; display:block; }
+    .qr-badge {
+      display:inline-block; font-size:12px; font-weight:800;
+      background:#2563eb; color:#fff; padding:2px 10px; border-radius:999px; margin-bottom:4px;
+    }
+    .qr-title { font-size:18px; font-weight:900; color:#0f172a; line-height:1.3; }
+    .qr-sub { font-size:13px; color:#334155; margin-top:3px; }
+    .qr-url {
+      margin-top:6px; font-size:12px; font-weight:700; color:#1d4ed8;
+      background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px;
+      padding:4px 8px; word-break:break-all;
+    }
+
+    .foot {
+      font-size:12px; color:#334155; font-weight:600;
+      background:rgba(255,255,255,.92);
+      border:1px solid rgba(203,213,225,.9);
+      border-radius:10px;
+      padding:7px 12px;
+      line-height:1.45;
+    }
+
+    @media print {
+      body { background:#fff; }
+      .bar { display:none; }
+      .page { margin:0; box-shadow:none; width:210mm; height:297mm; min-height:297mm; }
+      @page { size:A4; margin:0; }
+    }
   </style>
 </head>
 <body>
 <div class="bar">
   <button class="pri" onclick="window.print()">🖨️ 인쇄 / PDF로 저장</button>
-  <span id="barNote" style="font-size:13px;color:#475569;"></span>
+  <span id="barNote" style="font-size:13px;color:#334155;font-weight:600;"></span>
 </div>
+
 <div class="page">
-  <span class="ad">[광고] 운영자가 제작한 서비스 안내 리플릿</span>
-  <h1><span id="regionLabel"></span> 원룸·다가구 집주인님께</h1>
-  <div class="note">공실 때문에 중개수수료를 내고 계시다면, <strong>AI 스마트 계약</strong>으로 직접 계약하고 월세 장부까지 편하게 정리해 보세요.</div>
-
-  <h2>할 수 있는 것</h2>
-  <ul>
-    <li><strong>AI 스마트 계약 (중개수수료 없음)</strong> — 채팅창에서 신규·이사·연장 계약을 비대면 전자서명으로 진행하고, <strong>등기부 캡처 AI OCR 검토(임차인 선택) · AI 특약 다듬기 · 계약서 쉬운 요약 · 보류 후 재개(최대 7일)</strong>까지 지원</li>
-    <li><strong>초기 호실·장부 무료 세팅 지원</strong> — 처음 입력이 번거로우시면 가맹 승인 후 기존 계약서 사진·장부만 전달해 주세요. 운영자가 초기 호실·입주 장부 세팅을 무료로 도와드립니다(중개 계약서도 함께 통합 관리)</li>
-    <li><strong>월세 장부 정리 · 미납 자동 계산</strong> — 은행 입금 문자를 붙여넣으면 호실별 수납이 기록되고, 미납 월·금액 자동 계산과 안내 문자 발송까지 한 번에 처리</li>
-    <li><strong>세무 참고 자료</strong> — 장부를 <strong>홈택스 신고용 입금 증빙 자료(CSV)</strong>로 정리</li>
-  </ul>
-
-  <h2>이용 조건 (숨기지 않고 적습니다)</h2>
-  <div class="fee" id="fee">불러오는 중…</div>
-  <ul id="feeNotes"></ul>
-  <div class="note" id="taxNote"></div>
-
-  <div class="qrbox">
-    <div id="qr"></div>
-    <div>
-      <div style="font-size:18px;font-weight:800;">QR을 휴대폰 카메라로 비춰 보세요</div>
-      <div>AI 스마트 계약 기능과 요금을 먼저 확인하실 수 있습니다. 가입하지 않으셔도 됩니다.</div>
-      <div class="note" id="shortLink" style="margin-top:6px;word-break:break-all;"></div>
+  <header class="hero">
+    <span class="ad">[광고] 운영자가 제작한 서비스 안내 리플릿</span>
+    <h1><span id="regionLabel"></span> 원룸·다가구 집주인님께</h1>
+    <p class="hero-sub">공실 때문에 중개수수료를 내고 계시다면, <strong>AI 스마트 계약</strong>으로 직접 계약하고 월세 장부까지 편하게 정리해 보세요.</p>
+    <div class="pills">
+      <span class="pill pill--blue">🤖 복비 0원 AI 스마트 계약</span>
+      <span class="pill pill--mint">🛠️ 초기 장부 무료 세팅</span>
+      <span class="pill pill--amber">💰 입금문자 자동 정리</span>
+      <span class="pill pill--rose">🧾 홈택스 증빙 CSV</span>
     </div>
-  </div>
+  </header>
 
-  <div class="foot">이 안내는 서비스 소개용 광고입니다. 개인정보(이름·연락처)를 수집하지 않으며, QR로 들어와 가입하실 때에만 가입 정보를 입력하게 됩니다. 가맹·초기 세팅 문의: 민흥식 010-3269-3343 · himin5004@gmail.com</div>
+  <section>
+    <div class="sec-head">✨ 할 수 있는 것</div>
+    <div class="feat-grid">
+      <div class="fcard fcard--blue">
+        <div class="fcard__title">🤖 AI 스마트 계약 (중개수수료 없음)</div>
+        <p class="fcard__desc">채팅창에서 신규·이사·연장 계약을 비대면 전자서명으로 진행하고, <strong>등기부 캡처 AI OCR 검토(임차인 선택) · AI 특약 다듬기 · 계약서 쉬운 요약 · 보류 후 재개(최대 7일)</strong>까지 지원합니다.</p>
+      </div>
+      <div class="fcard fcard--mint">
+        <div class="fcard__title">🛠️ 초기 호실·장부 무료 세팅 지원</div>
+        <p class="fcard__desc">처음 입력이 번거로우시면 가맹 승인 후 기존 계약서 사진·장부만 전달해 주세요. 운영자가 <strong>초기 호실·입주 장부 세팅을 무료로 도와드립니다</strong>(중개 계약서도 함께 통합 관리).</p>
+      </div>
+      <div class="fcard fcard--amber">
+        <div class="fcard__title">💰 월세 장부 정리 · 미납 자동 계산</div>
+        <p class="fcard__desc">은행 입금 문자를 붙여넣으면 호실별 수납이 자동 기록되고, 미납 월·금액 계산과 임차인 납부 안내 문자 작성까지 한 번에 처리합니다.</p>
+      </div>
+      <div class="fcard fcard--rose">
+        <div class="fcard__title">🧾 세무 참고 자료 (홈택스 CSV)</div>
+        <p class="fcard__desc">기록된 월세·관리비 수납 장부를 <strong>홈택스 신고용 입금 증빙 자료(CSV)</strong>로 정리해 1월·7월 부가세 및 5월 종합소득세 준비를 돕습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="fee-card">
+    <div class="fee-head">💳 이용 조건 (숨기지 않고 적습니다)</div>
+    <div class="fee" id="fee">불러오는 중…</div>
+    <ul id="feeNotes"></ul>
+    <div class="note" id="taxNote"></div>
+  </section>
+
+  <section class="qrbox">
+    <div class="qr-frame" id="qr"></div>
+    <div style="min-width:0;flex:1;">
+      <span class="qr-badge">📱 스마트폰 카메라로 스캔</span>
+      <div class="qr-title">QR을 휴대폰 카메라로 비춰 보세요</div>
+      <div class="qr-sub">AI 스마트 계약 기능과 요금을 먼저 확인하실 수 있습니다. <strong>가입하지 않으셔도 됩니다.</strong></div>
+      <div class="qr-url" id="shortLink"></div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    이 안내는 서비스 소개용 광고입니다. 개인정보(이름·연락처)를 수집하지 않으며, QR로 들어와 가입하실 때에만 가입 정보를 입력하게 됩니다.<br>
+    📞 가맹·초기 세팅 문의: <strong>민흥식 010-3269-3343</strong> · ✉️ <strong>himin5004@gmail.com</strong>
+  </footer>
 </div>
+
 <script src="/rent3_contract/qrcode.min.js"></script>
 <script>
 (function () {
@@ -76,7 +230,7 @@
   var baseOrigin = isLocal ? COOLIFY_ORIGIN : location.origin;
   var link = baseOrigin + "/rent3/lessor-intro.html?ref=" + encodeURIComponent(ref) + "&campaign=" + encodeURIComponent(campaign);
   document.getElementById("shortLink").textContent = link;
-  document.getElementById("barNote").textContent = "유입 표식: ref=" + ref + " · campaign=" + campaign;
+  document.getElementById("barNote").textContent = "유입 표식: ref=" + ref + " · campaign=" + campaign + " (인쇄 시 '배경 그래픽' 켜기 권장)";
   try {
     var qr = qrcode(0, "M"); qr.addData(link); qr.make();
     document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });

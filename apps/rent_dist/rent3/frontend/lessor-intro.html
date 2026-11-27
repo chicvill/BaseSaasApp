@@ -7,35 +7,87 @@
   <style>
     :root { color-scheme: light; --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --mute:#475569; --line:#e2e8f0; --pri:#e11d48; --ok:#15803d; }
     * { box-sizing:border-box; }
-    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.7 -apple-system,"Pretendard","Malgun Gothic",sans-serif; }
-    main { max-width:720px; margin:0 auto; padding:20px 16px 60px; }
-    h1 { font-size:22px; margin:8px 0 4px; color:#0f172a; } h2 { font-size:17px; margin:0 0 8px; color:#0f172a; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+    body {
+      margin:0;
+      background:linear-gradient(180deg, #eff6ff 0%, #fff7ed 48%, #f0fdf4 100%);
+      color:var(--ink);
+      font:15px/1.7 -apple-system,"Pretendard","Malgun Gothic",sans-serif;
+      min-height:100vh;
+    }
+    main { max-width:740px; margin:0 auto; padding:18px 16px 60px; }
+    .hero {
+      position:relative; border-radius:20px; overflow:hidden;
+      background:#ffffff url("leaflet-bg.jpg") center / cover no-repeat;
+      border:1.5px solid #bfdbfe;
+      box-shadow:0 10px 28px rgba(15,23,42,.10);
+      padding:22px 20px 24px; margin:6px 0 16px;
+    }
+    .hero__inner {
+      background:rgba(255,255,255,.88);
+      backdrop-filter:blur(4px);
+      border-radius:16px; padding:16px 18px;
+      border:1px solid rgba(255,255,255,.95);
+    }
+    h1 { font-size:24px; font-weight:900; margin:6px 0 6px; color:#0f172a; letter-spacing:-0.02em; }
+    h2 { font-size:17.5px; font-weight:800; margin:0 0 8px; color:#0f172a; }
+    .card {
+      background:rgba(255,255,255,.96);
+      border:1px solid var(--line); border-radius:16px;
+      padding:16px 18px; margin:14px 0;
+      box-shadow:0 4px 14px rgba(15,23,42,.05);
+    }
+    .card--blue { border-left:5px solid #2563eb; }
+    .card--mint { border-left:5px solid #10b981; background:linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%); }
+    .card--amber { border-left:5px solid #f59e0b; }
+    .card--violet { border-left:5px solid #7c3aed; }
+    .card--rose { border-left:5px solid #e11d48; background:linear-gradient(135deg, #ffffff 0%, #fff1f2 100%); }
+    .card--sky { border-left:5px solid #0284c7; }
     .mute { color:var(--mute); font-size:13px; }
-    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:46px; padding:0 18px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
-    .btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; }
+    .btn {
+      display:inline-flex; align-items:center; justify-content:center;
+      min-height:46px; padding:0 18px; border-radius:12px;
+      border:1px solid #cbd5e1; background:#ffffff; color:var(--ink);
+      font-size:15px; font-weight:700; text-decoration:none; cursor:pointer;
+    }
+    .btn.pri {
+      background:linear-gradient(135deg, #e11d48, #f97316);
+      border-color:transparent; color:#fff;
+      box-shadow:0 6px 16px rgba(225,29,72,.25);
+    }
     input { min-height:44px; width:100%; padding:0 10px; border:1px solid #cbd5e1; border-radius:10px; background:#ffffff; color:#0f172a; font-size:15px; }
     label { display:block; font-size:13px; margin:8px 0 2px; font-weight:700; }
     .big { font-size:20px; font-weight:800; }
-    .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; margin:0 4px 4px 0; }
-    .highlight { border-left:4px solid var(--ok); background:#f0fdf4; }
+    .pill { display:inline-block; font-size:12px; font-weight:800; padding:3px 10px; border-radius:999px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; margin:0 4px 4px 0; }
+    .pill--mint { background:#d1fae5; color:#065f46; border-color:#a7f3d0; }
+    .pill--amber { background:#fef3c7; color:#92400e; border-color:#fde68a; }
+    .pill--rose { background:#ffe4e6; color:#9f1239; border-color:#fecdd3; }
     ul { padding-left:20px; margin:6px 0; }
     li { margin:4px 0; }
   </style>
 </head>
 <body>
 <main>
-  <div class="mute"><a href="/rent3/" style="color:inherit;">← OpenRent 홈</a></div>
-  <h1>🏢 임대인(집주인)님께</h1>
-  <div class="mute">세입자와 <strong>AI 스마트 계약</strong>으로 중개수수료 없이 공실을 채우고, 월세 장부와 초기 세팅까지 간편하게 정리하고 싶은 집주인님을 위한 안내입니다.</div>
+  <div class="hero">
+    <div class="hero__inner">
+      <div class="mute"><a href="/rent3/" style="color:#1d4ed8;font-weight:700;text-decoration:none;">← OpenRent 홈</a></div>
+      <h1>🏢 임대인(집주인)님께</h1>
+      <div class="mute" style="color:#334155;">세입자와 <strong>AI 스마트 계약</strong>으로 중개수수료 없이 공실을 채우고, 월세 장부와 초기 세팅까지 간편하게 정리하고 싶은 집주인님을 위한 안내입니다.</div>
+      <div style="margin-top:10px;">
+        <span class="pill">🤖 채팅형 AI 스마트 계약</span>
+        <span class="pill pill--mint">🛠️ 초기 장부 무료 세팅</span>
+        <span class="pill pill--amber">💰 입금문자 자동 정리</span>
+        <span class="pill pill--rose">🧾 홈택스 증빙 CSV</span>
+      </div>
+    </div>
+  </div>
 
-  <div class="card">
+  <div class="card card--blue">
     <h2>① 중개수수료 없이 AI 스마트 계약</h2>
     <div style="margin-bottom:6px;">
       <span class="pill">💬 채팅형 전자계약</span>
-      <span class="pill">📸 등기부 캡처 AI OCR</span>
-      <span class="pill">✨ AI 특약 다듬기</span>
-      <span class="pill">⏸️ 보류·재개(7일)</span>
+      <span class="pill pill--mint">📸 등기부 캡처 AI OCR</span>
+      <span class="pill pill--amber">✨ AI 특약 다듬기</span>
+      <span class="pill pill--rose">⏸️ 보류·재개(7일)</span>
     </div>
     공인중개사를 거치지 않고 임대인과 임차인이 채팅창에서 대화하며 <strong>신규 · 이사 · 만기 연장 스마트 계약</strong>을 비대면 전자서명으로 마무리합니다.
     <ul>
@@ -46,7 +98,7 @@
     <div class="mute" style="margin-top:6px;">※ AI 요약·OCR 결과는 이해를 돕기 위한 참고용이며 원본 대조가 필요합니다. 계약서의 법적 효력·확정일자 등 세부 사항은 계약 화면의 안내를 확인해 주세요.</div>
   </div>
 
-  <div class="card highlight">
+  <div class="card card--mint">
     <h2>② 초기 호실·장부 무료 세팅 지원 (처음 입력 부담 해소)</h2>
     기존 입주 세대가 많아 처음 입력이 번거로우신가요? 가맹 승인 후 <strong>기존 종이 계약서 사진이나 사용 중인 장부 자료를 보내주시면, 운영자가 호실 정보와 입주 장부 초기 세팅을 무료로 도와드립니다.</strong>
     <ul>
@@ -55,24 +107,24 @@
     <div class="mute" style="margin-top:6px;">※ 가맹 승인된 임대인 대상 초기 1회 온보딩을 별도 추가 비용 없이 지원합니다.</div>
   </div>
 
-  <div class="card">
+  <div class="card card--amber">
     <h2>③ 입금 문자로 장부 정리 · 세무 자료</h2>
     은행 입금 문자를 붙여넣으면 호실별 수납 장부에 자동 기록됩니다. 장부는 <strong>홈택스 신고용 입금 증빙 자료(CSV)</strong>로 정리됩니다.
     <div class="mute" style="margin-top:6px;">신고서를 대신 작성·제출하지 않고, 세액을 계산하거나 절세를 보장하지 않습니다. 신고는 직접 하시거나 세무 전문가와 상의해 주세요.</div>
     <div style="margin-top:8px;"><a class="btn" href="/api/rent3/pool/lessor-offer/sample.csv">📥 샘플 CSV 받기 (가상 자료)</a></div>
   </div>
 
-  <div class="card">
+  <div class="card card--violet">
     <h2>④ 미납 자동 계산 · 만기 연장 안내</h2>
     납부 기록으로 호실별 미납 월과 금액을 자동 계산하고, 안내 문구를 문자창에 바로 불러옵니다. 만기 6~2개월 전에는 전출 의사를 확인하고 법정 5% 상한 내 연장 스마트 계약으로 바로 이어집니다.
   </div>
 
-  <div class="card" id="feeCard">
+  <div class="card card--rose" id="feeCard">
     <h2>💳 이용 요금 (숨기지 않고 알려 드립니다)</h2>
     <div id="feeBody" class="mute">불러오는 중…</div>
   </div>
 
-  <div class="card">
+  <div class="card card--sky">
     <h2>🧮 내 경우 비교해 보기</h2>
     <div class="mute">숫자는 모두 직접 입력하는 값입니다. 예상 절감액을 대신 알려 드리지 않습니다.</div>
     <label for="calcFee">최근 한 번 중개수수료로 낸 금액(원)</label>
