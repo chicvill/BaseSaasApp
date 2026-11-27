@@ -105,7 +105,25 @@ class TestRent3PwaTwa(unittest.TestCase):
         drawer = portal_html[portal_html.index("data-r3-drawer"):portal_html.index("</aside>")]
         self.assertIn('id="btnPwaGuide"', drawer)
         self.assertIn("앱 설치 · PWA/TWA 안내", drawer)
+        self.assertIn('/rent3/contest-plan.html', drawer)
+        self.assertIn("공모전 출품 계획서", drawer)
         self.assertEqual(drawer.count("data-r3-plain"), 2)
+
+        # 공모전 출품 계획서 페이지(HTML) 및 원본 MD 검증
+        cp = self.client.get("/rent3/contest-plan.html")
+        self.assertEqual(cp.status_code, 200)
+        for needle in (
+            "부동산서비스산업 창업경진대회",
+            "국토교통 데이터활용 경진대회",
+            "초기창업패키지",
+            "공공데이터포털",
+            "Google Play TWA",
+            "apps/equip_rent",
+            "contestChecklist",
+        ):
+            self.assertIn(needle, cp.text, needle)
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, "docs", "rent3_contest_plan.md")))
+        self.assertFalse(re.compile(r"font-size:\s*(?:9|10|11)(?:\.\d)?px").search(cp.text))
 
         # pwa.js 안내 모달 핵심 내용 및 폰트 >= 12px 검증
         with open(os.path.join(base, "rent3", "frontend", "pwa.js"), encoding="utf-8") as fp:

@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="manifest" href="/rent3/manifest.json">
+  <link rel="apple-touch-icon" href="/rent3_tenant/icons/apple-touch-icon.png">
+  <title>🏆 공모전 · 창업지원사업 출품 계획서 — OpenRent · Rent3</title>
+  <style>
+    :root {
+      --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --sub: #334155; --mute: #64748b;
+      --line: #e2e8f0; --pri: #2563eb; --pri-soft: #eff6ff; --ok: #15803d; --ok-soft: #ecfdf5;
+      --warn: #b45309; --warn-soft: #fffbeb; --err: #b91c1c; --err-soft: #fef2f2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.7 -apple-system, "Pretendard", "Malgun Gothic", sans-serif; }
+    main { max-width: 920px; margin: 0 auto; padding: 18px 14px 64px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 14px;
+      border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+      font-size: 13.5px; font-weight: 700; text-decoration: none; cursor: pointer; }
+    .btn.pri { background: var(--pri); border-color: var(--pri); color: #fff; }
+    .hero { background: linear-gradient(135deg, #1e3a8a, #2563eb); color: #fff; border-radius: 18px; padding: 22px 20px; margin-bottom: 16px; }
+    .hero h1 { margin: 0 0 6px; font-size: 22px; line-height: 1.35; }
+    .hero p { margin: 0; font-size: 13.5px; opacity: .92; }
+    .hero-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .pill { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+      background: rgba(255,255,255,.16); color: #fff; }
+    .toc { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+    .toc a { font-size: 13px; font-weight: 700; color: var(--pri); background: var(--pri-soft); border: 1px solid #bfdbfe;
+      padding: 6px 11px; border-radius: 999px; text-decoration: none; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 16px; margin-bottom: 14px;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, .04); }
+    .card h2 { margin: 0 0 10px; font-size: 17px; color: var(--ink); border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+    .card h3 { margin: 14px 0 6px; font-size: 14.5px; color: var(--ink); }
+    .mute { color: var(--mute); font-size: 13px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+    .psst-box { padding: 12px 13px; border-radius: 12px; background: #f8fafc; border: 1px solid var(--line); }
+    .psst-box strong { display: block; font-size: 14px; color: var(--pri); margin-bottom: 4px; }
+    .tbl-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 8px 0; border-radius: 10px; border: 1px solid var(--line); }
+    table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th, td { border-bottom: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; }
+    th { background: #f1f5f9; font-weight: 800; color: var(--ink); white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+    .tag--p0 { background: var(--err-soft); color: var(--err); border: 1px solid #fecaca; }
+    .tag--p1 { background: var(--warn-soft); color: var(--warn); border: 1px solid #fde68a; }
+    .tag--p2 { background: var(--ok-soft); color: var(--ok); border: 1px solid #bbf7d0; }
+    .chk-list { display: grid; gap: 8px; margin-top: 8px; }
+    .chk-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px;
+      border: 1px solid var(--line); background: #f8fafc; cursor: pointer; }
+    .chk-item.is-done { background: var(--ok-soft); border-color: #86efac; }
+    .chk-item input[type="checkbox"] { width: 20px; height: 20px; margin-top: 2px; accent-color: #16a34a; flex: none; }
+    .chk-item__body { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.55; }
+    .chk-item__sub { display: block; font-size: 12.5px; color: var(--mute); margin-top: 3px; }
+    .progress-bar { height: 10px; border-radius: 999px; background: #e2e8f0; overflow: hidden; margin: 8px 0 12px; }
+    .progress-bar__fill { height: 100%; background: linear-gradient(90deg, #2563eb, #16a34a); width: 0%; transition: width .25s ease; }
+    .qa-item { padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: #f8fafc; margin-bottom: 8px; }
+    .qa-item__q { font-weight: 800; color: var(--ink); font-size: 14px; margin-bottom: 4px; }
+    .qa-item__a { font-size: 13.5px; color: var(--sub); }
+    .note-box { padding: 11px 13px; border-radius: 12px; background: var(--warn-soft); border: 1px solid #fde68a; color: #78350f; font-size: 13px; line-height: 1.6; }
+    @page { size: A4; margin: 12mm; }
+    @media print {
+      body { background: #fff; font-size: 12px; }
+      .no-print { display: none !important; }
+      main { max-width: none; padding: 0; }
+      .hero { background: #1e3a8a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .card { box-shadow: none; page-break-inside: avoid; }
+      table { min-width: 0; font-size: 12px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="topbar no-print">
+    <a class="btn" href="/rent3/?home=1">← OpenRent 포털</a>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="button" class="btn pri" onclick="window.print()">🖨️ 계획서 인쇄 / PDF 저장</button>
+    </div>
+  </div>
+
+  <header class="hero">
+    <h1>🏆 Rent3 공모전 · 창업지원사업 출품 계획서</h1>
+    <p>중개수수료 0원 소유주 직거래 · 채팅형 AI 전세사기 차단 전자계약 · 올인원 임대관리 SaaS</p>
+    <div class="hero-meta">
+      <span class="pill">기준일: 2026-11-27</span>
+      <span class="pill">원본 MD: docs/rent3_contest_plan.md</span>
+      <span class="pill">자동 검증 170+ 테스트 PASS</span>
+      <span class="pill">확장 모델: 건설장비(equip_rent)</span>
+    </div>
+  </header>
+
+  <nav class="toc no-print" aria-label="바로가기">
+    <a href="#sec-psst">1. PSST 요약</a>
+    <a href="#sec-contests">2. 타겟 공모전·일정</a>
+    <a href="#sec-roadmap">3. 월별 실행 로드맵</a>
+    <a href="#sec-todo">4. 추가·보완 체크리스트</a>
+    <a href="#sec-qa">5. 심사위원 Q&amp;A</a>
+  </nav>
+
+  <section id="sec-psst" class="card">
+    <h2>1. 출품 핵심 스토리 (PSST 요약)</h2>
+    <div class="grid-2">
+      <div class="psst-box">
+        <strong>P · Problem (문제 정의)</strong>
+        ① 등기부 위조·잔금 전 신규 근저당 설정 등 직거래 전세·월세 사기 위험<br>
+        ② 청년·1인가구·소규모 임대인의 반복적인 중개수수료 부담<br>
+        ③ 수기 수납장부, 중도퇴실 일할 정산 분쟁, 세무 신고 자료 정리 고통
+      </div>
+      <div class="psst-box">
+        <strong>S · Solution (완성된 해결책)</strong>
+        ① 채팅창 앱 개입 + <strong>좌우·상하 4방향 스크롤</strong> 등기부·표준계약서 승인<br>
+        ② 법원등기소 직접 열람 + <strong>Gemini AI 위험 분석</strong> + 체결 직전·잔금일 <strong>2중 재열람</strong><br>
+        ③ 매물 표준조건 PDF, SMS 자동 수납(FIFO), 전출정산, 5% 상한 재계약, 세무 허브, PWA/TWA
+      </div>
+      <div class="psst-box">
+        <strong>S · Scale-up (플랫폼 확장성)</strong>
+        <code>BaseSaasApp</code> 멀티테넌트 템플릿을 재사용해 <strong>부동산(Rent3) → 건설장비·중장비 B2B 월대(<code>apps/equip_rent</code>, 공정위 제10059호 표준계약서 · 다중 현장/장비 임차료 관리)</strong>로 수평 확장
+      </div>
+      <div class="psst-box">
+        <strong>T · Readiness (구현 완성도)</strong>
+        5대 분리 앱(포털·임대인·임차인·계약·관리인) + 단일 JSON Data Pool, 자동화 테스트 <strong>170건+ PASS</strong>, Pyrefly 0 errors, Coolify HTTPS 실운영 배포 완료
+      </div>
+    </div>
+  </section>
+
+  <section id="sec-contests" class="card">
+    <h2>2. 타겟 공모전 · 창업지원사업 상세 일정 (2026.12 ~ 2027.12)</h2>
+
+    <h3>🥇 1순위 — 부동산 · 프롭테크 · 공공데이터 특화 (적합도 최상)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>대회명</th><th>주최·주관</th><th>예상 공고/접수</th><th>본선·시상</th><th>Rent3 핵심 공략 포인트</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>부동산서비스산업 창업경진대회</strong></td>
+            <td>국토교통부 · 한국부동산원 · 국토연구원</td>
+            <td><strong>2027.02 ~ 05월</strong></td>
+            <td>06~07월 창업캠프<br>07~08월 시상</td>
+            <td>프롭테크 직격 대회(도전창업 예비~3년 / 성장도약 4~7년). 장관상·상금·범정부 본선 연계</td>
+          </tr>
+          <tr>
+            <td><strong>국토교통 데이터활용 경진대회</strong></td>
+            <td>국토교통부 · 한국부동산원 · HUG</td>
+            <td><strong>2027.04 ~ 05월</strong></td>
+            <td>07월 시상</td>
+            <td><strong>제품·서비스 개발 부문</strong>. AI 등기부 분석 + 국토부 공공데이터(건축물대장·실거래가) 실연동 가점 극대화</td>
+          </tr>
+          <tr>
+            <td><strong>범정부 공공데이터·AI 활용 창업경진대회</strong></td>
+            <td>행정안전부 · NIA</td>
+            <td><strong>2027.02 ~ 05월</strong><br>(부처·지자체 예선)</td>
+            <td>09~10월 본선<br>11~12월 왕중왕전</td>
+            <td>국토부 또는 지자체(서울·경기 등) 예선 통과 → 대통령상·국무총리상 도전</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>🥈 2순위 — 사업화 자금 확보 (정부 창업지원사업 · K-Startup)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>사업명</th><th>대상</th><th>예상 일정</th><th>핵심 공략 포인트</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>초기창업패키지</strong></td>
+            <td>업력 3년 이내 창업기업</td>
+            <td><strong>2027.01월 초·중순 공고</strong> → 01~02월 접수 → 05월 협약</td>
+            <td>12월이 PSST 사업계획서 작성 골든타임. 작동하는 실서비스와 170+ 테스트로 실현가능성 압도</td>
+          </tr>
+          <tr>
+            <td><strong>예비창업패키지 / 「모두의 창업」</strong></td>
+            <td>예비창업자</td>
+            <td><strong>2027.01 ~ 03월</strong> (통합공고 확인)</td>
+            <td>2027년 개편 회차별 모집 일정 집중 모니터링</td>
+          </tr>
+          <tr>
+            <td><strong>올해의 K-스타트업</strong></td>
+            <td>예비·초기 창업자</td>
+            <td><strong>2027.03월 말 통합공고</strong> → 04~08월 예선 → 12월 왕중왕전</td>
+            <td>혁신창업리그 + 공공데이터리그 복수 예선 루트 활용</td>
+          </tr>
+          <tr>
+            <td><strong>구글 창구 프로그램</strong></td>
+            <td>모바일 앱·서비스 (7년 이내)</td>
+            <td><strong>2027.02월 말 ~ 03월 중순</strong></td>
+            <td>Android TWA(<code>.aab</code>) Google Play 출시 완료 후 지원</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>🥉 3순위 — 금융권 오픈이노베이션 · 민간 경진대회 · 공공 PoC</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>프로그램명</th><th>주최</th><th>예상 일정</th><th>협업·어필 포인트</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>KB스타터스</strong></td><td>KB금융그룹</td><td><strong>2027.02월 초 ~ 03월 초</strong></td><td>전세사기 예방(보증보험)·계약금 안전 검증·임대료 자동 수납·세무 허브</td></tr>
+          <tr><td><strong>신한 퓨처스랩</strong></td><td>신한금융그룹</td><td><strong>2027.02월 말 ~ 03월 말</strong></td><td>소규모 임대사업자 계좌 입금 자동 매칭·전자세금계산서 금융 협업</td></tr>
+          <tr><td><strong>정주영 창업경진대회</strong></td><td>아산나눔재단</td><td><strong>2027.03 ~ 04월 접수</strong> → 10월 데모데이</td><td>실사용자 파일럿 계약 성과 + 플랫폼 확장성</td></tr>
+          <tr><td><strong>프롭테크포럼 · LH/SH 지원사업</strong></td><td>한국프롭테크포럼 · LH · SH</td><td>연중 상·하반기 수시</td><td>피칭데이, 투자상담회, 소규모 주거 관리 PoC 실증</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="sec-roadmap" class="card">
+    <h2>3. 월별 · 주차별 상세 실행 로드맵 (2026.12 ~ 2027.05)</h2>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>시기</th><th>핵심 목표</th><th>구체적 실행 항목</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>2026.12월 1~2주</strong></td>
+            <td>핵심 보완 개발 (P0)</td>
+            <td>① 국토부 <strong>건축물대장 API + 전월세 실거래가 API</strong> 실연동<br>② 한국저작권위원회 <strong>프로그램 저작권 등록</strong> 신청<br>③ 실제 임대인·임차인 파일럿 체험 피드백 5~10건 확보</td>
+          </tr>
+          <tr>
+            <td><strong>2026.12월 3~4주</strong></td>
+            <td>서류 · 시연물 완성</td>
+            <td>① <strong>3분 원테이크 시연 영상</strong> 녹화 (매물 PDF → 채팅 스마트계약 → AI 등기부 → 4방향 표준계약서 → 서명/QR → 수납·전출정산)<br>② <strong>PSST 사업계획서 마스터본</strong> + 발표자료(IR Deck 12~15매) 작성<br>③ Coolify HTTPS 실서버 시연 계정·초기화 절차 검증</td>
+          </tr>
+          <tr>
+            <td><strong>2027.01월</strong></td>
+            <td>1차 접수 (정부 지원)</td>
+            <td>① K-Startup 2027 통합공고 확인 → <strong>초기창업패키지 / 모두의 창업</strong> 접수<br>② Google Play 개발자 등록 및 <strong>TWA(<code>.aab</code>) 비공개 테스트·출시</strong> 착수</td>
+          </tr>
+          <tr>
+            <td><strong>2027.02 ~ 03월</strong></td>
+            <td>2차 집중 접수</td>
+            <td>① <strong>부동산서비스산업 창업경진대회</strong> 접수<br>② <strong>KB스타터스 · 신한 퓨처스랩</strong> 접수<br>③ <strong>구글 창구 프로그램</strong>(TWA 출시 후) 및 <strong>올해의 K-스타트업</strong> 접수</td>
+          </tr>
+          <tr>
+            <td><strong>2027.04 ~ 05월</strong></td>
+            <td>3차 접수 &amp; 확장 시연</td>
+            <td>① <strong>국토교통 데이터활용 경진대회</strong> + 지자체 공공데이터 예선 접수<br>② <strong>정주영 창업경진대회</strong> 접수<br>③ <code>apps/equip_rent</code>(건설장비 임대 앱) 1단계 MVP 연동으로 확장성 발표 강화</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="sec-todo" class="card">
+    <h2>4. 출품 전 추가 · 보완 체크리스트</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <span class="mute">항목을 체크하면 이 브라우저에 진행률이 자동 저장됩니다.</span>
+      <strong id="chkProgressText" style="font-size:13.5px;color:var(--pri);">0 / 9 완료 (0%)</strong>
+    </div>
+    <div class="progress-bar"><div id="chkProgressFill" class="progress-bar__fill"></div></div>
+
+    <div class="chk-list" id="contestChecklist">
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p0_public_api">
+        <span class="chk-item__body">
+          <span class="tag tag--p0">P0 필수 · 12월</span> <strong>공공데이터포털(<code>data.go.kr</code>) API 2종 실연동</strong>
+          <span class="chk-item__sub">국토부 건축물대장(면적·층수·용도·위반건축물 자동조회) + 전월세 실거래가(시세 비교·깡통전세 경보) 연동으로 국토부·행안부 대회 가점 확보</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p0_pilot">
+        <span class="chk-item__body">
+          <span class="tag tag--p0">P0 필수 · 12월</span> <strong>실운영 파일럿 지표 및 사용자 후기(5~10건) 수집</strong>
+          <span class="chk-item__sub">실제 호실 관리·수납 매칭 건수, 예상 중개수수료 절감액, 임대인·임차인 실사용 피드백을 정량 수치로 문서화</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p0_video">
+        <span class="chk-item__body">
+          <span class="tag tag--p0">P0 필수 · 12월</span> <strong>3분 원테이크 시연 영상 &amp; 심사위원 라이브 데모 URL 점검</strong>
+          <span class="chk-item__sub">매물 PDF → 채팅 신분확인 → AI 등기부 차단 → 4방향 스크롤 표준계약서 승인 → QR 진위확인 → 수납·전출정산 3분 컷 제작</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p0_psst">
+        <span class="chk-item__body">
+          <span class="tag tag--p0">P0 필수 · 12월</span> <strong>PSST 사업계획서 마스터본 &amp; IR 발표자료(12~15매) 작성</strong>
+          <span class="chk-item__sub">전세사기 통계·화면 캡처 6장·보안 아키텍처·170+ 테스트 증빙·구독 BM·장비 임대 확장 전략 정리</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p1_twa">
+        <span class="chk-item__body">
+          <span class="tag tag--p1">P1 권장 · 1~2월</span> <strong>Google Play TWA(<code>.aab</code>) 정식 등록 및 <code>assetlinks.json</code> 연결</strong>
+          <span class="chk-item__sub">Coolify에서 <code>/.well-known/assetlinks.json</code> 매핑 + Bubblewrap CLI 빌드(개인 계정은 테스터 12명·14일 필요하므로 1월 조기 착수)</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p1_legal">
+        <span class="chk-item__body">
+          <span class="tag tag--p1">P1 권장 · 1~2월</span> <strong>법적·규제 안전성 Q&amp;A 요약서(1페이지) 구비</strong>
+          <span class="chk-item__sub">공인중개사법(중개 비개입), 전자문서법 효력, 확정일자 미대체 고지, 개인정보보호법(AI 동의·원본 미보관·암호화) 명시</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p1_prod_api">
+        <span class="chk-item__body">
+          <span class="tag tag--p1">P1 권장 · 1~2월</span> <strong>상용 API 고도화 로드맵(6개월 사업비 집행계획) 수립</strong>
+          <span class="chk-item__sub">PASS/NICE 실명인증, 카카오 알림톡, 오픈뱅킹 계좌조회, 전자세금계산서 상용 연동 일정·예산 정리</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p2_ip">
+        <span class="chk-item__body">
+          <span class="tag tag--p2">P2 가점 · 수시</span> <strong>프로그램 저작권 등록(한국저작권위원회) 및 특허 출원 검토</strong>
+          <span class="chk-item__sub">프로그램 저작권은 저비용·신속 등록 가능(정부사업 가점 증빙) + 채팅 개입형 이중 등기부 검증·봉인 특허 검토</span>
+        </span>
+      </label>
+      <label class="chk-item">
+        <input type="checkbox" data-cid="p2_equip">
+        <span class="chk-item__body">
+          <span class="tag tag--p2">P2 확장 · 3월~</span> <strong>건설장비 임대 앱(<code>apps/equip_rent</code>) 1단계 시연 화면 연동</strong>
+          <span class="chk-item__sub">공정위 제10059호 표준계약서 + 건설사 다중 현장/장비 임차료 관리 화면으로 플랫폼 확장성 증명</span>
+        </span>
+      </label>
+    </div>
+  </section>
+
+  <section id="sec-qa" class="card">
+    <h2>5. 심사위원 예상 질문 (Q&amp;A) 핵심 답변 5선</h2>
+    <div class="qa-item">
+      <div class="qa-item__q">Q1. 공인중개사법 위반 소지는 없나요?</div>
+      <div class="qa-item__a">중개·알선이나 중개보수 수취를 일절 하지 않고, 소유주 본인이 등기부 대조 가맹 심사를 거쳐 직접 매물을 올리고 임차인과 당사자 간 직접 계약하는 <strong>중개수수료 0원 직거래 SaaS 도구</strong>입니다.</div>
+    </div>
+    <div class="qa-item">
+      <div class="qa-item__q">Q2. 전자계약서의 법적 효력과 확정일자는 어떻게 되나요?</div>
+      <div class="qa-item__a">「전자문서 및 전자거래 기본법」 및 「민법」상 사인 간 전자계약으로 효력이 있으며 SHA-256 해시·QR 진위 확인으로 위변조를 차단합니다. 확정일자는 서비스가 대체하지 않음을 명확히 고지하고 입주 당일 주민센터·등기소에서 A4 인쇄본으로 즉시 받도록 안내합니다.</div>
+    </div>
+    <div class="qa-item">
+      <div class="qa-item__q">Q3. AI(Gemini)가 등기부등본을 잘못 읽으면 책임은 어떻게 되나요?</div>
+      <div class="qa-item__a">AI 분석은 이해를 돕는 보조 수단일 뿐이며, 소유자 불일치·압류·신탁 즉시 차단과 근저당 위험 판정은 <strong>결정론적 서버 코드</strong>와 <strong>임차인의 인터넷등기소 직접 열람 대조·명시적 확인 체크</strong>를 필수 게이트로 강제합니다.</div>
+    </div>
+    <div class="qa-item">
+      <div class="qa-item__q">Q4. 직방·당근부동산·국토부 전자계약시스템과 무엇이 다른가요?</div>
+      <div class="qa-item__a">기존 플랫폼은 매물 광고에 그치거나 공인중개사 경유를 전제합니다. Rent3는 <strong>매물 PDF → 채팅 사기차단 전자계약 → 잔금일 등기부 재열람 후 도어락 교부 → 월세 FIFO 수납 → 전출정산 → 5% 상한 재계약 → 세무 자료</strong>까지 전 주기를 통합했습니다.</div>
+    </div>
+    <div class="qa-item">
+      <div class="qa-item__q">Q5. 수익 모델(BM)과 시장 확장 계획은 무엇인가요?</div>
+      <div class="qa-item__a">임차인은 전면 무료(수수료 0원), 임대인은 호실 수 기반 월 구독(가맹비) 및 세무·알림 부가서비스로 수익화합니다. 또한 <code>BaseSaasApp</code> 템플릿으로 <strong>건설장비(크레인·중장비) B2B 월대 관리(<code>equip_rent</code>)</strong> 등 고단가 임대 시장으로 수평 확장합니다.</div>
+    </div>
+
+    <div class="note-box" style="margin-top:12px;">
+      💡 <strong>운영 참고:</strong> 이 계획서는 준비·심사 기간 중 포털 <strong>☰ 더보기</strong> 메뉴에서 바로 열람할 수 있도록 연결되어 있습니다. 일반 임차인·임대인 대상 대고객 홍보를 시작할 때는 관리인(<code>rent3_admin</code>) 메뉴로 1줄 이동해 내부 전용으로 전환할 수 있습니다.
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var KEY = "rent3_contest_plan_checks_v1";
+  var saved = {};
+  try { saved = JSON.parse(window.localStorage.getItem(KEY) || "{}") || {}; } catch (_) { saved = {}; }
+
+  var inputs = Array.prototype.slice.call(document.querySelectorAll("#contestChecklist input[type='checkbox']"));
+  function sync() {
+    var done = 0;
+    inputs.forEach(function (inp) {
+      var id = inp.getAttribute("data-cid");
+      var on = Boolean(inp.checked);
+      if (id) saved[id] = on;
+      var row = inp.closest(".chk-item");
+      if (row) row.classList.toggle("is-done", on);
+      if (on) done++;
+    });
+    var total = inputs.length || 1;
+    var pct = Math.round((done / total) * 100);
+    var txt = document.getElementById("chkProgressText");
+    var fill = document.getElementById("chkProgressFill");
+    if (txt) txt.textContent = done + " / " + total + " 완료 (" + pct + "%)";
+    if (fill) fill.style.width = pct + "%";
+    try { window.localStorage.setItem(KEY, JSON.stringify(saved)); } catch (_) {}
+  }
+
+  inputs.forEach(function (inp) {
+    var id = inp.getAttribute("data-cid");
+    if (id && saved[id]) inp.checked = true;
+    inp.addEventListener("change", sync);
+  });
+  sync();
+})();
+</script>
+</body>
+</html>
