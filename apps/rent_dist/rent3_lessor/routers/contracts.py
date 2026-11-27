@@ -43,6 +43,7 @@ class ContractEditReq(BaseModel):
     cleaning_fee: Optional[int] = None         # 퇴실 청소비 약정(원, 0 = 약정 없음)
     move_in_date: str = ""
     expiry_date: str = ""
+    tenant_name: Optional[str] = None
     tenant_phone: str = ""
     payer_names: Optional[List[str]] = None
     memo: str = ""
@@ -183,6 +184,12 @@ def edit_contract(req: ContractEditReq):
         ct.move_in_date = req.move_in_date
     if req.expiry_date:
         ct.expiry_date = req.expiry_date
+    new_tenant_name: Optional[str] = None
+    if req.tenant_name is not None:
+        new_tenant_name = req.tenant_name.strip()
+        if not new_tenant_name:
+            raise DomainError("임차인명을 입력해 주세요.")
+        ct.tenant_name = new_tenant_name
     ct.tenant_phone = req.tenant_phone.strip()
     if req.payer_names is not None:
         pn: List[str] = []
@@ -193,6 +200,8 @@ def edit_contract(req: ContractEditReq):
         if len(pn) > 3:
             raise DomainError("송금자명은 최대 3개까지 등록할 수 있습니다.")
         ct.payer_names = pn
+    elif new_tenant_name and ct.payer_names:
+        ct.payer_names = [x for x in ct.payer_names if (x or "").strip() != new_tenant_name]
     ct.lessor_memo = req.memo.strip()
     if req.tenant_business_number is not None:
         ct.tenant_business_number = req.tenant_business_number.strip()
@@ -222,6 +231,8 @@ def edit_contract(req: ContractEditReq):
         room.save(action="room_terms_synced", app_source=APP_SRC)
     tenant = Tenant.get(ct.id_tenant) if ct.id_tenant else None
     if tenant:
+        if new_tenant_name:
+            tenant.name = new_tenant_name
         if req.tenant_phone.strip():
             tenant.phone = req.tenant_phone.strip()
         if req.tenant_business_number is not None:
@@ -234,7 +245,16 @@ def edit_contract(req: ContractEditReq):
             tenant.email = req.tenant_email.strip()
         if req.tenant_business_address is not None:
             tenant.business_address = req.tenant_business_address.strip()
-        tenant.save(action="tenant_phone_edited", app_source=APP_SRC)
+        tenant.save(action="tenant_profile_edited", app_source=APP_SRC)
+    if new_tenant_name:
+        chk = ExpiryRenewalCheck.for_contract(ct.id)
+        if chk and chk.tenant_name != new_tenant_name:
+            chk.tenant_name = new_tenant_name
+            chk.save(action="expiry_check_tenant_name_synced", app_source=APP_SRC)
+        for co in CheckOutSettlement.find(id_contract=ct.id):
+            if co.status != "COMPLETED" and co.tenant_name != new_tenant_name:
+                co.tenant_name = new_tenant_name
+                co.save(action="checkout_tenant_name_synced", app_source=APP_SRC)
     return {"success": True, "message": f"{ct.room_no}호 계약 내용을 저장했습니다.", "contract": ct.model_dump()}
 
 
