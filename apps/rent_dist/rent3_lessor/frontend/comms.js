@@ -455,16 +455,39 @@
         });
       });
     }
-    async function poll() {
-      if (document.visibilityState === "hidden") return;
-      let d;
-      try { d = await Bass.api(APP_ID, `/connect-requests?branch=${encodeURIComponent(S.currentBranch)}`); } catch (_) { return; }
-      renderBar(d.recent || []);
-      const next = (d.pending || []).find((n) => !shown.has(n.id));
-      if (next && !document.getElementById("r3Modal")) showModal(next);
+    let connectTimer = null;
+    let connectBusy = false;
+    function scheduleNext(ms) {
+      if (connectTimer) clearTimeout(connectTimer);
+      connectTimer = setTimeout(poll, ms);
     }
-    setTimeout(poll, 1500);
-    setInterval(poll, 6000);
+    async function poll() {
+      if (connectBusy) return;
+      if (document.visibilityState === "hidden") {
+        scheduleNext(20000);
+        return;
+      }
+      connectBusy = true;
+      let fast = false;
+      try {
+        const d = await Bass.api(APP_ID, `/connect-requests?branch=${encodeURIComponent(S.currentBranch)}`);
+        renderBar(d.recent || []);
+        const pending = d.pending || [];
+        const recent = d.recent || [];
+        fast = pending.length > 0 || recent.some((n) => n.state !== "DONE");
+        const next = pending.find((n) => !shown.has(n.id));
+        if (next && !document.getElementById("r3Modal")) showModal(next);
+      } catch (_) {
+        // 일시적 오류는 다음 주기에 재시도
+      } finally {
+        connectBusy = false;
+        scheduleNext(fast ? 6000 : 20000);
+      }
+    }
+    scheduleNext(1500);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") poll();
+    });
   }
 
   Object.assign(L, {

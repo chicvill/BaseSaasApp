@@ -177,7 +177,10 @@
     if (state.timer) clearInterval(state.timer);
     poll();
     state.timer = setInterval(poll, 30000);
-    document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+    if (!state.visBound) {
+      state.visBound = true;
+      document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
+    }
   }
 
   // 화면이 바뀌어 🔔 자리가 달라질 때(전자계약: 홈 ↔ 계약 화면) 같은 단추를 새 자리로 옮긴다

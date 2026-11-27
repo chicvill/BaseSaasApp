@@ -13,7 +13,9 @@
     }
   }
 
+  let callPollBusy = false;
   async function refreshIncomingCallBadge(container, user) {
+    if (document.hidden || callPollBusy) return;
     if (!user || !user.name) return;
     if (window.location.pathname.startsWith("/rent3_contract")) return;
     const isLessor = user.role === "lessor" || user.role === "admin";
@@ -26,6 +28,7 @@
       if (user.phone) params.set("phone", user.phone);
       if (user.name) params.set("name", user.name);
     }
+    callPollBusy = true;
     try {
       const tok = window.localStorage.getItem("bass_token") || "";
       if (!tok) return;   // 로그인 토큰 없이 부르면 401 이 되어 로그인이 풀린다
@@ -53,7 +56,16 @@
       }
     } catch (_) {
       // background poll ignore
+    } finally {
+      callPollBusy = false;
     }
+  }
+
+  function startCallPolling(container, user) {
+    const run = () => refreshIncomingCallBadge(container, user);
+    run();
+    window.setInterval(run, 20000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) run(); });
   }
 
   // ☰ 메뉴 체계에는 .nav-pills 가 없다 — 공동계약 호출이 오면 화면 위쪽에 띠로 알린다(호출이 없으면 보이지 않는다)
@@ -65,8 +77,7 @@
     bar.style.cssText = "position:sticky;top:0;z-index:99980;display:none;padding:8px 10px;background:#fff7e6;text-align:center;";
     document.body.insertBefore(bar, document.body.firstChild);
     new MutationObserver(() => { bar.style.display = bar.childElementCount ? "block" : "none"; }).observe(bar, { childList: true });
-    refreshIncomingCallBadge(bar, user);
-    window.setInterval(() => refreshIncomingCallBadge(bar, user), 5000);
+    startCallPolling(bar, user);
   }
 
   function mountBar() {
@@ -104,8 +115,7 @@
       logoutBtn.textContent = "로그아웃";
 
       spacer.append(badge, logoutBtn);
-      refreshIncomingCallBadge(spacer, user);
-      window.setInterval(() => refreshIncomingCallBadge(spacer, user), 5000);
+      startCallPolling(spacer, user);
     } else {
       const loginBtn = document.createElement("a");
       loginBtn.className = "bass-btn bass-btn--sm";

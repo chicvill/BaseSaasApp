@@ -595,10 +595,13 @@
     load();
   }
 
-  // 안 읽은 관리인 글 수(메뉴 단추 옆)와 '관리인이 접속 중' 알림을 30초마다 확인한다. 관리인 세션에서는 하지 않는다.
+  // 안 읽은 관리인 글 수(메뉴 단추 옆)와 '관리인이 접속 중' 알림을 확인한다(백그라운드 탭에서는 일시정지, 복귀 시 즉시 확인). 관리인 세션에서는 하지 않는다.
   function watchSupport() {
     if (isAdminSession() || !(global.Bass && global.Bass.token())) return;
+    var supBusy = false;
     function poll() {
+      if (document.hidden || supBusy) return;
+      supBusy = true;
       fetch(SUPPORT_API + "/summary", { headers: authHeaders(false) })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (d) {
@@ -621,10 +624,12 @@
             bar.remove();
           }
         })
-        .catch(function () {});
+        .catch(function () {})
+        .then(function () { supBusy = false; });
     }
     poll();
-    setInterval(poll, 30000);
+    setInterval(poll, 60000);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) poll(); });
   }
 
   // ── 내 정보 · 비밀번호 변경 (임대인 · 임차인 · 관리인 공용) ──
