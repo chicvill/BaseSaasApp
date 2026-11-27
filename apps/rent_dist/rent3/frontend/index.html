@@ -319,6 +319,10 @@
           <label for="loginPassword">비밀번호</label>
           <input id="loginPassword" type="password" class="or-input" placeholder="비밀번호" autocomplete="current-password" required>
         </div>
+        <div class="or-field" style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--or-text);">
+          <input id="chkKeepLoggedIn" type="checkbox" checked style="width:18px; height:18px; margin:0; cursor:pointer; flex-shrink:0;">
+          <label for="chkKeepLoggedIn" style="margin:0; font-weight:600; cursor:pointer;">🔐 로그인 상태 유지 <span style="font-weight:400; color:var(--or-muted);">(30일 · 다시 접속 시 자동 로그인)</span></label>
+        </div>
         <div class="or-field" style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--or-muted);">
           <input id="chkAdminPoolHub" type="checkbox">
           <label for="chkAdminPoolHub" style="margin:0; font-weight:500; cursor:pointer;">관리인(admin) 로그인 시 통합 Data Pool 허브(<code>/rent3/pool.html</code>)로 바로 이동</label>

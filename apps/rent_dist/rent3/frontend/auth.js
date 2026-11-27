@@ -60,15 +60,23 @@
     $("authModal").classList.remove("is-open");
   }
 
+  function wantKeepLoggedIn() {
+    const chk = $("chkKeepLoggedIn");
+    return chk ? Boolean(chk.checked) : true;
+  }
+
   // ── 관리인 2단계 인증: 비밀번호를 통과하면 '코드 필요' 응답이 온다 → 인증 앱 6자리(또는 복구 코드)를 입력해 정식 로그인 응답을 받는다 ──
-  async function resolveMfa(res) {
+  async function resolveMfa(res, keepLoggedIn = true) {
     if (!res || !res.mfa_required) return res;
     let last = "";
     for (let i = 0; i < 3; i += 1) {
       const code = window.prompt(`${last ? last + "\n\n" : ""}🔐 2단계 인증\n인증 앱(Google Authenticator 등)의 6자리 숫자를 입력하세요.\n폰을 잃었다면 복구 코드를 입력하세요.`, "");
       if (code === null) throw new Error("2단계 인증을 취소했습니다.");
       try {
-        return await Bass.api(APP_ID, "/pool/auth/mfa-verify", { method: "POST", body: { ticket: res.mfa_ticket, code: code.trim() } });
+        return await Bass.api(APP_ID, "/pool/auth/mfa-verify", {
+          method: "POST",
+          body: { ticket: res.mfa_ticket, code: code.trim(), device_id: Bass.deviceId(), keep_logged_in: keepLoggedIn },
+        });
       } catch (err) {
         if (/시도 횟수|처음부터 다시/.test(err.message || "")) throw err;           // 잠겼거나 대기표가 만료되면 더 묻지 않는다
         last = `❌ ${err.message || "코드가 맞지 않습니다."}`;
@@ -78,7 +86,7 @@
   }
 
   // ── 로그인 결과가 '동의 필요'이면 동의 화면을 거쳐 토큰을 받는다 ──
-  function resolveConsent(res) {
+  function resolveConsent(res, keepLoggedIn = true) {
     if (!res || !res.needs_consent) return Promise.resolve(res);
     return new Promise((resolve, reject) => {
       const bg = document.createElement("div");
@@ -111,7 +119,13 @@
         try {
           const done = await Bass.api(APP_ID, "/pool/auth/consent", {
             method: "POST",
-            body: { ticket: res.consent_ticket, agree_privacy: true, agree_support: bg.querySelector("#csSupport").checked },
+            body: {
+              ticket: res.consent_ticket,
+              agree_privacy: true,
+              agree_support: bg.querySelector("#csSupport").checked,
+              device_id: Bass.deviceId(),
+              keep_logged_in: keepLoggedIn,
+            },
           });
           close();
           resolve(done);
@@ -139,6 +153,7 @@
           const effectiveHint = currentHint.startsWith("contract")
             ? currentHint
             : (acc.target_hint || currentHint);
+          const keep = wantKeepLoggedIn();
           const res = await Bass.api(APP_ID, "/pool/auth/login", {
             method: "POST",
             body: {
@@ -147,10 +162,11 @@
               password: acc.password,
               target_hint: effectiveHint,
               device_id: Bass.deviceId(),
+              keep_logged_in: keep,
             },
           });
-          const done = await resolveConsent(await resolveMfa(res));
-          saveSession(done.user, done.token);
+          const done = await resolveConsent(await resolveMfa(res, keep), keep);
+          saveSession(done.user, done.token, done.refresh_token || "");
           Bass.updateAppAlert("success", done.message, `이동 경로: ${done.redirect_url}`);
           window.location.href = done.redirect_url;
         }, "본인인증 확인 및 이동 중... ⏳");
@@ -198,9 +214,9 @@
         $("loginPassword").value = "";
         // 본인 확인을 방금 마쳤으므로 새 비밀번호로 곧바로 내 페이지에 들어간다(실패하면 로그인 화면으로)
         try {
-          const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "", device_id: Bass.deviceId() } });
-          const done = await resolveConsent(await resolveMfa(res));
-          saveSession(done.user, done.token);
+          const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "", device_id: Bass.deviceId(), keep_logged_in: true } });
+          const done = await resolveConsent(await resolveMfa(res, true), true);
+          saveSession(done.user, done.token, done.refresh_token || "");
           closeAuthModal();
           window.location.href = done.redirect_url;
           return;
@@ -239,6 +255,7 @@
         if ($("chkAdminPoolHub").checked && !hint) hint = "pool";
 
         try {
+          const keep = wantKeepLoggedIn();
           const res = await Bass.api(APP_ID, "/pool/auth/login", {
             method: "POST",
             body: {
@@ -247,10 +264,11 @@
               password: $("loginPassword").value,
               device_id: Bass.deviceId(),
               target_hint: hint,
+              keep_logged_in: keep,
             },
           });
-          const done = await resolveConsent(await resolveMfa(res));
-          saveSession(done.user, done.token);
+          const done = await resolveConsent(await resolveMfa(res, keep), keep);
+          saveSession(done.user, done.token, done.refresh_token || "");
           closeAuthModal();
           Bass.updateAppAlert("success", done.message, `자동 이동: ${done.redirect_url}`);
           window.location.href = done.redirect_url;
@@ -321,9 +339,11 @@
               agree_privacy: $("regAgreePrivacy").checked,
               agree_support: $("regAgreeSupport").checked,
               acq: $("regRole").value === "lessor" ? (readAcq() || {}) : {},
+              device_id: Bass.deviceId(),
+              keep_logged_in: true,
             },
           });
-          saveSession(res.user, res.token);
+          saveSession(res.user, res.token, res.refresh_token || "");
           closeAuthModal();
           Bass.updateAppAlert("success", res.message);
           window.location.href = res.redirect_url;

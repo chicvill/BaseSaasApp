@@ -27,6 +27,7 @@ from apps.rent_dist._rent3_core import (
     passwords as pwd,
     quicklogin as ql,
     ratelimit,
+    refresh_sessions as rfs,
     support as sup,
 )
 from apps.rent_dist._rent3_core.authz import lessor_token, need_claims, tenant_token, unrevoke_token
@@ -506,6 +507,8 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
             extra_lsr = {"qk": qk, "start_url": f"/rent3_lessor/?branch={t.branch}&qk={qk}&welcome=1", "device": {"id": dev["id"]}}
         tok = lessor_token(t)
         unrevoke_token(tok)
+        rfs.revoke_all_for_user("lessor", t.id)
+        rt_lsr = rfs.issue_refresh("lessor", t.id, username=t.username or t.id, branch=t.branch, device_id=req.device_id)
         url = f"/rent3_lessor/?branch={t.branch}"
         lbl = f"임대인 ({t.branch})"
         return {
@@ -514,6 +517,7 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
             "role_label": lbl,
             "redirect_url": url,
             "token": tok,
+            "refresh_token": rt_lsr,
             "user": {
                 "id": t.id,
                 "username": t.username or t.id,
@@ -535,6 +539,8 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
         extra = {"qk": qk, "start_url": f"/rent3_tenant/?tenant={t.id}&qk={qk}&welcome=1", "device": {"id": dev["id"]}}
     tok = tenant_token(t)
     unrevoke_token(tok)
+    rfs.revoke_all_for_user("tenant", t.id)
+    rt_t = rfs.issue_refresh("tenant", t.id, username=t.id, branch=t.branch or "", device_id=req.device_id)
     url = f"/rent3_tenant/?tenant={t.id}"
     return {
         "success": True,
@@ -542,6 +548,7 @@ def invite_accept(req: InviteAcceptReq, request: Request) -> Dict[str, Any]:
         "role_label": f"입주 임차인 ({t.room_no}호)",
         "redirect_url": url,
         "token": tok,
+        "refresh_token": rt_t,
         "user": {
             "id": t.id,
             "username": t.id,

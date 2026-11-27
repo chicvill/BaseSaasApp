@@ -4,6 +4,7 @@
 
   const APP_ID = "rent3";
   const SESSION_KEY = "rent3_session";
+  const REFRESH_KEY = "rent3_refresh_token";
 
   const state = {
     listings: [],
@@ -35,19 +36,76 @@
     }
   }
 
-  function saveSession(user, tok) {
+  function getRefreshToken() {
+    try {
+      return window.localStorage.getItem(REFRESH_KEY) || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function saveSession(user, tok, refreshTok) {
     if (tok !== undefined) Bass.setToken(tok || "");
+    if (refreshTok !== undefined) {
+      try {
+        if (refreshTok) window.localStorage.setItem(REFRESH_KEY, refreshTok);
+        else window.localStorage.removeItem(REFRESH_KEY);
+      } catch (_) {}
+    }
     if (user) {
       window.localStorage.setItem(SESSION_KEY, JSON.stringify(user));
     } else {
       window.localStorage.removeItem(SESSION_KEY);
+      try { window.localStorage.removeItem(REFRESH_KEY); } catch (_) {}
     }
   }
 
   function clearSession() {
-    try { if (Bass.token()) fetch("/api/rent3/pool/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + Bass.token() }, keepalive: true }); } catch (_) {}
+    const tok = Bass.token();
+    const rt = getRefreshToken();
+    try {
+      if (tok || rt) {
+        const headers = { "Content-Type": "application/json" };
+        if (tok) headers.Authorization = "Bearer " + tok;
+        fetch("/api/rent3/pool/auth/logout", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ refresh_token: rt }),
+          keepalive: true,
+        });
+      }
+    } catch (_) {}
     Bass.setToken("");
     window.localStorage.removeItem(SESSION_KEY);
+    try { window.localStorage.removeItem(REFRESH_KEY); } catch (_) {}
+  }
+
+  async function tryRefreshSession() {
+    const rt = getRefreshToken();
+    if (!rt) return null;
+    try {
+      const res = await fetch("/api/rent3/pool/auth/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          refresh_token: rt,
+          device_id: Bass.deviceId ? Bass.deviceId() : "",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && data.token && data.user) {
+        saveSession(data.user, data.token, data.refresh_token || "");
+        return data;
+      }
+      if (res.status === 401 || res.status === 403) {
+        Bass.setToken("");
+        window.localStorage.removeItem(SESSION_KEY);
+        try { window.localStorage.removeItem(REFRESH_KEY); } catch (_) {}
+      }
+    } catch (_) {
+      // 일시적인 오프라인/네트워크 오류에서는 저장된 세션을 지우지 않는다
+    }
+    return null;
   }
 
   function roleIcon(role) {
@@ -161,8 +219,10 @@
     esc,
     fmtMan,
     getSession,
+    getRefreshToken,
     saveSession,
     clearSession,
+    tryRefreshSession,
     roleIcon,
     buildContractUrlFromSession,
     navigateToCoSignOrLogin,

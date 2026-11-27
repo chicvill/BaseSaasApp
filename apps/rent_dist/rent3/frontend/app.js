@@ -4,7 +4,7 @@
 
   const P = window.R3P;
   const {
-    APP_ID, state, $, esc, getSession, clearSession,
+    APP_ID, state, $, esc, getSession, getRefreshToken, clearSession, tryRefreshSession,
     navigateToCoSignOrLogin, renderSessionUI, captureAcq,
     openAuthModal, closeAuthModal, renderDemoAccounts, bindPasswordReset, bindAuthEvents,
     renderListings, bindListingEvents, bindConnect,
@@ -133,18 +133,52 @@
     Bass.updateAppAlert("success", "로그아웃되어 OpenRent 직거래 포털 홈으로 이동했습니다.");
   }
 
+  function tokenIsAlive(tok) {
+    if (!tok) return false;
+    try {
+      const p = JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
+      return p.exp * 1000 > Date.now() + 30000;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // 이미 로그인되어 있으면 포털 첫 화면 대신 내 업무 화면(임대인=내 건물, 임차인=내 집, 관리인=관리인 앱)으로 바로 들어간다.
   // 다른 건물·계정으로 가려면 로그아웃 후 그 아이디로 다시 로그인한다. 포털 홈을 일부러 보려면 ?home=1, 특정 매물 공유 링크는 ?room=.
+  // 12시간이 지났거나 서버 재시작 뒤라도 '로그인 상태 유지(refresh_token)'가 살아 있으면 조용히 자동 연장해 바로 들어간다.
   (function autoEnter() {
     const u = getSession();
     const tok = Bass.token();
-    if (!u || !u.redirect_url || !tok || urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1" || urlParams.get("room") || urlParams.get("invite")) return;
-    if (!["lessor", "tenant", "admin", "superadmin"].includes(u.role)) return;
-    try {
-      const p = JSON.parse(atob(tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/")));
-      if (!(p.exp * 1000 > Date.now() + 30000)) return;       // 만료된 로그인은 들어가지 않고 포털에서 다시 로그인
-    } catch (_) { return; }
-    window.location.replace(u.redirect_url);
+    const rt = getRefreshToken();
+    if (urlParams.get("home") === "1" && u && rt && !tokenIsAlive(tok)) {
+      tryRefreshSession().then(() => renderSessionUI());
+    }
+    if (urlParams.get("connect") || urlParams.get("login") === "1" || urlParams.get("logout") === "1" || urlParams.get("home") === "1" || urlParams.get("room") || urlParams.get("invite")) return;
+    if (!u && rt) {
+      tryRefreshSession().then((d) => {
+        if (d && d.user && d.user.redirect_url && ["lessor", "tenant", "admin", "superadmin"].includes(d.user.role)) {
+          window.location.replace(d.user.redirect_url);
+        } else {
+          renderSessionUI();
+        }
+      });
+      return;
+    }
+    if (!u || !u.redirect_url) return;
+    if (!["lessor", "tenant", "admin", "superadmin"].includes(u.role)) {
+      if (rt && !tokenIsAlive(tok)) tryRefreshSession().then(() => renderSessionUI());
+      return;
+    }
+    if (tokenIsAlive(tok)) {
+      window.location.replace(u.redirect_url);
+      return;
+    }
+    if (rt) {
+      tryRefreshSession().then((d) => {
+        if (d && d.user && d.user.redirect_url) window.location.replace(d.user.redirect_url);
+        else renderSessionUI();
+      });
+    }
   })();
 
   renderSessionUI();
@@ -221,7 +255,7 @@
       if (urlParams.get("login") === "1") {
         openAuthModal({ tab: "login" });
         if (urlParams.get("expired") === "1") {
-          Bass.updateAppAlert("warning", "로그인이 만료되었습니다. 다시 로그인해 주세요.", "보안을 위해 로그인은 12시간 동안 유지되고, 서버를 다시 시작하면 새로 로그인해야 할 수 있습니다.");
+          Bass.updateAppAlert("warning", "로그인이 만료되었습니다. 다시 로그인해 주세요.", "로그인 창에서 '로그인 상태 유지(30일)'를 체크해 두면 다시 접속해도 로그인 상태가 계속 유지됩니다.");
         }
       }
     })

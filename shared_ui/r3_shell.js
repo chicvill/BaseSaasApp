@@ -341,6 +341,7 @@
           if (!res.ok || !res.d.token) { msg.textContent = (res.d.message || res.d.detail || "가입하지 못했습니다.") + (res.d.hint ? " " + res.d.hint : ""); return; }
           global.localStorage.setItem("bass_token", res.d.token);
           global.localStorage.setItem("rent3_session", JSON.stringify(res.d.user));
+          if (res.d.refresh_token) global.localStorage.setItem("rent3_refresh_token", res.d.refresh_token);
           global.location.replace(res.d.start_url || res.d.redirect_url);
         })
         .catch(function () { btn.disabled = false; msg.textContent = "서버에 연결하지 못했습니다. 잠시 뒤 다시 시도해 주세요."; });

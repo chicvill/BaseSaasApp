@@ -243,7 +243,11 @@
   }
 
   function fullLogin() {
-    try { window.localStorage.removeItem("bass_token"); window.localStorage.removeItem("rent3_session"); } catch (_) {}
+    try {
+      window.localStorage.removeItem("bass_token");
+      window.localStorage.removeItem("rent3_session");
+      window.localStorage.removeItem("rent3_refresh_token");
+    } catch (_) {}
     window.location.href = "/rent3/?login=1";
   }
 

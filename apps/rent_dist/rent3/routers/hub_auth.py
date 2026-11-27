@@ -30,6 +30,7 @@ from apps.rent_dist._rent3_core import (
     passwords as pwd,
     quicklogin as ql,
     ratelimit,
+    refresh_sessions as rfs,
     support as sup,
     validate_email_format,
 )
@@ -58,6 +59,7 @@ class PortalLoginReq(BaseModel):
     target_hint: str = ""                # "" | "pool" | "add_listing" | "broker" | "contract" | "contract:{branch}:{room_no}"
     session_code: str = ""
     cosign_role: str = "tenant"          # lessor | tenant
+    keep_logged_in: bool = True          # 로그인 상태 유지(30일 자동 갱신)
 
 
 class PortalRegisterReq(BaseModel):
@@ -74,12 +76,16 @@ class PortalRegisterReq(BaseModel):
     agree_privacy: bool = False          # (필수) 개인정보 수집·이용 동의
     agree_support: bool = False          # (선택) 관리인 원격 지원 접속 동의
     acq: Dict[str, Any] = {}             # 유입 표식(ref·campaign·from·first_seen). 임대인 가입에만 기록하며 형식이 틀리면 조용히 버린다
+    device_id: str = ""
+    keep_logged_in: bool = True
 
 
 class ConsentReq(BaseModel):
     ticket: str
     agree_privacy: bool = False
     agree_support: bool = False
+    device_id: str = ""
+    keep_logged_in: bool = True
 
 
 class SupportToggleReq(BaseModel):
@@ -89,6 +95,14 @@ class SupportToggleReq(BaseModel):
 class MfaVerifyReq(BaseModel):
     ticket: str
     code: str
+    device_id: str = ""
+    keep_logged_in: bool = True
+
+
+class RefreshReq(BaseModel):
+    refresh_token: str = ""
+    device_id: str = ""
+    target_hint: str = ""
 
 
 class PasswordResetReq(BaseModel):
@@ -403,6 +417,36 @@ def _portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     )
 
 
+def _attach_refresh(
+    out: Dict[str, Any],
+    *,
+    keep_logged_in: bool,
+    device_id: str = "",
+    mfa_ok: bool = False,
+) -> Dict[str, Any]:
+    """로그인·가입·동의·2단계 인증 완료 응답에 장기 로그인 갱신 토큰을 발급해 붙인다."""
+    if not keep_logged_in or not out.get("token"):
+        return out
+    if out.get("needs_consent") or out.get("mfa_required"):
+        return out
+    u = out.get("user") or {}
+    role = str(u.get("role") or out.get("role") or "").lower()
+    uid = str(u.get("id") or "")
+    if role not in ("admin", "superadmin", "lessor", "branch_admin", "tenant", "prospect") or not uid:
+        return out
+    rt = rfs.issue_refresh(
+        role=role,
+        user_id=uid,
+        username=str(u.get("username") or ""),
+        branch=str(u.get("branch") or ""),
+        device_id=device_id,
+        mfa_ok=mfa_ok,
+    )
+    if rt:
+        out["refresh_token"] = rt
+    return out
+
+
 @router.post("/auth/mfa-verify")
 def mfa_verify(req: MfaVerifyReq, request: Request) -> Dict[str, Any]:
     """관리인 2단계 인증: 비밀번호 단계에서 받은 대기표와 인증 앱 코드(또는 복구 코드)를 맞추면 정식 토큰을 준다."""
@@ -421,7 +465,7 @@ def mfa_verify(req: MfaVerifyReq, request: Request) -> Dict[str, Any]:
     res["mfa_method"] = method
     if method == "recovery":
         res["message"] += f" (복구 코드를 사용했습니다 — 남은 복구 코드 {len(admin.recovery_hashes or [])}개. 폰을 바꿨다면 2단계 인증을 다시 설정하세요.)"
-    return res
+    return _attach_refresh(res, keep_logged_in=req.keep_logged_in, device_id=req.device_id, mfa_ok=True)
 
 
 @router.post("/auth/login")
@@ -447,7 +491,7 @@ def portal_role_login(req: PortalLoginReq, request: Request) -> Dict[str, Any]:
     contract_chat.purge_expired()   # 계약방 대화: 취소 후 90일 · 체결 계약 종료 후 5년(10분에 한 번만 실제로 훑는다)
     out = _gate_consent(out)
     unrevoke_token(out.get("token", ""))
-    return out
+    return _attach_refresh(out, keep_logged_in=req.keep_logged_in, device_id=req.device_id, mfa_ok=False)
 
 
 @router.post("/auth/consent")
@@ -467,7 +511,135 @@ def portal_consent(req: ConsentReq) -> Dict[str, Any]:
         raise NotFound("계정을 찾을 수 없습니다.")
     cs.record_consent(user, True, req.agree_support)
     unrevoke_token(out.get("token", ""))
-    return out
+    return _attach_refresh(out, keep_logged_in=req.keep_logged_in, device_id=req.device_id, mfa_ok=False)
+
+
+@router.post("/auth/refresh")
+def portal_refresh(req: RefreshReq, request: Request) -> Dict[str, Any]:
+    """장기 로그인 갱신: 12시간 만료 또는 서버 재시작 뒤에도 저장된 갱신 토큰으로 새 액세스 토큰을 조용히 재발급한다."""
+    ensure_pool_seeded()
+    ensure_default_admins()
+    sess = rfs.peek_refresh(req.refresh_token)
+    if sess is None:
+        raise Unauthorized("로그인이 만료되었습니다. 다시 로그인해 주세요.")
+
+    role = str(sess.get("role") or "").lower()
+    uid = str(sess.get("user_id") or "")
+    demo = demo_login_allowed(request)
+
+    if role == "admin":
+        admin = Admin.get(uid) or (Admin.first(username=str(sess.get("username") or "")) if sess.get("username") else None)
+        if admin is None:
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("계정을 찾을 수 없습니다. 다시 로그인해 주세요.")
+        mfa_ok = bool(sess.get("mfa_ok", False))
+        if mfa_mod.active(admin) and not mfa_ok:
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("2단계 인증이 필요합니다. 다시 로그인해 주세요.")
+        out = _admin_login_response(admin, CoreUser.by_username(admin.username), req.target_hint, mfa_ok)
+        new_rt = rfs.rotate_refresh(req.refresh_token, device_id=req.device_id, branch="all")
+        if not new_rt:
+            raise Unauthorized("로그인이 만료되었습니다. 다시 로그인해 주세요.")
+        unrevoke_token(out.get("token", ""))
+        out["refresh_token"] = new_rt
+        out["message"] = "로그인 상태를 자동으로 연장했습니다."
+        return out
+
+    if role == "lessor":
+        lsr = Lessor.get(uid)
+        if lsr is None:
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("임대인 계정을 찾을 수 없습니다. 다시 로그인해 주세요.")
+        if not demo:
+            dbind.enforce(lsr, req.device_id, "임대인")
+        if cs.consent_required() and not cs.has_valid_consent(lsr):
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("개인정보 수집·이용 동의가 필요합니다. 다시 로그인해 주세요.")
+        tok = lessor_token(lsr)
+        target_url = f"/rent3_lessor/?branch={lsr.branch}"
+        role_lbl = f"임대인 ({lsr.branch})"
+        new_rt = rfs.rotate_refresh(req.refresh_token, device_id=req.device_id, branch=lsr.branch)
+        if not new_rt:
+            raise Unauthorized("로그인이 만료되었습니다. 다시 로그인해 주세요.")
+        unrevoke_token(tok)
+        return {
+            "success": True,
+            "role": "lessor",
+            "role_label": role_lbl,
+            "redirect_url": target_url,
+            "token": tok,
+            "refresh_token": new_rt,
+            "user": {
+                "id": lsr.id,
+                "username": lsr.username or lsr.id,
+                "name": lsr.name,
+                "phone": lsr.phone,
+                "role": "lessor",
+                "role_label": role_lbl,
+                "branch": lsr.branch,
+                "login_auth_verified": True,
+                "redirect_url": target_url,
+            },
+            "message": "로그인 상태를 자동으로 연장했습니다.",
+        }
+
+    if role == "tenant":
+        t = Tenant.get(uid)
+        if t is None:
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("임차인 계정을 찾을 수 없습니다. 다시 로그인해 주세요.")
+        moved_out = t.status == "MOVED_OUT"
+        if moved_out:
+            if not t.readonly_until or date_today().isoformat() > t.readonly_until:
+                rfs.revoke_refresh(req.refresh_token)
+                raise Unauthorized("퇴실 후 조회 기간이 끝나 더 이상 로그인할 수 없습니다.")
+        elif not demo:
+            dbind.enforce(t, req.device_id, "임차인")
+        if cs.consent_required() and not cs.has_valid_consent(t):
+            rfs.revoke_refresh(req.refresh_token)
+            raise Unauthorized("개인정보 수집·이용 동의가 필요합니다. 다시 로그인해 주세요.")
+        is_active_resident = t.status == "ACTIVE" and bool(t.current_room_id or t.room_no)
+        if is_active_resident:
+            role_key = "tenant"
+            role_lbl = f"입주 임차인 ({t.room_no}호)"
+            target_url = f"/rent3_tenant/?tenant={t.id}"
+        else:
+            role_key = "prospect"
+            role_lbl = "예비임차인"
+            target_url = "/rent3_tenant/?view=listings"
+            if moved_out:
+                role_lbl = f"퇴실 임차인 (조회 전용, {t.readonly_until}까지)"
+                target_url = f"/rent3_tenant/?tenant={t.id}&view=moved"
+        tok = tenant_token(t)
+        new_rt = rfs.rotate_refresh(req.refresh_token, device_id=req.device_id, branch=t.branch or "")
+        if not new_rt:
+            raise Unauthorized("로그인이 만료되었습니다. 다시 로그인해 주세요.")
+        unrevoke_token(tok)
+        return {
+            "success": True,
+            "role": role_key,
+            "role_label": role_lbl,
+            "redirect_url": target_url,
+            "token": tok,
+            "refresh_token": new_rt,
+            "user": {
+                "id": t.id,
+                "username": t.id,
+                "name": t.name,
+                "phone": t.phone,
+                "role": role_key,
+                "role_label": role_lbl,
+                "branch": t.branch,
+                "room_no": t.room_no,
+                "tenant_id": t.id,
+                "login_auth_verified": True,
+                "redirect_url": target_url,
+            },
+            "message": "로그인 상태를 자동으로 연장했습니다.",
+        }
+
+    rfs.revoke_refresh(req.refresh_token)
+    raise Unauthorized("로그인이 만료되었습니다. 다시 로그인해 주세요.")
 
 
 @router.get("/auth/consents")
@@ -497,9 +669,15 @@ def set_my_support_access(req: SupportToggleReq, request: Request) -> Dict[str, 
 
 
 @router.post("/auth/logout")
-def portal_logout(request: Request) -> Dict[str, Any]:
-    """로그아웃: 이 토큰을 폐기한다(만료 전에도 더는 쓸 수 없다)."""
+async def portal_logout(request: Request) -> Dict[str, Any]:
+    """로그아웃: 이 액세스 토큰과(전달된 경우) 장기 로그인 갱신 토큰을 모두 즉시 폐기한다."""
     revoke_token(raw_token(request))
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 — 빈 본문 호환
+        body = {}
+    if isinstance(body, dict) and body.get("refresh_token"):
+        rfs.revoke_refresh(str(body.get("refresh_token") or ""))
     return {"success": True, "message": "로그아웃되었습니다."}
 
 
@@ -688,6 +866,7 @@ def change_my_password(req: ChangePasswordReq, request: Request) -> Dict[str, An
     if req.revoke_shortcuts and isinstance(acct, (Lessor, Tenant)):
         ql.revoke_all(acct)
         revoked = True
+    rfs.revoke_all_for_user(role, acct.id)
 
     ratelimit.clear("pwchange", keys[:1])
     uname = (getattr(acct, "username", "") or acct.id).strip().lower()
@@ -805,6 +984,7 @@ def password_reset_confirm(req: PasswordResetReq, request: Request) -> Dict[str,
     acct.password_changed_at = now
     acct.save("password_reset_by_recovery" if by_record else "password_reset_by_identity", app_source="rent3_portal")
     ql.revoke_all(acct)   # 비밀번호를 새로 정하면 이전에 등록한 바로가기·간편 비밀번호는 모두 해제(분실 폰 대비) — 새 비밀번호로 로그인해 다시 만든다
+    rfs.revoke_all_for_user("lessor" if isinstance(acct, Lessor) else "tenant", acct.id)
     ratelimit.clear("reset", keys[:1])
     ratelimit.clear("login", [f"u:{req.identifier.strip().lower()}"])
     return {"success": True, "message": "비밀번호를 바꿨습니다. 새 비밀번호로 로그인해 주세요."}
@@ -867,7 +1047,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
             if is_contract_hint
             else f"/rent3_lessor/?branch={branch_code}&tab=rooms"
         )
-        return {
+        out_lsr: Dict[str, Any] = {
             "success": True,
             "role": "lessor",
             "role_label": f"임대인 ({branch_code})",
@@ -886,6 +1066,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
             },
             "message": f"임대인 가입이 접수되었습니다. [{b_name}] 가맹 심사가 끝나면 매물을 공개할 수 있어요. 그동안 호실 정보를 미리 준비해 두세요.",
         }
+        return _attach_refresh(out_lsr, keep_logged_in=req.keep_logged_in, device_id=req.device_id)
 
     # 예비임차인 (prospect) 가입
     existing_t = next((t for t in Tenant.all() if _digits(t.phone) == phone_digits), None)
@@ -906,7 +1087,7 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
         if is_contract_hint
         else "/rent3_tenant/?view=listings"
     )
-    return {
+    out_p: Dict[str, Any] = {
         "success": True,
         "role": "prospect",
         "role_label": "예비임차인",
@@ -927,3 +1108,4 @@ def portal_register(req: PortalRegisterReq, request: Request) -> Dict[str, Any]:
         },
         "message": f"{name}님 본인인증 회원가입이 완료되었습니다! 전용 화면으로 이동합니다.",
     }
+    return _attach_refresh(out_p, keep_logged_in=req.keep_logged_in, device_id=req.device_id)
