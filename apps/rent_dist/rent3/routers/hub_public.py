@@ -115,6 +115,7 @@ def portal_landing(request: Request) -> Dict[str, Any]:
     """OpenRent 스타일 직거래 포털 메인 화면용 실시간 Data Pool 집계."""
     ensure_pool_seeded()
     ExpiryRenewalCheck.activate_due()   # 공개일(퇴실 기준일 1개월 전)이 된 사전 매물을 올린다 — 스케줄러가 없어 조회·로그인 때 확인
+    CoSignSession.expire_idle()         # 24시간/7일 기한이 지난 세션을 먼저 해제해 만료된 잠금 표시를 없앤다
     meta = pool().overview()
     buildings = Building.all()
     lessors = Lessor.all()

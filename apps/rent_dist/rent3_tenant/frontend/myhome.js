@@ -701,8 +701,10 @@
             <input class="bass-input inq-msg" data-room="${r.room_no}" style="flex:1;min-width:160px;" value="이번 주말 현장 방문투어 예약하고 싶습니다!">
             <button class="bass-btn bass-btn--sm btn-send-inq" data-branch="${r.branch}" data-room="${r.room_no}" type="button">💬 1:1 방문문의</button>
             ${r.active_cosign_session
-              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${r.active_cosign_session.id}&role=tenant">🤝 열린 스마트 계약방 입장(코드 ${r.active_cosign_session.session_code})</a>`
-              : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant">🤝 스마트 계약 시작</a>`
+              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant">🤝 열린 스마트 계약방 입장(코드 ${Bass.escapeHtml(r.active_cosign_session.session_code)})</a>`
+              : (r.contract_in_progress
+                ? `<button class="bass-btn bass-btn--sm" type="button" disabled style="opacity:.55;cursor:not-allowed;">🔒 다른 분과 계약 진행 중</button>`
+                : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant&call_branch=${encodeURIComponent(r.branch)}&call_room=${encodeURIComponent(r.room_no)}">🤝 스마트 계약 시작</a>`)
             }
           </div>
         </div>`;
@@ -720,9 +722,13 @@
           window.R3ListingModal.open(item, {
             rentNowLabel: item.active_cosign_session ? "🤝 열린 스마트 계약방 입장" : "🤝 스마트 계약 시작",
             onRentNow: (r) => {
+              if (r.contract_in_progress && !r.active_cosign_session) {
+                Bass.updateAppAlert("warning", "현재 다른 임차인과 계약이 진행 중인 호실입니다.");
+                return;
+              }
               window.location.href = r.active_cosign_session
                 ? `/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant`
-                : "/rent3_contract/?role=tenant";
+                : `/rent3_contract/?role=tenant&call_branch=${encodeURIComponent(r.branch)}&call_room=${encodeURIComponent(r.room_no)}`;
             },
           });
         }

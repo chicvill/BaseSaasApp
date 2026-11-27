@@ -115,6 +115,7 @@ def get_status():
 def list_candidate_rooms(request: Request, branch: Optional[str] = None):
     ensure_pool_seeded()
     ExpiryRenewalCheck.activate_due()           # 공개일이 된 사전 매물을 올린다
+    CoSignSession.expire_idle()                 # 기한 지난 미응답·보류 세션을 먼저 해제한다
     c = claims_from(request) or {}
     staff_all = is_admin(c)
     my_branch = normalize_branch_id(c.get("b")) if c.get("r") in ("lessor", "branch_admin") else None
@@ -122,6 +123,7 @@ def list_candidate_rooms(request: Request, branch: Optional[str] = None):
     bldgs = {b.id: b for b in Building.all()}
     lessors_by_branch = {lsr.branch: lsr for lsr in Lessor.all()}
     tenants_by_room = {t.current_room_id: t for t in Tenant.all() if t.status == "ACTIVE" and t.current_room_id}
+    live_by_room = {s.id_room: s for s in CoSignSession.all() if s.status in ("IN_PROGRESS", "PAUSED")}
     default_imgs = (
         "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80",
         "https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=800&q=80",
@@ -136,10 +138,13 @@ def list_candidate_rooms(request: Request, branch: Optional[str] = None):
         shown = r.as_listing() if r.is_occupied else r          # 입주 중인 전출 예정 호실은 사전 매물로 올린 다음 세입자용 조건을 보여 준다
         img_url = shown.images[0] if shown.images else default_imgs[idx % len(default_imgs)]
         spec = listing_pdf.normalize_listing_spec(shown.listing_spec, shown.option_list)
+        live_s = live_by_room.get(r.id)
+        is_locked_by_other = bool(live_s is not None and not (c and session_party_ok(c, live_s)))
         items.append({
             **(shown.model_dump() if (staff_all or r.branch == my_branch) else public_room(shown.model_dump())),
             "is_occupied": r.is_occupied,
             "has_reservation": r.reservation() is not None,
+            "contract_in_progress": is_locked_by_other,
             "expected_vacate_date": r.expected_vacate_date() if (r.is_occupied and r.pre_moveout_notice) else "",
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",

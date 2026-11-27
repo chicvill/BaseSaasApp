@@ -707,6 +707,78 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
         for m in re.finditer(r"font-size\s*:\s*([0-9.]+)px", non_print_html):
             self.assertGreaterEqual(float(m.group(1)), 12.0, f"12px 미만 폰트: {m.group(0)}")
 
+        # 임차인 매물 목록 → 스마트 계약 호실 직접 연결(call_branch/call_room → openTenantCallDialog) 확인
+        t_myhome = read_fe("rent3_tenant", "frontend", "myhome.js")
+        self.assertIn("call_branch=", t_myhome)
+        self.assertIn("call_room=", t_myhome)
+        self.assertIn("openTenantCallDialog", c_js)
+
+    def test_06_prospect_listings_do_not_leak_other_session_and_expire_idle(self):
+        """임차인 매물 목록(/api/rent3_tenant/listings)은 만료 세션을 정리하고 타인의 세션을 active_cosign_session 으로 노출하지 않는다."""
+        from datetime import datetime, timedelta
+        from apps.rent_dist._rent3_core import CoSignSession
+
+        lh = self._lessor_headers("chic")
+        self._create_vacant_room(lh, "906")
+        try:
+            pid1, pth1 = self._register_verified_prospect("선점임차인", "010-9060-9060", "950101")
+            pid2, pth2 = self._register_verified_prospect("후발임차인", "010-9061-9061", "960202")
+
+            call = self.client.post(
+                "/api/rent3_contract/sessions/call",
+                headers=pth1,
+                json={
+                    "caller_role": "tenant",
+                    "branch": "main",
+                    "room_no": "906",
+                    "mode": "NEW",
+                    "tenant_name": "선점임차인",
+                    "tenant_phone": "010-9060-9060",
+                    "id_tenant": pid1,
+                },
+            )
+            self.assertEqual(call.status_code, 200, call.text)
+            sid = call.json()["session"]["id"]
+
+            # 당사자(pid1)에게는 본인 세션(active_cosign_session)이 보이고, contract_in_progress=False
+            l1 = self.client.get("/api/rent3_tenant/listings", headers=pth1).json()["listings"]
+            r1 = next(x for x in l1 if x["room_no"] == "906")
+            self.assertIsNotNone(r1["active_cosign_session"])
+            self.assertEqual(r1["active_cosign_session"]["id"], sid)
+            self.assertFalse(r1["contract_in_progress"])
+
+            # 타인(pid2)에게는 남의 세션 id 를 절대 노출하지 않고 contract_in_progress=True 로 표시
+            l2 = self.client.get("/api/rent3_tenant/listings", headers=pth2).json()["listings"]
+            r2 = next(x for x in l2 if x["room_no"] == "906")
+            self.assertIsNone(r2["active_cosign_session"])
+            self.assertTrue(r2["contract_in_progress"])
+
+            # /api/rent3_contract/rooms 도 타인에게 contract_in_progress=True
+            cr2 = self.client.get("/api/rent3_contract/rooms", headers=pth2).json()["rooms"]
+            rc2 = next(x for x in cr2 if x["room_no"] == "906")
+            self.assertTrue(rc2["contract_in_progress"])
+
+            # 25시간 지난 미응답 세션은 /listings 조회 시 자동 만료되어 후발임차인도 바로 계약 가능
+            from apps.rent_dist._rent3_core import pool as _pool
+            old_ts = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
+            cs_path = os.path.join(_pool().pool_dir, "cosign_sessions.json")
+            with open(cs_path, encoding="utf-8") as fp:
+                cs_doc = json.load(fp)
+            for it in cs_doc.get("items", []):
+                if it.get("id") == sid:
+                    it["called_at"] = old_ts
+                    it["updated_at"] = old_ts
+            with open(cs_path, "w", encoding="utf-8") as fp:
+                json.dump(cs_doc, fp, ensure_ascii=False, indent=2)
+            _pool()._cache.pop("cosign_sessions", None)
+
+            l2_after = self.client.get("/api/rent3_tenant/listings", headers=pth2).json()["listings"]
+            r2_after = next(x for x in l2_after if x["room_no"] == "906")
+            self.assertIsNone(r2_after["active_cosign_session"])
+            self.assertFalse(r2_after["contract_in_progress"])
+        finally:
+            self._cleanup_room_sessions("906")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -366,7 +366,7 @@
       } else if (params.get("call_branch") && params.get("call_room")) {
         const val = `${params.get("call_branch")}|${params.get("call_room")}`;
         if (currentRole === "lessor") C.openLessorCallDialog(val);
-        else C.openTenantPickerDialog();
+        else C.openTenantCallDialog(val);
       }
 
       setInterval(async () => {

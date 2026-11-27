@@ -116,6 +116,11 @@
         Bass.updateAppAlert("success", r.message);
         await C.loadIdentity();
         renderHome(true);
+        if (S.pendingCallRoom) {
+          const nextVal = S.pendingCallRoom;
+          S.pendingCallRoom = "";
+          openTenantCallDialog(nextVal);
+        }
       });
     });
   }
@@ -260,6 +265,72 @@
     });
   }
 
+  async function startTenantCallForRoom(room) {
+    const res = await Bass.api(APP_ID, "/sessions/call", {
+      method: "POST",
+      body: {
+        caller_role: "tenant",
+        branch: room.branch,
+        room_no: room.room_no,
+        mode: "NEW",
+        tenant_name: loggedUser.name || "",
+        tenant_phone: loggedUser.phone || "",
+        id_tenant: myTenantId,
+      },
+    });
+    D.elDlgHost.innerHTML = "";
+    await afterCall(res);
+  }
+
+  function openTenantCallDialog(val) {
+    const [br, no] = String(val || "").split("|");
+    // 이미 해당 호실로 내가 참여 중인 계약방(진행 중/보류 중/호출 중)이 있으면 바로 연다.
+    const mineNow = C.mySessions().find((s) =>
+      (s.status === "IN_PROGRESS" || s.status === "PAUSED") &&
+      s.branch === br && s.room_no === no
+    );
+    if (mineNow) {
+      C.openSession(mineNow.id);
+      return;
+    }
+    if (S.myIdentity && !S.myIdentity.verified) {
+      S.pendingCallRoom = val;
+      Bass.updateAppAlert("warning", "먼저 화면 상단에서 휴대폰 본인인증을 완료해 주세요.", "본인인증이 끝나면 선택한 호실의 스마트 계약이 바로 열립니다.");
+      return;
+    }
+    const room = findRoom(val);
+    const curRoomId = (S.myhome && S.myhome.room && S.myhome.room.id) || "";
+    if (!room || !room.is_published || room.has_reservation || (room.is_occupied && !room.pre_moveout_notice) || (curRoomId && room.id === curRoomId)) {
+      Bass.updateAppAlert("warning", "선택하신 호실은 현재 신규 스마트 계약을 시작할 수 없어 매물 목록을 열었습니다.");
+      openTenantPickerDialog(true);
+      return;
+    }
+    if (room.contract_in_progress) {
+      Bass.updateAppAlert("warning", `${room.building_name} ${room.room_no}호는 현재 다른 임차인과 계약이 진행 중입니다.`);
+      openTenantPickerDialog(true);
+      return;
+    }
+    const bd = openDialog(`
+      <h3 style="margin:0 0 4px;">🤝 ${esc(room.building_name)} ${esc(room.room_no)}호 스마트 계약 시작</h3>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;line-height:1.6;">
+        보증금 <strong>${fmtWon(room.deposit)}</strong> · 월세 <strong>${fmtWon(room.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(room.maintenance_fee)}</strong><br>
+        ${room.is_occupied ? `📅 퇴실 전 사전 계약 (${room.expected_vacate_date ? `${esc(room.expected_vacate_date)} 이후 입주` : "퇴실 확정 후 입주"})` : `⚡ 입주 가능: ${esc(room.available_from || "즉시입주")}`}
+      </div>
+      <div class="bass-card" style="padding:10px 12px;margin:0 0 12px;font-size:12.5px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a;">
+        임차인 <strong>${esc(loggedUser.name || "")}</strong> (${esc(loggedUser.phone || "-")}) 본인인증 계정으로 임대인(<strong>${esc(room.lessor_name || "임대인")}</strong>)에게 스마트 계약을 요청합니다.
+      </div>
+      <button id="dlgTenantGo" class="bass-btn bass-btn--primary" style="width:100%;" type="button">📞 임대인 호출하고 스마트 계약 시작</button>
+      <div class="bass-row" style="margin-top:8px;gap:8px;">
+        <button id="dlgTenantOther" class="bass-btn" style="flex:1;" type="button">다른 집 고르기</button>
+        <button id="dlgCancel" class="bass-btn" style="flex:1;" type="button">닫기</button>
+      </div>`);
+    bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
+    bd.querySelector("#dlgTenantOther").addEventListener("click", () => openTenantPickerDialog(true));
+    bd.querySelector("#dlgTenantGo").addEventListener("click", function () {
+      Bass.withLock(this, () => startTenantCallForRoom(room), "스마트 계약 요청 중... ⏳");
+    });
+  }
+
   function openTenantPickerDialog(forcePicker = false) {
     if (!forcePicker) {
       const incoming = C.incomingCalls();
@@ -288,20 +359,11 @@
             ${r.is_occupied ? `<div class="bass-muted" style="font-size:12px;">현재 입주 중 · ${r.expected_vacate_date ? `<strong>${esc(r.expected_vacate_date)}</strong> 이후 입주` : "퇴실 확정 후 입주"} (전입일과 전출일은 같은 날까지 가능)</div>` : ""}
             <div class="room-row__meta bass-muted">보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)} · 관리비 ${fmtWon(r.maintenance_fee)}<br>${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${esc(r.direction)}` : ""} · 입주 ${esc(r.available_from || "즉시")}</div>
           </div>
-          <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">이 집으로</button>
+          <button class="bass-btn bass-btn--primary bass-btn--sm js-pick" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button" ${r.contract_in_progress ? 'disabled style="opacity:.55;cursor:not-allowed;"' : ""}>${r.contract_in_progress ? "🔒 진행 중" : "이 집으로"}</button>
         </div>`;
       }).join("") : `<div class="bass-muted" style="padding:10px 0;">지금 공개된 매물이 없습니다.</div>`}
       <button id="dlgCancel" class="bass-btn" style="width:100%;margin-top:8px;" type="button">닫기</button>`);
     bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
-    const startCallForRoom = async (room) => {
-      const res = await Bass.api(APP_ID, "/sessions/call", {
-        method: "POST",
-        body: { caller_role: "tenant", branch: room.branch, room_no: room.room_no, mode: "NEW",
-                tenant_name: loggedUser.name || "", tenant_phone: loggedUser.phone || "", id_tenant: myTenantId },
-      });
-      D.elDlgHost.innerHTML = "";
-      await afterCall(res);
-    };
     bd.querySelectorAll(".js-ct-detail").forEach((el) => el.addEventListener("click", (e) => {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1) return;
       e.preventDefault();
@@ -310,13 +372,13 @@
       if (room && window.R3ListingModal) {
         window.R3ListingModal.open(room, {
           rentNowLabel: "🤝 이 집으로 계약 요청",
-          onRentNow: (pickedRoom) => { startCallForRoom(pickedRoom).catch(Bass.showError); },
+          onRentNow: (pickedRoom) => { startTenantCallForRoom(pickedRoom).catch(Bass.showError); },
         });
       }
     }));
     bd.querySelectorAll(".js-pick").forEach((b) => b.addEventListener("click", function () {
       const room = findRoom(this.dataset.room);
-      Bass.withLock(this, () => startCallForRoom(room), "요청 보내는 중... ⏳");
+      Bass.withLock(this, () => startTenantCallForRoom(room), "요청 보내는 중... ⏳");
     }));
   }
 
@@ -345,7 +407,7 @@
 
   Object.assign(C, {
     sessionTag, renderHome, bindIdentityCard, homeLessorHtml, homeTenantHtml,
-    openDialog, closeDialog, findRoom, openLessorCallDialog, openTenantPickerDialog,
+    openDialog, closeDialog, findRoom, openLessorCallDialog, openTenantCallDialog, openTenantPickerDialog,
     afterCall, respondToIncomingCall,
   });
 })();

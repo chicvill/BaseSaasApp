@@ -10,7 +10,7 @@ from apps.rent_dist._rent3_core.pool import now_iso
 from apps.rent_dist._rent3_core.ops import TransferNotice
 
 from core.errors import DomainError, NotFound
-from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, staff_only, tenant_scope
+from apps.rent_dist._rent3_core.authz import any_user, api_headers, claims_from, is_admin, public_room, session_party_ok, staff_only, tenant_scope
 from apps.rent_dist._rent3_core import room_messages, contract_chat, chatsessions as chat_sessions, listing_pdf, roomregistry as room_registry
 from apps.rent_dist._rent3_core import (
     BrokerContractOnboarding,
@@ -97,14 +97,18 @@ def get_status():
 
 
 @router.get("/listings")
-def list_open_listings(branch: Optional[str] = None):
+def list_open_listings(request: Request, branch: Optional[str] = None):
     ensure_pool_seeded()
     ExpiryRenewalCheck.activate_due()           # 공개일(퇴실 기준일 1개월 전)이 된 사전 매물을 올린다
+    CoSignSession.expire_idle()                 # 기한이 지난 미응답·보류 세션을 먼저 해제한다
+    c = claims_from(request)
     rooms = Room.find(branch=normalize_branch_id(branch)) if branch else Room.all()
     bldgs = {b.id: b for b in Building.all()}
     lessors = {l.id: l for l in Lessor.all()}
     sessions_by_room = {
-        s.id_room: s for s in CoSignSession.find(status="IN_PROGRESS")
+        s.id_room: s
+        for s in CoSignSession.all()
+        if s.status in ("IN_PROGRESS", "PAUSED")
     }
 
     default_imgs = (
@@ -123,6 +127,7 @@ def list_open_listings(branch: Optional[str] = None):
         b = bldgs.get(r.id_building)
         lessor = lessors.get(b.id_lessor) if (b and b.id_lessor) else None
         sess = sessions_by_room.get(r.id)
+        is_mine = bool(sess is not None and c is not None and session_party_ok(c, sess))
         img_url = r.images[0] if r.images else default_imgs[idx % len(default_imgs)]
         spec = listing_pdf.normalize_listing_spec(r.listing_spec, r.option_list)
         cards.append({
@@ -138,7 +143,8 @@ def list_open_listings(branch: Optional[str] = None):
             "terms_pdf_url": listing_pdf.listing_pdf_url(r.id),
             "image": img_url,
             "images": list(r.images) if r.images else [img_url],
-            "active_cosign_session": {"id": sess.id, "session_code": sess.session_code} if sess else None,
+            "contract_in_progress": bool(sess is not None and not is_mine),
+            "active_cosign_session": {"id": sess.id, "session_code": sess.session_code} if (sess is not None and is_mine) else None,
         })
 
     return {
