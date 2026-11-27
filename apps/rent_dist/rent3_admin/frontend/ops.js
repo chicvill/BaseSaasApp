@@ -129,6 +129,17 @@
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
     });
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
+    elTabContent.querySelectorAll(".btn-bk-copy").forEach((b) => {
+      b.addEventListener("click", async () => {
+        const cmd = b.dataset.cmd || "";
+        try {
+          await navigator.clipboard.writeText(cmd);
+          Bass.updateAppAlert("success", "명령어를 복사했습니다.", cmd);
+        } catch (_) {
+          Bass.updateAppAlert("warning", "자동 복사가 차단되었습니다. 명령어를 직접 선택해 복사해 주세요.", cmd);
+        }
+      });
+    });
     loadMfa();
 
     document.getElementById("btnLf").addEventListener("click", () => {
@@ -310,6 +321,39 @@
           <strong>같은 디스크에만 두면 디스크 고장 때 함께 사라집니다 — 가끔 내려받아 다른 곳에 보관하세요.</strong> 백업에는 개인정보가 들어 있습니다.</div>
         <button id="btnBkRun" class="bass-btn bass-btn--primary" type="button" style="min-height:44px;">지금 백업 만들기</button>
         <div style="margin-top:8px;">${rows}</div>
+        <details id="bkLocalTestGuide" style="margin-top:12px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#f8fafc;">
+          <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:#0f172a;">🧪 운영 데이터(Coolify) 안전 로컬 테스트 절차 (백업 → 로컬 복구 → 테스트 → 삭제)</summary>
+          <div style="margin-top:10px;font-size:12.5px;line-height:1.75;color:#334155;">
+            <div style="padding:8px 10px;border-radius:8px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;margin-bottom:10px;">
+              <strong>목적:</strong> 실제 사용 중인 Coolify 운영 데이터를 전혀 건드리지 않고, 최신 실데이터 사본을 내 PC(로컬)에 복구해 테스트한 뒤 깨끗이 삭제합니다.<br>
+              <strong>안전 보장:</strong> Coolify에서는 백업 파일을 <strong>내려받기(읽기 전용)</strong>만 하며, 아래 복구 명령은 내 PC의 Git 제외 폴더(<code>data\\private\\coolify_live</code>)에만 적용되므로 <strong>Coolify 원본 데이터와 기본 폴더(<code>data\\rent3_pool</code>)는 절대 겹쳐 써지지 않습니다.</strong>
+            </div>
+            <ol style="margin:0;padding-left:18px;">
+              <li style="margin-bottom:8px;"><strong>① Coolify에서 실시간 백업 내려받기:</strong> 위 <strong>[지금 백업 만들기]</strong>를 누른 뒤 가장 위 <code>.tar.gz</code> 파일의 <strong>[내려받기]</strong> 클릭</li>
+              <li style="margin-bottom:8px;">
+                <strong>② 내 PC PowerShell에서 복구 + 로컬 서버 실행</strong> (다운로드 폴더의 최신 백업을 자동 검증·교체 복구 후 실행):
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">.\\scripts\\run_coolify_backup.ps1 -Latest</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd=".\\scripts\\run_coolify_backup.ps1 -Latest" style="min-height:40px;">📋 복사</button>
+                </div>
+                <div class="bass-muted" style="font-size:12px;margin-top:4px;">
+                  • 특정 파일 직접 지정: <code>.\\scripts\\run_coolify_backup.ps1 "C:\\Users\\USER\\Downloads\\백업파일.tar.gz"</code><br>
+                  • 이미 복구된 폴더로 재실행: <code>.\\scripts\\run_coolify_backup.ps1</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd=".\\scripts\\run_coolify_backup.ps1" style="min-height:36px;margin-left:4px;">📋 복사</button>
+                </div>
+              </li>
+              <li style="margin-bottom:8px;"><strong>③ 로컬에서 안전하게 테스트:</strong> <code>http://localhost:8080/rent3/</code>에서 실데이터와 동일한 상태로 검증 (도어락·계좌 암호화 키가 필요하면 <code>data\\private\\coolify.env</code>에 <code>MASTER_CRYPTO_KEY=키값</code> 1줄 저장)</li>
+              <li>
+                <strong>④ 테스트 종료 후 삭제(개인정보 정리):</strong> 로컬 서버 창에서 <code>Ctrl+C</code>로 서버를 종료한 뒤 실행:
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">Remove-Item -Recurse -Force data\\private\\coolify_live</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd="Remove-Item -Recurse -Force data\\private\\coolify_live" style="min-height:40px;">📋 복사</button>
+                </div>
+                <div class="bass-muted" style="font-size:12px;margin-top:4px;">개인정보 보호를 위해 <code>Downloads</code> 폴더에 내려받은 <code>rent3_pool_*.tar.gz</code> 파일도 함께 삭제하는 것을 권장합니다.</div>
+              </li>
+            </ol>
+          </div>
+        </details>
       </div>
       <div class="bass-card" style="margin-bottom:14px;" id="mfaCard">
         <h3>🔐 내 계정 2단계 인증 (인증 앱)</h3>

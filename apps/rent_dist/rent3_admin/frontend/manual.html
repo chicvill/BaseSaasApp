@@ -71,6 +71,16 @@
         </ul>
       </li>
     </ol>
+
+    <h2>5. 운영 데이터(Coolify) 안전 로컬 테스트 절차 (백업 → 로컬 복구 → 테스트 → 삭제)</h2>
+    <div class="box">
+      <strong>목적 및 안전 원칙:</strong> 실제 서비스 중인 Coolify 운영 데이터를 건드리지 않고, 최신 실데이터 사본을 로컬 PC의 비공개 격리 폴더(<code>data\private\coolify_live</code>, Git 제외)에만 복구해 검증한 뒤 삭제합니다. Coolify 서버에는 <strong>덮어쓰기가 전혀 발생하지 않으며</strong>, 기본 로컬 시연 폴더(<code>data\rent3_pool</code>)도 유지됩니다.
+    </div>
+    <ol>
+      <li><strong>실시간 백업 내려받기 (Coolify):</strong> <strong>[🛟 운영 안전 · 백업 · 계정]</strong> → <strong>[🛟 Data Pool 백업]</strong>에서 <strong>[지금 백업 만들기]</strong> 후 최신 <code>rent3_pool_*.tar.gz</code>를 <strong>[내려받기]</strong>합니다.</li>
+      <li><strong>로컬 복구 및 서버 실행 (내 PC PowerShell):</strong> <code>.\scripts\run_coolify_backup.ps1 -Latest</code>를 실행하면 다운로드 폴더의 최신 백업을 자동 검증하고 이전 복구 폴더를 안전 교체한 뒤 <code>http://localhost:8080/rent3/</code>로 서버를 띄웁니다. (이미 복구된 데이터 재실행은 <code>.\scripts\run_coolify_backup.ps1</code>, 암호화 키는 <code>data\private\coolify.env</code>에 보관)</li>
+      <li><strong>테스트 완료 후 개인정보 정리 (삭제):</strong> 로컬 서버를 <code>Ctrl+C</code>로 종료한 뒤 <code>Remove-Item -Recurse -Force data\private\coolify_live</code>로 임시 복구 폴더를 삭제하고, 다운로드 폴더의 <code>.tar.gz</code> 파일도 정리합니다.</li>
+    </ol>
   </main>
 <script src="/shared/ui/phone_fmt.js"></script>
 </body>
