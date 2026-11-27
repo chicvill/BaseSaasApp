@@ -694,6 +694,14 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
         self.assertIn("스마트 계약 요청", read_fe("rent3", "frontend", "listings.js"))
         self.assertIn("스마트 계약 호출", read_fe("rent3", "frontend", "session-bar.js"))
 
+        # 임대인 안내 페이지 및 오프라인 리플릿: AI 스마트 계약 + 초기 장부 무료 세팅 반영 확인
+        intro_html = read_fe("rent3", "frontend", "lessor-intro.html")
+        leaflet_html = read_fe("rent3", "frontend", "leaflet.html")
+        for needle in ("AI 스마트 계약", "등기부 캡처", "표준 특약 문구", "초기 호실·장부 무료 세팅 지원"):
+            self.assertIn(needle, intro_html, f"lessor-intro.html 누락: {needle}")
+        for needle in ("AI 스마트 계약", "등기부 캡처 AI OCR", "AI 특약 다듬기", "초기 호실·장부 무료 세팅 지원"):
+            self.assertIn(needle, leaflet_html, f"leaflet.html 누락: {needle}")
+
         # 인쇄(@media print) 제외 모든 CSS 폰트 크기 >= 12px
         non_print_html = c_html.split("@media print")[0]
         for m in re.finditer(r"font-size\s*:\s*([0-9.]+)px", non_print_html):
