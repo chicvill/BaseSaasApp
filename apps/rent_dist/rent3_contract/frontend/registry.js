@@ -137,6 +137,7 @@
     const e = res.extracted;
     return `
       <div style="margin-top:10px;">
+        ${res.plain_summary ? `<div class="cg-ai-summary" style="margin:0 0 8px;white-space:pre-line;"><strong>🤖 AI 쉬운 요약</strong>\n${esc(res.plain_summary)}</div>` : ""}
         <div style="font-size:12.5px;line-height:1.7;">
           <strong>AI가 읽은 값</strong> (틀릴 수 있어요)<br>
           소유자: ${esc(e.owner_name || "-")}${e.owners.length > 1 ? ` (공동 ${e.owners.length}명)` : ""}<br>

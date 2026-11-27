@@ -184,7 +184,7 @@
   const incomingCalls = () =>
     mySessions().filter((s) => s.status === "IN_PROGRESS" && s.call_status === "CALLING" && s.initiated_by_role !== currentRole);
   const ongoingSessions = () =>
-    mySessions().filter((s) => s.status === "IN_PROGRESS" && !(s.call_status === "CALLING" && s.initiated_by_role !== currentRole));
+    mySessions().filter((s) => (s.status === "IN_PROGRESS" || s.status === "PAUSED") && !(s.call_status === "CALLING" && s.initiated_by_role !== currentRole));
 
   async function loadSessionList() {
     const data = await Bass.api(APP_ID, "/sessions");

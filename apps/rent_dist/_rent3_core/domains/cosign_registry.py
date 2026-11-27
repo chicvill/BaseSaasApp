@@ -244,6 +244,9 @@ def submit_tenant_registry(
             hint="위험을 이해했다면 '소액 보증금 위험을 확인하고 계속' 항목에 체크해 다시 제출해 주세요.",
         )
     self.tenant_registry = rec
+    self.registry_check_mode = "REQUIRED"
+    if str(self.tenant_recheck_at or "").startswith("SKIPPED_BY_TENANT:"):
+        self.tenant_recheck_at = ""
     synced = self._sync_cleanup_clause(self.terms or {})   # 보증보험 '가입 예정'이면 거절 특약을 자동으로 넣는다
     if synced != self.terms:
         self.terms = synced
@@ -322,6 +325,67 @@ def recheck_registry(self: CoSignSession, changed: bool, app_source: str = "rent
         return self.save(action="cosign_cancelled_registry_changed", app_source=app_source)
     self.tenant_recheck_at = now_iso()
     return self.save(action="tenant_registry_rechecked", app_source=app_source)
+
+def set_registry_preference(
+    self: CoSignSession,
+    role: str,
+    want_check: bool = True,
+    skip_acknowledged: bool = False,
+    app_source: str = "rent3_contract",
+) -> CoSignSession:
+    """임차인이 등기부등본 캡처·AI 검토 진행 여부를 직접 선택한다(원할 때만 진행, 생략 시 본인 동의 기록)."""
+    self._ensure_ready_for_steps()
+    if role != "tenant":
+        raise DomainError("등기부등본 검토 여부는 임차인 본인만 선택할 수 있습니다.", hint="임대인은 임차인의 등기부 확인을 임의로 생략할 수 없습니다.")
+    if self.mode == "RENEWAL":
+        return self
+    if self.current_step >= 4:
+        raise DomainError("서명 단계 이후에는 등기부 검토 설정을 바꿀 수 없습니다.", hint="변경하려면 '조건 다시 열기' 후 진행해 주세요.")
+
+    from .. import contract_chat
+    if not want_check:
+        if not skip_acknowledged:
+            raise DomainError(
+                "등기부등본 확인을 생략하려면 본인 확인 동의가 필요합니다.",
+                hint="임차인 본인의 선택으로 등기부 검토를 생략한다는 확인 체크 후 진행해 주세요.",
+            )
+        ts = now_iso()
+        self.registry_check_mode = "SKIPPED_BY_TENANT"
+        self.tenant_registry = {
+            "submitted": False,
+            "skipped_by_tenant": True,
+            "skipped_at": ts,
+        }
+        self.step1_lessor_confirmed = True
+        self.step1_tenant_locked = True
+        self.tenant_recheck_at = f"SKIPPED_BY_TENANT:{ts}"
+        if self.is_step1_fully_verified() and self.current_step < 2:
+            self.current_step = 2
+        saved = self.save(action="registry_check_skipped_by_tenant", app_source=app_source)
+        contract_chat.system_note(
+            saved,
+            "ℹ️ 임차인의 선택으로 등기부등본 캡처·AI 검토를 생략했습니다. 서명 전이라면 언제든 체크를 다시 켜서 검토할 수 있습니다.",
+            step=saved.current_step,
+        )
+        return saved
+
+    # 다시 검토 진행으로 전환
+    self.registry_check_mode = "REQUIRED"
+    if (self.tenant_registry or {}).get("skipped_by_tenant"):
+        self.tenant_registry = {}
+        self.step1_tenant_locked = False
+        if str(self.tenant_recheck_at or "").startswith("SKIPPED_BY_TENANT:"):
+            self.tenant_recheck_at = ""
+        if self.current_step == 2:
+            self.current_step = 1
+    saved = self.save(action="registry_check_enabled_by_tenant", app_source=app_source)
+    contract_chat.system_note(
+        saved,
+        "🏛️ 임차인이 등기부등본 캡처·AI 검토 진행을 선택했습니다. 법원등기소 캡처 이미지를 올려 AI로 바로 검토할 수 있습니다.",
+        step=saved.current_step,
+    )
+    return saved
+
 
 def is_step1_fully_verified(self: CoSignSession) -> bool:
     return (

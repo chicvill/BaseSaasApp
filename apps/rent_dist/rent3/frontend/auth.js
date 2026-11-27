@@ -32,7 +32,7 @@
 
     const sub = $("authModalSub");
     if ((targetHint || "").startsWith("contract")) {
-      sub.textContent = "임대인 또는 임차인으로 본인인증 로그인(또는 회원가입)하면 즉시 공동계약 호출·응답 화면으로 이동합니다.";
+      sub.textContent = "임대인 또는 임차인으로 본인인증 로그인(또는 회원가입)하면 즉시 스마트 계약 호출·응답 화면으로 이동합니다.";
     } else if (targetHint === "add_listing") {
       sub.textContent = "임대인으로 본인인증 로그인(또는 신규 가입)하면 보유 지점의 호실·매물 등록 탭으로 바로 이동합니다.";
     } else if (targetHint === "broker") {

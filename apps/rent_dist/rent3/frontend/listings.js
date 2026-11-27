@@ -126,7 +126,7 @@
           <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
             data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}"
             ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
-            ${l.contract_in_progress ? "🔒 계약 진행 중" : "📞 공동계약 호출"}
+            ${l.contract_in_progress ? "🔒 계약 진행 중" : "🤝 스마트 계약 요청"}
           </button>
         </div>
       </article>
@@ -158,7 +158,7 @@
       $("rnRoomNo").value = l.room_no;
       const isLessor = u.role === "lessor" || u.role === "admin";
       $("rnCallerRole").value = isLessor ? "lessor" : "tenant";
-      $("rnModalTitle").textContent = `📞 [${l.building_name} ${l.room_no}호] 상대방 호출 및 공동계약 시작`;
+      $("rnModalTitle").textContent = `📞 [${l.building_name} ${l.room_no}호] 상대방 호출 및 스마트 계약 시작`;
       $("rnVerifiedNotice").innerHTML =
         `🛡️ <strong>${esc(u.name)}</strong>님(본인인증 완료) 계정으로 <strong>${isLessor ? "임차인" : "임대인"}</strong>을 호출합니다.`;
       if (!isLessor) {

@@ -153,7 +153,7 @@
       <div class="or-section__head">
         <div>
           <h2 class="or-section__title">🔐 로그인 후 내 역할에 맞는 전용 페이지로 자동 이동</h2>
-          <p class="or-section__sub">하나의 통합 로그인 창에서 계정을 인식해 관리인·임대인·입주임차인·공동계약 전용 워크스페이스로 즉시 분기합니다.</p>
+          <p class="or-section__sub">하나의 통합 로그인 창에서 계정을 인식해 관리인·임대인·입주임차인·스마트 계약 전용 워크스페이스로 즉시 분기합니다.</p>
         </div>
         <button type="button" class="or-btn or-btn--blue or-btn--sm" id="btnOpenLoginSection">통합 로그인 열기 →</button>
       </div>
@@ -181,11 +181,11 @@
 
         <article class="or-role-card">
           <div>
-            <span class="or-brand__tag" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">🤝 Rent Now 계약 당사자</span>
-            <h3>실시간 화면공유 공동계약</h3>
-            <p>임대인과 임차인이 각자 본인인증 로그인 후, 먼저 입장한 측이 매물을 선택해 상대를 호출·응답으로 연결하고 서로 신분증 확인 체크 및 등기부등본 열람 후 전자서명을 진행합니다.</p>
+            <span class="or-brand__tag" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">🤝 스마트 계약 당사자</span>
+            <h3>실시간 채팅 스마트 계약</h3>
+            <p>임대인과 임차인이 각자 본인인증 로그인 후, 채팅창 안에서 AI OCR·쉬운 요약과 함께 신분 확인·등기부 검토(선택)·표준계약서 전자서명을 간편하게 진행합니다.</p>
           </div>
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="cosign">공동계약 화면 입장 →</button>
+          <button type="button" class="or-btn or-btn--outline or-btn--sm js-role-login" data-role-preset="cosign">스마트 계약 화면 입장 →</button>
         </article>
 
         <article class="or-role-card">
@@ -220,21 +220,21 @@
     <section id="rentNowSection" class="or-section" style="padding-top:10px;">
       <div class="or-cosign-banner">
         <div>
-          <h2 style="font-size:24px; font-weight:800; margin:0 0 8px;">🤝 직거래 계약하기</h2>
-          <p style="font-size:14px; color:#dbeafe; margin:0;">임대인과 임차인이 각자 로그인한 뒤, 매물을 고르고 서로 확인하며 전자서명으로 계약을 마칩니다.</p>
+          <h2 style="font-size:24px; font-weight:800; margin:0 0 8px;">🤝 스마트 계약하기</h2>
+          <p style="font-size:14px; color:#dbeafe; margin:0;">임대인과 임차인이 각자 로그인한 뒤, 채팅창에서 AI 도우미와 함께 조건을 협의하고 전자서명으로 계약을 마칩니다.</p>
         </div>
 
         <div id="quickCosignPanel" style="background:#ffffff; color:var(--or-text); padding:20px; border-radius:12px;">
-          <div style="font-size:15px; font-weight:800; color:var(--or-navy); margin-bottom:8px;">📞 계약 시작 · 응답</div>
+          <div style="font-size:15px; font-weight:800; color:var(--or-navy); margin-bottom:8px;">📞 스마트 계약 시작 · 응답 · 보류 재개</div>
           <div id="quickCosignAuthStatus" style="font-size:12.5px; background:#f8fafc; border:1px solid var(--or-border); border-radius:8px; padding:10px 12px; margin-bottom:10px;">
-            🔒 임대인 또는 임차인으로 본인인증 로그인하면 매물을 선택해 상대를 호출하거나 도착한 호출에 즉시 응답할 수 있습니다.
+            🔒 임대인 또는 임차인으로 본인인증 로그인하면 신규·이사·연장 스마트 계약을 시작하거나 보류 중인 계약을 이어서 진행할 수 있습니다.
           </div>
           <div id="openSessionsWrap" style="display:none; margin-bottom:12px;">
-            <div style="font-size:12px; font-weight:700; color:#334155; margin-bottom:4px;">🔔 현재 호출 대기 / 진행 중 공동계약 현황</div>
+            <div style="font-size:12px; font-weight:700; color:#334155; margin-bottom:4px;">🔔 현재 호출 대기 / 진행 중 스마트 계약 현황</div>
             <div id="openSessionsSummary" style="font-size:12.5px; color:var(--or-muted); display:grid; gap:5px;"></div>
           </div>
           <button type="button" id="btnQuickCosignGo" class="or-btn or-btn--green" style="width:100%;">
-            🤝 계약 화면 열기 →
+            🤝 스마트 계약 열기 →
           </button>
         </div>
       </div>
@@ -260,7 +260,7 @@
         <article id="forLandlordsSection" class="or-pillar">
           <span class="or-brand__tag">For Landlords · 임대인 솔루션</span>
           <h3 style="font-size:21px; color:var(--or-navy); margin:10px 0 6px;">엑셀 없는 무인 자동 수납 · 중개계약 편입 · 세무 결산</h3>
-          <p style="font-size:13.5px; color:var(--or-muted); margin:0;">직거래 전자계약은 물론 외부 공인중개사 지면계약도 사진 한 장으로 동일한 자동 수납·세무 원장에 통합됩니다.</p>
+          <p style="font-size:13.5px; color:var(--or-muted); margin:0;">스마트 계약은 물론 외부 공인중개사 지면계약도 사진 한 장으로 동일한 자동 수납·세무 원장에 통합됩니다.</p>
           <ul>
             <li><strong>은행 입금문자 스마트 파싱 & FIFO 상계</strong>: 후불 입주월 가짜체납을 100% 차단하고 오래된 미납월부터 자동 상계합니다.</li>
             <li><strong>납입일 D-3 안내 & D+1 미납 자동통보</strong>: 완납 세대 오발송은 차단하고, 수납 즉시 미납통보를 자동 해소합니다.</li>
@@ -309,7 +309,7 @@
       <form id="formAccountLogin">
         <input type="hidden" id="loginTargetHint" value="">
         <div style="font-size:12px; background:#eff6ff; color:#1e40af; border:1px solid #bfdbfe; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🛡️ 로그인 시 휴대폰·계정 기반 <strong>본인인증(신분 확인 완료)</strong> 상태가 자동 부여되며 공동계약 전자서명 자격이 활성화됩니다.
+          🛡️ 로그인 시 휴대폰·계정 기반 <strong>본인인증(신분 확인 완료)</strong> 상태가 자동 부여되며 스마트 계약 전자서명 자격이 활성화됩니다.
         </div>
         <div class="or-field">
           <label for="loginIdentifier">아이디 / 휴대폰 번호 / 이메일 / 성명</label>
@@ -366,13 +366,13 @@
       <!-- TAB 2: 간편 본인인증 회원가입 -->
       <form id="formRegister" style="display:none;">
         <div style="font-size:12px; background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; border-radius:8px; padding:8px 10px; margin-bottom:10px;">
-          🛡️ 실명·휴대폰 본인인증 가입 즉시 임대인 또는 임차인 전용 워크스페이스 및 공동계약 호출 기능을 이용할 수 있습니다.
+          🛡️ 실명·휴대폰 본인인증 가입 즉시 임대인 또는 임차인 전용 워크스페이스 및 스마트 계약 기능을 이용할 수 있습니다.
         </div>
         <div class="or-field">
           <label for="regRole">가입 유형 선택</label>
           <select id="regRole" class="or-select">
-            <option value="prospect">🔑 예비임차인 (복비 0원 공실 탐색 & 공동계약 호출)</option>
-            <option value="lessor">🏢 신규 임대인 (무료 매물 등록 & 공동계약 호출)</option>
+            <option value="prospect">🔑 예비임차인 (복비 0원 공실 탐색 & 스마트 계약 요청)</option>
+            <option value="lessor">🏢 신규 임대인 (무료 매물 등록 & 스마트 계약 요청)</option>
           </select>
         </div>
         <div class="or-field">
@@ -494,8 +494,8 @@
     <div class="or-modal">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
         <div>
-          <h3 id="rnModalTitle" style="margin:0; font-size:18px; color:var(--or-navy);">📞 Rent Now — 상대방 호출 및 공동계약 시작</h3>
-          <div id="rnModalSub" style="font-size:12.5px; color:var(--or-muted);">본인인증된 계정으로 상대방을 호출하며, 상대방이 응답하면 신분증·등기부 확인 후 서명을 진행합니다.</div>
+          <h3 id="rnModalTitle" style="margin:0; font-size:18px; color:var(--or-navy);">📞 스마트 계약 — 상대방 호출 및 시작</h3>
+          <div id="rnModalSub" style="font-size:12.5px; color:var(--or-muted);">본인인증된 계정으로 상대방을 호출하며, 상대방이 응답하면 채팅창에서 AI 도우미와 함께 스마트 계약을 진행합니다.</div>
         </div>
         <button type="button" id="btnCloseRentNowModal" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--or-muted);">✕</button>
       </div>
@@ -516,7 +516,7 @@
           <input id="rnTenantPhone" class="or-input" placeholder="010-1234-5678" required>
         </div>
         <button type="submit" id="btnSubmitRentNow" class="or-btn or-btn--green" style="width:100%; padding:12px;">
-          📞 상대방 호출하고 공동계약 화면 입장 →
+          📞 상대방 호출하고 스마트 계약 시작 →
         </button>
       </form>
     </div>
@@ -526,7 +526,7 @@
   <nav class="or-bottom-nav" aria-label="빠른 이동">
     <button type="button" class="or-bottom-nav__item is-active" data-bnav="listings"><span>🏠</span><span>매물</span></button>
     <button type="button" class="or-bottom-nav__item" data-bnav="search"><span>🔍</span><span>검색</span></button>
-    <button type="button" class="or-bottom-nav__item" data-bnav="cosign"><span>🤝</span><span>직거래 계약</span></button>
+    <button type="button" class="or-bottom-nav__item" data-bnav="cosign"><span>🤝</span><span>스마트 계약</span></button>
     <button type="button" class="or-bottom-nav__item" id="bnavAccount" data-bnav="account"><span>🔐</span><span id="bnavAccountLabel">로그인</span></button>
   </nav>
 

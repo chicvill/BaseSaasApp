@@ -401,10 +401,24 @@ def complete_step5_and_seal(
             raise Conflict(f"{room.room_no}호는 이미 연장 재계약이 체결되었습니다.", hint="체결된 재계약을 취소한 뒤에 다시 시도해 주세요.")
 
     # 1) 임차인 객체 생성 또는 갱신 -> users.json 즉시 업데이트
+    move_in = t_info.get("move_in_date") or date_today().isoformat()
     tenant = (
         (Tenant.get(self.id_tenant) if self.id_tenant else None)
         or (Tenant.first(phone=t_info["tenant_phone"]) if t_info.get("tenant_phone") else None)
     )
+    # 기존 입주 임차인이 다른 호실로 이사하기 위해 미래 입주일로 신규 계약하는 경우:
+    # 입주일 전까지는 현재 거주 중인 호실 배정을 유지하고, 새 호실은 예약(SCHEDULED)으로 잠가 둔다.
+    future_move = (
+        (self.mode != "RENEWAL")
+        and (not reserve)
+        and (tenant is not None)
+        and (tenant.status == "ACTIVE")
+        and bool(tenant.current_room_id)
+        and (tenant.current_room_id != room.id)
+        and bool(move_in)
+        and (move_in > date_today().isoformat())
+    )
+    reserve_new_room = reserve or future_move
     if not tenant:
         tenant = Tenant(
             name=t_info["tenant_name"],
@@ -414,12 +428,12 @@ def complete_step5_and_seal(
             company_name=t_info.get("tenant_company_name", ""),
             ceo_name=t_info.get("tenant_ceo_name", ""),
             car_number=t_info.get("tenant_car_number", ""),
-            doorlock_pwd="" if reserve else room.doorlock_pwd,
+            doorlock_pwd="" if reserve_new_room else room.doorlock_pwd,
             branch=self.branch,
             id_building=self.id_building,
-            current_room_id="" if reserve else room.id,
-            room_no="" if reserve else room.room_no,
-            status="PROSPECT" if reserve else "ACTIVE",
+            current_room_id="" if reserve_new_room else room.id,
+            room_no="" if reserve_new_room else room.room_no,
+            status="PROSPECT" if reserve_new_room else "ACTIVE",
         )
     else:
         tenant.name = t_info["tenant_name"]
@@ -432,14 +446,14 @@ def complete_step5_and_seal(
             tenant.ceo_name = str(t_info["tenant_ceo_name"]).strip()
         if t_info.get("tenant_car_number"):
             tenant.car_number = t_info["tenant_car_number"]
-        if not reserve:
+        if not reserve_new_room:
             tenant.doorlock_pwd = room.doorlock_pwd
             tenant.branch = self.branch
             tenant.id_building = self.id_building
             tenant.current_room_id = room.id
             tenant.room_no = room.room_no
             tenant.status = "ACTIVE"
-    tenant.save(action="tenant_reserved_by_cosign" if reserve else "tenant_activated_by_cosign", app_source=app_source)
+    tenant.save(action="tenant_reserved_by_cosign" if reserve_new_room else "tenant_activated_by_cosign", app_source=app_source)
     self.id_tenant = tenant.id
 
     # 재계약인 경우 이전 계약 RENEWED 마감(미리 체결한 연장은 시작일에 마감한다)
@@ -451,7 +465,6 @@ def complete_step5_and_seal(
             old_ct.save(action="contract_renewed_replaced", app_source=app_source)
 
     # 2) Contract 원장 객체 생성 -> contracts.json 즉시 업데이트
-    move_in = t_info.get("move_in_date") or date_today().isoformat()
     months = int(t_info.get("lease_term_months", 12))
     expiry = add_months_str(move_in, months)
 
@@ -499,6 +512,7 @@ def complete_step5_and_seal(
             "lessor_id_checked_at": self.lessor_id_checked_at,
             "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
             "tenant_id_checked_at": self.tenant_id_checked_at,
+            "registry_check_mode": self.registry_check_mode,
             "tenant_direct_registry": self.tenant_registry,
             "tenant_identity": self._tenant_identity_evidence(),
             "tenant_recheck_at": self.tenant_recheck_at,
@@ -512,18 +526,18 @@ def complete_step5_and_seal(
         cosign_session_id=self.id,
         chat_digest=chat_digest,
         chat_digest_count=chat_digest_count,
-        status="SCHEDULED" if (reserve or renewal_later) else "ACTIVE",
+        status="SCHEDULED" if (reserve_new_room or renewal_later) else "ACTIVE",
         renews_contract_id=self.prev_contract_id if (self.mode == "RENEWAL" and self.prev_contract_id) else "",
     )
     ct.vat = ct.compute_vat()
     ct.save(action="contract_sealed_from_cosign", app_source=app_source)
 
     # 3) Room 호실 상태 입주 전환 (공실 광고 자동 비노출) -> rooms.json 즉시 업데이트
-    if reserve or renewal_later:
+    if reserve_new_room or renewal_later:
         room.reserved_contract_id = ct.id   # 현재 입주자·계약은 그대로 두고 예약만 건다(새 입주자 예약은 광고를 내린다, 연장 예약은 호실 값 그대로)
-        if reserve:
+        if reserve_new_room:
             room.is_published = False
-        room.save(action="room_reserved_by_cosign" if reserve else "room_renewal_reserved_by_cosign", app_source=app_source)
+        room.save(action="room_reserved_by_cosign" if reserve_new_room else "room_renewal_reserved_by_cosign", app_source=app_source)
     else:
         room.id_tenant = tenant.id
         room.active_contract_id = ct.id
@@ -599,9 +613,14 @@ def complete_step5_and_seal(
     }
 
 def _ensure_in_progress(self: CoSignSession) -> None:
+    if self.status == "PAUSED":
+        raise Conflict(
+            "이 스마트 계약은 현재 보류 중입니다.",
+            hint="상단의 [▶️ 스마트 계약 재개하기] 버튼을 누른 뒤 이어서 진행해 주세요.",
+        )
     if self.status != "IN_PROGRESS":
         raise Conflict(
-            f"이미 종료되었거나 체결 완료된 계약 세션입니다 (상태: {self.status}).",
+            f"이미 종료되었거나 체결 완료된 스마트 계약 세션입니다 (상태: {self.status}).",
             hint="체결된 계약서를 인쇄하거나 새 매물을 선택해 상대를 호출해 주세요.",
         )
 

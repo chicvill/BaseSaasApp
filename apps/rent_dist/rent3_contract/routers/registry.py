@@ -31,6 +31,12 @@ class RegistryAiReq(BaseModel):
     consent: bool = False
 
 
+class RegistryPrefReq(BaseModel):
+    role: str = "tenant"
+    want_check: bool = True
+    skip_acknowledged: bool = False
+
+
 class RecheckReq(BaseModel):
     changed: bool = False
 
@@ -92,6 +98,24 @@ def submit_tenant_registry(session_id: str, req: TenantRegistryReq):
         "message": "직접 열람한 등기부 확인 내용이 기록되었습니다.",
         "session": s.model_dump(),
     }
+
+
+@router.post("/sessions/{session_id}/registry-preference")
+def set_registry_preference(session_id: str, req: RegistryPrefReq):
+    """임차인이 등기부등본 캡처·AI 검토 진행 여부를 직접 선택한다(원할 때만 진행)."""
+    s = CoSignSession.by_code_or_id(session_id)
+    s.set_registry_preference(
+        role=req.role,
+        want_check=req.want_check,
+        skip_acknowledged=req.skip_acknowledged,
+        app_source=APP_SRC,
+    )
+    msg = (
+        "등기부등본 캡처·AI 검토를 진행하도록 설정했습니다."
+        if req.want_check
+        else "임차인의 선택으로 등기부등본 확인을 생략했습니다. 원하시면 서명 전 언제든 다시 켤 수 있습니다."
+    )
+    return {"success": True, "message": msg, "session": s.model_dump()}
 
 
 @router.post("/sessions/{session_id}/registry-ai")

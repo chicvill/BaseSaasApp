@@ -150,7 +150,7 @@
             </div>
             <div class="bass-row" style="margin-top:10px;flex-wrap:wrap;gap:8px;">
               ${ec.status !== "RENEWAL_ACKNOWLEDGED" ? `<button id="btnAckRenewal" class="bass-btn bass-btn--primary" type="button">✅ 연장 재계약 예고 조건 확인·동의</button>` : ""}
-              ${ec.cosign_session_id ? `<a class="bass-btn bass-btn--sm ${ec.status === "RENEWAL_ACKNOWLEDGED" ? "bass-btn--primary" : ""}" href="/rent3_contract/?session=${encodeURIComponent(ec.cosign_session_id)}&role=tenant">🤝 공동 재계약방 즉시 입장 (참여코드 ${Bass.escapeHtml(ec.cosign_session_code)})</a>` : ""}
+              ${ec.cosign_session_id ? `<a class="bass-btn bass-btn--sm ${ec.status === "RENEWAL_ACKNOWLEDGED" ? "bass-btn--primary" : ""}" href="/rent3_contract/?session=${encodeURIComponent(ec.cosign_session_id)}&role=tenant">🤝 스마트 연장계약방 즉시 입장 (참여코드 ${Bass.escapeHtml(ec.cosign_session_code)})</a>` : ""}
             </div>
           </div>
         ` : ""}
@@ -215,7 +215,7 @@
           ? `<div class="bass-muted" style="margin-top:8px;font-size:13px;">PDF 스캔본 계약서가 보관되어 있습니다. 우측 상단 버튼으로 확인하세요.</div>`
           : `<img id="imgContractPhotoPreview" alt="내 호실 임대차계약서 사본" style="max-width:100%;max-height:320px;border-radius:12px;border:1px solid var(--border);margin-top:10px;background:#fff;display:none;">`}
       </div>` : "";
-    return blk(inner, "보관된 중개 계약서 사본이 없습니다. (직거래 계약은 계약 화면에서 확인합니다)");
+    return blk(inner, "보관된 중개 계약서 사본이 없습니다. (스마트 계약은 계약 화면에서 확인합니다)");
   }
 
   function buildCertHtml(cert) {
@@ -701,8 +701,8 @@
             <input class="bass-input inq-msg" data-room="${r.room_no}" style="flex:1;min-width:160px;" value="이번 주말 현장 방문투어 예약하고 싶습니다!">
             <button class="bass-btn bass-btn--sm btn-send-inq" data-branch="${r.branch}" data-room="${r.room_no}" type="button">💬 1:1 방문문의</button>
             ${r.active_cosign_session
-              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${r.active_cosign_session.id}&role=tenant">🤝 열린 계약방 입장(코드 ${r.active_cosign_session.session_code})</a>`
-              : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant">🤝 공동 임대계약 앱 이동</a>`
+              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${r.active_cosign_session.id}&role=tenant">🤝 열린 스마트 계약방 입장(코드 ${r.active_cosign_session.session_code})</a>`
+              : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant">🤝 스마트 계약 시작</a>`
             }
           </div>
         </div>`;
@@ -718,7 +718,7 @@
         const item = list.find((x) => x.id === el.dataset.roomId);
         if (item && window.R3ListingModal) {
           window.R3ListingModal.open(item, {
-            rentNowLabel: item.active_cosign_session ? "🤝 열린 계약방 입장" : "🤝 공동 임대계약 앱 이동",
+            rentNowLabel: item.active_cosign_session ? "🤝 열린 스마트 계약방 입장" : "🤝 스마트 계약 시작",
             onRentNow: (r) => {
               window.location.href = r.active_cosign_session
                 ? `/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant`

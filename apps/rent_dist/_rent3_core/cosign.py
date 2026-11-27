@@ -29,7 +29,8 @@ from .pool import PoolObj, now_iso
 
 # 진행 중인 계약이 이 시간 동안 아무 변화가 없으면 자동 해제(취소)한다. (테스트·E2E 하네스에서 동적 변경 가능)
 IDLE_EXPIRE = timedelta(hours=24)
-IDLE_EXPIRE_DRAFT = timedelta(hours=72)  # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
+IDLE_EXPIRE_DRAFT = timedelta(hours=72)   # 대면 전에 미리 작성한 계약은 약속 시간을 감안해 더 오래 보존
+IDLE_EXPIRE_PAUSED = timedelta(days=7)    # 잠시 보류(PAUSED)한 스마트 계약은 최대 7일간 현재 단계 그대로 보존
 
 
 class CoSignSession(PoolObj):
@@ -56,6 +57,9 @@ class CoSignSession(PoolObj):
     id: str = Field(default_factory=lambda: f"cs_{uuid4().hex[:8]}")
     session_code: str = Field(default_factory=lambda: f"{random.randint(100000, 999999)}")
     mode: str = "NEW"                        # NEW (신규계약) / RENEWAL (조건변경 재계약)
+    entry_channel: str = ""                  # LESSOR_RENEWAL | PORTAL_NEW | EXISTING_TENANT_MOVE | LESSOR_NEW
+    moving_from_room_id: str = ""            # 기존 입주 임차인이 다른 호실로 이사하는 경우 기존 호실 ID
+    moving_from_room_no: str = ""            # 기존 입주 임차인이 다른 호실로 이사하는 경우 기존 호실 번호
     prev_contract_id: str = ""
     reserve_after: str = ""                  # 사전 계약(입주 중인 전출 예정 호실): 새 입주일의 가장 빠른 날 = 현재 입주자의 예상 퇴실일
     branch: str = "main"
@@ -79,8 +83,13 @@ class CoSignSession(PoolObj):
     tenant_login_verified: bool = True       # 임차인 로그인 본인인증 완료 여부
 
     current_step: int = 1                    # 1..5
-    status: str = "IN_PROGRESS"              # IN_PROGRESS / COMPLETED / CANCELLED
+    status: str = "IN_PROGRESS"              # IN_PROGRESS / PAUSED / COMPLETED / CANCELLED
     revision: int = 1                        # 조건 변경 시마다 +1 증가 (위변조 원천 차단)
+    paused_at: str = ""                      # 보류(PAUSED) 시작 시각
+    paused_by: str = ""                      # lessor / tenant
+    pause_reason: str = ""                   # 보류 사유(예: 가족 상의·이사 일정 확인)
+    pause_expires_at: str = ""               # 보류 만료 예정 시각(기본 7일)
+    registry_check_mode: str = "REQUIRED"    # REQUIRED (기본) / SKIPPED_BY_TENANT (임차인이 원하지 않아 명시적 생략)
 
     # Step 1: 상호 신분증 확인 체크 & 대법원 등기부등본 권리 분석
     lessor_checked_tenant_id: bool = False   # 임대인이 임차인 신분증을 대조·본인확인 체크했는지 여부
@@ -135,13 +144,16 @@ class CoSignSession(PoolObj):
     completed_at: str = ""
 
     def is_idle_expired(self, now: Optional[datetime] = None) -> bool:
-        """진행 중인 세션이 IDLE_EXPIRE 동안 무응답(변화 없음)이면 True."""
-        if self.status != "IN_PROGRESS":
+        """진행 중(24h/72h) 또는 보류 중(7일) 세션이 기한 동안 무응답(변화 없음)이면 True."""
+        if self.status not in ("IN_PROGRESS", "PAUSED"):
             return False
         try:
-            last = datetime.fromisoformat(self.updated_at)
+            ref_ts = self.paused_at if (self.status == "PAUSED" and self.paused_at) else self.updated_at
+            last = datetime.fromisoformat(ref_ts)
         except (TypeError, ValueError):
             return False
+        if self.status == "PAUSED":
+            return (now or datetime.now()) - last >= IDLE_EXPIRE_PAUSED
         window = IDLE_EXPIRE_DRAFT if (self.draft_prefilled_at and self.call_status == "CALLING") else IDLE_EXPIRE
         return (now or datetime.now()) - last >= max(window, IDLE_EXPIRE)
 
@@ -161,6 +173,7 @@ class CoSignSession(PoolObj):
     _ensure_risk_ok = _reg._ensure_risk_ok
     registry_mismatches = _reg.registry_mismatches
     submit_tenant_registry = _reg.submit_tenant_registry
+    set_registry_preference = _reg.set_registry_preference
     _save_registry_attachment = staticmethod(_reg._save_registry_attachment)
     registry_attachment_path = _reg.registry_attachment_path
     cancel = _reg.cancel
@@ -168,7 +181,7 @@ class CoSignSession(PoolObj):
     is_step1_fully_verified = _reg.is_step1_fully_verified
     ensure_renewal_ready = _reg.ensure_renewal_ready
 
-    # ── 세션 개설·호출/응답·신분확인·1~2단계 (`domains/cosign_session.py`) ──
+    # ── 세션 개설·호출/응답·보류/재개·신분확인·1~2단계 (`domains/cosign_session.py`) ──
     open_session = classmethod(_sess.open_session)
     expire_idle = classmethod(_sess.expire_idle)
     ai_calls_this_month = classmethod(_sess.ai_calls_this_month)
@@ -177,6 +190,8 @@ class CoSignSession(PoolObj):
     is_tenant_party = _sess.is_tenant_party
     call_counterparty = classmethod(_sess.call_counterparty)
     respond_to_call = _sess.respond_to_call
+    pause = _sess.pause_session
+    resume = _sess.resume_session
     by_code_or_id = classmethod(_sess.by_code_or_id)
     verify_counterparty_id = _sess.verify_counterparty_id
     confirm_step1 = _sess.confirm_step1
@@ -202,6 +217,7 @@ class CoSignSession(PoolObj):
 __all__ = [
     "IDLE_EXPIRE",
     "IDLE_EXPIRE_DRAFT",
+    "IDLE_EXPIRE_PAUSED",
     "HIGH_DEPOSIT",
     "LOW_DEPOSIT",
     "INSURED_STATUS",

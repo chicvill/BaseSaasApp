@@ -67,13 +67,13 @@
       ${isCalleeView ? `
         <div class="call-banner" style="margin-top:12px; margin-bottom:0;">
           <div style="font-weight:800; margin-bottom:6px;">
-            🔔 ${esc(callerKo)}님이 [${esc(s.building_name)} ${esc(s.room_no)}호] 공동계약을 호출했습니다!
+            🔔 ${esc(callerKo)}님이 [${esc(s.building_name)} ${esc(s.room_no)}호] 스마트 계약을 호출했습니다!
           </div>
           <div class="bass-muted" style="font-size:12.5px; margin-bottom:10px;">
             응답하면 ① 신분증·등기부 확인 단계가 시작됩니다.
           </div>
           <button id="btnRespondMain" type="button" class="bass-btn bass-btn--primary" style="width:100%;">
-            ✅ 호출에 응답하고 공동계약 시작하기 (${currentRole === "lessor" ? "임대인" : "임차인"} 본인인증 연결)
+            ✅ 호출에 응답하고 스마트 계약 시작하기 (${currentRole === "lessor" ? "임대인" : "임차인"} 본인인증 연결)
           </button>
         </div>
       ` : `
@@ -195,7 +195,7 @@
       qr.make();
       svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
     } catch (_) { svg = ""; }
-    const invite = `[${s.building_name} ${s.room_no}호] 공동 임대계약에 초대합니다. 아래 링크로 들어와 본인 계정으로 로그인한 뒤 '응답'을 눌러 주세요.\n${joinUrl}\n참여코드 ${s.session_code || ""}`;
+    const invite = `[${s.building_name} ${s.room_no}호] 스마트 계약에 초대합니다. 아래 링크로 들어와 본인 계정으로 로그인한 뒤 '응답'을 눌러 주세요.\n${joinUrl}\n참여코드 ${s.session_code || ""}`;
     const box = document.createElement("div");
     box.className = "bass-card";
     box.style.cssText = "padding:14px;margin-top:12px;text-align:center;";

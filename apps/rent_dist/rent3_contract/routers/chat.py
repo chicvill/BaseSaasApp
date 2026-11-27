@@ -5,7 +5,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
-from apps.rent_dist._rent3_core import CoSignSession, Contract, contract_chat
+from core.errors import DomainError
+from apps.rent_dist._rent3_core import CoSignSession, Contract, contract_ai, contract_chat
 from ._deps import _chat_actor, _touch_chat_session
 
 router = APIRouter()
@@ -21,6 +22,13 @@ class ContractMsgReq(BaseModel):
 
 class ContractMsgRespondReq(BaseModel):
     action: str                        # accept | decline | withdraw
+
+
+class AiAssistReq(BaseModel):
+    action: str = "explain_contract"   # explain_contract | draft_clause | ocr_memo
+    text: str = ""
+    image_data_url: str = ""
+    consent: bool = False
 
 
 @router.get("/sessions/{session_id}/messages")
@@ -108,3 +116,30 @@ def contract_message_respond(session_id: str, msg_id: str, req: ContractMsgRespo
         "withdraw": "철회했습니다.",
     }[req.action]
     return {"success": True, "message": text, "session": s.model_dump(), **res, "open_count": len(contract_chat.open_items(s.id))}
+
+
+@router.post("/sessions/{session_id}/ai-assist")
+def contract_ai_assist(session_id: str, req: AiAssistReq):
+    """스마트 계약 AI 문해력·OCR 도우미: 쉬운 계약서 요약, 자연어→표준 특약 다듬기, 계약 메모 사진 OCR."""
+    s = CoSignSession.by_code_or_id(session_id)
+    act = (req.action or "explain_contract").strip()
+    if act == "explain_contract":
+        data = contract_ai.explain_contract(s)
+        return {"success": True, "action": act, "result": data, "message": "스마트 계약서 핵심 내용을 쉽게 요약했습니다."}
+    if act == "draft_clause":
+        data = contract_ai.draft_special_clause(req.text, s)
+        return {"success": True, "action": act, "result": data, "message": "입력하신 내용을 표준 특약 문구로 다듬었습니다."}
+    if act == "ocr_memo":
+        if not req.consent:
+            raise DomainError("사진을 AI로 분석하려면 전송 동의 체크가 필요합니다.")
+        if not req.image_data_url:
+            raise DomainError("분석할 사진 또는 캡처 이미지를 선택해 주세요.")
+        data = contract_ai.ocr_memo_image(req.image_data_url)
+        return {
+            "success": data["status"] == "ok",
+            "level": "success" if data["status"] == "ok" else "warning",
+            "action": act,
+            "result": data,
+            "message": data["message"],
+        }
+    raise DomainError("지원하지 않는 AI 도우미 기능입니다.", hint="explain_contract / draft_clause / ocr_memo")

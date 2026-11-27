@@ -34,6 +34,7 @@
   function turnInfo(s) {
     if (s.status === "CANCELLED") return { mine: false, text: "취소된 계약입니다" };
     if (s.status === "COMPLETED") return { mine: false, text: "체결이 완료되었습니다" };
+    if (s.status === "PAUSED") return { mine: true, text: "⏸️ 보류 중 — [▶️ 재개하기]로 이어서 진행" };
     if (s.call_status === "CALLING") {
       return currentRole !== s.initiated_by_role
         ? { mine: true, text: "지금 내 차례: 호출에 응답하세요" }
@@ -361,6 +362,21 @@
     return String(v || "").replace(/\([^)]*\)/g, "").replace(/\s+/g, "");
   }
 
+  function nowLocalInputStr() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 16);
+  }
+
+  function readFileDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result || ""));
+      fr.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
+      fr.readAsDataURL(file);
+    });
+  }
+
   function renderPartyHeader(s) {
     const el = document.getElementById("wsPartyHeader");
     if (!el) return;
@@ -377,11 +393,23 @@
     const tm = s.terms || {};
     const lr = s.registry_data || {};
     const tr = s.tenant_registry || {};
+    const aiRes = s.registry_ai_result || {};
     const isRen = s.mode === "RENEWAL";
     const active = s.status === "IN_PROGRESS";
+    const paused = s.status === "PAUSED";
     const canAct = !adminProxy && Boolean(currentRole) && active;
     const renderMsg = (m) => renderChatBubble(m, d);
     const sigHtml = (sig) => (C.renderSigCell ? C.renderSigCell(sig) : esc(sig));
+
+    const pauseBannerHtml = paused ? `
+      <div class="cg-pause-banner">
+        <div style="font-weight:800;color:#92400e;margin-bottom:4px;">⏸️ 스마트 계약이 잠시 보류 중입니다 (${s.current_step}단계 보관 중)</div>
+        <div style="font-size:12.5px;color:#78350f;line-height:1.55;">
+          ${s.pause_reason ? `보류 사유: <strong>${esc(s.pause_reason)}</strong><br>` : ""}
+          보관 기한: <strong>${esc(String(s.pause_expires_at || "").slice(0, 16).replace("T", " ") || "최대 7일")}</strong> · 보류 중에도 아래 채팅으로 자유롭게 대화할 수 있습니다.
+        </div>
+        ${!adminProxy && currentRole ? `<div style="margin-top:8px;"><button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-resume">▶️ 스마트 계약 재개하기 (${s.current_step}단계 이어서)</button></div>` : ""}
+      </div>` : "";
 
     if (s.call_status === "CALLING") {
       const callee = currentRole !== s.initiated_by_role;
@@ -402,10 +430,11 @@
             </button>
           </div>
         </div>`;
-      return callCard + msgs.map(renderMsg).join("");
+      return pauseBannerHtml + callCard + msgs.map(renderMsg).join("");
     }
 
     const parts = [];
+    if (pauseBannerHtml) parts.push(pauseBannerHtml);
     if (s.status === "CANCELLED") {
       parts.push(`
         <div class="cg-card" style="border-color:var(--err);border-left-color:var(--err);background:#fef2f2;">
@@ -450,50 +479,92 @@
           </label>
         </div>`);
 
-      // 앱 개입 카드 ②: 법원등기소 등기부등본 열람 및 확인 (좌우상하 스크롤 모달 링크)
+      // 앱 개입 카드 ②: 법원등기소 등기부등본 열람 · 캡처 AI OCR 검토 (임차인 선택 진행 가능)
+      const regSkipped = s.registry_check_mode === "SKIPPED_BY_TENANT";
+      const regEnabled = !regSkipped;
       const regDone = Boolean(s.step1_lessor_confirmed && s.step1_tenant_locked);
       const trSub = Boolean(tr.submitted);
       const ownerTarget = lr.owner_name || s.lessor_name || "";
       const ownerOk = trSub && Boolean(tr.owner_name) && (!ownerTarget || normSimpleName(tr.owner_name) === normSimpleName(ownerTarget));
       const mortOk = trSub && tr.mortgage_amount !== undefined && tr.mortgage_amount !== "";
       const seizeOk = trSub && tr.seizure_or_trust === "없음";
-      const canTenantRegChk = canAct && currentRole === "tenant" && !s.step1_tenant_locked;
+      const canTenantRegChk = canAct && currentRole === "tenant" && !s.step1_tenant_locked && regEnabled;
+      const canToggleReg = canAct && currentRole === "tenant" && s.current_step <= 3 && !s.lessor_signature && !s.tenant_signature;
+      const regBadgeText = regSkipped ? "임차인 선택으로 생략 ✓" : (regDone ? "열람·확인 완료 ✓" : "임차인 열람 선택");
       parts.push(`
-        <div class="cg-card ${regDone ? "cg-card--done" : (s.current_step === 1 ? "cg-card--active" : "")}">
+        <div class="cg-card ${regDone || regSkipped ? "cg-card--done" : (s.current_step === 1 ? "cg-card--active" : "")}">
           <div class="cg-card__top">
             <span class="cg-card__tag">🤖 스마트 계약 안내 · ② 등기부등본 확인</span>
-            <span class="bass-badge ${regDone ? "bass-badge--ok" : "bass-badge--warn"}">${regDone ? "열람·확인 완료 ✓" : "임차인 열람 필요"}</span>
+            <span class="bass-badge ${regDone || regSkipped ? "bass-badge--ok" : "bass-badge--warn"}">${regBadgeText}</span>
           </div>
-          <div class="cg-card__msg">
-            임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람하고 아래 사항을 체크해 주세요.
+          <div class="cg-reg-opt-box">
+            <label class="cg-check ${regEnabled ? "is-checked" : ""} ${canToggleReg ? "is-actionable" : ""}" style="margin:0;">
+              <span class="cg-check__label">
+                <span><strong>☑️ 등기부등본 캡처 · AI 권리관계 검토 진행 (임차인 선택)</strong></span>
+                <span class="cg-check__hint">${regSkipped ? "현재 생략 선택됨 — 서명 전까지 체크를 켜면 언제든 등기부 캡처·AI 검토를 진행할 수 있습니다" : "임차인이 원할 때만 체크해서 진행합니다 (체크를 풀면 등기부 확인 단계를 생략할 수 있어요)"}</span>
+              </span>
+              <input type="checkbox" class="js-cg-reg-opt" ${regEnabled ? "checked" : ""} ${canToggleReg ? "" : "disabled"}>
+            </label>
           </div>
-          <div class="cg-link-row">
-            <button type="button" class="cg-link-btn js-cg-iros">🏛️ [ 법원등기소 ] 접속 (주소복사) ↗</button>
-            <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="1">
-              ${currentRole === "tenant" ? "📄 [ 등기부등본 확인 · 승인 모달 ] ↗" : "📄 [ 등기부 제시 · 확인 모달 ] ↗"}
-            </button>
-          </div>
-          <div class="cg-reg-list">
-            <div class="cg-reg-item">
-              <span>1. 등기인 = 임대인 명의(${esc(ownerTarget || "-")}) 일치?</span>
-              <span class="bass-badge ${ownerOk ? "bass-badge--ok" : "bass-badge--warn"}">${ownerOk ? `${esc(tr.owner_name)} 일치 ✓` : "열람 대기"}</span>
+          ${regSkipped ? `
+            <div class="cg-ai-summary" style="background:#f0fdf4;border-color:#86efac;">
+              ✅ <strong>임차인 선택으로 등기부등본 확인을 생략했습니다.</strong><br>
+              임대인 신분 확인과 등기 제시가 끝나면 다음 단계로 바로 진행되며, 서명 전까지 위 체크를 다시 켜서 언제든 캡처·AI 검토를 할 수 있습니다.
             </div>
-            <div class="cg-reg-item">
-              <span>2. 근저당 / 채권최고액 확인</span>
-              <span class="bass-badge ${mortOk ? "bass-badge--ok" : "bass-badge--warn"}">${mortOk ? `${fmtWon(tr.mortgage_amount)} ✓` : "열람 대기"}</span>
+          ` : `
+            <div class="cg-card__msg">
+              임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람·캡처하고 아래 사항을 체크해 주세요.
             </div>
-            <div class="cg-reg-item">
-              <span>3. 압류·가압류·신탁 없음 확인</span>
-              <span class="bass-badge ${seizeOk ? "bass-badge--ok" : "bass-badge--warn"}">${seizeOk ? "없음 ✓" : (trSub && tr.seizure_or_trust ? esc(tr.seizure_or_trust) : "열람 대기")}</span>
+            <div class="cg-link-row">
+              <button type="button" class="cg-link-btn js-cg-iros">🏛️ [ 법원등기소 ] 접속 (주소복사) ↗</button>
+              <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="1">
+                ${currentRole === "tenant" ? "📄 [ 등기부등본 확인 · 승인 모달 ] ↗" : "📄 [ 등기부 제시 · 확인 모달 ] ↗"}
+              </button>
             </div>
-          </div>
-          <label class="cg-check ${s.step1_tenant_locked ? "is-checked" : (canTenantRegChk ? "is-actionable" : "")}">
-            <span class="cg-check__label">
-              <span><strong>임차인이 위 사실을 확인했음</strong></span>
-              <span class="cg-check__hint">${s.step1_tenant_locked ? "임차인 직접 열람·확인 완료" : "모달에서 등기부등본을 보고 승인하면 체크됩니다"}</span>
-            </span>
-            <input type="checkbox" class="js-cg-reg-confirm" ${s.step1_tenant_locked ? "checked" : ""} ${canTenantRegChk ? "" : "disabled"}>
-          </label>
+            ${currentRole === "tenant" && canAct && !s.step1_tenant_locked ? `
+              <div class="cg-ocr-box">
+                <div style="font-weight:800;font-size:13px;color:#1e3a8a;margin-bottom:4px;">📸 등기부등본 캡처 · PDF 바로 올려 AI OCR 검토</div>
+                <div class="bass-muted" style="font-size:12px;margin-bottom:6px;line-height:1.5;">
+                  법원등기소 화면을 캡처해 올리거나 <strong>Ctrl+V 붙여넣기</strong>하면 AI가 소유자·근저당·압류 여부를 쉬운 말로 요약해 드립니다.
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:6px;cursor:pointer;">
+                  <input type="checkbox" class="js-cg-reg-ai-consent" checked>
+                  <span>AI(Google Gemini) 등기부 OCR 분석 전송 동의 (분석 전용, 서버 미보관)</span>
+                </label>
+                <input type="file" class="bass-input js-cg-reg-file" accept="image/*,application/pdf">
+              </div>` : ""}
+            ${aiRes && aiRes.status === "ok" && aiRes.extracted ? `
+              <div class="cg-ai-summary">
+                <div style="font-weight:800;color:#1e3a8a;margin-bottom:4px;">🤖 AI 등기부등본 쉬운 요약 (참고용)</div>
+                <div style="white-space:pre-line;">${esc(aiRes.plain_summary || `소유자: ${aiRes.extracted.owner_name || "-"} · 근저당 ${fmtWon(aiRes.extracted.mortgage_total)} · 압류/신탁 ${aiRes.extracted.seizure_or_trust || "없음"}`)}</div>
+                ${currentRole === "tenant" && canAct && !s.step1_tenant_locked ? `
+                  <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                    <button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-reg-ai-apply">✅ AI OCR 결과로 등기부 확인 바로 완료</button>
+                    <button type="button" class="bass-btn bass-btn--sm js-cg-open-step" data-step="1">🔍 상세 대조·수정 모달</button>
+                  </div>` : ""}
+              </div>` : ""}
+            <div class="cg-reg-list">
+              <div class="cg-reg-item">
+                <span>1. 등기인 = 임대인 명의(${esc(ownerTarget || "-")}) 일치?</span>
+                <span class="bass-badge ${ownerOk ? "bass-badge--ok" : "bass-badge--warn"}">${ownerOk ? `${esc(tr.owner_name)} 일치 ✓` : "열람 대기"}</span>
+              </div>
+              <div class="cg-reg-item">
+                <span>2. 근저당 / 채권최고액 확인</span>
+                <span class="bass-badge ${mortOk ? "bass-badge--ok" : "bass-badge--warn"}">${mortOk ? `${fmtWon(tr.mortgage_amount)} ✓` : "열람 대기"}</span>
+              </div>
+              <div class="cg-reg-item">
+                <span>3. 압류·가압류·신탁 없음 확인</span>
+                <span class="bass-badge ${seizeOk ? "bass-badge--ok" : "bass-badge--warn"}">${seizeOk ? "없음 ✓" : (trSub && tr.seizure_or_trust ? esc(tr.seizure_or_trust) : "열람 대기")}</span>
+              </div>
+            </div>
+            <label class="cg-check ${s.step1_tenant_locked ? "is-checked" : (canTenantRegChk ? "is-actionable" : "")}">
+              <span class="cg-check__label">
+                <span><strong>임차인이 위 사실을 확인했음</strong></span>
+                <span class="cg-check__hint">${s.step1_tenant_locked ? "임차인 직접 열람·확인 완료" : "캡처 AI OCR 승인 또는 모달에서 확인하면 체크됩니다"}</span>
+              </span>
+              <input type="checkbox" class="js-cg-reg-confirm" ${s.step1_tenant_locked ? "checked" : ""} ${canTenantRegChk ? "" : "disabled"}>
+            </label>
+          `}
           <div class="bass-muted" style="font-size:12px;margin-top:6px;">
             임대인 등기 제시: <strong>${s.step1_lessor_confirmed ? "제시 완료 ✓" : "대기 중"}</strong> (소유자 ${esc(lr.owner_name || s.lessor_name || "-")} · 채권최고액 ${fmtWon(lr.mortgage_amount)})
           </div>
@@ -633,7 +704,12 @@
 
     let extraInfo = "";
     let btns = "";
-    if (s.call_status === "CALLING") {
+    if (s.status === "PAUSED") {
+      extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">⏸️ 보류 상태(${s.current_step}단계 보관) · 채팅 대화는 계속 가능하며 [▶️ 재개하기]를 누르면 이어서 진행합니다.</div>`;
+      btns = !adminProxy && currentRole
+        ? `<button type="button" id="wsBtnResume" class="bass-btn bass-btn--sm bass-btn--primary">▶️ 스마트 계약 재개하기</button>`
+        : "";
+    } else if (s.call_status === "CALLING") {
       btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="0">📞 호출 응답 / 연결 확인</button>`;
     } else if (step === 1) {
       const myIdDone = currentRole === "lessor" ? Boolean(s.lessor_checked_tenant_id) : Boolean(s.tenant_checked_lessor_id);
@@ -701,6 +777,17 @@
         C.openStepModal(st || s.current_step, { forceDoc: true });
       });
     });
+    const btnWsResume = document.getElementById("wsBtnResume");
+    if (btnWsResume) {
+      btnWsResume.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/resume`, { method: "POST", body: { role: currentRole } });
+          S.activeSession = res.session;
+          Bass.updateAppAlert("success", res.message);
+          C.renderWorkspace();
+        });
+      });
+    }
     const btnIdChk = document.getElementById("wsBtnIdCheck");
     if (btnIdChk) {
       btnIdChk.addEventListener("click", function () {
@@ -785,6 +872,7 @@
       const tm = s.terms || {};
       const sessionSig = [
         s.id, s.status, s.call_status, s.current_step, s.revision,
+        s.paused_at || "", s.registry_check_mode || "", (s.registry_ai_result && s.registry_ai_result.analyzed_at) || "",
         s.lessor_checked_tenant_id, s.tenant_checked_lessor_id,
         s.step1_lessor_confirmed, s.step1_tenant_locked,
         Boolean(tr.submitted), tr.owner_name || "", tr.mortgage_amount ?? "", tr.seizure_or_trust || "",
@@ -909,6 +997,91 @@
         list.querySelectorAll(".js-cg-bundle").forEach((btn) => btn.addEventListener("click", () => {
           openBundleDialog(S.activeSession);
         }));
+
+        list.querySelectorAll(".js-cg-resume").forEach((btn) => btn.addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/resume`, {
+              method: "POST",
+              body: { role: currentRole },
+            });
+            S.activeSession = res.session;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-reg-opt").forEach((chk) => chk.addEventListener("change", () => {
+          const curS = S.activeSession;
+          if (!curS || currentRole !== "tenant") return;
+          const want = chk.checked;
+          if (!want) {
+            const ok = window.confirm("등기부등본 캡처·AI 검토를 생략하고 진행할까요?\n생략해도 전자서명 전까지 체크박스를 다시 켜서 언제든 검토할 수 있습니다.");
+            if (!ok) { chk.checked = true; return; }
+          }
+          chk.disabled = true;
+          Bass.api(APP_ID, `/sessions/${curS.id}/registry-preference`, {
+            method: "POST",
+            body: { role: "tenant", want_check: want, skip_acknowledged: !want },
+          }).then((res) => {
+            S.activeSession = res.session;
+            S.viewStep = S.activeSession.current_step;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          }).catch((err) => {
+            chk.checked = !want;
+            chk.disabled = false;
+            Bass.showError(err);
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-reg-file").forEach((inp) => inp.addEventListener("change", () => {
+          const f = inp.files && inp.files[0];
+          if (!f) return;
+          const box = inp.closest(".cg-ocr-box");
+          const consentChk = box && box.querySelector(".js-cg-reg-ai-consent");
+          runInlineRegistryOcr(f, !consentChk || consentChk.checked).finally(() => { inp.value = ""; });
+        }));
+
+        list.querySelectorAll(".js-cg-reg-ai-apply").forEach((btn) => btn.addEventListener("click", function () {
+          const curS = S.activeSession;
+          const ex = curS && curS.registry_ai_result && curS.registry_ai_result.extracted;
+          if (!curS || !ex) return;
+          const lrNow = curS.registry_data || {};
+          const tmNow = curS.terms || {};
+          const ownerTarget = lrNow.owner_name || curS.lessor_name || "";
+          const ownerDiff = Boolean(ownerTarget && ex.owner_name && normSimpleName(ownerTarget) !== normSimpleName(ex.owner_name));
+          const isJeonse = tmNow.lease_type === "전세" || Number(tmNow.monthly_rent || 0) === 0;
+          const highDep = isJeonse || Number(tmNow.deposit || 0) > 50000000;
+          const lowDepRisk = !isJeonse && Number(tmNow.deposit || 0) <= 20000000 && Number(ex.mortgage_total || 0) > 0;
+          if (ownerDiff || ex.seizure_or_trust === "있음" || highDep || lowDepRisk) {
+            Bass.updateAppAlert("warning", "권리관계 확인 또는 보증보험 선택이 필요해 상세 대조 모달을 열었습니다.");
+            C.openStepModal(1, { forceDoc: true });
+            return;
+          }
+          Bass.withLock(this, async () => {
+            const regPayload = {
+              viewed_directly: true,
+              viewed_at: ex.viewed_at || nowLocalInputStr(),
+              owner_name: ex.owner_name || ownerTarget,
+              mortgage_amount: Number(ex.mortgage_total || 0),
+              seizure_or_trust: ex.seizure_or_trust || "없음",
+              issue_number: ex.issue_number || "",
+              mismatch_ack: true,
+            };
+            await Bass.api(APP_ID, `/sessions/${curS.id}/tenant-registry`, {
+              method: "POST",
+              body: { registry: regPayload },
+            });
+            const res = await Bass.api(APP_ID, `/sessions/${curS.id}/step1`, {
+              method: "POST",
+              body: { role: "tenant", checked_counterparty_id: Boolean(curS.tenant_checked_lessor_id) },
+            });
+            S.activeSession = res.session;
+            S.viewStep = S.activeSession.current_step;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
       }
       S.chatSummary = { unread: d.unread || 0, open_count: d.open_count || 0 };
       updateChatFab();
@@ -916,6 +1089,227 @@
     } catch (_) { /* 다음 폴링에서 재시도 */ }
     finally { wsChatBusy = false; }
   }
+
+  async function runInlineRegistryOcr(file, consent) {
+    const curS = S.activeSession;
+    if (!curS) return;
+    if (file.size > 10 * 1024 * 1024) {
+      Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다.");
+      return;
+    }
+    if (!consent) {
+      Bass.updateAppAlert("warning", "AI 등기부 OCR 분석 전송 동의 체크 후 올려 주세요.");
+      return;
+    }
+    Bass.updateAppAlert("info", "🤖 AI가 등기부등본 캡처를 읽고 있습니다...");
+    try {
+      const dataUrl = await readFileDataUrl(file);
+      const res = await Bass.api(APP_ID, `/sessions/${curS.id}/registry-ai`, {
+        method: "POST",
+        body: { attachment_data_url: dataUrl, consent: true },
+      });
+      if (res.session) S.activeSession = res.session;
+      Bass.updateAppAlert(res.level === "success" ? "success" : "warning", res.message);
+      C.renderWorkspace();
+    } catch (err) {
+      Bass.showError(err);
+    }
+  }
+
+  // 채팅창에서 Ctrl+V 로 등기부 캡처 이미지를 바로 붙여넣어 AI OCR 검토
+  document.addEventListener("paste", (ev) => {
+    const curS = S.activeSession;
+    if (!curS || D.elContract.hidden || S.stepModalOpen) return;
+    if (curS.status !== "IN_PROGRESS" || curS.mode === "RENEWAL" || curS.current_step !== 1) return;
+    if (currentRole !== "tenant" || curS.step1_tenant_locked || curS.registry_check_mode === "SKIPPED_BY_TENANT") return;
+    const items = (ev.clipboardData && ev.clipboardData.items) || [];
+    for (const it of items) {
+      if (it.type && it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) {
+          ev.preventDefault();
+          const consentChk = document.querySelector(".js-cg-reg-ai-consent");
+          runInlineRegistryOcr(f, !consentChk || consentChk.checked);
+          return;
+        }
+      }
+    }
+  });
+
+  function openAiExplainModal() {
+    const curS = S.activeSession;
+    if (!curS) return;
+    const body = R3.openModal("🤖 AI 쉬운 스마트 계약 요약", `<div class="bass-muted" style="font-size:13px;padding:12px 0;">AI가 현재 계약 조건·특약·권리관계를 쉬운 말로 정리하고 있습니다...</div>`);
+    Bass.api(APP_ID, `/sessions/${curS.id}/ai-assist`, {
+      method: "POST",
+      body: { action: "explain_contract" },
+    }).then((res) => {
+      const r = res.result || {};
+      const bullets = (r.bullets || []).map((b) => `<li style="margin:4px 0;">${esc(b)}</li>`).join("");
+      const cautions = (r.cautions || []).map((c) => `<li style="margin:4px 0;color:#92400e;">${esc(c)}</li>`).join("");
+      body.innerHTML = `
+        <div class="cg-ai-summary" style="margin-top:0;">
+          <div style="font-weight:800;color:#1e3a8a;margin-bottom:4px;">📋 한눈에 보는 계약 요약 <span class="bass-badge bass-badge--info" style="margin-left:4px;">${r.ai_enhanced ? "Gemini AI" : "표준 분석"}</span></div>
+          <div>${esc(r.summary || "")}</div>
+        </div>
+        ${bullets ? `<div style="margin-top:10px;"><strong style="font-size:13px;">핵심 조건 체크</strong><ul style="margin:6px 0 0 18px;padding:0;font-size:13px;line-height:1.55;">${bullets}</ul></div>` : ""}
+        ${cautions ? `<div style="margin-top:10px;padding:10px 12px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;"><strong style="font-size:13px;color:#92400e;">⚠️ 서명 전 꼭 확인할 사항</strong><ul style="margin:6px 0 0 18px;padding:0;font-size:12.5px;line-height:1.55;">${cautions}</ul></div>` : ""}
+        <div class="bass-muted" style="font-size:12px;margin-top:10px;">※ AI 요약은 이해를 돕기 위한 참고용이며, 법적 효력은 표준계약서 본문에 따릅니다.</div>`;
+    }).catch((err) => {
+      body.innerHTML = `<div class="bass-muted" style="font-size:13px;color:var(--err);">${esc(err.message || "요약을 불러오지 못했습니다.")}</div>`;
+    });
+  }
+
+  function openAiClauseModal() {
+    const curS = S.activeSession;
+    if (!curS) return;
+    const body = R3.openModal("✨ AI 특약 다듬기 (문해력 도우미)", `
+      <p class="bass-muted" style="font-size:12.5px;margin:0 0 8px;">평소 말투로 합의 내용을 적으면 분쟁 없는 공정한 표준 임대차 특약 문구로 다듬어 드립니다.</p>
+      <textarea id="aiClauseIn" class="bass-input" rows="3" placeholder="예: 고양이 1마리 키우는데 벽지 긁으면 원상복구하고 퇴실 청소비 10만원 낼게요"></textarea>
+      <button id="aiClauseRun" type="button" class="bass-btn bass-btn--primary" style="width:100%;margin-top:8px;">✨ 표준 특약으로 다듬기</button>
+      <div id="aiClauseOut" style="margin-top:10px;"></div>`);
+    body.querySelector("#aiClauseRun").addEventListener("click", function () {
+      const txt = body.querySelector("#aiClauseIn").value.trim();
+      if (!txt) { Bass.updateAppAlert("warning", "특약으로 정리할 내용을 입력해 주세요."); return; }
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/sessions/${curS.id}/ai-assist`, {
+          method: "POST",
+          body: { action: "draft_clause", text: txt },
+        });
+        const r = res.result || {};
+        const out = body.querySelector("#aiClauseOut");
+        out.innerHTML = `
+          <div class="cg-ai-summary">
+            <div style="font-weight:800;color:#1e3a8a;margin-bottom:4px;">📝 추천 표준 특약 문구</div>
+            <div id="aiClauseText" style="white-space:pre-line;font-weight:600;">${esc(r.clause || "")}</div>
+            ${r.explanation ? `<div class="bass-muted" style="font-size:12px;margin-top:6px;">💡 ${esc(r.explanation)}</div>` : ""}
+          </div>
+          <div class="bass-row" style="gap:6px;margin-top:8px;flex-wrap:wrap;">
+            <button type="button" id="aiClauseCopy" class="bass-btn bass-btn--sm">📋 복사</button>
+            <button type="button" id="aiClauseSend" class="bass-btn bass-btn--sm bass-btn--primary">💬 채팅에 특약 제안 보내기</button>
+          </div>`;
+        out.querySelector("#aiClauseCopy").addEventListener("click", () => {
+          R3.copyText(r.clause || "").then((ok) => Bass.updateAppAlert(ok ? "success" : "warning", ok ? "특약 문구를 복사했습니다." : "복사에 실패했습니다."));
+        });
+        out.querySelector("#aiClauseSend").addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const canReq = curS.status === "IN_PROGRESS" && curS.current_step <= 3;
+            await Bass.api(APP_ID, `/sessions/${curS.id}/messages`, {
+              method: "POST",
+              body: canReq
+                ? { kind: "change_request", field: "special_terms", body: r.clause || txt }
+                : { kind: "question", body: `[AI 특약 초안] ${r.clause || txt}` },
+            });
+            R3.closeModal();
+            Bass.updateAppAlert("success", "다듬은 특약 문구를 계약 채팅방에 보냈습니다.");
+            await refreshInlineChat(true);
+            await C.fetchActiveSession(true);
+          });
+        });
+      });
+    });
+  }
+
+  function openAiOcrMemoModal() {
+    const curS = S.activeSession;
+    if (!curS) return;
+    const body = R3.openModal("📷 메모 · 기존 계약서 사진 OCR", `
+      <p class="bass-muted" style="font-size:12.5px;margin:0 0 8px;">손글씨 메모, 중개사 안내지, 기존 계약서 사진을 올리면 AI OCR이 보증금·월세·관리비·청소비·입주일·특약을 자동으로 읽어 계약 조건으로 채워 드립니다.</p>
+      <input id="aiOcrFile" type="file" accept="image/*" class="bass-input">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin:8px 0;cursor:pointer;">
+        <input id="aiOcrConsent" type="checkbox" checked>
+        <span>선택한 사진이 AI(Google Gemini) OCR 분석에 전송되는 것에 동의합니다 (분석 전용, 서버 미보관)</span>
+      </label>
+      <button id="aiOcrRun" type="button" class="bass-btn bass-btn--primary" style="width:100%;">🔍 AI로 조건 읽어오기</button>
+      <div id="aiOcrOut" style="margin-top:10px;"></div>`);
+    body.querySelector("#aiOcrRun").addEventListener("click", function () {
+      const inp = body.querySelector("#aiOcrFile");
+      const f = inp.files && inp.files[0];
+      if (!f) { Bass.updateAppAlert("warning", "사진 파일을 먼저 선택해 주세요."); return; }
+      if (f.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "사진은 10MB 이하만 가능합니다."); return; }
+      if (!body.querySelector("#aiOcrConsent").checked) { Bass.updateAppAlert("warning", "AI OCR 전송 동의에 체크해 주세요."); return; }
+      Bass.withLock(this, async () => {
+        const dataUrl = await readFileDataUrl(f);
+        const res = await Bass.api(APP_ID, `/sessions/${curS.id}/ai-assist`, {
+          method: "POST",
+          body: { action: "ocr_memo", image_data_url: dataUrl, consent: true },
+        });
+        const r = res.result || {};
+        const ex = r.extracted || {};
+        const out = body.querySelector("#aiOcrOut");
+        if (r.status !== "ok") {
+          out.innerHTML = `<div class="bass-muted" style="font-size:12.5px;color:#b45309;">⚠️ ${esc(r.message || "읽지 못했습니다.")}</div>`;
+          return;
+        }
+        const rows = [];
+        if (ex.deposit != null) rows.push(`보증금 ${fmtWon(ex.deposit)}`);
+        if (ex.monthly_rent != null) rows.push(`월세 ${fmtWon(ex.monthly_rent)}`);
+        if (ex.maintenance_fee != null) rows.push(`관리비 ${fmtWon(ex.maintenance_fee)}`);
+        if (ex.cleaning_fee != null) rows.push(`퇴실 청소비 ${fmtWon(ex.cleaning_fee)}`);
+        if (ex.move_in_date) rows.push(`입주일 ${ex.move_in_date}`);
+        if (ex.lease_term_months) rows.push(`계약기간 ${ex.lease_term_months}개월`);
+        const canBundle = currentRole === "lessor" && curS.status === "IN_PROGRESS" && curS.current_step <= 3 && rows.length > 0;
+        out.innerHTML = `
+          <div class="cg-ai-summary">
+            <div style="font-weight:800;color:#1e3a8a;margin-bottom:4px;">✅ AI OCR 추출 결과</div>
+            <div>${rows.length ? esc(rows.join(" · ")) : "금액·날짜 항목 없음"}</div>
+            ${ex.special_terms ? `<div style="margin-top:4px;">특약: ${esc(ex.special_terms)}</div>` : ""}
+            ${ex.facility_notes ? `<div style="margin-top:4px;">시설 메모: ${esc(ex.facility_notes)}</div>` : ""}
+            ${ex.summary ? `<div class="bass-muted" style="font-size:12px;margin-top:4px;">${esc(ex.summary)}</div>` : ""}
+          </div>
+          <div class="bass-row" style="gap:6px;margin-top:8px;flex-wrap:wrap;">
+            ${canBundle ? `<button type="button" id="aiOcrApplyBundle" class="bass-btn bass-btn--sm bass-btn--primary">📋 채팅방에 조건 일괄 제안 올리기</button>` : ""}
+            <button type="button" id="aiOcrShareChat" class="bass-btn bass-btn--sm">💬 OCR 요약 채팅에 공유</button>
+          </div>`;
+        const btnB = out.querySelector("#aiOcrApplyBundle");
+        if (btnB) {
+          btnB.addEventListener("click", function () {
+            Bass.withLock(this, async () => {
+              const tNow = curS.terms || {};
+              const isRen = curS.mode === "RENEWAL";
+              const dep = ex.deposit != null ? Number(ex.deposit) : Number(tNow.deposit || 0);
+              const bundle = {
+                deposit: dep,
+                contract_deposit: isRen ? 0 : Math.floor(dep / 10),
+                monthly_rent: ex.monthly_rent != null ? Number(ex.monthly_rent) : Number(tNow.monthly_rent || 0),
+                maintenance_fee: ex.maintenance_fee != null ? Number(ex.maintenance_fee) : Number(tNow.maintenance_fee || 0),
+                cleaning_fee: ex.cleaning_fee != null ? Number(ex.cleaning_fee) : Number(tNow.cleaning_fee || 0),
+                move_in_date: ex.move_in_date || tNow.move_in_date || "",
+                lease_term_months: ex.lease_term_months || Number(tNow.lease_term_months || 12),
+              };
+              await Bass.api(APP_ID, `/sessions/${curS.id}/messages`, {
+                method: "POST",
+                body: { kind: "bundle", body: "📷 AI OCR로 읽은 계약 조건입니다. 확인 후 수락해 주세요.", bundle },
+              });
+              R3.closeModal();
+              Bass.updateAppAlert("success", "OCR로 읽은 조건을 채팅방에 일괄 제안했습니다.");
+              await refreshInlineChat(true);
+              await C.fetchActiveSession(true);
+            });
+          });
+        }
+        out.querySelector("#aiOcrShareChat").addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const shareText = `[📷 AI OCR 메모 정리] ${rows.join(" / ")}${ex.special_terms ? ` · 특약: ${ex.special_terms}` : ""}${ex.facility_notes ? ` · 시설: ${ex.facility_notes}` : ""}`;
+            await Bass.api(APP_ID, `/sessions/${curS.id}/messages`, {
+              method: "POST",
+              body: { kind: "question", body: shareText },
+            });
+            R3.closeModal();
+            Bass.updateAppAlert("success", "OCR 요약 내용을 채팅방에 공유했습니다.");
+            await refreshInlineChat(true);
+          });
+        });
+      });
+    });
+  }
+
+  const btnAiExplain = document.getElementById("wsAiExplain");
+  if (btnAiExplain) btnAiExplain.addEventListener("click", openAiExplainModal);
+  const btnAiClause = document.getElementById("wsAiClause");
+  if (btnAiClause) btnAiClause.addEventListener("click", openAiClauseModal);
+  const btnAiOcr = document.getElementById("wsAiOcr");
+  if (btnAiOcr) btnAiOcr.addEventListener("click", openAiOcrMemoModal);
 
   const wsSendBtn = document.getElementById("wsChatSend");
   if (wsSendBtn) {

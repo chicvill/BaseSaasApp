@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="Rent3">
   <link rel="manifest" href="/rent3/manifest.json">
   <link rel="apple-touch-icon" href="/rent3_tenant/icons/apple-touch-icon.png">
-  <title>🤝 임대계약 — Rent3</title>
+  <title>🤝 스마트 계약 — Rent3</title>
   <link rel="stylesheet" href="/shared/ui/base.css">
   <link rel="stylesheet" href="/shared/ui/rent3_mobile.css">
   <style>
@@ -129,6 +129,21 @@
       padding: 8px 10px; border-top: 1px solid #e2e8f0; font-size: 13.5px; }
     .cg-sign-row__who { display: inline-flex; align-items: center; gap: 8px; }
     .cg-sign-row__sig { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+    .cg-pause-banner { background: #fffbeb; border: 1.5px solid #f59e0b; border-left: 5px solid #d97706;
+      border-radius: 14px; padding: 12px 14px; margin: 8px 0; color: #78350f; }
+    .cg-reg-opt-box { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+      padding: 9px 11px; border-radius: 10px; border: 1.5px solid #bfdbfe; background: #eff6ff;
+      margin: 6px 0 8px; font-size: 13px; color: #1e3a8a; }
+    .cg-reg-opt-box input[type="checkbox"] { width: 20px; height: 20px; accent-color: #2563eb; flex: none; cursor: pointer; }
+    .cg-ocr-box { margin: 8px 0; padding: 10px 12px; border-radius: 11px; border: 1.5px dashed #60a5fa;
+      background: #f8fafc; font-size: 12.5px; line-height: 1.55; }
+    .cg-ai-summary { margin-top: 8px; padding: 9px 11px; border-radius: 10px; background: #ecfdf5;
+      border: 1px solid #86efac; color: #065f46; font-size: 12.5px; line-height: 1.6; }
+    .cg-ai-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+    .cg-flow-guide { margin-bottom: 14px; padding: 10px 12px; border-radius: 14px; border: 1px solid #bfdbfe;
+      background: #f8fafc; font-size: 12.5px; line-height: 1.65; color: #1e293b; }
+    .cg-flow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; }
+    .cg-flow-chip { padding: 7px 9px; border-radius: 10px; background: #ffffff; border: 1px solid #dbeafe; font-size: 12px; }
     /* 기본 상태가 '보임'이다. 모션을 끈 환경(prefers-reduced-motion)에서도 창이 사라지지 않는다. */
     .cm-card.is-open { animation: cm-in .26s ease-out; }
     .cm-card.is-closing { opacity: 0; transform: translateY(-14px) scale(.98); }
@@ -206,6 +221,7 @@
           <button id="btnBackHome" class="bass-btn bass-btn--sm" type="button">← 홈</button>
           <div class="cv-head__actions">
             <span id="callStateBadge" class="bass-badge bass-badge--ok">연결됨</span>
+            <button id="btnPauseContract" class="bass-btn bass-btn--sm" type="button" hidden>⏸️ 보류</button>
             <button id="btnCancelContract" class="bass-btn bass-btn--sm" type="button" hidden>계약 취소</button>
             <span id="bellCvSlot" style="display:inline-flex;"></span>
           </div>
@@ -235,7 +251,12 @@
             <textarea id="wsChatMsg" class="bass-input" rows="2" placeholder="상대방에게 보낼 채팅을 입력하세요"></textarea>
             <button id="wsChatSend" type="button" class="bass-btn bass-btn--sm bass-btn--primary">보내기</button>
           </div>
-          <div class="bass-row" style="gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <div class="cg-ai-bar">
+            <button type="button" id="wsAiExplain" class="bass-btn bass-btn--sm">🤖 AI 쉬운 계약 요약</button>
+            <button type="button" id="wsAiClause" class="bass-btn bass-btn--sm">✨ AI 특약 다듬기</button>
+            <button type="button" id="wsAiOcr" class="bass-btn bass-btn--sm">📷 메모·계약서 사진 OCR</button>
+          </div>
+          <div class="bass-row" style="gap:6px;margin-top:4px;flex-wrap:wrap;">
             <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="확인했습니다">확인했습니다</button>
             <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="신분증 확인했습니다">신분증 확인했습니다</button>
             <button type="button" class="bass-btn bass-btn--sm ws-quick" data-t="등기부등본 확인했습니다">등기부등본 확인했습니다</button>

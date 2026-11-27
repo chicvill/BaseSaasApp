@@ -7,16 +7,41 @@
   const { APP_ID, loggedUser, currentRole, myTenantId, myBranch, ROLE_KO, OTHER_KO, state: S, dom: D, esc, fmtWon } = C;
 
   function sessionTag(s) {
+    if (s.status === "PAUSED") {
+      return `⏸️ 보류 중 · 단계 ${s.current_step}/5`;
+    }
     if (s.call_status === "CALLING") {
       return s.initiated_by_role === currentRole ? `⏳ ${OTHER_KO} 응답 대기` : "🔔 응답 필요";
     }
     return `단계 ${s.current_step}/5`;
   }
 
+  function entryTag(s) {
+    if (s.mode === "RENEWAL") return "🔁 연장";
+    if (s.entry_channel === "EXISTING_TENANT_MOVE") return `🚚 이사${s.moving_from_room_no ? `(${s.moving_from_room_no}호→)` : ""}`;
+    return "✨ 신규";
+  }
+
+  function smartFlowGuideHtml() {
+    return `
+      <details class="cg-flow-guide">
+        <summary style="cursor:pointer;font-weight:800;font-size:13.5px;color:#1e3a8a;">🗺️ 스마트 계약 진입 경로 · 진행 흐름 한눈에 보기</summary>
+        <div class="cg-flow-steps">
+          <div class="cg-flow-chip"><strong>① 연장 계약</strong><br>임대인이 입주 중 호실 선택 → 5% 상한 조건·서명으로 즉시 연장</div>
+          <div class="cg-flow-chip"><strong>② 신규 가입자</strong><br>포털 공개 매물 선택 → 호출·응답 → 채팅창에서 5단계 스마트 계약</div>
+          <div class="cg-flow-chip"><strong>③ 기존 임차인 이사</strong><br>거주 중인 임차인이 더 좋은 호실 선택 → 미래 입주일이면 안전 예약 체결</div>
+          <div class="cg-flow-chip"><strong>④ 보류 ↔ 재개</strong><br>진행 중 언제든 [⏸️ 보류](최대 7일 보관) 후 [▶️ 재개]로 이어서 진행</div>
+        </div>
+        <div class="bass-muted" style="font-size:12px;margin-top:8px;">
+          🤖 <strong>AI 도우미:</strong> 등기부 캡처 OCR 검토(임차인 선택 체크) · AI 쉬운 계약서 요약 · 자연어 표준 특약 다듬기 · 메모 사진 OCR을 채팅창 안에서 바로 쓸 수 있습니다.
+        </div>
+      </details>`;
+  }
+
   function renderHome(force) {
     if (!D.elContract.hidden) return;
     const sig = JSON.stringify([
-      C.mySessions().map((s) => [s.id, s.call_status, s.current_step, s.status]),
+      C.mySessions().map((s) => [s.id, s.call_status, s.current_step, s.status, s.paused_at || ""]),
       S.candidateRooms.map((r) => `${r.room_no}${r.is_occupied ? 1 : 0}${r.is_published ? 1 : 0}`).join(),
       S.myhome ? S.myhome.pool_revision : 0,
       S.lessorDash ? S.lessorDash.pool_revision : 0,
@@ -28,14 +53,14 @@
 
     const incoming = C.incomingCalls();
     const ongoing = C.ongoingSessions();
-    let html = "";
+    let html = smartFlowGuideHtml();
 
     if (incoming.length) {
       html += `<div class="call-banner">
-        <div style="font-weight:800;margin-bottom:8px;">🔔 ${ROLE_KO[currentRole]}님께 계약 요청이 왔습니다</div>
+        <div style="font-weight:800;margin-bottom:8px;">🔔 ${ROLE_KO[currentRole]}님께 스마트 계약 요청이 왔습니다</div>
         ${incoming.map((c) => `
           <div class="bass-row" style="justify-content:space-between;margin-top:6px;">
-            <div style="font-size:13px;"><strong>${esc(c.building_name)} ${esc(c.room_no)}호</strong><br>
+            <div style="font-size:13px;"><strong>${esc(c.building_name)} ${esc(c.room_no)}호</strong> <span class="bass-badge bass-badge--info">${entryTag(c)}</span><br>
               <span class="bass-muted">${c.initiated_by_role === "lessor" ? `임대인 ${esc(c.lessor_name)}` : `임차인 ${esc((c.terms && c.terms.tenant_name) || "예비임차인")}`}</span></div>
             <button class="bass-btn bass-btn--primary js-respond" data-sid="${esc(c.id)}" type="button">✅ 응답하고 시작</button>
           </div>`).join("")}
@@ -44,20 +69,20 @@
 
     if (ongoing.length) {
       html += `<div class="bass-card" style="margin-bottom:14px;">
-        <h3 style="margin:0 0 8px;">진행 중인 계약</h3>
+        <h3 style="margin:0 0 8px;">🤝 진행 중 · 보류 중인 스마트 계약</h3>
         ${ongoing.map((s) => `
           <div class="room-row">
             <div class="room-row__main">
-              <div class="room-row__title">${esc(s.building_name)} ${esc(s.room_no)}호</div>
-              <div class="room-row__meta bass-muted">${sessionTag(s)} · ${esc((s.terms && s.terms.tenant_name) || "임차인 응답 대기")}</div>
+              <div class="room-row__title">${esc(s.building_name)} ${esc(s.room_no)}호 <span class="bass-badge ${s.status === "PAUSED" ? "bass-badge--warn" : "bass-badge--info"}">${entryTag(s)}</span></div>
+              <div class="room-row__meta bass-muted">${sessionTag(s)} · ${esc((s.terms && s.terms.tenant_name) || "임차인 응답 대기")}${s.status === "PAUSED" && s.pause_reason ? ` · 사유: ${esc(s.pause_reason)}` : ""}</div>
             </div>
-            <button class="bass-btn bass-btn--primary bass-btn--sm js-open" data-sid="${esc(s.id)}" type="button">이어서 진행 →</button>
+            <button class="bass-btn bass-btn--primary bass-btn--sm js-open" data-sid="${esc(s.id)}" type="button">${s.status === "PAUSED" ? "▶️ 재개·열기" : "이어서 진행 →"}</button>
           </div>`).join("")}
       </div>`;
     }
 
     html += currentRole === "lessor" ? homeLessorHtml() : homeTenantHtml();
-    html += `<div style="text-align:center;margin-top:14px;"><a class="bass-btn bass-btn--sm" href="verify.html">🔍 계약서 진위 확인</a></div>`;
+    html += `<div style="text-align:center;margin-top:14px;"><a class="bass-btn bass-btn--sm" href="verify.html">🔍 스마트 계약서 진위 확인</a></div>`;
     D.elHomeBody.innerHTML = html;
 
     D.elHomeBody.querySelectorAll(".js-respond").forEach((b) =>
@@ -67,7 +92,7 @@
     D.elHomeBody.querySelectorAll(".js-lessor-call").forEach((b) =>
       b.addEventListener("click", () => openLessorCallDialog(b.dataset.room)));
     const tBtn = document.getElementById("btnTenantContract");
-    if (tBtn) tBtn.addEventListener("click", () => openTenantPickerDialog());
+    if (tBtn) tBtn.addEventListener("click", () => openTenantPickerDialog(true));
     bindIdentityCard();
   }
 
@@ -117,7 +142,7 @@
             <div class="room-row__title">${esc(r.room_no)}호 ${stateBadge}${unpaidBadge}</div>
             <div class="room-row__meta bass-muted">${r.is_occupied ? `임차인 ${esc(r.active_tenant_name || "-")} · ` : ""}보증금 ${fmtWon(r.deposit)} · 월 ${fmtWon(r.monthly_rent)}</div>
           </div>
-          <button class="bass-btn bass-btn--primary bass-btn--sm js-lessor-call" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">${r.is_occupied ? "재계약" : "임대계약"}</button>
+          <button class="bass-btn bass-btn--primary bass-btn--sm js-lessor-call" data-room="${esc(r.branch)}|${esc(r.room_no)}" type="button">${r.is_occupied ? "연장 스마트 계약" : "신규 스마트 계약"}</button>
         </div>`;
       }).join("") || `<div class="bass-muted">등록된 호실이 없습니다.</div>`}
     </div>`;
@@ -138,17 +163,18 @@
           <span style="color:${m.unpaid > 0 ? "var(--err)" : "var(--ok)"};font-weight:700;">${esc(m.note)}</span></div>`).join("")}
       </div>`;
     }
-    const incoming = C.incomingCalls();
-    const ongoing = C.ongoingSessions();
-    const label = incoming.length ? "🔔 임대인 요청 확인하기"
-      : ongoing.length ? "▶ 진행 중인 계약 이어서 하기"
-      : "📝 임대계약";
+    const isResident = Boolean(S.myhome && S.myhome.room);
+    const curRoomNo = isResident ? (S.myhome.room.room_no || "") : "";
+    const curExpiry = isResident && S.myhome.contract ? (S.myhome.contract.expiry_date || "") : "";
+    const label = isResident
+      ? "🚚 더 좋은 조건의 새 집으로 이사 스마트 계약 요청"
+      : "🤝 새 집 스마트 계약 요청";
     const needId = S.myIdentity && !S.myIdentity.verified;
     const idDone = S.myIdentity && S.myIdentity.verified
       ? `<div class="bass-muted" style="font-size:12px;margin-bottom:8px;">✅ 본인인증 완료 — ${esc(S.myIdentity.name)}${S.myIdentity.fake ? " <span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}</div>` : "";
     const idCard = needId ? `<div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
         <h3 style="margin:0 0 4px;">🔐 휴대폰 본인인증이 필요합니다</h3>
-        <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;line-height:1.55;">명의 도용 사기를 막기 위해, 계약을 시작·응답·서명하기 전에 <strong>가입한 본인 명의 휴대폰</strong>으로 인증해야 합니다.</div>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;line-height:1.55;">명의 도용 사기를 막기 위해, 스마트 계약을 시작·응답·서명하기 전에 <strong>가입한 본인 명의 휴대폰</strong>으로 인증해야 합니다.</div>
         <input id="idName" class="bass-input" placeholder="실명" style="margin-bottom:6px;">
         <input id="idPhone" class="bass-input" placeholder="가입한 휴대폰 010-0000-0000" style="margin-bottom:6px;">
         <input id="idBirth" class="bass-input" placeholder="생년월일 6자리(900101) 또는 8자리" style="margin-bottom:6px;">
@@ -160,10 +186,14 @@
       </div>` : "";
     return `${idCard}${pay}
       <div class="bass-card">
-        <h3 style="margin:0 0 6px;">새 집 계약</h3>
+        <h3 style="margin:0 0 6px;">${isResident ? "🚚 이사 · 새 집 스마트 계약" : "🤝 새 집 스마트 계약"}</h3>
         ${idDone}
-        <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;">공개된 매물을 고르면 임대인에게 계약 요청이 전달됩니다.</div>
-        <button id="btnTenantContract" class="bass-btn bass-btn--primary big-cta" type="button" ${needId ? "disabled" : ""}>${needId ? "🔒 본인인증 후 계약할 수 있어요" : label}</button>
+        <div class="bass-muted" style="font-size:12.5px;margin-bottom:12px;line-height:1.6;">
+          ${isResident
+            ? `현재 <strong>${esc(curRoomNo)}호</strong> 거주 중입니다${curExpiry ? ` (만기 ${esc(curExpiry)})` : ""}. 더 좋은 조건의 다른 호실·건물로 이사하려면 아래에서 공개 매물을 골라 신규 스마트 계약을 요청하세요. 입주일이 미래인 경우 현재 호실은 유지되고 새 호실은 예약 체결됩니다.`
+            : "공개된 매물을 고르면 임대인에게 스마트 계약 요청이 전달됩니다."}
+        </div>
+        <button id="btnTenantContract" class="bass-btn bass-btn--primary big-cta" type="button" ${needId ? "disabled" : ""}>${needId ? "🔒 본인인증 후 스마트 계약할 수 있어요" : label}</button>
       </div>`;
   }
 
@@ -230,16 +260,20 @@
     });
   }
 
-  function openTenantPickerDialog() {
-    const incoming = C.incomingCalls();
-    if (incoming.length) { C.openSession(incoming[0].id); return; }
-    const ongoing = C.ongoingSessions();
-    if (ongoing.length) { C.openSession(ongoing[0].id); return; }
-    // 공실 + 입주 중이지만 전출 예정으로 공개된 '사전 매물'(퇴실 전에 미리 계약해 전입일·전출일을 맞춘다). 이미 예약이 걸린 호실은 뺀다.
-    const listings = S.candidateRooms.filter((r) => r.is_published && !r.has_reservation && (!r.is_occupied || r.pre_moveout_notice));
+  function openTenantPickerDialog(forcePicker = false) {
+    if (!forcePicker) {
+      const incoming = C.incomingCalls();
+      if (incoming.length) { C.openSession(incoming[0].id); return; }
+      const ongoing = C.ongoingSessions();
+      if (ongoing.length) { C.openSession(ongoing[0].id); return; }
+    }
+    const curRoomId = (S.myhome && S.myhome.room && S.myhome.room.id) || "";
+    const curRoomNo = (S.myhome && S.myhome.room && S.myhome.room.room_no) || "";
+    // 공실 + 입주 중이지만 전출 예정으로 공개된 '사전 매물'(퇴실 전에 미리 계약해 전입일·전출일을 맞춘다). 본인 현재 거주 호실과 이미 예약이 걸린 호실은 뺀다.
+    const listings = S.candidateRooms.filter((r) => r.is_published && !r.has_reservation && (!r.is_occupied || r.pre_moveout_notice) && (!curRoomId || r.id !== curRoomId));
     const bd = openDialog(`
-      <h3 style="margin:0 0 4px;">계약할 집 고르기</h3>
-      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다. 입주 중이어도 퇴실이 예정된 집은 <strong>퇴실 전에 미리 계약</strong>할 수 있습니다.</div>
+      <h3 style="margin:0 0 4px;">${curRoomNo ? `🚚 ${esc(curRoomNo)}호에서 이사할 집 고르기` : "계약할 집 고르기"}</h3>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">임대인이 공개한 빈 집입니다. 입주 중이어도 퇴실이 예정된 집은 <strong>퇴실 전에 미리 스마트 계약</strong>할 수 있습니다.${curRoomNo ? " (현재 거주 중인 호실은 제외됩니다)" : ""}</div>
       ${listings.length ? listings.map((r) => {
         const pdfUrl = r.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(r.id)}/terms.pdf`;
         const imgUrl = r.image || "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80";

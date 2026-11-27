@@ -61,6 +61,15 @@ class VerifyIdReq(BaseModel):
     checked: bool = True
 
 
+class PauseReq(BaseModel):
+    role: str = "tenant"
+    reason: str = ""
+
+
+class ResumeReq(BaseModel):
+    role: str = "tenant"
+
+
 class TenantIdentityReq(BaseModel):
     name: str
     phone: str
@@ -95,6 +104,7 @@ def get_status():
         "status": "HEALTHY",
         "pool_revision": meta["total_revision"],
         "active_sessions": len(in_progress),
+        "paused_sessions": CoSignSession.count(status="PAUSED"),
         "calling_sessions": sum(1 for s in in_progress if s.call_status == "CALLING"),
         "completed_sessions": CoSignSession.count(status="COMPLETED"),
         "total_contracts": Contract.count(),
@@ -348,6 +358,32 @@ def verify_counterparty_id(session_id: str, req: VerifyIdReq):
     return {
         "success": True,
         "message": f"{actor_ko}이(가) {target_ko} 신분증 대조 [{state_ko}]를 반영했습니다.",
+        "session": s.model_dump(),
+    }
+
+
+@router.post("/sessions/{session_id}/pause")
+def pause_session_route(session_id: str, req: PauseReq):
+    """진행 중인 스마트 계약을 잠시 보류(PAUSED)한다. 현재 단계가 최대 7일간 유지된다."""
+    ensure_pool_seeded()
+    s = CoSignSession.by_code_or_id(session_id)
+    s.pause(role=req.role, reason=req.reason, app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": "스마트 계약을 잠시 보류했습니다. 현재 단계 그대로 최대 7일간 보관되며 언제든 재개할 수 있습니다.",
+        "session": s.model_dump(),
+    }
+
+
+@router.post("/sessions/{session_id}/resume")
+def resume_session_route(session_id: str, req: ResumeReq):
+    """보류 중(PAUSED)인 스마트 계약을 재개(IN_PROGRESS)한다."""
+    ensure_pool_seeded()
+    s = CoSignSession.by_code_or_id(session_id)
+    s.resume(role=req.role, app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": f"보류 중이던 스마트 계약을 재개했습니다 ({s.current_step}단계부터 이어서 진행).",
         "session": s.model_dump(),
     }
 

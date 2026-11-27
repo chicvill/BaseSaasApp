@@ -4,6 +4,7 @@ apps/_rent3_core/domains/cosign_session.py — 공동계약 세션 개설·호�
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from core.errors import DomainError, NotFound
@@ -138,9 +139,29 @@ def open_session(
         *extra_spec_terms,
     ]
     new_special_terms = "\n".join(f"{i}. {line}" for i, line in enumerate(base_new_terms, start=1))
+    moving_from_room_id = ""
+    moving_from_room_no = ""
+    if is_renewal:
+        entry_channel = "LESSOR_RENEWAL"
+    elif (
+        matched_t is not None
+        and matched_t.status == "ACTIVE"
+        and bool(matched_t.current_room_id)
+        and matched_t.current_room_id != room.id
+    ):
+        entry_channel = "EXISTING_TENANT_MOVE"
+        moving_from_room_id = matched_t.current_room_id
+        moving_from_room_no = matched_t.room_no or ""
+    elif initiated_by_role == "tenant":
+        entry_channel = "PORTAL_NEW"
+    else:
+        entry_channel = "LESSOR_NEW"
     now_str = now_iso()
     session = cls(
         mode=mode,
+        entry_channel=entry_channel,
+        moving_from_room_id=moving_from_room_id,
+        moving_from_room_no=moving_from_room_no,
         prev_contract_id=prev_ct.id if prev_ct else "",
         reserve_after=reserve_after,
         branch=b_id,
@@ -234,20 +255,26 @@ def open_session(
     return session
 
 def expire_idle(cls: type[CoSignSession], branch: str = "", room_no: str = "") -> int:
-    """무응답 세션을 자동 해제(CANCELLED)한다. 해제한 건수를 돌려준다."""
-    kw: Dict[str, Any] = {"status": "IN_PROGRESS"}
+    """무응답(24h/72h) 또는 보류 기한 초과(7일) 세션을 자동 해제(CANCELLED)한다. 해제한 건수를 돌려준다."""
+    base_kw: Dict[str, Any] = {}
     if branch:
-        kw["branch"] = normalize_branch_id(branch)
+        base_kw["branch"] = normalize_branch_id(branch)
     if room_no:
-        kw["room_no"] = room_no
+        base_kw["room_no"] = room_no
     n = 0
-    for x in cls.find(**kw):
-        if x.is_idle_expired():
-            x.status = "CANCELLED"
-            x.cancel_reason = "24시간 이상 응답이 없어 자동 해제되었습니다."
-            x.cancelled_by, x.cancelled_at = "system", now_iso()
-            x.save(action="cosign_expired_idle", app_source="rent3_contract")
-            n += 1
+    for st in ("IN_PROGRESS", "PAUSED"):
+        for x in cls.find(status=st, **base_kw):
+            if x.is_idle_expired():
+                was_paused = (x.status == "PAUSED")
+                x.status = "CANCELLED"
+                x.cancel_reason = (
+                    "보류 기한(7일)이 지나 자동 해제되었습니다."
+                    if was_paused
+                    else "24시간 이상 응답이 없어 자동 해제되었습니다."
+                )
+                x.cancelled_by, x.cancelled_at = "system", now_iso()
+                x.save(action="cosign_expired_idle", app_source="rent3_contract")
+                n += 1
     return n
 
 def ai_calls_this_month(cls: type[CoSignSession], branch: str) -> int:
@@ -255,9 +282,13 @@ def ai_calls_this_month(cls: type[CoSignSession], branch: str) -> int:
     return sum(1 for x in cls.find(branch=normalize_branch_id(branch)) for t in x.registry_ai_times if t.startswith(ym))
 
 def live_for_room(cls: type[CoSignSession], branch: str, room_no: str) -> Optional[CoSignSession]:
-    """해당 호실에 진행 중(IN_PROGRESS)인 계약 세션. 없으면 None. (무응답 세션은 먼저 해제)"""
+    """해당 호실에 진행 중(IN_PROGRESS) 또는 보류 중(PAUSED)인 계약 세션. 없으면 None. (기한 초과 세션은 먼저 해제)"""
     cls.expire_idle(branch, room_no)
-    return next(iter(cls.find(branch=normalize_branch_id(branch), room_no=room_no, status="IN_PROGRESS")), None)
+    b_id = normalize_branch_id(branch)
+    return next(
+        (x for x in cls.find(branch=b_id, room_no=room_no) if x.status in ("IN_PROGRESS", "PAUSED")),
+        None,
+    )
 
 def _tenant_identity_evidence(self: CoSignSession) -> Dict[str, Any]:
     """봉인 때 남기는 임차인 본인인증 증거 (업체·시각·가짜 여부). 생년월일 등 개인정보는 싣지 않는다."""
@@ -308,12 +339,16 @@ def call_counterparty(
         )
 
     if role_norm == "tenant":
-        mine = [x for x in cls.find(status="IN_PROGRESS") if x.is_tenant_party(id_tenant, tenant_phone)
-                and not (x.branch == normalize_branch_id(branch) and x.room_no == room_no)]
+        mine = [
+            x for x in cls.all()
+            if x.status in ("IN_PROGRESS", "PAUSED")
+            and x.is_tenant_party(id_tenant, tenant_phone)
+            and not (x.branch == normalize_branch_id(branch) and x.room_no == room_no)
+        ]
         if len(mine) >= MAX_LIVE_PER_TENANT:
             raise DomainError(
-                f"동시에 진행할 수 있는 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
-                hint="진행 중인 계약을 마치거나 취소한 뒤 다른 호실을 선택해 주세요.",
+                f"동시에 진행·보류할 수 있는 스마트 계약은 {MAX_LIVE_PER_TENANT}건까지입니다.",
+                hint="진행 중이거나 보류 중인 계약을 마치거나 취소한 뒤 다른 호실을 선택해 주세요.",
             )
 
     room0 = Room.first(branch=normalize_branch_id(branch), room_no=room_no)
@@ -327,12 +362,12 @@ def call_counterparty(
             raise DomainError(f"{room_no}호는 입주 중입니다.",
                               hint="임차인의 전출 예정이 확인되어 사전 매물로 공개된 호실만 퇴실 전에 미리 계약할 수 있습니다.")
 
-    # 같은 호실에 진행 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
+    # 같은 호실에 진행 중/보류 중인 계약이 이미 있으면 새로 만들지 않고 그것을 이어서 쓴다.
     # (버튼을 두 번 누르거나 양쪽이 동시에 시작해도 계약이 중복 생성되지 않게 한다.)
     cls.expire_idle(branch, room_no)
     b_id = normalize_branch_id(branch)
     live = next(
-        (x for x in cls.find(branch=b_id, room_no=room_no, status="IN_PROGRESS") if x.mode == mode),
+        (x for x in cls.find(branch=b_id, room_no=room_no) if x.status in ("IN_PROGRESS", "PAUSED") and x.mode == mode),
         None,
     )
     if live:
@@ -405,6 +440,64 @@ def respond_to_call(
     ).save(action="cosign_call_connected", app_source=app_source)
 
     return self
+
+def pause_session(
+    self: CoSignSession,
+    role: str,
+    reason: str = "",
+    app_source: str = "rent3_contract",
+) -> CoSignSession:
+    """진행 중인 스마트 계약을 잠시 보류(PAUSED)한다. 현재 단계·합의 내역은 그대로 유지되며 최대 7일간 보관된다."""
+    self._ensure_in_progress()
+    from ..cosign import IDLE_EXPIRE_PAUSED
+    from .. import contract_chat
+    norm_role = "lessor" if role == "lessor" else "tenant"
+    who = "임대인" if norm_role == "lessor" else "임차인"
+    why = (reason or "양측 협의 후 이어서 진행 예정").strip()[:200]
+    now_dt = datetime.now()
+    self.status = "PAUSED"
+    self.paused_by = norm_role
+    self.paused_at = now_dt.isoformat(timespec="seconds")
+    self.pause_reason = why
+    self.pause_expires_at = (now_dt + IDLE_EXPIRE_PAUSED).isoformat(timespec="seconds")
+    saved = self.save(action=f"cosign_paused_by_{norm_role}", app_source=app_source)
+    contract_chat.system_note(
+        saved,
+        f"⏸️ {who}이(가) 스마트 계약을 잠시 보류했습니다({why}). 최대 7일간 현재 {saved.current_step}단계 상태가 유지되며 언제든 [재개]할 수 있습니다.",
+        step=saved.current_step,
+    )
+    return saved
+
+
+def resume_session(
+    self: CoSignSession,
+    role: str,
+    app_source: str = "rent3_contract",
+) -> CoSignSession:
+    """보류 중(PAUSED)인 스마트 계약을 재개(IN_PROGRESS)해 이전 단계부터 그대로 이어서 진행한다."""
+    if self.status == "IN_PROGRESS":
+        return self
+    if self.status != "PAUSED":
+        raise DomainError(
+            f"보류 중인 스마트 계약만 재개할 수 있습니다 (현재 상태: {self.status}).",
+            hint="이미 체결되었거나 취소된 계약은 재개할 수 없습니다.",
+        )
+    from .. import contract_chat
+    norm_role = "lessor" if role == "lessor" else "tenant"
+    who = "임대인" if norm_role == "lessor" else "임차인"
+    self.status = "IN_PROGRESS"
+    self.paused_by = ""
+    self.paused_at = ""
+    self.pause_reason = ""
+    self.pause_expires_at = ""
+    saved = self.save(action=f"cosign_resumed_by_{norm_role}", app_source=app_source)
+    contract_chat.system_note(
+        saved,
+        f"▶️ {who}이(가) 보류 중이던 스마트 계약을 재개했습니다. 이전 진행 단계({saved.current_step}단계)부터 이어서 진행합니다.",
+        step=saved.current_step,
+    )
+    return saved
+
 
 def by_code_or_id(cls: type[CoSignSession], token: str) -> CoSignSession:
     key = (token or "").strip()

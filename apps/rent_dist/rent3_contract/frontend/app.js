@@ -50,6 +50,38 @@
   }
   document.getElementById("btnBackHome").addEventListener("click", goHome);
 
+  // 잠시 보류(최대 7일 보관) ↔ 재개
+  const btnPauseContract = document.getElementById("btnPauseContract");
+  if (btnPauseContract) {
+    btnPauseContract.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        if (!S.activeSession) return;
+        if (S.activeSession.status === "PAUSED") {
+          const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/resume`, {
+            method: "POST",
+            body: { role: currentRole },
+          });
+          S.activeSession = res.session;
+          Bass.updateAppAlert("success", res.message);
+          renderWorkspace();
+          return;
+        }
+        const reason = window.prompt(
+          "스마트 계약을 잠시 보류할 사유를 입력해 주세요 (선택).\n보류해도 현재 진행 단계·협의 내용이 최대 7일간 그대로 유지됩니다.",
+          "가족 상의 · 일정 확인 후 이어서 진행"
+        );
+        if (reason === null) return;
+        const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/pause`, {
+          method: "POST",
+          body: { role: currentRole, reason: reason.trim() },
+        });
+        S.activeSession = res.session;
+        Bass.updateAppAlert("success", res.message);
+        renderWorkspace();
+      });
+    });
+  }
+
   // 체결 전 계약 취소: 사유를 적으면 상대방 화면에 그대로 전달되고 호실이 다시 열린다
   document.getElementById("btnCancelContract").addEventListener("click", function () {
     Bass.withLock(this, async () => {
@@ -243,16 +275,31 @@
     const s = S.activeSession;
     document.getElementById("wsTitle").textContent = `${s.building_name} ${s.room_no}호`;
     R3Shell.proxyBanner(`${s.building_name} ${s.room_no}호 (${ROLE_KO[currentRole]} 입장 · 계약방)`);
+    const entryLabel = s.mode === "RENEWAL"
+      ? "연장 스마트 계약"
+      : (s.entry_channel === "EXISTING_TENANT_MOVE"
+        ? `🚚 이사 신규 스마트 계약${s.moving_from_room_no ? ` (${s.moving_from_room_no}호 → ${s.room_no}호)` : ""}`
+        : "신규 스마트 계약");
     document.getElementById("wsMeta").textContent =
-      `${s.mode === "RENEWAL" ? "재계약" : "신규 계약"} · 나는 ${ROLE_KO[currentRole]}${s.reserve_after ? ` · 📅 퇴실 전 사전 계약 (입주 ${s.reserve_after} 이후)` : ""}`;
+      `${entryLabel} · 나는 ${ROLE_KO[currentRole]}${s.reserve_after ? ` · 📅 퇴실 전 사전 계약 (입주 ${s.reserve_after} 이후)` : ""}`;
 
-    document.getElementById("btnCancelContract").hidden = s.status !== "IN_PROGRESS";
+    const isLive = s.status === "IN_PROGRESS" || s.status === "PAUSED";
+    document.getElementById("btnCancelContract").hidden = !isLive;
+    const btnPause = document.getElementById("btnPauseContract");
+    if (btnPause) {
+      btnPause.hidden = !isLive || adminProxy;
+      btnPause.textContent = s.status === "PAUSED" ? "▶️ 재개하기" : "⏸️ 보류";
+      btnPause.classList.toggle("bass-btn--primary", s.status === "PAUSED");
+    }
     C.updateTurnLine();
     C.updateChatFab();
     const callBadge = document.getElementById("callStateBadge");
     if (s.status === "COMPLETED") {
       callBadge.className = "bass-badge bass-badge--ok";
       callBadge.textContent = "체결 완료";
+    } else if (s.status === "PAUSED") {
+      callBadge.className = "bass-badge bass-badge--warn";
+      callBadge.textContent = "⏸️ 보류 중";
     } else if (s.call_status === "CALLING") {
       callBadge.className = "bass-badge bass-badge--warn";
       callBadge.textContent = "응답 대기";

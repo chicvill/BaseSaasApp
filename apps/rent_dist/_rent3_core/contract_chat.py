@@ -71,8 +71,14 @@ def _clean_body(body: str, required: bool) -> str:
     return b
 
 
-def _ensure_open_session(s: Any) -> None:
-    if s.status != "IN_PROGRESS":
+def _ensure_open_session(s: Any, *, allow_paused: bool = False) -> None:
+    ok = ("IN_PROGRESS", "PAUSED") if allow_paused else ("IN_PROGRESS",)
+    if s.status not in ok:
+        if s.status == "PAUSED":
+            raise Conflict(
+                "보류 중인 스마트 계약에서는 조건 제안·수락을 할 수 없습니다.",
+                hint="먼저 [▶️ 스마트 계약 재개하기]를 눌러 진행 상태로 전환한 뒤 처리해 주세요. 일반 채팅 문의는 보류 중에도 가능합니다.",
+            )
         raise Conflict(
             "체결되었거나 취소된 계약방에는 새 글을 남길 수 없습니다.",
             hint="지난 채팅은 읽을 수만 있습니다.",
@@ -245,7 +251,7 @@ def list_for(session: Any, role: Optional[str], mark_read: bool = True) -> Dict[
         "messages": [public_item(m) for m in items],
         "open_count": len(open_items(session.id)),
         "can_negotiate": session.status == "IN_PROGRESS" and session.current_step <= LAST_NEGOTIATION_STEP,
-        "read_only": session.status != "IN_PROGRESS",
+        "read_only": session.status not in ("IN_PROGRESS", "PAUSED"),
         "purged": bool(getattr(session, "chat_purged_at", "")),
         "purged_note": "보관 기간이 지나 삭제되었습니다." if getattr(session, "chat_purged_at", "") else "",
         "negotiable_fields": {k: v[0] for k, v in PROPOSAL_FIELDS.items()},
@@ -259,7 +265,7 @@ def post(session: Any, role: str, sender_name: str, kind: str, body: str = "", f
         raise Forbidden("계약 당사자만 글을 남길 수 있습니다.")
     if kind not in ("question", "proposal", "bundle", "change_request"):
         raise DomainError("글 종류가 올바르지 않습니다.", hint="question / proposal / bundle / change_request")
-    _ensure_open_session(session)
+    _ensure_open_session(session, allow_paused=(kind == "question"))
     base = dict(
         branch=session.branch, id_room=getattr(session, "id_room", "") or "", room_no=session.room_no, session_id=session.id,
         tenant_id=session.id_tenant or "", sender_role=role, sender_name=sender_name or ("임대인" if role == "lessor" else "임차인"),

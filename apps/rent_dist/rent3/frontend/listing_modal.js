@@ -363,7 +363,7 @@
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             ${options.onInquiry ? `<button type="button" id="r3LmInquiry" class="r3-lm-btn">💬 1:1 방문문의</button>` : ""}
             ${options.onRentNow
-              ? `<button type="button" id="r3LmRentNow" class="r3-lm-btn r3-lm-btn--dark" ${listing.contract_in_progress ? "disabled style='opacity:.55;cursor:not-allowed;'" : ""}>${listing.contract_in_progress ? "🔒 계약 진행 중" : esc(options.rentNowLabel || "📞 공동계약 호출")}</button>`
+              ? `<button type="button" id="r3LmRentNow" class="r3-lm-btn r3-lm-btn--dark" ${listing.contract_in_progress ? "disabled style='opacity:.55;cursor:not-allowed;'" : ""}>${listing.contract_in_progress ? "🔒 계약 진행 중" : esc(options.rentNowLabel || "🤝 스마트 계약 요청")}</button>`
               : ""}
           </div>
         </div>

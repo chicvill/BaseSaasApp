@@ -27,7 +27,7 @@
   const TENANT_MENU = [
     { items: [{ label: "🏠 내 집 (납부 확인)", id: "btnSvcHome" }] },
     { title: "계약 · 증빙 서류", items: [
-      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=tenant" },
+      { label: "🤝 스마트 계약", href: "/rent3_contract/?role=tenant" },
       { label: "📸 중개 계약서 사본", id: "btnSvcPaper" },
       { label: "🧾 연말정산 납부확인서", id: "btnSvcCert" },
     ] },

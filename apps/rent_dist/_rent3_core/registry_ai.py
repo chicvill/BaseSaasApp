@@ -241,11 +241,19 @@ def assess_risks(ex: Dict[str, Any], *, lessor_names: List[str], deposit: int, p
 def analyze(binary: bytes, mime: str, *, lessor_names: List[str], deposit: int, property_value: int) -> Dict[str, Any]:
     res = read_registry(binary, mime)
     if res["status"] != "ok":
-        return {"status": res["status"], "message": res["message"], "extracted": None, "risks": []}
+        return {"status": res["status"], "message": res["message"], "extracted": None, "risks": [], "plain_summary": ""}
     ex = normalize(res["raw"])
     risks = assess_risks(ex, lessor_names=lessor_names, deposit=deposit, property_value=property_value)
-    return {"status": "ok", "message": "", "extracted": ex, "risks": risks,
-            "analyzed_at": datetime.now().isoformat(timespec="seconds")}
+    from . import contract_ai
+    summary = contract_ai.plain_registry_summary(ex, risks, deposit=deposit, lessor_names=lessor_names)
+    return {
+        "status": "ok",
+        "message": "",
+        "extracted": ex,
+        "risks": risks,
+        "plain_summary": summary,
+        "analyzed_at": datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 BIZ_REG_PROMPT = """당신은 한국 사업자등록증(또는 주택임대사업자 등록증) 문서를 읽어 항목을 추출하는 도구입니다.

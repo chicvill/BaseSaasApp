@@ -166,7 +166,7 @@
 
       strip.style.display = "none";    // '다른 계정으로 전환' 안내는 두지 않는다 — 로그아웃 후 다른 아이디로 로그인
       $("activeSessionText").innerHTML =
-        `🛡️ <strong>${esc(user.name)}</strong>님(<code>${esc(user.role_label || user.role)}</code> · 본인인증 완료)으로 로그인되어 있습니다. 역할 전용 워크스페이스 또는 공동계약 호출 화면으로 바로 이동할 수 있습니다.`;
+        `🛡️ <strong>${esc(user.name)}</strong>님(<code>${esc(user.role_label || user.role)}</code> · 본인인증 완료)으로 로그인되어 있습니다. 역할 전용 워크스페이스 또는 스마트 계약 화면으로 바로 이동할 수 있습니다.`;
       $("stripGoBtn").href = user.redirect_url;
 
       if (quickAuth) {

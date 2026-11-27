@@ -50,7 +50,7 @@
         }
         const targetRole = isLessor ? "lessor" : "tenant";
         callLink.href = `/rent3_contract/?role=${targetRole}&session=${encodeURIComponent(topCall.id)}`;
-        callLink.textContent = `🔔 공동계약 호출 (${topCall.building_name} ${topCall.room_no}호 응답하기 →)`;
+        callLink.textContent = `🔔 스마트 계약 호출 (${topCall.building_name} ${topCall.room_no}호 응답하기 →)`;
       } else if (callLink) {
         callLink.remove();
       }

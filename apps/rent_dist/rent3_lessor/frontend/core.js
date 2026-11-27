@@ -28,8 +28,8 @@
       { label: "🏷️ 임대매물 등록", tab: "rooms" },
       { label: "📜 등기부 확인 (등기클린)", tab: "registry" },
     ] },
-    { title: "3단계 · 직거래 전자계약 · 세무", more: true, items: [
-      { label: "🤝 직거래 계약", href: "/rent3_contract/?role=lessor" },
+    { title: "3단계 · 스마트 계약 · 세무", more: true, items: [
+      { label: "🤝 스마트 계약", href: "/rent3_contract/?role=lessor" },
       { label: "🧾 세무 허브", tab: "tax" },
       { label: "🧾 세금계산서 · 현금영수증 발행", id: "btnTaxInvoice" },
       { label: "🧮 관리비 산출근거", id: "btnMgmtFee" },
