@@ -89,9 +89,18 @@ def download_backup(name: str):
 @router.get("/landlord-promo", dependencies=ADMIN_ONLY)
 def landlord_promo(request: Request, channel: str = "cafe", season: str = "none", campaign: str = ""):
     """임대인 대상 홍보 글 초안(카페·밴드·블로그). '[광고]' 표시·실제 요금·채널 규정 확인 목록이 들어 있다. 운영자가 직접 올린다."""
+    import os
+    public_url = os.getenv("RENT3_PUBLIC_URL", "").strip().rstrip("/")
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
-    return {"success": True, "seasons": lp.SEASONS, "post": lp.generate(channel, season, campaign, f"{proto}://{host}" if host else "")}
+    host_only = host.split(":")[0].lower()
+    if public_url:
+        base_url = public_url
+    elif not host or host_only in ("localhost", "127.0.0.1", "0.0.0.0", "testserver"):
+        base_url = "https://saas.34.31.10.12.sslip.io"
+    else:
+        base_url = f"{proto}://{host}"
+    return {"success": True, "seasons": lp.SEASONS, "post": lp.generate(channel, season, campaign, base_url)}
 
 
 @router.get("/notifications", dependencies=ADMIN_ONLY)

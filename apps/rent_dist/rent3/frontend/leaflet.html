@@ -71,7 +71,10 @@
   document.getElementById("regionLabel").textContent = label;
   var ref = region ? "offline-" + region : "offline";
   if (ref.length > 32) ref = ref.slice(0, 32);
-  var link = location.origin + "/rent3/lessor-intro.html?ref=" + encodeURIComponent(ref) + "&campaign=" + encodeURIComponent(campaign);
+  var COOLIFY_ORIGIN = "https://saas.34.31.10.12.sslip.io";
+  var isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(location.hostname || "");
+  var baseOrigin = isLocal ? COOLIFY_ORIGIN : location.origin;
+  var link = baseOrigin + "/rent3/lessor-intro.html?ref=" + encodeURIComponent(ref) + "&campaign=" + encodeURIComponent(campaign);
   document.getElementById("shortLink").textContent = link;
   document.getElementById("barNote").textContent = "유입 표식: ref=" + ref + " · campaign=" + campaign;
   try {
