@@ -172,11 +172,13 @@ if ($portBusy) {
 $env:RENT3_POOL_DIR = $TargetDir
 $env:RENT3_DEMO_SEED = "0"
 
+$cryptoStatus = if ($env:MASTER_CRYPTO_KEY -or $env:RENT3_CRYPTO_KEY) { "설정됨" } else { "미설정 (필요 시 data\private\coolify.env 작성)" }
+
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host " Coolify 백업 Data Pool 로 로컬 서버를 시작합니다" -ForegroundColor Cyan
 Write-Host " - 데이터 경로 : $TargetDir" -ForegroundColor White
 Write-Host " - 접속 주소   : http://localhost:$Port/rent3/" -ForegroundColor White
-Write-Host " - 암호화 키   : $(if ($env:MASTER_CRYPTO_KEY -or $env:RENT3_CRYPTO_KEY) { '설정됨' } else { '미설정 (필요 시 data\private\coolify.env 작성)' })" -ForegroundColor White
+Write-Host " - 암호화 키   : $cryptoStatus" -ForegroundColor White
 Write-Host "============================================================" -ForegroundColor Cyan
 
 Invoke-Py @("run.py", "--port", "$Port")
