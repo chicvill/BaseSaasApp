@@ -124,6 +124,17 @@
     }
   }
 
+  const BK_CMDS = {
+    localLatest: ".\\scripts\\run_coolify_backup.ps1 -Latest",
+    localRun: ".\\scripts\\run_coolify_backup.ps1",
+    localClean: "Remove-Item -Recurse -Force data\\private\\coolify_live",
+    coolifyStep1: 'POOL="${RENT3_POOL_DIR:-/app/data/rent3_pool}"; BKDIR="${RENT3_BACKUP_DIR:-$POOL/_backups}"; echo "POOL=$POOL / BKDIR=$BKDIR"; python scripts/rent3_backup.py --pool-dir "$POOL" --run && ls -lh "$BKDIR"',
+    coolifyStep2: 'BK="$BKDIR/rent3_pool_YYYYMMDD_HHMMSS.tar.gz"; rm -rf /tmp/rent3_restore_new && python scripts/rent3_backup.py --verify "$BK" && python scripts/rent3_backup.py --restore "$BK" --to /tmp/rent3_restore_new',
+    coolifyStep3: 'find "$POOL" -mindepth 1 -maxdepth 1 ! -name "_backups" -exec rm -rf {} + && cp -a /tmp/rent3_restore_new/. "$POOL"/ && rm -rf /tmp/rent3_restore_new',
+    coolifyUpload: 'scp "C:\\Users\\USER\\Downloads\\rent3_pool_YYYYMMDD_HHMMSS.tar.gz" root@서버IP:/tmp/restore.tar.gz',
+    coolifyDockerCp: "docker cp /tmp/restore.tar.gz <컨테이너ID>:/tmp/restore.tar.gz",
+  };
+
   function bindMaintenanceAndAccountTools() {
     document.getElementById("btnBkRun").addEventListener("click", function () {
       Bass.withLock(this, async () => { const r = await Bass.api(APP_ID, "/backups/run", { method: "POST", body: {} }); Bass.updateAppAlert(r.verify.ok ? "success" : "warning", r.message); await renderOpsTab(); });
@@ -131,7 +142,7 @@
     elTabContent.querySelectorAll(".btn-bk-dl").forEach((b) => b.addEventListener("click", () => downloadBackup(b.dataset.name)));
     elTabContent.querySelectorAll(".btn-bk-copy").forEach((b) => {
       b.addEventListener("click", async () => {
-        const cmd = b.dataset.cmd || "";
+        const cmd = (b.dataset.cmdKey && BK_CMDS[b.dataset.cmdKey]) || b.dataset.cmd || "";
         try {
           await navigator.clipboard.writeText(cmd);
           Bass.updateAppAlert("success", "명령어를 복사했습니다.", cmd);
@@ -333,25 +344,73 @@
               <li style="margin-bottom:8px;">
                 <strong>② 내 PC PowerShell에서 복구 + 로컬 서버 실행</strong> (다운로드 폴더의 최신 백업을 자동 검증·교체 복구 후 실행):
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
-                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">.\\scripts\\run_coolify_backup.ps1 -Latest</code>
-                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd=".\\scripts\\run_coolify_backup.ps1 -Latest" style="min-height:40px;">📋 복사</button>
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.localLatest)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="localLatest" style="min-height:40px;">📋 복사</button>
                 </div>
                 <div class="bass-muted" style="font-size:12px;margin-top:4px;">
                   • 특정 파일 직접 지정: <code>.\\scripts\\run_coolify_backup.ps1 "C:\\Users\\USER\\Downloads\\백업파일.tar.gz"</code><br>
-                  • 이미 복구된 폴더로 재실행: <code>.\\scripts\\run_coolify_backup.ps1</code>
-                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd=".\\scripts\\run_coolify_backup.ps1" style="min-height:36px;margin-left:4px;">📋 복사</button>
+                  • 이미 복구된 폴더로 재실행: <code>${Bass.escapeHtml(BK_CMDS.localRun)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="localRun" style="min-height:36px;margin-left:4px;">📋 복사</button>
                 </div>
               </li>
               <li style="margin-bottom:8px;"><strong>③ 로컬에서 안전하게 테스트:</strong> <code>http://localhost:8080/rent3/</code>에서 실데이터와 동일한 상태로 검증 (도어락·계좌 암호화 키가 필요하면 <code>data\\private\\coolify.env</code>에 <code>MASTER_CRYPTO_KEY=키값</code> 1줄 저장)</li>
               <li>
                 <strong>④ 테스트 종료 후 삭제(개인정보 정리):</strong> 로컬 서버 창에서 <code>Ctrl+C</code>로 서버를 종료한 뒤 실행:
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
-                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">Remove-Item -Recurse -Force data\\private\\coolify_live</code>
-                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd="Remove-Item -Recurse -Force data\\private\\coolify_live" style="min-height:40px;">📋 복사</button>
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.localClean)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="localClean" style="min-height:40px;">📋 복사</button>
                 </div>
                 <div class="bass-muted" style="font-size:12px;margin-top:4px;">개인정보 보호를 위해 <code>Downloads</code> 폴더에 내려받은 <code>rent3_pool_*.tar.gz</code> 파일도 함께 삭제하는 것을 권장합니다.</div>
               </li>
             </ol>
+          </div>
+        </details>
+        <details id="bkCoolifyRestoreGuide" style="margin-top:8px;padding:10px 12px;border:1px solid #fde68a;border-radius:10px;background:#fffbeb;">
+          <summary style="cursor:pointer;font-size:13.5px;font-weight:700;color:#92400e;">🚑 Coolify 운영 서버에 백업 리스토어(긴급 복구) 방법</summary>
+          <div style="margin-top:10px;font-size:12.5px;line-height:1.75;color:#334155;">
+            <div style="padding:8px 10px;border-radius:8px;background:#fef3c7;border:1px solid #fcd34d;color:#78350f;margin-bottom:10px;">
+              <strong>주의:</strong> 실수로 운영 DB를 덮어쓰는 사고를 막기 위해 웹 원클릭 복구는 제공하지 않습니다. Coolify 대시보드 → 해당 앱 → 왼쪽 <strong>Terminal</strong>에서 아래 순서대로 실행하세요.<br>
+              <strong>암호화 키 필수:</strong> 백업 생성 시 사용한 <code>MASTER_CRYPTO_KEY</code>(또는 <code>RENT3_CRYPTO_KEY</code>)가 Coolify 환경변수와 같아야 도어락·계좌번호가 정상 복호화됩니다.
+            </div>
+            <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">경우 A. Coolify 서버 안에 이미 있는 백업으로 되돌릴 때</div>
+            <ol style="margin:0 0 10px 0;padding-left:18px;">
+              <li style="margin-bottom:8px;">
+                <strong>① 현재 상태 먼저 1번 백업 + 백업 목록 확인:</strong>
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.coolifyStep1)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="coolifyStep1" style="min-height:40px;">📋 복사</button>
+                </div>
+              </li>
+              <li style="margin-bottom:8px;">
+                <strong>② 복구할 백업 검증 → 임시 폴더에 먼저 복구</strong> (<code>YYYYMMDD_HHMMSS</code>를 목록의 파일명으로 변경, <code>"ok": true</code> 확인):
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.coolifyStep2)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="coolifyStep2" style="min-height:40px;">📋 복사</button>
+                </div>
+              </li>
+              <li style="margin-bottom:8px;">
+                <strong>③ 운영 풀에 반영</strong> (<code>_backups</code> 폴더는 보존, 볼륨 마운트 안전 교체):
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px;">
+                  <code style="padding:5px 8px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.coolifyStep3)}</code>
+                  <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="coolifyStep3" style="min-height:40px;">📋 복사</button>
+                </div>
+              </li>
+              <li><strong>④ Coolify 대시보드에서 앱 [Restart] 클릭</strong> 후 로그인·호실·수납 내역 확인</li>
+            </ol>
+            <div style="font-weight:700;color:#0f172a;margin-bottom:4px;">경우 B. 내 PC의 <code>.tar.gz</code> 백업을 Coolify 서버로 올려 복구할 때</div>
+            <div style="font-size:12px;line-height:1.7;">
+              1) PC PowerShell에서 서버로 전송:
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:3px 0 6px;">
+                <code style="padding:4px 7px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.coolifyUpload)}</code>
+                <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="coolifyUpload" style="min-height:36px;">📋 복사</button>
+              </div>
+              2) Coolify 서버 SSH에서 <code>docker ps</code>로 컨테이너 ID 확인 후 복사:
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:3px 0 6px;">
+                <code style="padding:4px 7px;background:#fff;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;word-break:break-all;">${Bass.escapeHtml(BK_CMDS.coolifyDockerCp)}</code>
+                <button type="button" class="bass-btn bass-btn--sm btn-bk-copy" data-cmd-key="coolifyDockerCp" style="min-height:36px;">📋 복사</button>
+              </div>
+              3) Coolify <strong>Terminal</strong>에서 <code>BK="/tmp/restore.tar.gz"</code>로 두고 위 <strong>경우 A의 ①~④</strong> 실행
+            </div>
           </div>
         </details>
       </div>
