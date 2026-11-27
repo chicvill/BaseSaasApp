@@ -5,21 +5,20 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>임대인 안내 · OpenRent</title>
   <style>
-    :root { --bg:#f8fafc; --card:#fff; --ink:#1e293b; --mute:#64748b; --line:#e2e8f0; --pri:#e11d48; --ok:#15803d; }
-    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f172a; --card:#1e293b; --ink:#e2e8f0; --mute:#94a3b8; --line:#334155; --pri:#fb7185; --ok:#4ade80; } }
+    :root { color-scheme: light; --bg:#f8fafc; --card:#ffffff; --ink:#0f172a; --mute:#475569; --line:#e2e8f0; --pri:#e11d48; --ok:#15803d; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.7 -apple-system,"Pretendard","Malgun Gothic",sans-serif; }
     main { max-width:720px; margin:0 auto; padding:20px 16px 60px; }
-    h1 { font-size:22px; margin:8px 0 4px; } h2 { font-size:17px; margin:0 0 8px; }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; }
+    h1 { font-size:22px; margin:8px 0 4px; color:#0f172a; } h2 { font-size:17px; margin:0 0 8px; color:#0f172a; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
     .mute { color:var(--mute); font-size:13px; }
     .btn { display:inline-flex; align-items:center; justify-content:center; min-height:46px; padding:0 18px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:var(--ink); font-size:15px; font-weight:700; text-decoration:none; cursor:pointer; }
     .btn.pri { background:var(--pri); border-color:var(--pri); color:#fff; }
-    input { min-height:44px; width:100%; padding:0 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); font-size:15px; }
+    input { min-height:44px; width:100%; padding:0 10px; border:1px solid #cbd5e1; border-radius:10px; background:#ffffff; color:#0f172a; font-size:15px; }
     label { display:block; font-size:13px; margin:8px 0 2px; font-weight:700; }
     .big { font-size:20px; font-weight:800; }
     .pill { display:inline-block; font-size:12px; font-weight:700; padding:2px 8px; border-radius:999px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; margin:0 4px 4px 0; }
-    .highlight { border-left:4px solid var(--ok); }
+    .highlight { border-left:4px solid var(--ok); background:#f0fdf4; }
     ul { padding-left:20px; margin:6px 0; }
     li { margin:4px 0; }
   </style>
