@@ -1029,6 +1029,28 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
             self.assertIn(needle, chat_js, needle)
         self.assertIn("보증금 환불 계좌", steps_js)
 
+    def test_09_pool_refuses_empty_overwrite_if_loaded_file_vanishes(self):
+        """실행 중인 서버의 Data Pool 파일이 외부(백업 복구 등)에서 사라져도 빈 JSON([])으로 덮어쓰지 않고 안전하게 차단한다."""
+        from apps.rent_dist._rent3_core.pool import JsonDataPool
+        tmp_dir = tempfile.mkdtemp(prefix="rent3_pool_guard_")
+        try:
+            p = JsonDataPool(tmp_dir)
+            p.ensure_all_files_initialized()
+            p.put("users", "lessor", "lessor_x", {"id": "lessor_x", "username": "x"}, action="t")
+            users_file = p.file_path("users")
+            self.assertTrue(os.path.exists(users_file))
+
+            # 실행 중 외부에서 파일이 삭제된 상황을 재현
+            os.remove(users_file)
+            with self.assertRaises(RuntimeError):
+                p.ensure_all_files_initialized()
+            # 빈 파일로 덮어쓰지 않았음을 검증
+            self.assertFalse(os.path.exists(users_file))
+            with self.assertRaises(RuntimeError):
+                p.find("users")
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()

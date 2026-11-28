@@ -142,6 +142,11 @@ class JsonDataPool:
     def _load_collection_unlocked(self, collection: str) -> List[Dict[str, Any]]:
         path = self.file_path(collection)
         if not os.path.exists(path):
+            if self._revisions.get(collection, 0) > 0:
+                raise RuntimeError(
+                    f"Data Pool 컬렉션 파일({collection}.json)이 실행 중 디스크에서 사라졌습니다. "
+                    "외부 백업 복구·폴더 교체 중일 수 있어 빈 목록으로 덮어쓰지 않습니다. 서버를 종료한 뒤 복구하고 재시작해 주세요."
+                )
             self._cache[collection] = []
             self._mtimes[collection] = 0.0
             self._revisions.setdefault(collection, 0)
@@ -374,11 +379,18 @@ class JsonDataPool:
             return parsed
 
     def ensure_all_files_initialized(self) -> None:
-        """모든 표준 JSON 컬렉션 파일이 디스크에 가시적으로 존재하도록 보장."""
+        """모든 표준 JSON 컬렉션 파일이 디스크에 가시적으로 존재하도록 보장.
+        이미 로드되어 리비전이 기록된 컬렉션 파일이 실행 중 사라진 경우(백업 복구 중 등)에는
+        절대 빈 배열([])로 덮어쓰지 않고 예외를 발생시켜 데이터 손실을 막는다."""
         with self._lock:
             for col in POOL_COLLECTIONS:
                 p = self.file_path(col)
                 if not os.path.exists(p):
+                    if self._revisions.get(col, 0) > 0 or col in self._cache:
+                        raise RuntimeError(
+                            f"Data Pool 컬렉션 파일({col}.json)이 실행 중 사라졌습니다. "
+                            "외부 백업 복구 중 빈 파일 덮어쓰기를 방지하기 위해 중단했습니다. 서버를 종료 후 다시 복구·시작해 주세요."
+                        )
                     self._save_collection_unlocked(col, [])
 
 
@@ -388,7 +400,7 @@ _pool_instance: Optional[JsonDataPool] = None
 def pool() -> JsonDataPool:
     global _pool_instance
     desired = os.path.abspath(os.getenv("RENT3_POOL_DIR") or DEFAULT_POOL_DIR)
-    if _pool_instance is None:
+    if _pool_instance is None or _pool_instance.pool_dir != desired:
         _pool_instance = JsonDataPool(desired)
     return _pool_instance
 

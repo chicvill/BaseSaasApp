@@ -99,7 +99,21 @@ if ($Latest -and -not $BackupFile) {
     Write-Host "[AUTO] Latest backup selected: $BackupFile" -ForegroundColor Cyan
 }
 
-# If backup file provided: verify -> restore to staging -> swap into TargetDir
+# Check port BEFORE touching any files so a running server cannot re-create empty JSON files during swap!
+$portBusy = $false
+try {
+    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    if ($conns) { $portBusy = $true }
+} catch {
+    $portBusy = $false
+}
+if ($portBusy) {
+    Write-Host "[ERROR] Port $Port is already in use! Stop the running server (Ctrl+C) BEFORE restoring or starting." -ForegroundColor Red
+    Write-Host "        (실행 중인 서버를 끄지 않고 복구하면 브라우저 요청이 빈 폴더를 덮어쓸 수 있어 중단했습니다.)" -ForegroundColor Yellow
+    exit 1
+}
+
+# If backup file provided: verify -> restore to staging -> safe swap with rollback
 if ($BackupFile) {
     $BackupPath = [System.IO.Path]::GetFullPath($BackupFile)
     if (-not (Test-Path -LiteralPath $BackupPath -PathType Leaf)) {
@@ -116,7 +130,10 @@ if ($BackupFile) {
     if (-not (Test-Path -LiteralPath $parentDir)) {
         New-Item -ItemType Directory -Path $parentDir -Force | Out-Null
     }
-    $stagingDir = "$TargetDir`_staging_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+    $ts = Get-Date -Format "yyyyMMdd_HHmmss"
+    $stagingDir = "${TargetDir}_staging_${ts}"
+    $prevDir = "${TargetDir}_prev_${ts}"
+    $movedPrev = $false
     try {
         Write-Host "[2/3] Restoring into staging dir: $stagingDir" -ForegroundColor Yellow
         Invoke-Py @("scripts\rent3_backup.py", "--restore", $BackupPath, "--to", $stagingDir)
@@ -125,12 +142,20 @@ if ($BackupFile) {
         }
 
         if (Test-Path -LiteralPath $TargetDir) {
-            Write-Host "[3/3] Removing previous folder: $TargetDir" -ForegroundColor Yellow
-            Remove-Item -LiteralPath $TargetDir -Recurse -Force
+            Write-Host "[3/3] Swapping folder safely (preserving rollback copy)..." -ForegroundColor Yellow
+            Move-Item -LiteralPath $TargetDir -Destination $prevDir
+            $movedPrev = $true
         }
         Move-Item -LiteralPath $stagingDir -Destination $TargetDir
+        if ($movedPrev -and (Test-Path -LiteralPath $prevDir)) {
+            Remove-Item -LiteralPath $prevDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
         Write-Host "[OK] Restored successfully to: $TargetDir" -ForegroundColor Green
     } catch {
+        if ($movedPrev -and -not (Test-Path -LiteralPath $TargetDir) -and (Test-Path -LiteralPath $prevDir)) {
+            Write-Host "[ROLLBACK] Restoring previous folder: $prevDir -> $TargetDir" -ForegroundColor Yellow
+            Move-Item -LiteralPath $prevDir -Destination $TargetDir -ErrorAction SilentlyContinue
+        }
         if (Test-Path -LiteralPath $stagingDir) {
             Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
         }
@@ -146,19 +171,6 @@ if ($RestoreOnly) {
     Write-Host "[OK] Restore complete (-RestoreOnly). Run server with:" -ForegroundColor Green
     Write-Host "  .\scripts\run_coolify_backup.ps1" -ForegroundColor White
     exit 0
-}
-
-# Check port before starting
-$portBusy = $false
-try {
-    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($conns) { $portBusy = $true }
-} catch {
-    $portBusy = $false
-}
-if ($portBusy) {
-    Write-Host "[ERROR] Port $Port is already in use. Stop the running server (Ctrl+C) first." -ForegroundColor Red
-    exit 1
 }
 
 $env:RENT3_POOL_DIR = $TargetDir
