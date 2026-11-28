@@ -5,7 +5,7 @@
   if (!L) return;
 
   const {
-    APP_ID, elTabContent, state: S,
+    APP_ID, VIA_PIN, elTabContent, state: S,
     fmtWon, expiryStatusLabel, pinLimit,
     roomOf, shortYm, dotDate, $m, dueSoonOf, unpaidCount,
     receiptText, unpaidText, sendReceiptSms, downloadWithAuth,
@@ -318,7 +318,169 @@
     renderPayInline(r.room_no);
   }
 
+  let _ctxCleanup = null;
+
+  function closeRoomContextMenu() {
+    if (_ctxCleanup) {
+      const fn = _ctxCleanup;
+      _ctxCleanup = null;
+      fn();
+    }
+    document.querySelectorAll(".rl-ctx-menu, .rl-ctx-backdrop").forEach((el) => el.remove());
+    document.querySelectorAll(".rl-more[aria-expanded='true']").forEach((el) => el.setAttribute("aria-expanded", "false"));
+  }
+
+  function smartContractHrefForRoom(r) {
+    const live = ((S.dash && S.dash.cosign_sessions) || []).find((s) =>
+      s.room_no === r.room_no && (s.status === "IN_PROGRESS" || s.status === "PAUSED")
+    );
+    if (live && live.id) {
+      return `/rent3_contract/?session=${encodeURIComponent(live.id)}&role=lessor`;
+    }
+    return `/rent3_contract/?role=lessor&call_branch=${encodeURIComponent(S.currentBranch)}&call_room=${encodeURIComponent(r.room_no)}`;
+  }
+
+  function openRoomContextMenu(no, anchorEl, clientPoint) {
+    const wasSame = anchorEl && anchorEl.getAttribute("aria-expanded") === "true";
+    closeRoomContextMenu();
+    if (wasSame) return;
+
+    const r = roomOf(String(no));
+    if (!r) return;
+    const E = Bass.escapeHtml;
+    const isOcc = Boolean(r.is_occupied && r.contract);
+    const ct = r.contract || {};
+    const who = isOcc ? (ct.tenant_name || "") : "공실";
+    const nUnpaid = isOcc ? unpaidCount(r) : 0;
+    const needExpiry = Boolean(isOcc && r.expiry_window && r.expiry_window.in_6_to_2_months_window && !r.expiry_check);
+    const liveSess = ((S.dash && S.dash.cosign_sessions) || []).find((s) =>
+      s.room_no === r.room_no && (s.status === "IN_PROGRESS" || s.status === "PAUSED")
+    );
+
+    const items = [];
+    if (isOcc) {
+      items.push({ key: "ledger", label: "💰 수납내역" });
+      if (!VIA_PIN) {
+        items.push({ key: "contract", label: "📄 계약내용" });
+        items.push({ key: "expiry", label: "⚖️ 만기통보", badge: needExpiry ? "통보 필요" : "" });
+        items.push({ key: "moveout", label: "📦 전출정산" });
+        items.push({ key: "smartcontract", label: "🤝 스마트 계약", badge: liveSess ? "진행 중" : "" });
+      }
+      items.push({ key: "chat", label: "💬 임차인과 채팅" });
+      if (!VIA_PIN) {
+        items.push({ sep: true });
+        items.push({ key: "invite", label: "📲 입주안내 카드" });
+        items.push({ key: "lostphone", label: "📵 분실폰 해제", danger: true });
+        if (nUnpaid > 0) items.push({ key: "unpaidmsg", label: "📨 미납 안내 문자", badge: `미납 ${nUnpaid}` });
+        if (r.pre_moveout_notice) items.push({ key: "promo", label: "📢 홍보글 복사" });
+        items.push({ key: "listing", label: "🏷️ 임대매물 · PDF 등록" });
+        items.push({ key: "broker", label: "📸 중개계약서 사진 등록" });
+      }
+    } else {
+      items.push({ key: "ledger", label: "🏠 호실 상세 · 매물 상태" });
+      if (!VIA_PIN) {
+        items.push({ key: "listing", label: "🏷️ 임대매물 · PDF 등록" });
+        items.push({ key: "pubtoggle", label: r.is_published ? "🙈 매물 비공개 전환" : "👁️ 직거래 매물 공개" });
+        items.push({ key: "promo", label: "📢 홍보글 복사" });
+        items.push({ key: "smartcontract", label: "🤝 스마트 계약", badge: liveSess ? "진행 중" : "신규" });
+        items.push({ key: "broker", label: "📸 중개계약 사진등록" });
+      }
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "rl-ctx-backdrop";
+    const menu = document.createElement("div");
+    menu.className = "rl-ctx-menu";
+    menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", `${r.room_no}호 빠른 메뉴`);
+    menu.innerHTML = `
+      <div class="rl-ctx-head">
+        <span>🏠 ${E(r.room_no)}호 ${E(who)}</span>
+        <span class="bass-badge ${isOcc ? (nUnpaid > 0 ? "bass-badge--err" : "bass-badge--ok") : "bass-badge--warn"}" style="font-size:12px;">${isOcc ? (nUnpaid > 0 ? `미납 ${nUnpaid}` : (dueSoonOf(r) > 0 ? "대기" : "완납")) : "공실"}</span>
+      </div>
+      ${items.map((it) => it.sep
+        ? '<div class="rl-ctx-sep" role="separator"></div>'
+        : `<button type="button" class="rl-ctx-item ${it.danger ? "rl-ctx-item--danger" : ""}" role="menuitem" data-rmact="${E(it.key)}">
+            <span>${E(it.label)}</span>
+            ${it.badge ? `<span class="bass-badge bass-badge--warn" style="font-size:12px;">${E(it.badge)}</span>` : ""}
+          </button>`).join("")}
+      ${VIA_PIN ? '<div class="bass-muted" style="font-size:12px;padding:6px 10px 4px;">※ 계약·만기·설정은 아이디 로그인 후 이용할 수 있습니다.</div>' : ""}`;
+
+    document.body.appendChild(backdrop);
+    document.body.appendChild(menu);
+    if (anchorEl) anchorEl.setAttribute("aria-expanded", "true");
+
+    // 위치 계산: 모바일·데스크톱 모두 화면 밖으로 잘리지 않게 자동 상하/좌우 보정
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const mw = menu.offsetWidth || 236;
+    const mh = menu.offsetHeight || 280;
+    const bottomReserve = 68;
+    let left, top;
+    if (clientPoint) {
+      left = clientPoint.x;
+      top = clientPoint.y;
+    } else if (anchorEl) {
+      const rect = anchorEl.getBoundingClientRect();
+      left = rect.right - mw;
+      top = rect.bottom + 4;
+      if (top + mh > vh - bottomReserve && rect.top - mh - 4 >= 8) {
+        top = rect.top - mh - 4;
+      }
+    } else {
+      left = (vw - mw) / 2;
+      top = 120;
+    }
+    left = Math.max(10, Math.min(left, vw - mw - 10));
+    top = Math.max(10, Math.min(top, vh - mh - bottomReserve));
+    menu.style.left = `${Math.round(left)}px`;
+    menu.style.top = `${Math.round(top)}px`;
+
+    const onKey = (ev) => { if (ev.key === "Escape") closeRoomContextMenu(); };
+    const onResize = () => closeRoomContextMenu();
+    backdrop.addEventListener("click", closeRoomContextMenu);
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", onResize);
+    _ctxCleanup = () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onResize);
+    };
+
+    const runAction = (key) => {
+      closeRoomContextMenu();
+      S.selRoomNo = String(r.room_no);
+      if (key === "ledger") { S.payFlash = null; openRoomModal(r.room_no); }
+      else if (key === "contract") L.showContractModal(r.room_no);
+      else if (key === "expiry") L.showExpiryModal(r.room_no);
+      else if (key === "moveout") L.showMoveOutModal(r.room_no);
+      else if (key === "smartcontract") window.location.href = smartContractHrefForRoom(r);
+      else if (key === "chat") { S.msgRoom = r.room_no; L.switchTab("messages"); }
+      else if (key === "invite") L.showInviteModal(r.room_no);
+      else if (key === "lostphone") L.revokeShortcuts(r.room_no);
+      else if (key === "unpaidmsg") {
+        const rm = roomOf(r.room_no);
+        if (!rm || !rm.ledger) return;
+        copyAndSms(unpaidText(rm), (rm.contract && rm.contract.tenant_phone) || (rm.tenant && rm.tenant.phone) || "");
+      }
+      else if (key === "promo") L.showPromoModal(r.id, r.room_no);
+      else if (key === "listing") { S.listingTargetRoomNo = r.room_no; L.switchTab("rooms"); }
+      else if (key === "broker") { S.brokerTargetRoomNo = r.room_no; L.switchTab("broker"); }
+      else if (key === "pubtoggle") {
+        Bass.withLock(null, async () => {
+          const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/publish`, { method: "POST", body: { is_published: !r.is_published } });
+          Bass.updateAppAlert("success", res.message);
+          await L.refresh();
+        }).catch(Bass.showError);
+      }
+    };
+
+    menu.querySelectorAll("[data-rmact]").forEach((btn) => {
+      btn.addEventListener("click", () => runAction(btn.dataset.rmact));
+    });
+  }
+
   function renderLedgerTab() {
+    closeRoomContextMenu();
     const rooms = S.dash.rooms || [];
     const roomState = (x) => {
       if (!(x.is_occupied && x.contract)) return { cls: "vacant", label: "공실" };
@@ -331,11 +493,16 @@
       const st = roomState(x);
       const day = x.billing_schedule && x.billing_schedule.payment_day;
       const who = x.is_occupied && x.contract ? ` ${x.contract.tenant_name || ""}` : "";
-      return `<button type="button" class="bass-btn rl-row rl-row--${st.cls}" data-room="${Bass.escapeHtml(x.room_no)}" aria-label="${Bass.escapeHtml(x.room_no)}호${Bass.escapeHtml(who)} ${Bass.escapeHtml(st.label)}${day ? ` 매월 ${day}일` : ""}">
-        <span class="rl-no">${Bass.escapeHtml(x.room_no)}<small>호</small></span>
-        <span class="rl-who">${Bass.escapeHtml((who || " 공실").trim())}</span>
-        <span class="rl-st">${Bass.escapeHtml(st.label)}</span>
-        <span class="rl-day">${day ? `${day}일` : "-"}</span></button>`;
+      const rn = Bass.escapeHtml(x.room_no);
+      return `<div class="rl-wrap rl-wrap--${st.cls}" data-room="${rn}">
+        <button type="button" class="bass-btn rl-row rl-row--${st.cls}" data-room="${rn}" aria-label="${rn}호${Bass.escapeHtml(who)} ${Bass.escapeHtml(st.label)}${day ? ` 매월 ${day}일` : ""}">
+          <span class="rl-no">${rn}<small>호</small></span>
+          <span class="rl-who">${Bass.escapeHtml((who || " 공실").trim())}</span>
+          <span class="rl-st">${Bass.escapeHtml(st.label)}</span>
+          <span class="rl-day">${day ? `${day}일` : "-"}</span>
+        </button>
+        <button type="button" class="rl-more" data-room="${rn}" aria-label="${rn}호 빠른 메뉴" aria-haspopup="menu" aria-expanded="false">⋯</button>
+      </div>`;
     };
     const conn = S.dash.connect_requests || [];
     const listingAlerts = S.dash.listing_alerts || [];
@@ -382,11 +549,19 @@
       ${coHtml}
       ${connHtml}
       ${pendHtml}
-      <div class="r3-lbl" style="margin:4px 0 8px;font-weight:800;">🏠 호실 <span class="bass-muted" style="font-weight:500;">— 호실을 누르면 수납내역 창이 열립니다</span></div>
+      <div class="r3-lbl" style="margin:4px 0 8px;font-weight:800;">🏠 호실 <span class="bass-muted" style="font-weight:500;">— 호실 터치: 수납내역 · ⋯ 터치: 호실 메뉴</span></div>
       <div class="rl-list" id="roomList">${rooms.map(roomRow).join("") || '<div class="bass-muted">등록된 호실이 없습니다.</div>'}</div>
     `;
-    const goRoom = (no) => { S.payFlash = null; openRoomModal(no); };
+    const goRoom = (no) => { closeRoomContextMenu(); S.payFlash = null; openRoomModal(no); };
     elTabContent.querySelectorAll(".rl-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
+    elTabContent.querySelectorAll(".rl-more").forEach((b) => b.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      openRoomContextMenu(b.dataset.room, b);
+    }));
+    elTabContent.querySelectorAll(".rl-wrap").forEach((w) => w.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      openRoomContextMenu(w.dataset.room, w.querySelector(".rl-more"), { x: ev.clientX, y: ev.clientY });
+    }));
     elTabContent.querySelectorAll(".todo-row").forEach((b) => b.addEventListener("click", () => goRoom(b.dataset.room)));
     elTabContent.querySelectorAll(".co-open").forEach((b) => b.addEventListener("click", () => L.showMoveOutModal(b.dataset.room)));
     elTabContent.querySelectorAll(".btn-go-listing-pdf").forEach((b) => b.addEventListener("click", () => {
@@ -581,6 +756,7 @@
 
   Object.assign(L, {
     showLedgerStateModal, renderPayInline, reservationCardHtml,
-    openRoomModal, renderRoomPanel, renderLedgerTab, showLedgerCsvModal,
+    openRoomModal, renderRoomPanel, openRoomContextMenu, closeRoomContextMenu,
+    renderLedgerTab, showLedgerCsvModal,
   });
 })();

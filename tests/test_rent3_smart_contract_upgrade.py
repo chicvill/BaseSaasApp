@@ -1051,6 +1051,32 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
+    def test_10_lessor_room_row_context_menu_markup(self):
+        """임대인 호실 목록 각 행 끝의 '⋯' 버튼과 우클릭/터치 컨텍스트 서브메뉴 항목이 올바르게 구성되어 있다."""
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_lessor", "frontend")
+        with open(os.path.join(fe, "core.js"), encoding="utf-8") as fp:
+            core_js = fp.read()
+        with open(os.path.join(fe, "ledger.js"), encoding="utf-8") as fp:
+            ledger_js = fp.read()
+        for css_cls in (".rl-wrap", ".rl-more", ".rl-ctx-menu", ".rl-ctx-item"):
+            self.assertIn(css_cls, core_js, css_cls)
+        for needle in (
+            "function openRoomContextMenu",
+            "rl-more",
+            "contextmenu",
+            "💰 수납내역",
+            "📄 계약내용",
+            "⚖️ 만기통보",
+            "📦 전출정산",
+            "🤝 스마트 계약",
+            "📲 입주안내 카드",
+            "📵 분실폰 해제",
+            "💬 임차인과 채팅",
+        ):
+            self.assertIn(needle, ledger_js, needle)
+        # 기존 test_75 금지 문자열 위반 없음
+        self.assertNotIn('data-act="pay"', ledger_js)
+
 
 if __name__ == "__main__":
     unittest.main()
