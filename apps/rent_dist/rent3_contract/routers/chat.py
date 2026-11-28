@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from core.errors import DomainError
 from apps.rent_dist._rent3_core import CoSignSession, Contract, contract_ai, contract_chat
-from ._deps import _chat_actor, _touch_chat_session
+from ._deps import _chat_actor, _session_view, _touch_chat_session
 
 router = APIRouter()
 
@@ -115,7 +115,7 @@ def contract_message_respond(session_id: str, msg_id: str, req: ContractMsgRespo
         "decline": "거절했습니다.",
         "withdraw": "철회했습니다.",
     }[req.action]
-    return {"success": True, "message": text, "session": s.model_dump(), **res, "open_count": len(contract_chat.open_items(s.id))}
+    return {"success": True, "message": text, "session": _session_view(s, request, who["role"]), **res, "open_count": len(contract_chat.open_items(s.id))}
 
 
 @router.post("/sessions/{session_id}/ai-assist")

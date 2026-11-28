@@ -779,6 +779,256 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
         finally:
             self._cleanup_room_sessions("906")
 
+    def test_07_mutual_1won_account_flow_and_prod_identity_promotion(self):
+        """배포 환경(provider=none)에서 미인증 임차인이 계좌 등록·상호 1원 난수 4자리 확인으로 본인인증을 확정하고 체결·진위확인까지 통과한다."""
+        from apps.rent_dist._rent3_core import Tenant
+        from apps.rent_dist._rent3_core.authz import tenant_token
+
+        lh = self._lessor_headers("chic")
+        self._create_vacant_room(lh, "907")
+        with mock.patch.dict(os.environ, {"RENT3_FAKE_IDENTITY": "0"}):
+            try:
+                reg = self.client.post(
+                    "/api/rent3/pool/auth/register",
+                    json={"role": "prospect", "name": "일원임차인", "phone": "010-9070-9070", "password": "Pw123456!"},
+                )
+                self.assertEqual(reg.status_code, 200, reg.text)
+                tid = reg.json()["user"]["id"]
+                th = {"Authorization": f"Bearer {tenant_token(Tenant.require(tid))}"}
+
+                # 1) provider=none 이면 in_contract_verify_only=True, 계약방 호출(/sessions/call) 즉시 허용
+                id_info = self.client.get("/api/rent3_contract/identity", headers=th).json()
+                self.assertFalse(id_info["identity"]["verified"])
+                self.assertTrue(id_info["in_contract_verify_only"])
+                self.assertTrue(id_info["bank_1won_available"])
+
+                call = self.client.post(
+                    "/api/rent3_contract/sessions/call",
+                    headers=th,
+                    json={
+                        "caller_role": "tenant",
+                        "branch": "main",
+                        "room_no": "907",
+                        "mode": "NEW",
+                        "tenant_name": "일원임차인",
+                        "tenant_phone": "010-9070-9070",
+                        "id_tenant": tid,
+                    },
+                )
+                self.assertEqual(call.status_code, 200, call.text)
+                sid = call.json()["session"]["id"]
+
+                self.assertEqual(
+                    self.client.post(
+                        f"/api/rent3_contract/sessions/{sid}/respond",
+                        headers=lh,
+                        json={"responder_role": "lessor"},
+                    ).status_code,
+                    200,
+                )
+
+                # 2) 대면 실물 신분증 확인 체크
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", headers=lh, json={"role": "lessor", "checked": True}).status_code,
+                    200,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", headers=th, json={"role": "tenant", "checked": True}).status_code,
+                    200,
+                )
+
+                # 3) 수납 계좌(임대인) · 보증금 환불 계좌(임차인) 등록
+                r_la = self.client.post(
+                    f"/api/rent3_contract/sessions/{sid}/bank-account",
+                    headers=lh,
+                    json={"role": "lessor", "bank_name": "국민은행", "account_no": "123-456-789012"},
+                )
+                self.assertEqual(r_la.status_code, 200, r_la.text)
+                r_ta = self.client.post(
+                    f"/api/rent3_contract/sessions/{sid}/bank-account",
+                    headers=th,
+                    json={"role": "tenant", "bank_name": "카카오뱅크", "account_no": "3333-01-9070907"},
+                )
+                self.assertEqual(r_ta.status_code, 200, r_ta.text)
+
+                # 보안 핵심: 각자 보내야 할 코드만 보이고, 본인이 통장에서 읽어 입력할 코드는 절대 노출되지 않는다!
+                s_for_lessor = self.client.get(f"/api/rent3_contract/sessions/{sid}", headers=lh).json()["session"]
+                s_for_tenant = self.client.get(f"/api/rent3_contract/sessions/{sid}", headers=th).json()["session"]
+                bv_l = s_for_lessor["bank_verify"]
+                bv_t = s_for_tenant["bank_verify"]
+                self.assertEqual(bv_l["to_lessor_code"], "")
+                self.assertEqual(len(bv_l["to_tenant_code"]), 4)
+                self.assertEqual(bv_t["to_tenant_code"], "")
+                self.assertEqual(len(bv_t["to_lessor_code"]), 4)
+
+                # 4) 등기부 생략·옵션·조건 동의까지 먼저 끝내도, 1원 확인 전에는 서명 차단(400/403)!
+                self.assertEqual(
+                    self.client.post(
+                        f"/api/rent3_contract/sessions/{sid}/registry-preference",
+                        headers=th,
+                        json={"role": "tenant", "want_check": False, "skip_acknowledged": True},
+                    ).status_code,
+                    200,
+                )
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", headers=lh, json={"role": "lessor"}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", headers=th, json={"role": "tenant"}).status_code, 200)
+                rev = self.client.get(f"/api/rent3_contract/sessions/{sid}", headers=lh).json()["session"]["revision"]
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", headers=lh, json={"role": "lessor", "expected_revision": rev}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", headers=th, json={"role": "tenant", "expected_revision": rev}).status_code, 200)
+
+                r_block_t = self.client.post(
+                    f"/api/rent3_contract/sessions/{sid}/step4/sign",
+                    headers=th,
+                    json={"role": "tenant", "signature": "일원임차인서명", "expected_revision": rev},
+                )
+                self.assertEqual(r_block_t.status_code, 403)
+                r_block_l = self.client.post(
+                    f"/api/rent3_contract/sessions/{sid}/step4/sign",
+                    headers=lh,
+                    json={"role": "lessor", "signature": "임대인서명", "expected_revision": rev},
+                )
+                self.assertEqual(r_block_l.status_code, 400)
+
+                # 5) 예금주 확인 미체크 시 송금 표시 거부(400), 체크 후 양측 1원 송금 표시
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/sent", headers=th, json={"role": "tenant", "holder_name_checked": False}).status_code,
+                    400,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/sent", headers=th, json={"role": "tenant", "holder_name_checked": True}).status_code,
+                    200,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/sent", headers=lh, json={"role": "lessor", "holder_name_checked": True}).status_code,
+                    200,
+                )
+
+                # 6) 틀린 4자리 코드 거부(400), 재발급 후 올바른 코드 양측 입력 -> 임차인 본인인증(bank_1won) 자동 확정!
+                wrong_code = "0000" if bv_t["to_lessor_code"] != "0000" else "9999"
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/confirm", headers=lh, json={"role": "lessor", "code": wrong_code}).status_code,
+                    400,
+                )
+                reiss = self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/reissue", headers=th, json={"role": "tenant"})
+                self.assertEqual(reiss.status_code, 200)
+                new_to_lessor = reiss.json()["session"]["bank_verify"]["to_lessor_code"]
+                self.assertEqual(len(new_to_lessor), 4)
+
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/confirm", headers=lh, json={"role": "lessor", "code": new_to_lessor}).status_code,
+                    200,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/confirm", headers=th, json={"role": "tenant", "code": bv_l["to_tenant_code"]}).status_code,
+                    200,
+                )
+
+                # 임차인 계정이 bank_1won 으로 자동 본인인증 완료됨
+                t_after_id = Tenant.require(tid)
+                self.assertTrue((t_after_id.identity or {}).get("verified"))
+                self.assertEqual((t_after_id.identity or {}).get("provider"), "bank_1won")
+                self.assertEqual(t_after_id.account_number, "카카오뱅크 3333-01-9070907")
+
+                # 7) 이제 양측 서명 + 최종 체결 + 진위 확인(INTACT) 모두 통과!
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", headers=lh, json={"role": "lessor", "signature": "임대인서명", "expected_revision": rev}).status_code,
+                    200,
+                )
+                r_ts = self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", headers=th, json={"role": "tenant", "signature": "일원임차인서명", "expected_revision": rev})
+                self.assertEqual(r_ts.status_code, 200, r_ts.text)
+                r_seal = self.client.post(
+                    f"/api/rent3_contract/sessions/{sid}/step5/complete",
+                    headers=lh,
+                    json={"payment_method": "TRANSFER", "own_account_checked": True},
+                )
+                self.assertEqual(r_seal.status_code, 200, r_seal.text)
+                ct = r_seal.json()["contract"]
+                self.assertEqual(ct["lessor_account"], "국민은행 123-456-789012")
+                self.assertEqual(ct["tenant_refund_account"], "카카오뱅크 3333-01-9070907")
+                self.assertTrue(ct["registry_snapshot"]["bank_verification"]["to_lessor_verified"])
+                self.assertTrue(ct["registry_snapshot"]["bank_verification"]["to_tenant_verified"])
+
+                ver = self.client.get(f"/api/rent3_contract/verify?no={ct['id']}&hash={ct['integrity_hash']}")
+                self.assertEqual(ver.status_code, 200)
+                self.assertEqual(ver.json()["result"], "INTACT")
+            finally:
+                self._cleanup_room_sessions("907")
+
+    def test_08_bank_1won_mutual_skip_and_ui_flow_cards(self):
+        """1원 확인 불가 예외 시 양측 모두 합의해야 생략되며, 프론트엔드 채팅 카드가 ①~⑦ 흐름과 환불 계좌를 렌더링한다."""
+        from apps.rent_dist._rent3_core import Tenant
+        from apps.rent_dist._rent3_core.authz import tenant_token
+
+        lh = self._lessor_headers("chic")
+        self._create_vacant_room(lh, "908")
+        with mock.patch.dict(os.environ, {"RENT3_FAKE_IDENTITY": "0"}):
+            try:
+                reg = self.client.post(
+                    "/api/rent3/pool/auth/register",
+                    json={"role": "prospect", "name": "생략합의임차", "phone": "010-9080-9080", "password": "Pw123456!"},
+                )
+                self.assertEqual(reg.status_code, 200, reg.text)
+                tid = reg.json()["user"]["id"]
+                th = {"Authorization": f"Bearer {tenant_token(Tenant.require(tid))}"}
+
+                sid = self.client.post(
+                    "/api/rent3_contract/sessions/call",
+                    headers=th,
+                    json={
+                        "caller_role": "tenant",
+                        "branch": "main",
+                        "room_no": "908",
+                        "mode": "NEW",
+                        "tenant_name": "생략합의임차",
+                        "tenant_phone": "010-9080-9080",
+                        "id_tenant": tid,
+                    },
+                ).json()["session"]["id"]
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/respond", headers=lh, json={"responder_role": "lessor"}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", headers=lh, json={"role": "lessor", "checked": True}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/verify-id", headers=th, json={"role": "tenant", "checked": True}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/registry-preference", headers=th, json={"role": "tenant", "want_check": False, "skip_acknowledged": True}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", headers=lh, json={"role": "lessor"}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step2", headers=th, json={"role": "tenant"}).status_code, 200)
+                rev = self.client.get(f"/api/rent3_contract/sessions/{sid}", headers=lh).json()["session"]["revision"]
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", headers=lh, json={"role": "lessor", "expected_revision": rev}).status_code, 200)
+                self.assertEqual(self.client.post(f"/api/rent3_contract/sessions/{sid}/step3/agree", headers=th, json={"role": "tenant", "expected_revision": rev}).status_code, 200)
+
+                # 한쪽만 생략 동의하면 여전히 서명 불가
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/skip", headers=lh, json={"role": "lessor", "agree": True, "reason": "외국인 계좌"}).status_code,
+                    200,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", headers=th, json={"role": "tenant", "signature": "서명", "expected_revision": rev}).status_code,
+                    403,
+                )
+
+                # 양측 모두 생략 동의하면 대면 신분증 확인과 함께 서명 허용!
+                sk2 = self.client.post(f"/api/rent3_contract/sessions/{sid}/bank-verify/skip", headers=th, json={"role": "tenant", "agree": True, "reason": "외국인 계좌"})
+                self.assertEqual(sk2.status_code, 200, sk2.text)
+                self.assertEqual(sk2.json()["session"]["bank_verify_mode"], "SKIPPED_MUTUAL")
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", headers=lh, json={"role": "lessor", "signature": "임대인서명", "expected_revision": rev}).status_code,
+                    200,
+                )
+                self.assertEqual(
+                    self.client.post(f"/api/rent3_contract/sessions/{sid}/step4/sign", headers=th, json={"role": "tenant", "signature": "임차인서명", "expected_revision": rev}).status_code,
+                    200,
+                )
+            finally:
+                self._cleanup_room_sessions("908")
+
+        # 프론트엔드 흐름 카드 & 환불 계좌 마크업 확인
+        fe = os.path.join(ROOT, "apps", "rent_dist", "rent3_contract", "frontend")
+        with open(os.path.join(fe, "chat.js"), encoding="utf-8") as fp:
+            chat_js = fp.read()
+        with open(os.path.join(fe, "steps.js"), encoding="utf-8") as fp:
+            steps_js = fp.read()
+        for needle in ("① 대면 · 신분증 확인", "② 계좌번호 등록 (수납·환불용)", "③ 1원 송수금 확인 (난수 4자리)", "④ 등기부등본 확인 (임대인 신분 재확인)", "⑤ 표준계약서 내용 확인", "⑥ 전자서명"):
+            self.assertIn(needle, chat_js, needle)
+        self.assertIn("보증금 환불 계좌", steps_js)
+
 
 if __name__ == "__main__":
     unittest.main()

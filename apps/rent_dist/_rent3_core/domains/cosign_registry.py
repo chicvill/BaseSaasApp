@@ -44,7 +44,7 @@ def summary(self: CoSignSession) -> str:
 
 def compute_integrity_hash(self: CoSignSession) -> str:
     """현재 세션 데이터로 계산한 무결성 해시. 서명 시점에 저장한 값과 비교해 변조 여부를 확인한다."""
-    return Contract.compute_integrity_hash({
+    payload: Dict[str, Any] = {
         "session_id": self.id,
         "revision": self.revision,
         "identity_verification": {
@@ -58,7 +58,14 @@ def compute_integrity_hash(self: CoSignSession) -> str:
         "terms": self.terms,
         "lessor_signature": self.lessor_signature,
         "tenant_signature": self.tenant_signature,
-    })
+    }
+    if (self.bank_verify or {}).get("initiated") or self.bank_verify_mode == "SKIPPED_MUTUAL" or self.tenant_refund_account:
+        payload["bank_accounts"] = {
+            "lessor_account": self.lessor_account,
+            "tenant_refund_account": self.tenant_refund_account,
+            "bank_verification": self.bank_verify_public_summary(),
+        }
+    return Contract.compute_integrity_hash(payload)
 
 def is_jeonse(self: CoSignSession) -> bool:
     t = self.terms or {}
@@ -411,6 +418,7 @@ def ensure_renewal_ready(self: CoSignSession) -> CoSignSession:
         return self
     self.lessor_checked_tenant_id = True
     self.tenant_checked_lessor_id = True
+    self.bank_verify_mode = "NOT_REQUIRED"
     self.step1_lessor_confirmed = True
     self.step1_tenant_locked = True
     self.step2_lessor_confirmed = True

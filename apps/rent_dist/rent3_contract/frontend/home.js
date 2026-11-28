@@ -28,7 +28,7 @@
         <summary style="cursor:pointer;font-weight:800;font-size:13.5px;color:#1e3a8a;">🗺️ 스마트 계약 진입 경로 · 진행 흐름 한눈에 보기</summary>
         <div class="cg-flow-steps">
           <div class="cg-flow-chip"><strong>① 연장 계약</strong><br>임대인이 입주 중 호실 선택 → 5% 상한 조건·서명으로 즉시 연장</div>
-          <div class="cg-flow-chip"><strong>② 신규 가입자</strong><br>포털 공개 매물 선택 → 호출·응답 → 채팅창에서 5단계 스마트 계약</div>
+          <div class="cg-flow-chip"><strong>② 신규 대면 계약</strong><br>신분증 대조 → 수납·환불 계좌 등록 → 1원(4자리) 확인 → 등기부 → 계약서 → 서명</div>
           <div class="cg-flow-chip"><strong>③ 기존 임차인 이사</strong><br>거주 중인 임차인이 더 좋은 호실 선택 → 미래 입주일이면 안전 예약 체결</div>
           <div class="cg-flow-chip"><strong>④ 보류 ↔ 재개</strong><br>진행 중 언제든 [⏸️ 보류](최대 7일 보관) 후 [▶️ 재개]로 이어서 진행</div>
         </div>
@@ -174,9 +174,15 @@
     const label = isResident
       ? "🚚 더 좋은 조건의 새 집으로 이사 스마트 계약 요청"
       : "🤝 새 집 스마트 계약 요청";
-    const needId = S.myIdentity && !S.myIdentity.verified;
+    const inContractOnly = Boolean(S.myIdentityMeta && S.myIdentityMeta.in_contract_verify_only);
+    const needId = Boolean(S.myIdentity && !S.myIdentity.verified && !inContractOnly);
     const idDone = S.myIdentity && S.myIdentity.verified
-      ? `<div class="bass-muted" style="font-size:12px;margin-bottom:8px;">✅ 본인인증 완료 — ${esc(S.myIdentity.name)}${S.myIdentity.fake ? " <span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}</div>` : "";
+      ? `<div class="bass-muted" style="font-size:12px;margin-bottom:8px;">✅ ${S.myIdentity.provider === "bank_1won" ? "계좌 1원 본인인증 완료" : "본인인증 완료"} — ${esc(S.myIdentity.name)}${S.myIdentity.fake ? " <span class='bass-badge bass-badge--warn'>시연용 가짜 인증</span>" : ""}</div>`
+      : (inContractOnly
+        ? `<div class="bass-card" style="margin-bottom:10px;padding:10px 12px;border-left:4px solid #2563eb;background:#eff6ff;color:#1e3a8a;font-size:12.5px;line-height:1.55;">
+             🏦 <strong>계약방 상호 1원 계좌 본인인증</strong> — 별도 문자 인증 없이 바로 스마트 계약을 시작하고, 계약방 안에서 <strong>대면 신분증 확인 + 상호 1원 송수금(난수 4자리 코드)</strong>으로 신분을 입증합니다.
+           </div>`
+        : "");
     const idCard = needId ? `<div class="bass-card" style="margin-bottom:14px;border-left:4px solid var(--warn);">
         <h3 style="margin:0 0 4px;">🔐 휴대폰 본인인증이 필요합니다</h3>
         <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;line-height:1.55;">명의 도용 사기를 막기 위해, 스마트 계약을 시작·응답·서명하기 전에 <strong>가입한 본인 명의 휴대폰</strong>으로 인증해야 합니다.</div>
@@ -293,7 +299,8 @@
       C.openSession(mineNow.id);
       return;
     }
-    if (S.myIdentity && !S.myIdentity.verified) {
+    const inContractOnly = Boolean(S.myIdentityMeta && S.myIdentityMeta.in_contract_verify_only);
+    if (S.myIdentity && !S.myIdentity.verified && !inContractOnly) {
       S.pendingCallRoom = val;
       Bass.updateAppAlert("warning", "먼저 화면 상단에서 휴대폰 본인인증을 완료해 주세요.", "본인인증이 끝나면 선택한 호실의 스마트 계약이 바로 열립니다.");
       return;

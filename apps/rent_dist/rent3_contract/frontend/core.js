@@ -98,6 +98,7 @@
     reviewedStdContractRev: null,
     wsChatLastSig: "",
     myIdentity: null,
+    myIdentityMeta: null,
     pendingFacNotes: null,
   };
 
@@ -118,7 +119,12 @@
 
   function acctLabel(s) {
     const a = (s && s.lessor_account || "").trim();
-    return a ? `${Bass.escapeHtml(a)} (예금주: ${Bass.escapeHtml(s.lessor_name || "")})` : "임대인이 수납 계좌를 아직 등록하지 않았습니다(임대인에게 계좌 안내를 요청하세요)";
+    return a ? `${Bass.escapeHtml(a)} (예금주: ${Bass.escapeHtml(s.lessor_name || "")})` : "임대인이 수납 계좌를 아직 등록하지 않았습니다(② 계좌 등록에서 입력해 주세요)";
+  }
+  function refundAcctLabel(s) {
+    const a = (s && s.tenant_refund_account || "").trim();
+    const tName = (s && s.terms && s.terms.tenant_name) || "임차인";
+    return a ? `${Bass.escapeHtml(a)} (예금주: ${Bass.escapeHtml(tName)})` : "임차인 보증금 환불 계좌 등록 대기";
   }
   function autoPayGuideHtml() {
     return "💡 매월 연체 없이 납부하려면 <strong>은행 앱의 자동이체</strong>를 등록하길 권합니다. (신용카드·페이 결제는 추후 지원 예정입니다.)";
@@ -146,11 +152,12 @@
   }
 
   async function loadIdentity() {
-    if (currentRole !== "tenant") { state.myIdentity = null; return; }
+    if (currentRole !== "tenant") { state.myIdentity = null; state.myIdentityMeta = null; return; }
     try {
       const d = await Bass.api(APP_ID, "/identity");
       state.myIdentity = d && d.applies ? d.identity : null;
-    } catch (_) { state.myIdentity = null; }
+      state.myIdentityMeta = d || null;
+    } catch (_) { state.myIdentity = null; state.myIdentityMeta = null; }
   }
 
   async function loadRoleExtras() {
@@ -199,7 +206,7 @@
   window.R3C = {
     APP_ID, SESSION_KEY, params, loggedUser, adminProxy, currentRole,
     myTenantId, myBranch, ROLE_KO, OTHER_KO, state, dom,
-    esc, digits, acctLabel, autoPayGuideHtml, fmtWon,
+    esc, digits, acctLabel, refundAcctLabel, autoPayGuideHtml, fmtWon,
     FIELD_LABEL, fmtField, hhmm, STATUS_KO,
     loadCandidateRooms, loadIdentity, loadRoleExtras,
     isMine, mySessions, incomingCalls, ongoingSessions, loadSessionList,

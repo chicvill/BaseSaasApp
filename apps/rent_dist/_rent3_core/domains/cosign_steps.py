@@ -323,6 +323,11 @@ def sign_step4(
             "서로 상대방의 신분증을 확인하여 본인 확인 체크를 완료해야 전자서명할 수 있습니다.",
             hint="Step 1에서 임대인·임차인 모두 상대방 신분증 대조 확인에 체크해 주세요.",
         )
+    if self.is_bank_verify_enforced() and not self.is_bank_verify_done():
+        raise DomainError(
+            "상호 1원 송수금 확인(난수 4자리 코드)을 완료해야 전자서명할 수 있습니다.",
+            hint="채팅방 ②~③ 계좌 등록 및 상호 1원 송수금 확인을 마치거나, 예외 시 양측 합의로 생략해 주세요.",
+        )
     if not (self.step1_lessor_confirmed and self.step1_tenant_locked):
         raise DomainError(
             "등기부등본을 확인한 뒤에만 전자서명할 수 있습니다.",
@@ -424,6 +429,7 @@ def complete_step5_and_seal(
             name=t_info["tenant_name"],
             phone=t_info["tenant_phone"],
             email=t_info.get("tenant_email", ""),
+            account_number=self.tenant_refund_account or "",
             business_number=t_info.get("tenant_business_number", ""),
             company_name=t_info.get("tenant_company_name", ""),
             ceo_name=t_info.get("tenant_ceo_name", ""),
@@ -438,6 +444,8 @@ def complete_step5_and_seal(
     else:
         tenant.name = t_info["tenant_name"]
         tenant.email = t_info.get("tenant_email", tenant.email)
+        if self.tenant_refund_account.strip():
+            tenant.account_number = self.tenant_refund_account.strip()
         if t_info.get("tenant_business_number") is not None and str(t_info.get("tenant_business_number")).strip():
             tenant.business_number = str(t_info["tenant_business_number"]).strip()
         if t_info.get("tenant_company_name") is not None and str(t_info.get("tenant_company_name")).strip():
@@ -478,9 +486,11 @@ def complete_step5_and_seal(
         room_no=room.room_no,
         id_lessor=self.id_lessor,
         lessor_name=self.lessor_name,
+        lessor_account=self.lessor_account,
         id_tenant=tenant.id,
         tenant_name=tenant.name,
         tenant_phone=tenant.phone,
+        tenant_refund_account=self.tenant_refund_account,
         tax_invoice_requested=bool(t_info.get("tax_invoice_requested") or t_info.get("tenant_business_number")),
         tenant_business_number=tenant.business_number,
         tenant_company_name=tenant.company_name,
@@ -512,6 +522,9 @@ def complete_step5_and_seal(
             "lessor_id_checked_at": self.lessor_id_checked_at,
             "tenant_checked_lessor_id": self.tenant_checked_lessor_id,
             "tenant_id_checked_at": self.tenant_id_checked_at,
+            "lessor_account": self.lessor_account,
+            "tenant_refund_account": self.tenant_refund_account,
+            "bank_verification": self.bank_verify_public_summary(),
             "registry_check_mode": self.registry_check_mode,
             "tenant_direct_registry": self.tenant_registry,
             "tenant_identity": self._tenant_identity_evidence(),

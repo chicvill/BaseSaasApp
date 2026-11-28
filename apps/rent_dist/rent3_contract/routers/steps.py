@@ -4,13 +4,13 @@ apps/rent_dist/rent3_contract/routers/steps.py — Step 2 시설점검/사진 ·
 import os
 import re
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.errors import Conflict, DomainError
 from apps.rent_dist._rent3_core import Building, CoSignSession, Contract, contract_chat, ensure_pool_seeded
-from ._deps import APP_SRC
+from ._deps import APP_SRC, _session_view
 
 router = APIRouter()
 
@@ -84,7 +84,7 @@ class Step5CompleteReq(BaseModel):
 
 
 @router.post("/sessions/{session_id}/step2")
-def confirm_step2(session_id: str, req: Step2ConfirmReq):
+def confirm_step2(session_id: str, req: Step2ConfirmReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     s.confirm_step2(
         role=req.role,
@@ -95,32 +95,32 @@ def confirm_step2(session_id: str, req: Step2ConfirmReq):
     return {
         "success": True,
         "message": "Step 2 호실 옵션 및 시설 점검표 상태가 실시간 반영되었습니다.",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/cancel")
-def cancel_session(session_id: str, req: CancelReq):
+def cancel_session(session_id: str, req: CancelReq, request: Request):
     """체결 전 계약 취소(당사자만). 사유가 상대방 화면에 그대로 전달되고 호실이 다시 열린다."""
     s = CoSignSession.by_code_or_id(session_id)
     s.cancel(req.role, req.reason, app_source=APP_SRC)
-    return {"success": True, "message": "계약을 취소했습니다. 호실이 다시 열렸습니다.", "session": s.model_dump()}
+    return {"success": True, "message": "계약을 취소했습니다. 호실이 다시 열렸습니다.", "session": _session_view(s, request, req.role)}
 
 
 @router.post("/sessions/{session_id}/prefill")
-def prefill_session(session_id: str, req: PrefillReq):
+def prefill_session(session_id: str, req: PrefillReq, request: Request):
     """대면 전 사전 작성: 임대인은 계약 조건, 임차인은 이메일·차량번호. 상대가 연결하기 전에만 가능하며 만난 뒤 ③단계에서 다시 합의한다."""
     s = CoSignSession.by_code_or_id(session_id)
     s.prefill(req.role, req.updates, app_source=APP_SRC)
-    return {"success": True, "message": "사전 작성 내용을 저장했습니다. 만나서 ③단계에서 양쪽이 다시 확인합니다.", "session": s.model_dump()}
+    return {"success": True, "message": "사전 작성 내용을 저장했습니다. 만나서 ③단계에서 양쪽이 다시 확인합니다.", "session": _session_view(s, request, req.role)}
 
 
 @router.post("/sessions/{session_id}/facility-photos")
-def add_facility_photo(session_id: str, req: FacilityPhotoReq):
+def add_facility_photo(session_id: str, req: FacilityPhotoReq, request: Request):
     """시설 점검 사진 업로드(모바일 카메라). 당사자만, 점검 단계에서만."""
     s = CoSignSession.by_code_or_id(session_id)
     rec = s.add_facility_photo(req.role, req.photo_data_url, req.caption, app_source=APP_SRC)
-    return {"success": True, "message": "점검 사진이 기록되었습니다.", "photo": rec, "session": s.model_dump()}
+    return {"success": True, "message": "점검 사진이 기록되었습니다.", "photo": rec, "session": _session_view(s, request, req.role)}
 
 
 @router.get("/sessions/{session_id}/facility-photos/{photo_id}")
@@ -131,14 +131,14 @@ def get_facility_photo(session_id: str, photo_id: str):
 
 
 @router.post("/sessions/{session_id}/facility-photos/{photo_id}/delete")
-def delete_facility_photo(session_id: str, photo_id: str, req: FacilityPhotoDeleteReq):
+def delete_facility_photo(session_id: str, photo_id: str, req: FacilityPhotoDeleteReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     s.remove_facility_photo(req.role, photo_id, app_source=APP_SRC)
-    return {"success": True, "message": "사진을 지웠습니다.", "session": s.model_dump()}
+    return {"success": True, "message": "사진을 지웠습니다.", "session": _session_view(s, request, req.role)}
 
 
 @router.post("/sessions/{session_id}/reopen-terms")
-def reopen_terms(session_id: str, req: ReopenTermsReq):
+def reopen_terms(session_id: str, req: ReopenTermsReq, request: Request):
     """서명 이후 조건 변경: 경고를 확인(confirm)하면 양측 서명·동의가 지워지고 3단계로 돌아간다."""
     s = CoSignSession.by_code_or_id(session_id)
     if not req.confirm:
@@ -153,12 +153,12 @@ def reopen_terms(session_id: str, req: ReopenTermsReq):
         "success": True,
         "level": "diff",
         "message": f"조건을 다시 열었습니다. 서명이 초기화되고 3단계로 돌아갑니다 (리비전 v{s.revision}).",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/terms")
-def update_terms(session_id: str, req: TermsUpdateReq):
+def update_terms(session_id: str, req: TermsUpdateReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     if req.expected_revision is not None and req.expected_revision != s.revision and s.terms_changes(req.updates):
         raise Conflict(
@@ -190,23 +190,23 @@ def update_terms(session_id: str, req: TermsUpdateReq):
             if changed
             else "변경된 조건이 없습니다."
         ),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/step3/agree")
-def agree_step3(session_id: str, req: Step3AgreeReq):
+def agree_step3(session_id: str, req: Step3AgreeReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     s.agree_step3(role=req.role, expected_revision=req.expected_revision, app_source=APP_SRC)
     return {
         "success": True,
         "message": f"{'임대인' if req.role == 'lessor' else '임차인'} 계약 조건 합의 잠금이 완료되었습니다 (v{s.revision}).",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/step4/sign")
-def sign_step4(session_id: str, req: Step4SignReq):
+def sign_step4(session_id: str, req: Step4SignReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     s.sign_step4(
         role=req.role,
@@ -225,18 +225,18 @@ def sign_step4(session_id: str, req: Step4SignReq):
             f"🎉 비대면 재계약 체결 완료! 계약서({s.created_contract_id})가 봉인되었습니다."
             if s.status == "COMPLETED"
             else (
-                "상호 신분증·등기 확인 기반 양측 전자서명 및 SHA-256 계약원본 무결성 봉인이 완료되었습니다!"
+                "상호 신분증·계좌·등기 확인 기반 양측 전자서명 및 SHA-256 계약원본 무결성 봉인이 완료되었습니다!"
                 if s.integrity_hash
                 else f"{'임대인' if req.role == 'lessor' else '임차인'} 전자서명이 날인되었습니다."
             )
         ),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
         **({"contract": ct_dump} if ct_dump is not None else {}),
     }
 
 
 @router.post("/sessions/{session_id}/step5/complete")
-def complete_step5(session_id: str, req: Step5CompleteReq):
+def complete_step5(session_id: str, req: Step5CompleteReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     if not req.own_account_checked:
         raise DomainError(
@@ -244,6 +244,7 @@ def complete_step5(session_id: str, req: Step5CompleteReq):
             hint="임차인이 보여 주는 이체 완료 화면·캡처는 위조될 수 있습니다. 은행 앱의 입금 내역을 확인해 주세요.",
         )
     result = s.complete_step5_and_seal(payment_method=req.payment_method, app_source=APP_SRC)
+    result["session"] = _session_view(s, request)
     return {
         "success": True,
         "message": (
@@ -272,16 +273,21 @@ def _ledger_diffs(ct: Contract, sess: CoSignSession) -> List[Dict[str, Any]]:
         ("special_terms", "특약사항", t.get("special_terms", ct.special_terms), ct.special_terms),
         ("tenant_name", "임차인 성명", t.get("tenant_name", ct.tenant_name), ct.tenant_name),
         ("tenant_phone", "임차인 연락처", t.get("tenant_phone", ct.tenant_phone), ct.tenant_phone),
+        ("lessor_account", "임차료 수납 계좌", sess.lessor_account, ct.lessor_account) if ct.lessor_account else None,
+        ("tenant_refund_account", "보증금 환불 계좌", sess.tenant_refund_account, ct.tenant_refund_account) if ct.tenant_refund_account else None,
         ("room_no", "호실", sess.room_no, ct.room_no),
         ("lessor_signature", "임대인 서명", sess.lessor_signature, ct.lessor_signature),
         ("tenant_signature", "임차인 서명", sess.tenant_signature, ct.tenant_signature),
         ("integrity_hash", "무결성 해시", sess.integrity_hash, ct.integrity_hash),
     ]
     diffs: List[Dict[str, Any]] = []
-    for key, label, signed, ledger in checks:
+    for item in checks:
+        if item is None:
+            continue
+        key, label, signed, ledger = item
         if str(signed) != str(ledger):
             # 서명·해시·개인정보는 값을 그대로 보이지 않고 '다름'만 알린다.
-            hide = key in ("lessor_signature", "tenant_signature", "integrity_hash", "tenant_name", "tenant_phone", "special_terms")
+            hide = key in ("lessor_signature", "tenant_signature", "integrity_hash", "tenant_name", "tenant_phone", "special_terms", "lessor_account", "tenant_refund_account")
             diffs.append({
                 "field": key,
                 "label": label,

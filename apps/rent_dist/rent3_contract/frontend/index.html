@@ -144,6 +144,14 @@
       background: #f8fafc; font-size: 12.5px; line-height: 1.65; color: #1e293b; }
     .cg-flow-steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; margin-top: 8px; }
     .cg-flow-chip { padding: 7px 9px; border-radius: 10px; background: #ffffff; border: 1px solid #dbeafe; font-size: 12px; }
+    .cg-bank-grid { display: grid; gap: 8px; margin-top: 8px; }
+    .cg-bank-box { padding: 10px 12px; border-radius: 11px; border: 1px solid #cbd5e1; background: #f8fafc; font-size: 13px; line-height: 1.55; }
+    .cg-bank-box.is-ok { border-color: #86efac; background: #ecfdf5; }
+    .cg-bank-box.is-mine { border-color: #93c5fd; background: #eff6ff; }
+    .cg-code-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 10px;
+      background: #1d4ed8; color: #ffffff; font-size: 18px; font-weight: 900; letter-spacing: 3px; font-family: monospace; }
+    .cg-inline-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+    .cg-id-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 7px; font-size: 12px; color: #475569; align-items: center; }
     /* 기본 상태가 '보임'이다. 모션을 끈 환경(prefers-reduced-motion)에서도 창이 사라지지 않는다. */
     .cm-card.is-open { animation: cm-in .26s ease-out; }
     .cm-card.is-closing { opacity: 0; transform: translateY(-14px) scale(.98); }

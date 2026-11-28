@@ -2,12 +2,13 @@
 apps/rent_dist/rent3_contract/routers/_deps.py — 공동 임대계약 라우터 공통 상수·헬퍼.
 """
 import re
-from typing import Dict
+from typing import Any, Dict, Optional
 from fastapi import Request
 
 from core.errors import DomainError
 from apps.rent_dist._rent3_core import Lessor, Tenant, chatsessions as chat_sessions
 from apps.rent_dist._rent3_core.authz import LESSOR_ROLES, claims_from, is_admin, is_local_request, need_claims
+from apps.rent_dist._rent3_core.domains.cosign_bank import sanitize_session_dict
 
 APP_SRC = "rent3_contract"
 REGISTRY_AI_MAX_CALLS = 5  # 계약 1건당 Gemini 호출 상한 (비용 보호)
@@ -29,6 +30,24 @@ def _tenant_of(request: Request) -> Tenant:
     if t is None:
         raise DomainError("임차인 정보를 찾을 수 없습니다. 다시 로그인해 주세요.")
     return t
+
+
+def _viewer_role(request: Optional[Request], fallback_role: str = "") -> str:
+    """요청 토큰에서 현재 조회자 역할('lessor' | 'tenant' | '')을 결정한다."""
+    if request is not None:
+        c = claims_from(request) or {}
+        if is_admin(c):
+            return ""
+        if c.get("r") in LESSOR_ROLES:
+            return "lessor"
+        if c.get("r") == "tenant":
+            return "tenant"
+    return fallback_role if fallback_role in ("lessor", "tenant") else ""
+
+
+def _session_view(s: Any, request: Optional[Request] = None, role: str = "") -> Dict[str, Any]:
+    """세션 응답 직전 역할에 맞게 1원 난수 4자리 코드를 안전하게 필터링한다."""
+    return sanitize_session_dict(s.model_dump(), _viewer_role(request, role))
 
 
 def _chat_actor(request: Request, s) -> Dict[str, str]:

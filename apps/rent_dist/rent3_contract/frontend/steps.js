@@ -6,7 +6,7 @@
 
   const {
     APP_ID, adminProxy, currentRole, state: S, dom: D,
-    esc, acctLabel, autoPayGuideHtml, fmtWon,
+    esc, acctLabel, refundAcctLabel, autoPayGuideHtml, fmtWon,
     pairDots, needsGuarantee, mortgageExposure, riskBlock,
   } = C;
 
@@ -384,6 +384,10 @@
               <td colspan="3">${acctLabel(s)}</td>
             </tr>
             <tr>
+              <th>보증금 환불 계좌</th>
+              <td colspan="3">${refundAcctLabel(s)}</td>
+            </tr>
+            <tr>
               <th>특약사항</th>
               <td colspan="3" style="white-space:pre-line;">${esc(t.special_terms || "-")}</td>
             </tr>
@@ -650,35 +654,44 @@
     const mySig = currentRole === "lessor" ? s.lessor_signature : s.tenant_signature;
     const defaultName = currentRole === "lessor" ? s.lessor_name : ((s.terms && s.terms.tenant_name) || "임차인");
 
+    const bv = s.bank_verify || {};
     const okLogin = Boolean(s.lessor_login_verified && s.tenant_login_verified);
     const okMutualId = Boolean(s.lessor_checked_tenant_id && s.tenant_checked_lessor_id);
+    const okBank = s.mode === "RENEWAL"
+      || s.bank_verify_mode === "NOT_REQUIRED"
+      || s.bank_verify_mode === "SKIPPED_MUTUAL"
+      || Boolean(bv.to_lessor_verified && bv.to_tenant_verified);
     const okRegistry = Boolean(s.step1_lessor_confirmed && s.step1_tenant_locked);
     const okStep3 = Boolean(s.step3_lessor_agreed && s.step3_tenant_agreed);
-    const canSignNow = okLogin && okMutualId && okRegistry && okStep3;
+    const canSignNow = okLogin && okMutualId && okBank && okRegistry && okStep3;
 
     D.elStepPanel.innerHTML = `
       <h3 style="margin:0 0 6px;">${s.mode === "RENEWAL" ? "④ 재계약 전자서명 (양측 서명 완료 시 즉시 체결)" : "④ 표준계약서 최종 확인 및 자필 전자서명"}</h3>
       ${buildStandardContractSheetHtml(s)}
       <p class="bass-muted" style="font-size:13px;">
-        로그인 본인인증, 서로 신분증 확인 체크, 등기부등본 열람 확인, 계약조건 합의가 모두 완료되어야 서명이 날인되며 SHA-256 해시로 봉인됩니다.
+        실물 신분증 확인, 상호 1원 송수금(난수 4자리) 계좌 확인, 등기부등본 확인, 표준계약서 합의가 모두 완료되어야 서명이 날인되며 SHA-256 해시로 봉인됩니다.
       </p>
 
       <div class="gate-list">
         <div class="gate-item">
           <span>1. 임대인·임차인 각자 로그인 본인인증 완료</span>
-          <span class="bass-badge ${okLogin ? "bass-badge--ok" : "bass-badge--warn"}">${okLogin ? "확인 완료 ✓" : "미완료"}</span>
+          <span class="bass-badge ${okLogin ? "bass-badge--ok" : "bass-badge--warn"}">${okLogin ? "확인 완료 ✓" : "완료 전"}</span>
         </div>
         <div class="gate-item">
-          <span>2. 서로 신분증 대조 본인 확인 체크 (임대인 ${s.lessor_checked_tenant_id ? "✓" : "✗"} · 임차인 ${s.tenant_checked_lessor_id ? "✓" : "✗"})</span>
-          <span class="bass-badge ${okMutualId ? "bass-badge--ok" : "bass-badge--warn"}">${okMutualId ? "양측 완료 ✓" : "Step 1 체크 필요"}</span>
+          <span>2. 대면 실물 신분증 확인 체크 (임대인 ${s.lessor_checked_tenant_id ? "✓" : "✗"} · 임차인 ${s.tenant_checked_lessor_id ? "✓" : "✗"})</span>
+          <span class="bass-badge ${okMutualId ? "bass-badge--ok" : "bass-badge--warn"}">${okMutualId ? "양측 완료 ✓" : "① 신분증 확인 필요"}</span>
         </div>
         <div class="gate-item">
-          <span>3. 대법원 등기부등본 권리관계 확인 잠금</span>
-          <span class="bass-badge ${okRegistry ? "bass-badge--ok" : "bass-badge--warn"}">${okRegistry ? "확인 완료 ✓" : "Step 1 확인 필요"}</span>
+          <span>3. 수납·환불 계좌 등록 및 상호 1원 송수금(난수 4자리) 확인</span>
+          <span class="bass-badge ${okBank ? "bass-badge--ok" : "bass-badge--warn"}">${s.mode === "RENEWAL" ? "재계약 생략 ✓" : (s.bank_verify_mode === "SKIPPED_MUTUAL" ? "양측 합의 생략 ✓" : (okBank ? "상호 1원 완료 ✓" : "②~③ 계좌·1원 확인 필요"))}</span>
         </div>
         <div class="gate-item">
-          <span>4. 계약 조건(Revision v${s.revision}) 양측 최종 합의 잠금</span>
-          <span class="bass-badge ${okStep3 ? "bass-badge--ok" : "bass-badge--warn"}">${okStep3 ? "합의 완료 ✓" : "Step 3 합의 필요"}</span>
+          <span>4. 대법원 등기부등본 권리관계 확인 (임대인 신분 재확인)</span>
+          <span class="bass-badge ${okRegistry ? "bass-badge--ok" : "bass-badge--warn"}">${okRegistry ? "확인 완료 ✓" : "④ 등기부 확인 필요"}</span>
+        </div>
+        <div class="gate-item">
+          <span>5. 표준계약서 내용(Revision v${s.revision}) 양측 최종 동의</span>
+          <span class="bass-badge ${okStep3 ? "bass-badge--ok" : "bass-badge--warn"}">${okStep3 ? "합의 완료 ✓" : "⑤ 계약서 동의 필요"}</span>
         </div>
       </div>
 
@@ -686,8 +699,9 @@
         <div class="call-banner" style="margin-bottom:12px;">
           <div style="font-weight:800; font-size:13px; margin-bottom:6px;">⚠️ 전자서명 전 필수 확인 항목이 남아 있습니다.</div>
           <div class="bass-row">
-            ${(!okMutualId || !okRegistry) ? `<button type="button" id="btnJumpStep1" class="bass-btn bass-btn--sm">① 신분증 체크 · 등기부등본 확인하러 가기 →</button>` : ""}
-            ${!okStep3 ? `<button type="button" id="btnJumpStep3" class="bass-btn bass-btn--sm">③ 계약조건 합의 잠금하러 가기 →</button>` : ""}
+            ${!okBank ? `<button type="button" id="btnJumpBank" class="bass-btn bass-btn--sm bass-btn--primary">🏦 ②~③ 계좌 등록·1원 확인하러 가기 →</button>` : ""}
+            ${(!okMutualId || !okRegistry) ? `<button type="button" id="btnJumpStep1" class="bass-btn bass-btn--sm">① 신분증 · ④ 등기부등본 확인하러 가기 →</button>` : ""}
+            ${!okStep3 ? `<button type="button" id="btnJumpStep3" class="bass-btn bass-btn--sm">⑤ 표준계약서 동의하러 가기 →</button>` : ""}
           </div>
         </div>
       ` : ""}
@@ -715,6 +729,12 @@
       </div>
     `;
 
+    const jumpBank = document.getElementById("btnJumpBank");
+    if (jumpBank) jumpBank.addEventListener("click", () => {
+      if (C.closeStepModal) C.closeStepModal();
+      const target = document.getElementById("cgCardOneWon") || document.getElementById("cgCardAccount");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
     const jump1 = document.getElementById("btnJumpStep1");
     if (jump1) jump1.addEventListener("click", () => { S.viewStep = 1; C.renderWorkspace(); });
     const jump3 = document.getElementById("btnJumpStep3");
@@ -891,6 +911,13 @@
     const c = S.sealedContract;
     const regSnap = c.registry_snapshot || {};
     const tdr = regSnap.tenant_direct_registry || {};
+    const bSnap = regSnap.bank_verification || {};
+    const bankProofText = bSnap.to_lessor_verified && bSnap.to_tenant_verified
+      ? `상호 1원 계좌 실명·점유 확인 완료 (수납 ${bSnap.lessor_bank || ""} ${bSnap.lessor_account_last4 || ""} · 환불 ${bSnap.tenant_bank || ""} ${bSnap.tenant_account_last4 || ""})`
+      : (bSnap.mode === "SKIPPED_MUTUAL"
+        ? `1원 확인 양측 합의 생략 (${bSnap.skip_reason || "대면 실물 신분증 확인 대체"})`
+        : "");
+    const refundDisplay = (c.tenant_refund_account || S.activeSession.tenant_refund_account || "").trim();
     const verifyUrl = `${window.location.origin}/rent3_contract/verify.html?no=${encodeURIComponent(c.id)}&hash=${c.integrity_hash}`;
     let qrSvg = "";
     try {
@@ -932,8 +959,9 @@
           <tr><th>월 임차료</th><td>${fmtWon(c.monthly_rent)} (${esc(c.pay_timing)})</td><th>월 관리비 / 부가세</th><td>${fmtWon(c.maintenance_fee)} / ${fmtWon(c.vat)}</td></tr>
           <tr><th>퇴실 청소비</th><td colspan="3">${Number(c.cleaning_fee || 0) > 0 ? `${fmtWon(c.cleaning_fee)} — 퇴실할 때 임차인이 부담하며 전출 정산에서 보증금에서 공제함` : "약정 없음(임차인이 청소비를 부담하지 않음)"}</td></tr>
           <tr><th>임차료 수납 계좌</th><td colspan="3">${acctLabel(S.activeSession)}<br><span style="font-size:11.5px;">임차료·관리비는 매월 납입일(입주일)에 위 계좌로 납부합니다. ${autoPayGuideHtml()}</span></td></tr>
+          ${refundDisplay ? `<tr><th>보증금 환불 계좌</th><td colspan="3">${esc(refundDisplay)} (예금주: ${esc(c.tenant_name)})<br><span style="font-size:11.5px;">퇴실 정산 완료 시 보증금 반환은 위 임차인 본인 명의 계좌로 지급합니다.</span></td></tr>` : ""}
           <tr><th>임대차 기간</th><td colspan="3">${esc(c.move_in_date)} ~ ${esc(c.expiry_date)} (${c.lease_term_months}개월)</td></tr>
-          <tr><th>본인인증 및 신분증·등기 확인</th><td colspan="3">양측 로그인 본인인증 완료 · 임대인↔임차인 상호 신분증 대조 본인 확인 체크 완료 · 등기부등본(${esc(regSnap.issue_number || "-")}, 소유자 ${esc(regSnap.owner_name || c.lessor_name)}) 열람 확인 필</td></tr>
+          <tr><th>본인인증 및 신분증·계좌·등기 확인</th><td colspan="3">양측 로그인 본인인증 완료 · 임대인↔임차인 대면 신분증 대조 확인 완료${bankProofText ? ` · ${esc(bankProofText)}` : ""} · 등기부등본(${esc(regSnap.issue_number || "-")}, 소유자 ${esc(regSnap.owner_name || c.lessor_name)}) 확인 필</td></tr>
           ${tdr.submitted ? `<tr><th>임차인 직접 열람 확인</th><td colspan="3">인터넷등기소 직접 열람 (${esc(tdr.viewed_at || "-")}) · 소유자 ${esc(tdr.owner_name || "-")} · 근저당 채권최고액 ${fmtWon(tdr.mortgage_amount)} · 압류/신탁 ${esc(tdr.seizure_or_trust || "-")}${tdr.guarantee_status ? ` · 보증금 반환보증 ${esc(tdr.guarantee_status)}` : ""}${regSnap.tenant_recheck_at ? ` · 체결 직전 재열람 확인 ${esc(String(regSnap.tenant_recheck_at).slice(0, 16).replace("T", " "))}` : ""}${regSnap.registry_attachment_sha256 ? `<br><span style="font-family:monospace;font-size:10.5px;">첨부 SHA-256 ${esc(regSnap.registry_attachment_sha256)}</span>` : ""}</td></tr>` : ""}
           <tr><th>특약사항</th><td colspan="3" style="white-space:pre-line;">${esc(c.special_terms)}</td></tr>
           <tr><th>임대인(갑) 서명</th><td>${esc(c.lessor_name)} &nbsp; ${renderSigCell(c.lessor_signature)}</td><th>임차인(을) 서명</th><td>${esc(c.tenant_name)} (${esc(c.tenant_phone)}) &nbsp; ${renderSigCell(c.tenant_signature)}</td></tr>

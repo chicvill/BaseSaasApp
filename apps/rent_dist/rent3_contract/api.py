@@ -9,11 +9,11 @@ from fastapi import APIRouter, Depends
 from apps.rent_dist._rent3_core.authz import api_headers, contract_scope
 from .routers._deps import APP_SRC, REGISTRY_AI_MAX_CALLS
 from .routers.steps import terms_lock_enabled
-from .routers import chat, registry, sessions, steps
+from .routers import bank, chat, registry, sessions, steps
 
 router = APIRouter(dependencies=[Depends(api_headers), Depends(contract_scope)])
 
-for _sub in (sessions.router, chat.router, registry.router, steps.router):
+for _sub in (sessions.router, bank.router, chat.router, registry.router, steps.router):
     router.include_router(_sub)
 
 __all__ = ["router", "APP_SRC", "REGISTRY_AI_MAX_CALLS", "terms_lock_enabled"]

@@ -174,6 +174,8 @@ def open_session(
         lessor_name=lessor.name if lessor else "김임대",
         lessor_phone=lessor.phone if lessor else "010-1212-3434",
         lessor_account=(lessor.account_number or "") if lessor else "",     # 가짜 계좌를 대신 넣지 않는다(미등록이면 빈 값)
+        tenant_refund_account=(matched_t.account_number or "") if matched_t else ((prev_ct.tenant_refund_account or "") if prev_ct else ""),
+        bank_verify_mode="NOT_REQUIRED" if is_renewal else "REQUIRED",
         id_tenant=resolved_tid,
         initiated_by_role=initiated_by_role,
         call_status=call_status,

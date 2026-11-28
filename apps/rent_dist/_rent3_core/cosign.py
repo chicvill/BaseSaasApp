@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from pydantic import Field
 
+from .domains import cosign_bank as _bank
 from .domains import cosign_registry as _reg
 from .domains import cosign_session as _sess
 from .domains import cosign_steps as _steps
@@ -72,6 +73,9 @@ class CoSignSession(PoolObj):
     lessor_name: str = ""
     lessor_phone: str = ""
     lessor_account: str = ""
+    tenant_refund_account: str = ""          # 임차인 퇴실 보증금 환불 계좌 (예: 카카오뱅크 3333-01-...)
+    bank_verify_mode: str = "REQUIRED"       # REQUIRED (기본) / SKIPPED_MUTUAL (양측 합의 생략) / NOT_REQUIRED (연장 재계약)
+    bank_verify: Dict[str, Any] = Field(default_factory=dict)  # 계좌 등록 및 상호 1원 송수금 확인(난수 4자리 코드) 상태
     id_tenant: str = ""
 
     # 호출·응답 핸드셰이크 및 로그인 본인인증 상태
@@ -156,6 +160,16 @@ class CoSignSession(PoolObj):
             return (now or datetime.now()) - last >= IDLE_EXPIRE_PAUSED
         window = IDLE_EXPIRE_DRAFT if (self.draft_prefilled_at and self.call_status == "CALLING") else IDLE_EXPIRE
         return (now or datetime.now()) - last >= max(window, IDLE_EXPIRE)
+
+    # ── 계좌 등록 · 상호 1원 송수금 확인 (`domains/cosign_bank.py`) ──
+    is_bank_verify_done = _bank.is_bank_verify_done
+    is_bank_verify_enforced = _bank.is_bank_verify_enforced
+    bank_verify_public_summary = _bank.bank_verify_public_summary
+    register_bank_account = _bank.register_bank_account
+    mark_one_won_sent = _bank.mark_one_won_sent
+    confirm_one_won_code = _bank.confirm_one_won_code
+    reissue_one_won_code = _bank.reissue_one_won_code
+    toggle_bank_verify_skip = _bank.toggle_bank_verify_skip
 
     # ── 등기부 검증·위험 차단·취소·재열람 (`domains/cosign_registry.py`) ──
     summary = _reg.summary

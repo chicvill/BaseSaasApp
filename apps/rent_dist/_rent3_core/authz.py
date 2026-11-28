@@ -457,15 +457,38 @@ async def contract_scope(request: Request) -> Optional[Dict[str, Any]]:
             raise Forbidden("로그인한 계정의 역할과 다른 역할로 진행할 수 없습니다.",
                             hint="임대인은 임대인, 임차인은 임차인 계정으로 각각 로그인해 주세요.")
 
-    # 임차인은 휴대폰 본인인증을 마쳐야 계약을 시작·응답·서명할 수 있다 (명의 도용 방어)
+    # 임차인은 본인인증을 마쳐야 계약을 시작·응답·서명할 수 있다 (명의 도용 방어)
+    # 단, 외부 본인인증 업체(sms/fake)가 설정되지 않은 운영 환경(provider == "none")에서는
+    # 계약방 호출·응답(/sessions/call, /respond)을 먼저 허용하고, 계약 안의 [상호 1원 계좌확인]으로 본인인증을 완료한다.
     if c.get("r") == "tenant" and request.method == "POST" and path.rstrip("/").endswith(IDENTITY_GATED_SUFFIXES):
         from .models import Tenant
-        t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
-        if not (t and (t.identity or {}).get("verified")):
-            raise Forbidden("휴대폰 본인인증이 필요합니다.",
-                            hint="계약 화면 첫 페이지에서 본인인증을 마친 뒤 다시 시도해 주세요.")
         from . import franchise as _fr
-        if (t.identity or {}).get("assurance") == "invite_link" and not _fr.invite_identity_allowed():
+        t = Tenant.get(str(c.get("u", "")).removeprefix("tenant:"))
+        verified = bool(t and (t.identity or {}).get("verified"))
+        prov_name = _fr.provider(is_local_request(request)).name
+        is_sign = path.rstrip("/").endswith("/step4/sign")
+        if not verified:
+            if prov_name == "none" and not is_sign:
+                pass
+            elif prov_name == "none" and is_sign:
+                sid_chk = request.path_params.get("session_id") or request.path_params.get("token")
+                from .cosign import CoSignSession
+                s_chk = (CoSignSession.first(session_code=sid_chk) or CoSignSession.get(sid_chk)) if sid_chk else None
+                mutual_skip_ok = bool(
+                    s_chk
+                    and s_chk.bank_verify_mode == "SKIPPED_MUTUAL"
+                    and s_chk.lessor_checked_tenant_id
+                    and s_chk.tenant_checked_lessor_id
+                )
+                if not mutual_skip_ok:
+                    raise Forbidden(
+                        "계약방 상호 1원 계좌확인이 필요합니다.",
+                        hint="계좌 등록 후 상호 1원 송수금(난수 4자리 코드) 확인을 완료하면 본인인증이 확정되어 서명할 수 있습니다.",
+                    )
+            else:
+                raise Forbidden("휴대폰 본인인증이 필요합니다.",
+                                hint="계약 화면 첫 페이지에서 본인인증을 마친 뒤 다시 시도해 주세요.")
+        elif t and (t.identity or {}).get("assurance") == "invite_link" and not _fr.invite_identity_allowed():
             raise Forbidden("실명 본인인증이 필요합니다.", hint="입주 안내 링크 확인만으로는 계약할 수 없도록 설정되어 있습니다. 계약 화면에서 본인인증을 마쳐 주세요.")
 
     sid = request.path_params.get("session_id") or request.path_params.get("token")

@@ -2,14 +2,14 @@
 apps/rent_dist/rent3_contract/routers/registry.py — Step 1 등기부 확인 · AI 읽기 · 체결 직전 재열람 · 입주(잔금) 전 재확인.
 """
 from typing import Any, Dict, Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.errors import DomainError
 from apps.rent_dist._rent3_core import Building, CoSignSession, Contract, Lessor, balancecheck as bc, registry_ai
 from apps.rent_dist._rent3_core.pool import now_iso
-from ._deps import APP_SRC, REGISTRY_AI_MAX_CALLS
+from ._deps import APP_SRC, REGISTRY_AI_MAX_CALLS, _session_view
 
 router = APIRouter()
 
@@ -67,7 +67,7 @@ def _balance_contract_of(session_id: str, role: str):
 
 
 @router.post("/sessions/{session_id}/step1")
-def confirm_step1(session_id: str, req: Step1ConfirmReq):
+def confirm_step1(session_id: str, req: Step1ConfirmReq, request: Request):
     s = CoSignSession.by_code_or_id(session_id)
     s.confirm_step1(
         role=req.role,
@@ -80,11 +80,11 @@ def confirm_step1(session_id: str, req: Step1ConfirmReq):
         if s.is_step1_fully_verified()
         else "등기부등본 권리 확인 상태가 실시간 반영되었습니다. (양측 신분증 확인 체크 및 등기 확인 완료 시 다음 단계로 진행)"
     )
-    return {"success": True, "message": msg, "session": s.model_dump()}
+    return {"success": True, "message": msg, "session": _session_view(s, request, req.role)}
 
 
 @router.post("/sessions/{session_id}/tenant-registry")
-def submit_tenant_registry(session_id: str, req: TenantRegistryReq):
+def submit_tenant_registry(session_id: str, req: TenantRegistryReq, request: Request):
     """임차인이 인터넷등기소에서 직접 열람한 결과(+선택 첨부)를 기록한다."""
     s = CoSignSession.by_code_or_id(session_id)
     s.submit_tenant_registry(
@@ -96,12 +96,12 @@ def submit_tenant_registry(session_id: str, req: TenantRegistryReq):
     return {
         "success": True,
         "message": "직접 열람한 등기부 확인 내용이 기록되었습니다.",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, "tenant"),
     }
 
 
 @router.post("/sessions/{session_id}/registry-preference")
-def set_registry_preference(session_id: str, req: RegistryPrefReq):
+def set_registry_preference(session_id: str, req: RegistryPrefReq, request: Request):
     """임차인이 등기부등본 캡처·AI 검토 진행 여부를 직접 선택한다(원할 때만 진행)."""
     s = CoSignSession.by_code_or_id(session_id)
     s.set_registry_preference(
@@ -115,11 +115,11 @@ def set_registry_preference(session_id: str, req: RegistryPrefReq):
         if req.want_check
         else "임차인의 선택으로 등기부등본 확인을 생략했습니다. 원하시면 서명 전 언제든 다시 켤 수 있습니다."
     )
-    return {"success": True, "message": msg, "session": s.model_dump()}
+    return {"success": True, "message": msg, "session": _session_view(s, request, req.role)}
 
 
 @router.post("/sessions/{session_id}/registry-ai")
-def read_registry_with_ai(session_id: str, req: RegistryAiReq):
+def read_registry_with_ai(session_id: str, req: RegistryAiReq, request: Request):
     """임차인이 올린 등기사항증명서를 Gemini 로 읽어 항목을 추출하고, 위험 신호는 코드로 계산한다.
 
     - 전송 동의가 있어야 한다. 올린 파일은 분석에 쓰고 서버에 저장하지 않는다.
@@ -169,12 +169,12 @@ def read_registry_with_ai(session_id: str, req: RegistryAiReq):
         "available": result["status"] != "unavailable",
         "result": result,
         "calls_left": max(REGISTRY_AI_MAX_CALLS - s.registry_ai_calls, 0),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, "tenant"),
     }
 
 
 @router.post("/sessions/{session_id}/recheck")
-def recheck_registry(session_id: str, req: RecheckReq):
+def recheck_registry(session_id: str, req: RecheckReq, request: Request):
     """체결 직전 임차인의 등기부 재열람 결과. 변동이 있으면 계약을 중단한다."""
     s = CoSignSession.by_code_or_id(session_id)
     s.recheck_registry(changed=req.changed, app_source=APP_SRC)
@@ -185,7 +185,7 @@ def recheck_registry(session_id: str, req: RecheckReq):
             if req.changed
             else "체결 직전 재열람 확인이 기록되었습니다."
         ),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, "tenant"),
     }
 
 

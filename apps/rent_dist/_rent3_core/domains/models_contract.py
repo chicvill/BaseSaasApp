@@ -35,9 +35,11 @@ class Contract(PoolObj):
     room_no: str = ""
     id_lessor: str = ""
     lessor_name: str = ""
+    lessor_account: str = ""                 # 임차료·보증금 수납 계좌 (계약서 기록용)
     id_tenant: str = ""
     tenant_name: str = ""
     tenant_phone: str = ""
+    tenant_refund_account: str = ""          # 퇴실 시 보증금 환불 계좌 (계약서 기록용)
     payer_names: List[str] = Field(default_factory=list)   # 송금자명(임차인 이름과 다른 이름으로 입금되는 경우, 최대 3개): 문자 수납 때 임차인명과 똑같이 인정
     tax_invoice_requested: bool = False      # 세입자가 세금계산서 발행을 요청한 계약인지 여부 (사무실·기숙사 등 모든 호실 적용 가능)
     tenant_business_number: str = ""         # 임차인 사업자등록번호 (세금계산서 발행 요청 시 입력)

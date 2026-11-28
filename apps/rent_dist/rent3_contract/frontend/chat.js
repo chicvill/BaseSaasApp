@@ -6,8 +6,28 @@
 
   const {
     APP_ID, adminProxy, currentRole, OTHER_KO, state: S, dom: D,
-    esc, digits, acctLabel, fmtWon, FIELD_LABEL, fmtField, hhmm, STATUS_KO,
+    esc, digits, acctLabel, refundAcctLabel, fmtWon, FIELD_LABEL, fmtField, hhmm, STATUS_KO,
   } = C;
+
+  function splitBankAcct(raw) {
+    const t = String(raw || "").trim().replace(/\s+/g, " ");
+    if (!t) return { bank: "", no: "" };
+    const sp = t.indexOf(" ");
+    if (sp > 0 && /\d/.test(t.slice(sp + 1))) {
+      return { bank: t.slice(0, sp).trim(), no: t.slice(sp + 1).trim() };
+    }
+    const m = t.match(/^([^\d]+?)\s*([\d\- ]{6,})$/);
+    if (m) return { bank: m[1].trim(), no: m[2].trim() };
+    return { bank: "", no: t };
+  }
+
+  function isBankDone(s) {
+    if (!s || s.mode === "RENEWAL") return true;
+    const mode = s.bank_verify_mode || "REQUIRED";
+    if (mode === "NOT_REQUIRED" || mode === "SKIPPED_MUTUAL") return true;
+    const bv = s.bank_verify || {};
+    return Boolean(bv.to_lessor_verified && bv.to_tenant_verified);
+  }
 
   function stepProgress(s, step) {
     switch (step) {
@@ -449,19 +469,19 @@
     const msgs5 = msgs.filter((m) => (m.step || 0) >= 5);
 
     if (!isRen) {
-      // 앱 개입 카드 ①: 스마트 계약 시작 및 상호 신분 확인
+      // 앱 개입 카드 ①: 대면 · 실물 신분증 확인
       const idDone = Boolean(s.lessor_checked_tenant_id && s.tenant_checked_lessor_id);
       const canLessorId = canAct && currentRole === "lessor";
       const canTenantId = canAct && currentRole === "tenant";
       parts.push(`
-        <div class="cg-card ${idDone ? "cg-card--done" : "cg-card--active"}">
+        <div id="cgCardId" class="cg-card ${idDone ? "cg-card--done" : "cg-card--active"}">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · ① 신분 확인</span>
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ① 대면 · 신분증 확인</span>
             <span class="bass-badge ${idDone ? "bass-badge--ok" : "bass-badge--warn"}">${idDone ? "양측 완료 ✓" : "진행 중"}</span>
           </div>
           <div class="cg-card__msg">
             <strong>지금부터 스마트 계약을 시작합니다.</strong><br>
-            임대인과 임차인은 서로 신분증을 제시해 주세요.
+            대면 상태에서 임대인과 임차인은 서로 신분증을 제시해 주세요.
           </div>
           <label class="cg-check ${s.lessor_checked_tenant_id ? "is-checked" : (canLessorId ? "is-actionable" : "")}">
             <span class="cg-check__label">
@@ -477,9 +497,176 @@
             </span>
             <input type="checkbox" class="js-cg-id-chk" data-role="tenant" ${s.tenant_checked_lessor_id ? "checked" : ""} ${canTenantId ? "" : "disabled"}>
           </label>
+          <div class="cg-id-links">
+            <span>🔍 무료 공공 신분증 진위확인:</span>
+            <a class="bass-btn bass-btn--sm" href="tel:1382">☎️ 주민증 1382</a>
+            <a class="bass-btn bass-btn--sm" href="https://www.gov.kr" target="_blank" rel="noopener">🏛️ 정부24 진위확인 ↗</a>
+          </div>
         </div>`);
 
-      // 앱 개입 카드 ②: 법원등기소 등기부등본 열람 · 캡처 AI OCR 검토 (임차인 선택 진행 가능)
+      // 앱 개입 카드 ②: 임차료 송금 · 보증금 환불용 계좌번호 등록
+      const bv = s.bank_verify || {};
+      const lAcctParts = splitBankAcct(s.lessor_account);
+      const tAcctParts = splitBankAcct(s.tenant_refund_account);
+      const lBankVal = bv.lessor_bank || lAcctParts.bank || "";
+      const lNoVal = bv.lessor_account_no || lAcctParts.no || "";
+      const tBankVal = bv.tenant_bank || tAcctParts.bank || "";
+      const tNoVal = bv.tenant_account_no || tAcctParts.no || "";
+      const lAcctReady = Boolean(s.lessor_account && lNoVal);
+      const tAcctReady = Boolean(s.tenant_refund_account && tNoVal);
+      const acctBothReady = lAcctReady && tAcctReady;
+      const canEditBank = canAct && !s.lessor_signature && !s.tenant_signature;
+      parts.push(`
+        <div id="cgCardAccount" class="cg-card ${acctBothReady ? "cg-card--done" : (idDone ? "cg-card--active" : "")}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ② 계좌번호 등록 (수납·환불용)</span>
+            <span class="bass-badge ${acctBothReady ? "bass-badge--ok" : "bass-badge--warn"}">${acctBothReady ? "양측 등록 완료 ✓" : "계좌 등록 필요"}</span>
+          </div>
+          <div class="cg-card__msg">
+            <strong>임차료·보증금 수납 계좌</strong>(임대인)와 <strong>퇴실 시 보증금 환불 계좌</strong>(임차인)를 본인 명의 계좌로 등록해 주세요.
+          </div>
+          <div class="cg-bank-grid">
+            <div class="cg-bank-box ${lAcctReady ? "is-ok" : (currentRole === "lessor" ? "is-mine" : "")}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                <strong>🏢 임대인 수납 계좌 (임차료·보증금)</strong>
+                <span class="bass-badge ${lAcctReady ? "bass-badge--ok" : "bass-badge--warn"}">${lAcctReady ? "등록 완료 ✓" : "등록 대기"}</span>
+              </div>
+              <div style="margin-top:4px;">${acctLabel(s)}</div>
+              ${lAcctReady && currentRole === "tenant" ? `<div class="cg-inline-row"><button type="button" class="bass-btn bass-btn--sm js-cg-copy-txt" data-copy="${esc(s.lessor_account)}" data-label="임대인 계좌번호">📋 임대인 계좌 복사</button></div>` : ""}
+              ${canEditBank && currentRole === "lessor" ? `
+                <div class="cg-inline-row">
+                  <input id="cgLessorBank" class="bass-input js-cg-bank-input" style="flex:1;min-width:100px;" placeholder="은행명 (예: 국민은행)" value="${esc(lBankVal)}">
+                  <input id="cgLessorAccNo" class="bass-input js-cg-bank-input" style="flex:2;min-width:140px;" placeholder="계좌번호 (예: 123-456-789012)" value="${esc(lNoVal)}">
+                  <button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-save-acct" data-role="lessor">💾 수납 계좌 저장</button>
+                </div>` : ""}
+            </div>
+            <div class="cg-bank-box ${tAcctReady ? "is-ok" : (currentRole === "tenant" ? "is-mine" : "")}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                <strong>🔑 임차인 보증금 환불 계좌 (퇴실 시 반환용)</strong>
+                <span class="bass-badge ${tAcctReady ? "bass-badge--ok" : "bass-badge--warn"}">${tAcctReady ? "등록 완료 ✓" : "등록 대기"}</span>
+              </div>
+              <div style="margin-top:4px;">${refundAcctLabel(s)}</div>
+              ${tAcctReady && currentRole === "lessor" ? `<div class="cg-inline-row"><button type="button" class="bass-btn bass-btn--sm js-cg-copy-txt" data-copy="${esc(s.tenant_refund_account)}" data-label="임차인 환불 계좌번호">📋 임차인 계좌 복사</button></div>` : ""}
+              ${canEditBank && currentRole === "tenant" ? `
+                <div class="cg-inline-row">
+                  <input id="cgTenantBank" class="bass-input js-cg-bank-input" style="flex:1;min-width:100px;" placeholder="은행명 (예: 카카오뱅크)" value="${esc(tBankVal)}">
+                  <input id="cgTenantAccNo" class="bass-input js-cg-bank-input" style="flex:2;min-width:140px;" placeholder="계좌번호 (예: 3333-01-1234567)" value="${esc(tNoVal)}">
+                  <button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-save-acct" data-role="tenant">💾 환불 계좌 저장</button>
+                </div>` : ""}
+            </div>
+          </div>
+        </div>`);
+
+      // 앱 개입 카드 ③: 상호 1원 송수금 확인 (난수 4자리 코드)
+      const bankSkipped = s.bank_verify_mode === "SKIPPED_MUTUAL";
+      const bankDone = isBankDone(s);
+      const sendToName = currentRole === "tenant" ? (s.lessor_name || "임대인") : (tm.tenant_name || "임차인");
+      const sendToAcct = currentRole === "tenant" ? (s.lessor_account || "") : (s.tenant_refund_account || "");
+      const sendCode = currentRole === "tenant" ? (bv.to_lessor_code || "") : (bv.to_tenant_code || "");
+      const sendDoneByOther = currentRole === "tenant" ? Boolean(bv.to_lessor_verified) : Boolean(bv.to_tenant_verified);
+      const sendMarked = currentRole === "tenant" ? Boolean(bv.to_lessor_sent_at) : Boolean(bv.to_tenant_sent_at);
+      const recvDone = currentRole === "tenant" ? Boolean(bv.to_tenant_verified) : Boolean(bv.to_lessor_verified);
+      const recvPeerSent = currentRole === "tenant" ? Boolean(bv.to_tenant_sent_at) : Boolean(bv.to_lessor_sent_at);
+      const recvCodeIssued = currentRole === "tenant" ? Boolean(bv.to_tenant_code_issued) : Boolean(bv.to_lessor_code_issued);
+      const skipLessor = Boolean(bv.skip_lessor_agreed);
+      const skipTenant = Boolean(bv.skip_tenant_agreed);
+      parts.push(`
+        <div id="cgCardOneWon" class="cg-card ${bankDone ? "cg-card--done" : (acctBothReady ? "cg-card--active" : "")}">
+          <div class="cg-card__top">
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ③ 1원 송수금 확인 (난수 4자리)</span>
+            <span class="bass-badge ${bankDone ? "bass-badge--ok" : "bass-badge--warn"}">${bankSkipped ? "양측 합의로 생략 ✓" : (bankDone ? "상호 1원 확인 완료 ✓" : "상호 확인 필요")}</span>
+          </div>
+          ${bankSkipped ? `
+            <div class="cg-ai-summary" style="background:#f0fdf4;border-color:#86efac;">
+              ✅ <strong>임대인·임차인 양측 합의로 1원 송수금 확인을 생략했습니다.</strong><br>
+              사유: ${esc(bv.skip_reason || "대면 실물 신분증 확인으로 대체")}
+            </div>
+          ` : `
+            <div class="cg-card__msg">
+              <strong>송금할 때 은행 앱의 예금주(실명)</strong>를 확인하고, <strong>받는 통장 표시(입금자명)에 난수 4자리</strong>를 적어 1원씩 주고받아 실명과 계좌 주인을 입증합니다.
+            </div>
+            <div class="cg-bank-grid">
+              ${currentRole && !adminProxy ? `
+                <div class="cg-bank-box ${sendDoneByOther ? "is-ok" : "is-mine"}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <strong>1) 내가 ${esc(sendToName)} 계좌로 1원 보내기</strong>
+                    <span class="bass-badge ${sendDoneByOther ? "bass-badge--ok" : (sendMarked ? "bass-badge--info" : "bass-badge--warn")}">${sendDoneByOther ? "상대 코드 일치 ✓" : (sendMarked ? "송금 완료 · 상대 입력 대기" : "송금 대기")}</span>
+                  </div>
+                  ${sendToAcct && sendCode ? `
+                    <div style="margin-top:6px;">
+                      받는 계좌: <strong>${esc(sendToAcct)}</strong> (예금주: <strong>${esc(sendToName)}</strong>)
+                    </div>
+                    <div class="cg-inline-row">
+                      <span>입금자명(받는 통장 표시) 난수 4자리:</span>
+                      <span class="cg-code-badge">${esc(sendCode)}</span>
+                      <button type="button" class="bass-btn bass-btn--sm js-cg-copy-txt" data-copy="${esc(sendToAcct)}" data-label="받는 계좌번호">📋 계좌 복사</button>
+                      <button type="button" class="bass-btn bass-btn--sm js-cg-copy-txt" data-copy="${esc(sendCode)}" data-label="난수 4자리 코드">📋 코드 복사</button>
+                      ${canEditBank && !sendDoneByOther ? `<button type="button" class="bass-btn bass-btn--sm js-cg-1won-reissue">🔄 새 코드 재발급</button>` : ""}
+                    </div>
+                    <div class="bass-muted" style="font-size:12px;margin-top:4px;">
+                      ※ 이 4자리 코드는 <strong>내 화면에만</strong> 표시됩니다. 은행 앱에서 예금주가 <strong>${esc(sendToName)}</strong>인지 확인한 뒤, 받는 통장 표시에 <strong>${esc(sendCode)}</strong>를 적어 1원을 보내 주세요.
+                    </div>
+                    ${canEditBank && !sendDoneByOther ? `
+                      <label class="cg-check is-actionable" style="margin-top:6px;">
+                        <span class="cg-check__label">
+                          <span>은행 앱 송금 화면에서 <strong>예금주명(${esc(sendToName)}) 일치</strong>를 직접 확인했습니다.</span>
+                        </span>
+                        <input type="checkbox" id="cgHolderNameChk" ${sendMarked ? "checked" : ""}>
+                      </label>
+                      <div class="cg-inline-row">
+                        <button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-1won-sent">💸 예금주 확인 · 1원 송금 완료 알림</button>
+                      </div>` : ""}
+                  ` : `<div class="bass-muted" style="font-size:12.5px;margin-top:4px;">위 ②에서 ${esc(sendToName)}님의 계좌가 등록되면 송금할 난수 4자리 코드가 자동 발급됩니다.</div>`}
+                </div>
+
+                <div class="cg-bank-box ${recvDone ? "is-ok" : "is-mine"}">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;">
+                    <strong>2) 내 통장에 들어온 1원의 4자리 코드 입력</strong>
+                    <span class="bass-badge ${recvDone ? "bass-badge--ok" : (recvPeerSent ? "bass-badge--warn" : "")}">${recvDone ? "내 계좌 확인 완료 ✓" : (recvPeerSent ? "1원 입금 도착 · 입력 필요" : "상대 송금 대기")}</span>
+                  </div>
+                  ${recvDone ? `
+                    <div style="margin-top:6px;color:#065f46;font-weight:700;">
+                      ✅ 본인 통장의 4자리 코드가 일치하여 계좌 실명·점유 확인이 완료되었습니다.${currentRole === "tenant" ? " (임차인 본인인증 자동 확정 ✓)" : ""}
+                    </div>
+                  ` : (recvCodeIssued ? `
+                    <div class="bass-muted" style="font-size:12.5px;margin-top:4px;">
+                      상대방이 보낸 1원 입금 내역의 <strong>입금자명 숫자 4자리</strong>를 본인 은행 앱에서 확인해 입력해 주세요. (5회 오입력 시 재발급 필요)
+                    </div>
+                    ${canEditBank ? `
+                      <div class="cg-inline-row">
+                        <input id="cgOneWonCodeInput" class="bass-input js-cg-bank-input" style="max-width:180px;font-weight:800;letter-spacing:2px;" inputmode="numeric" maxlength="8" placeholder="숫자 4자리 (예: 4821)">
+                        <button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-cg-1won-confirm">✅ 4자리 코드 확인</button>
+                      </div>` : ""}
+                  ` : `<div class="bass-muted" style="font-size:12.5px;margin-top:4px;">위 ②에서 내 계좌를 먼저 저장해 주세요.</div>`)}
+                </div>
+              ` : `
+                <div class="cg-bank-box">
+                  임대인 계좌 확인: ${bv.to_lessor_verified ? "완료 ✓" : "대기"} · 임차인 계좌 확인: ${bv.to_tenant_verified ? "완료 ✓" : "대기"}
+                </div>
+              `}
+            </div>
+          `}
+          <div class="bass-muted" style="font-size:12px;margin-top:6px;">
+            실시간 확인 현황: 임대인 수납 계좌 ${bv.to_lessor_verified ? "✅ 완료" : (bankSkipped ? "생략 합의" : "⏳ 대기")} · 임차인 환불 계좌 ${bv.to_tenant_verified ? "✅ 완료" : (bankSkipped ? "생략 합의" : "⏳ 대기")}
+          </div>
+          ${canEditBank && !(bv.to_lessor_verified && bv.to_tenant_verified) ? `
+            <details style="margin-top:8px;font-size:12.5px;">
+              <summary style="cursor:pointer;color:#475569;font-weight:700;">예외: 타행이체 제한·외국인 계좌 등으로 1원 확인이 어려운 경우 (양측 합의 생략)</summary>
+              <div style="margin-top:6px;padding:8px 10px;border-radius:10px;background:#f8fafc;border:1px solid #e2e8f0;">
+                <input id="cgBankSkipReason" class="bass-input js-cg-bank-input" placeholder="생략 사유 (예: 외국인 계좌 · 대면 실물 신분증 확인 완료)" value="${esc(bv.skip_reason || "")}" style="margin-bottom:6px;">
+                <label class="cg-check ${skipLessor ? "is-checked" : (currentRole === "lessor" ? "is-actionable" : "")}" style="margin-top:4px;">
+                  <span class="cg-check__label"><span>임대인: 대면 실물 신분증 확인으로 1원 확인 생략에 동의</span></span>
+                  <input type="checkbox" class="js-cg-bank-skip" data-role="lessor" ${skipLessor ? "checked" : ""} ${currentRole === "lessor" ? "" : "disabled"}>
+                </label>
+                <label class="cg-check ${skipTenant ? "is-checked" : (currentRole === "tenant" ? "is-actionable" : "")}" style="margin-top:4px;">
+                  <span class="cg-check__label"><span>임차인: 대면 실물 신분증 확인으로 1원 확인 생략에 동의</span></span>
+                  <input type="checkbox" class="js-cg-bank-skip" data-role="tenant" ${skipTenant ? "checked" : ""} ${currentRole === "tenant" ? "" : "disabled"}>
+                </label>
+              </div>
+            </details>` : ""}
+        </div>`);
+
+      // 앱 개입 카드 ④: 법원등기소 등기부등본 열람 · 캡처 AI OCR 검토 (임대인 신분·소유권 재확인)
       const regSkipped = s.registry_check_mode === "SKIPPED_BY_TENANT";
       const regEnabled = !regSkipped;
       const regDone = Boolean(s.step1_lessor_confirmed && s.step1_tenant_locked);
@@ -492,9 +679,9 @@
       const canToggleReg = canAct && currentRole === "tenant" && s.current_step <= 3 && !s.lessor_signature && !s.tenant_signature;
       const regBadgeText = regSkipped ? "임차인 선택으로 생략 ✓" : (regDone ? "열람·확인 완료 ✓" : "임차인 열람 선택");
       parts.push(`
-        <div class="cg-card ${regDone || regSkipped ? "cg-card--done" : (s.current_step === 1 ? "cg-card--active" : "")}">
+        <div id="cgCardRegistry" class="cg-card ${regDone || regSkipped ? "cg-card--done" : (s.current_step === 1 && bankDone ? "cg-card--active" : "")}">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · ② 등기부등본 확인</span>
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ④ 등기부등본 확인 (임대인 신분 재확인)</span>
             <span class="bass-badge ${regDone || regSkipped ? "bass-badge--ok" : "bass-badge--warn"}">${regBadgeText}</span>
           </div>
           <div class="cg-reg-opt-box">
@@ -509,11 +696,11 @@
           ${regSkipped ? `
             <div class="cg-ai-summary" style="background:#f0fdf4;border-color:#86efac;">
               ✅ <strong>임차인 선택으로 등기부등본 확인을 생략했습니다.</strong><br>
-              임대인 신분 확인과 등기 제시가 끝나면 다음 단계로 바로 진행되며, 서명 전까지 위 체크를 다시 켜서 언제든 캡처·AI 검토를 할 수 있습니다.
+              임대인 신분·계좌 확인이 끝나면 다음 단계로 바로 진행되며, 서명 전까지 위 체크를 다시 켜서 언제든 캡처·AI 검토를 할 수 있습니다.
             </div>
           ` : `
             <div class="cg-card__msg">
-              임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람·캡처하고 아래 사항을 체크해 주세요.
+              임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람·캡처하고, <strong>등기부 갑구 소유자가 방금 신분증·1원 계좌로 확인한 임대인(${esc(ownerTarget || "-")})과 같은지 재확인</strong>해 주세요.
             </div>
             <div class="cg-link-row">
               <button type="button" class="cg-link-btn js-cg-iros">🏛️ [ 법원등기소 ] 접속 (주소복사) ↗</button>
@@ -583,7 +770,7 @@
       parts.push(`
         <div class="cg-card ${stdDone ? "cg-card--done" : ((s.current_step === 2 || s.current_step === 3) ? "cg-card--active" : "")}">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "① 표준계약서 확인" : "③ 표준계약서 내용 확인"}</span>
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "① 표준계약서 확인" : "⑤ 표준계약서 내용 확인"}</span>
             <span class="bass-badge ${stdDone ? "bass-badge--ok" : "bass-badge--warn"}">${stdDone ? "양측 동의 완료 ✓" : `Revision v${s.revision}`}</span>
           </div>
           <div class="cg-card__msg">
@@ -632,7 +819,7 @@
       parts.push(`
         <div class="cg-card ${sigDone ? "cg-card--done" : (s.current_step === 4 ? "cg-card--active" : "")}">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "② 전자서명" : "④ 전자서명"}</span>
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ${isRen ? "② 전자서명" : "⑥ 전자서명"}</span>
             <span class="bass-badge ${sigDone ? "bass-badge--ok" : "bass-badge--warn"}">${sigDone ? "양측 서명 완료 ✓" : "서명 진행 중"}</span>
           </div>
           <div class="cg-sign-paper">
@@ -671,7 +858,7 @@
       parts.push(`
         <div class="cg-card cg-card--active">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · ⑤ 계약금 확인 및 최종 체결</span>
+            <span class="cg-card__tag">🤖 스마트 계약 안내 · ⑦ 계약금 확인 및 최종 체결</span>
             <span class="bass-badge bass-badge--warn">${s.tenant_recheck_at ? "임대인 입금 확인 대기" : "임차인 등기부 재열람 필요"}</span>
           </div>
           <div class="cg-card__msg">
@@ -715,9 +902,11 @@
       const myIdDone = currentRole === "lessor" ? Boolean(s.lessor_checked_tenant_id) : Boolean(s.tenant_checked_lessor_id);
       const myRegDone = currentRole === "lessor" ? Boolean(s.step1_lessor_confirmed) : Boolean(s.step1_tenant_locked);
       const tenantRegSubmitted = Boolean(s.tenant_registry && s.tenant_registry.submitted);
+      const bvBar = s.bank_verify || {};
       extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">
-        상호 신원 확인: 임대인 ${s.lessor_checked_tenant_id ? "✅" : "⏳"} · 임차인 ${s.tenant_checked_lessor_id ? "✅" : "⏳"} &nbsp;|&nbsp;
-        등기부 확인: 임대인 ${s.step1_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step1_tenant_locked ? "✅" : "⏳"}
+        ① 신분증: ${s.lessor_checked_tenant_id && s.tenant_checked_lessor_id ? "✅" : "⏳"} &nbsp;|&nbsp;
+        ②~③ 계좌·1원: ${isBankDone(s) ? "✅" : (bvBar.to_lessor_verified || bvBar.to_tenant_verified ? "1/2" : "⏳")} &nbsp;|&nbsp;
+        ④ 등기부: 임대인 ${s.step1_lessor_confirmed ? "✅" : "⏳"} · 임차인 ${s.step1_tenant_locked ? "✅" : "⏳"}
       </div>`;
       btns = `
         ${!adminProxy && currentRole ? `<button type="button" id="wsBtnIdCheck" class="bass-btn bass-btn--sm ${myIdDone ? "" : "bass-btn--primary"}">${myIdDone ? "✅ 신원 확인 완료" : "🪪 상호 신원 확인 체크"}</button>` : ""}
@@ -870,9 +1059,16 @@
       const s = S.activeSession;
       const tr = s.tenant_registry || {};
       const tm = s.terms || {};
+      const bvSig = s.bank_verify || {};
       const sessionSig = [
         s.id, s.status, s.call_status, s.current_step, s.revision,
         s.paused_at || "", s.registry_check_mode || "", (s.registry_ai_result && s.registry_ai_result.analyzed_at) || "",
+        s.lessor_account || "", s.tenant_refund_account || "", s.bank_verify_mode || "",
+        bvSig.to_lessor_code || "", bvSig.to_tenant_code || "",
+        Boolean(bvSig.to_lessor_code_issued), Boolean(bvSig.to_tenant_code_issued),
+        bvSig.to_lessor_sent_at || "", bvSig.to_tenant_sent_at || "",
+        Boolean(bvSig.to_lessor_verified), Boolean(bvSig.to_tenant_verified),
+        Boolean(bvSig.skip_lessor_agreed), Boolean(bvSig.skip_tenant_agreed), bvSig.skip_reason || "",
         s.lessor_checked_tenant_id, s.tenant_checked_lessor_id,
         s.step1_lessor_confirmed, s.step1_tenant_locked,
         Boolean(tr.submitted), tr.owner_name || "", tr.mortgage_amount ?? "", tr.seizure_or_trust || "",
@@ -884,7 +1080,8 @@
         tm.deposit || 0, tm.monthly_rent || 0, tm.maintenance_fee || 0, tm.cleaning_fee || 0, tm.move_in_date || "", tm.lease_term_months || 12,
       ].join("|");
       const sig = sessionSig + "::" + JSON.stringify((d.messages || []).map((m) => [m.id, m.status]));
-      if (sig !== S.wsChatLastSig) {
+      const activeInBankInput = Boolean(document.activeElement && list.contains(document.activeElement) && document.activeElement.classList.contains("js-cg-bank-input"));
+      if (sig !== S.wsChatLastSig && !activeInBankInput) {
         const firstRender = !S.wsChatLastSig;
         S.wsChatLastSig = sig;
         const atBottom = firstRender || (list.scrollHeight - list.scrollTop - list.clientHeight < 60);
@@ -1080,6 +1277,114 @@
             S.viewStep = S.activeSession.current_step;
             Bass.updateAppAlert("success", res.message);
             C.renderWorkspace();
+          });
+        }));
+
+        // 계좌번호 등록 · 상호 1원 송수금(난수 4자리 코드) 인라인 이벤트 바인딩
+        list.querySelectorAll(".js-cg-bank-input").forEach((inp) => {
+          inp.addEventListener("focus", () => { S.isEditingForm = true; });
+          inp.addEventListener("blur", () => { setTimeout(() => { S.isEditingForm = false; }, 250); });
+        });
+
+        list.querySelectorAll(".js-cg-copy-txt").forEach((btn) => btn.addEventListener("click", () => {
+          const val = btn.dataset.copy || "";
+          const lbl = btn.dataset.label || "내용";
+          if (window.R3 && R3.copyText) {
+            R3.copyText(val).then((ok) => Bass.updateAppAlert(ok ? "success" : "warning", ok ? `${lbl}(${val})을(를) 복사했습니다.` : "복사에 실패했습니다."));
+          }
+        }));
+
+        list.querySelectorAll(".js-cg-save-acct").forEach((btn) => btn.addEventListener("click", function () {
+          const role = btn.dataset.role;
+          if (!role || role !== currentRole) return;
+          const bankEl = document.getElementById(role === "lessor" ? "cgLessorBank" : "cgTenantBank");
+          const noEl = document.getElementById(role === "lessor" ? "cgLessorAccNo" : "cgTenantAccNo");
+          const bank_name = (bankEl && bankEl.value || "").trim();
+          const account_no = (noEl && noEl.value || "").trim();
+          if (!bank_name || !account_no) {
+            Bass.updateAppAlert("warning", "은행명과 계좌번호를 모두 입력해 주세요.");
+            return;
+          }
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/bank-account`, {
+              method: "POST",
+              body: { role: currentRole, bank_name, account_no },
+            });
+            S.activeSession = res.session;
+            S.isEditingForm = false;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-1won-sent").forEach((btn) => btn.addEventListener("click", function () {
+          const chk = document.getElementById("cgHolderNameChk");
+          if (!chk || !chk.checked) {
+            Bass.updateAppAlert("warning", "먼저 은행 앱 송금 화면에서 상대방 예금주(실명) 일치를 확인해 체크해 주세요.");
+            return;
+          }
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/bank-verify/sent`, {
+              method: "POST",
+              body: { role: currentRole, holder_name_checked: true },
+            });
+            S.activeSession = res.session;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-1won-confirm").forEach((btn) => btn.addEventListener("click", function () {
+          const inp = document.getElementById("cgOneWonCodeInput");
+          const code = (inp && inp.value || "").trim();
+          if (!code) {
+            Bass.updateAppAlert("warning", "본인 통장 1원 입금 내역에 찍힌 숫자 4자리를 입력해 주세요.");
+            return;
+          }
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/bank-verify/confirm`, {
+              method: "POST",
+              body: { role: currentRole, code },
+            });
+            S.activeSession = res.session;
+            S.isEditingForm = false;
+            if (currentRole === "tenant") await C.loadIdentity();
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-1won-reissue").forEach((btn) => btn.addEventListener("click", function () {
+          Bass.withLock(this, async () => {
+            const res = await Bass.api(APP_ID, `/sessions/${S.activeSession.id}/bank-verify/reissue`, {
+              method: "POST",
+              body: { role: currentRole },
+            });
+            S.activeSession = res.session;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          });
+        }));
+
+        list.querySelectorAll(".js-cg-bank-skip").forEach((chk) => chk.addEventListener("change", () => {
+          const role = chk.dataset.role;
+          if (!role || role !== currentRole) return;
+          const agree = chk.checked;
+          const reasonEl = document.getElementById("cgBankSkipReason");
+          const reason = (reasonEl && reasonEl.value || "").trim();
+          chk.disabled = true;
+          Bass.api(APP_ID, `/sessions/${S.activeSession.id}/bank-verify/skip`, {
+            method: "POST",
+            body: { role: currentRole, agree, reason },
+          }).then((res) => {
+            S.activeSession = res.session;
+            S.isEditingForm = false;
+            Bass.updateAppAlert("success", res.message);
+            C.renderWorkspace();
+          }).catch((err) => {
+            chk.checked = !agree;
+            chk.disabled = false;
+            Bass.showError(err);
           });
         }));
       }

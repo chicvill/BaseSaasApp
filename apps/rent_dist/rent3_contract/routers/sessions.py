@@ -24,7 +24,7 @@ from apps.rent_dist._rent3_core import (
 )
 from apps.rent_dist._rent3_core.authz import LESSOR_ROLES, claims_from, is_admin, need_claims, public_room, session_party_ok
 from apps.rent_dist._rent3_core.ops import ExpiryRenewalCheck
-from ._deps import APP_SRC, _chat_actor, _digits, _loopback, _tenant_of
+from ._deps import APP_SRC, _chat_actor, _digits, _loopback, _session_view, _tenant_of
 
 router = APIRouter()
 
@@ -188,6 +188,7 @@ def list_participants(request: Request):
 
 @router.get("/incoming-calls")
 def list_incoming_calls(
+    request: Request,
     role: str = "lessor",
     branch: Optional[str] = None,
     tenant_id: Optional[str] = None,
@@ -220,7 +221,7 @@ def list_incoming_calls(
             elif not tenant_id and not phone_digits and not name:
                 matched.append(s)
     matched.sort(key=lambda x: x.updated_at, reverse=True)
-    return {"success": True, "count": len(matched), "calls": [s.model_dump() for s in matched]}
+    return {"success": True, "count": len(matched), "calls": [_session_view(s, request, role) for s in matched]}
 
 
 @router.get("/identity")
@@ -228,13 +229,16 @@ def my_identity(request: Request):
     """로그인한 임차인의 본인인증 상태 (생년월일은 가려서 돌려준다)."""
     c = claims_from(request) or {}
     if c.get("r") != "tenant":
-        return {"success": True, "applies": False, "identity": {"verified": True}}
+        return {"success": True, "applies": False, "identity": {"verified": True}, "bank_1won_available": True}
     t = _tenant_of(request)
+    prov = fr.provider(_loopback(request)).name
     return {
         "success": True,
         "applies": True,
         "identity": fr.mask_identity(t.identity),
-        "provider": fr.provider(_loopback(request)).name,
+        "provider": prov,
+        "bank_1won_available": True,
+        "in_contract_verify_only": (prov == "none"),
     }
 
 
@@ -281,12 +285,12 @@ def list_sessions(request: Request, branch: Optional[str] = None):
     return {
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
-        "sessions": [s.model_dump() for s in sessions_sorted],
+        "sessions": [_session_view(s, request) for s in sessions_sorted],
     }
 
 
 @router.post("/sessions")
-def create_session(req: SessionCreateReq):
+def create_session(req: SessionCreateReq, request: Request):
     ensure_pool_seeded()
     s = CoSignSession.open_session(
         branch=req.branch,
@@ -299,12 +303,12 @@ def create_session(req: SessionCreateReq):
     return {
         "success": True,
         "message": f"{s.room_no}호 공동 임대계약 세션이 개설되었습니다.",
-        "session": s.model_dump(),
+        "session": _session_view(s, request),
     }
 
 
 @router.post("/sessions/call")
-def call_counterparty_session(req: SessionCallReq):
+def call_counterparty_session(req: SessionCallReq, request: Request):
     """로그인한 임대인 또는 임차인이 먼저 매물을 선택하여 상대방을 호출(CALLING)합니다."""
     ensure_pool_seeded()
     s = CoSignSession.call_counterparty(
@@ -325,12 +329,12 @@ def call_counterparty_session(req: SessionCallReq):
             f"[{s.building_name} {s.room_no}호] {caller_ko}이(가) {callee_ko}을(를) 호출했습니다! "
             f"{callee_ko}이(가) 로그인 화면에서 호출에 응답하면 공동계약이 시작됩니다."
         ),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.caller_role),
     }
 
 
 @router.post("/sessions/{session_id}/respond")
-def respond_to_call_session(session_id: str, req: SessionRespondReq):
+def respond_to_call_session(session_id: str, req: SessionRespondReq, request: Request):
     """호출받은 상대방(임대인 또는 임차인)이 응답하여 양측 연결(CONNECTED) 및 공동계약을 시작합니다."""
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(session_id)
@@ -345,14 +349,14 @@ def respond_to_call_session(session_id: str, req: SessionRespondReq):
         "success": True,
         "message": (
             f"[{s.building_name} {s.room_no}호] 호출 응답 완료! 양측 본인인증 계정이 연결되었습니다. "
-            f"서로 신분증을 확인 체크하고 등기부등본을 확인한 뒤 계약을 진행해 주세요."
+            f"서로 신분증을 확인 체크하고 계좌·1원 확인 및 등기부등본 확인을 순서대로 진행해 주세요."
         ),
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.responder_role),
     }
 
 
 @router.post("/sessions/{session_id}/verify-id")
-def verify_counterparty_id(session_id: str, req: VerifyIdReq):
+def verify_counterparty_id(session_id: str, req: VerifyIdReq, request: Request):
     """임대인·임차인이 서로의 신분증을 대조하여 본인 확인이 완료되었음을 체크합니다."""
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(session_id)
@@ -363,12 +367,12 @@ def verify_counterparty_id(session_id: str, req: VerifyIdReq):
     return {
         "success": True,
         "message": f"{actor_ko}이(가) {target_ko} 신분증 대조 [{state_ko}]를 반영했습니다.",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/pause")
-def pause_session_route(session_id: str, req: PauseReq):
+def pause_session_route(session_id: str, req: PauseReq, request: Request):
     """진행 중인 스마트 계약을 잠시 보류(PAUSED)한다. 현재 단계가 최대 7일간 유지된다."""
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(session_id)
@@ -376,12 +380,12 @@ def pause_session_route(session_id: str, req: PauseReq):
     return {
         "success": True,
         "message": "스마트 계약을 잠시 보류했습니다. 현재 단계 그대로 최대 7일간 보관되며 언제든 재개할 수 있습니다.",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
 @router.post("/sessions/{session_id}/resume")
-def resume_session_route(session_id: str, req: ResumeReq):
+def resume_session_route(session_id: str, req: ResumeReq, request: Request):
     """보류 중(PAUSED)인 스마트 계약을 재개(IN_PROGRESS)한다."""
     ensure_pool_seeded()
     s = CoSignSession.by_code_or_id(session_id)
@@ -389,7 +393,7 @@ def resume_session_route(session_id: str, req: ResumeReq):
     return {
         "success": True,
         "message": f"보류 중이던 스마트 계약을 재개했습니다 ({s.current_step}단계부터 이어서 진행).",
-        "session": s.model_dump(),
+        "session": _session_view(s, request, req.role),
     }
 
 
@@ -441,7 +445,7 @@ def get_session(token: str, request: Request):
     return {
         "success": True,
         "pool_revision": pool().overview()["total_revision"],
-        "session": s.model_dump(),
+        "session": _session_view(s, request, who["role"]),
         "contract": contract.model_dump() if contract else None,
         "renewal_context": renewal_ctx,
         "room_info": room_info,
