@@ -356,6 +356,13 @@
     const liveSess = ((S.dash && S.dash.cosign_sessions) || []).find((s) =>
       s.room_no === r.room_no && (s.status === "IN_PROGRESS" || s.status === "PAUSED")
     );
+    const ri = r.registry_info || {};
+    const regRegistered = Boolean(r.registry_checked);
+    const regFromBalance = ri.source === "tenant_balance";
+    const regBadge = !regRegistered
+      ? (ri.status === "pending" ? "확정 대기" : "미등록")
+      : (regFromBalance ? "잔금 최신" : (ri.verified_at ? ri.verified_at.slice(5) : "등재됨"));
+    const carNo = (r.tenant && r.tenant.car_number) ? String(r.tenant.car_number).trim() : "";
 
     const items = [];
     if (isOcc) {
@@ -369,6 +376,8 @@
       items.push({ key: "chat", label: "💬 임차인과 채팅" });
       if (!VIA_PIN) {
         items.push({ sep: true });
+        items.push({ key: "registry", label: "📜 등기부등본 등재", pink: !regRegistered, badge: regBadge, badgeCls: !regRegistered ? "rl-ctx-badge--pink" : "bass-badge--ok" });
+        items.push({ key: "doorlock", label: "🔑 도어락 · 주차", badge: carNo, badgeCls: "bass-badge--info" });
         items.push({ key: "invite", label: "📲 입주안내 카드" });
         items.push({ key: "lostphone", label: "📵 분실폰 해제", danger: true });
         if (nUnpaid > 0) items.push({ key: "unpaidmsg", label: "📨 미납 안내 문자", badge: `미납 ${nUnpaid}` });
@@ -379,6 +388,8 @@
     } else {
       items.push({ key: "ledger", label: "🏠 호실 상세 · 매물 상태" });
       if (!VIA_PIN) {
+        items.push({ key: "registry", label: "📜 등기부등본 등재", pink: !regRegistered, badge: regBadge, badgeCls: !regRegistered ? "rl-ctx-badge--pink" : "bass-badge--ok" });
+        items.push({ key: "doorlock", label: "🔑 도어락 · 주차" });
         items.push({ key: "listing", label: "🏷️ 임대매물 · PDF 등록" });
         items.push({ key: "pubtoggle", label: r.is_published ? "🙈 매물 비공개 전환" : "👁️ 직거래 매물 공개" });
         items.push({ key: "promo", label: "📢 홍보글 복사" });
@@ -400,9 +411,9 @@
       </div>
       ${items.map((it) => it.sep
         ? '<div class="rl-ctx-sep" role="separator"></div>'
-        : `<button type="button" class="rl-ctx-item ${it.danger ? "rl-ctx-item--danger" : ""}" role="menuitem" data-rmact="${E(it.key)}">
+        : `<button type="button" class="rl-ctx-item ${it.danger ? "rl-ctx-item--danger" : ""} ${it.pink ? "rl-ctx-item--pink" : ""}" role="menuitem" data-rmact="${E(it.key)}">
             <span>${E(it.label)}</span>
-            ${it.badge ? `<span class="bass-badge bass-badge--warn" style="font-size:12px;">${E(it.badge)}</span>` : ""}
+            ${it.badge ? `<span class="bass-badge ${it.badgeCls || "bass-badge--warn"}" style="font-size:12px;">${E(it.badge)}</span>` : ""}
           </button>`).join("")}
       ${VIA_PIN ? '<div class="bass-muted" style="font-size:12px;padding:6px 10px 4px;">※ 계약·만기·설정은 아이디 로그인 후 이용할 수 있습니다.</div>' : ""}`;
 
@@ -455,6 +466,8 @@
       else if (key === "moveout") L.showMoveOutModal(r.room_no);
       else if (key === "smartcontract") window.location.href = smartContractHrefForRoom(r);
       else if (key === "chat") { S.msgRoom = r.room_no; L.switchTab("messages"); }
+      else if (key === "registry") L.openRoomRegistryModal(r.room_no);
+      else if (key === "doorlock") L.openRoomDoorlockParkingModal(r.room_no);
       else if (key === "invite") L.showInviteModal(r.room_no);
       else if (key === "lostphone") L.revokeShortcuts(r.room_no);
       else if (key === "unpaidmsg") {

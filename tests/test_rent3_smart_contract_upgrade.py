@@ -1058,7 +1058,7 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
             core_js = fp.read()
         with open(os.path.join(fe, "ledger.js"), encoding="utf-8") as fp:
             ledger_js = fp.read()
-        for css_cls in (".rl-wrap", ".rl-more", ".rl-ctx-menu", ".rl-ctx-item"):
+        for css_cls in (".rl-wrap", ".rl-more", ".rl-ctx-menu", ".rl-ctx-item", ".rl-ctx-item--pink", ".rl-ctx-badge--pink"):
             self.assertIn(css_cls, core_js, css_cls)
         for needle in (
             "function openRoomContextMenu",
@@ -1069,6 +1069,11 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
             "⚖️ 만기통보",
             "📦 전출정산",
             "🤝 스마트 계약",
+            "📜 등기부등본 등재",
+            "🔑 도어락 · 주차",
+            "rl-ctx-item--pink",
+            "openRoomRegistryModal",
+            "openRoomDoorlockParkingModal",
             "📲 입주안내 카드",
             "📵 분실폰 해제",
             "💬 임차인과 채팅",
@@ -1076,6 +1081,267 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
             self.assertIn(needle, ledger_js, needle)
         # 기존 test_75 금지 문자열 위반 없음
         self.assertNotIn('data-act="pay"', ledger_js)
+
+    def test_11_lessor_registry_iros_links(self):
+        """임대인·매물·계약·잔금 등기부 확인 UI가 '등기부등본 발급 받기' 안내 모달, 매물 하단 '등기부 확인' 버튼, 잔금 시 비교·서버보관 UI를 모두 포함한다."""
+        def rd(*rel):
+            with open(os.path.join(ROOT, "apps", "rent_dist", *rel), encoding="utf-8") as fp:
+                return fp.read()
+
+        rooms_js = rd("rent3_lessor", "frontend", "rooms.js")
+        for needle in (
+            "function irosUrl",
+            "https://m.iros.go.kr",
+            "https://www.iros.go.kr",
+            "function roomAddressForIros",
+            "function copyAddressSync",
+            "function openRegistryGuideModal",
+            "function openLessorRegistryDoc",
+            "btnListingRegCheck",
+            "btn-reg-guide",
+            "📄 등기부등본 발급 받기",
+            "btnFrIros",
+        ):
+            self.assertIn(needle, rooms_js, needle)
+
+        lm_js = rd("rent3", "frontend", "listing_modal.js")
+        listings_js = rd("rent3", "frontend", "listings.js")
+        myhome_js = rd("rent3_tenant", "frontend", "myhome.js")
+        for needle in ("openRegistryPreview", "임대인이 제시한 등기부등본 원본", "r3LmRegistry", "r3RegIrosOpen"):
+            self.assertIn(needle, lm_js, needle)
+        self.assertIn("js-open-registry", listings_js)
+        self.assertIn("js-tn-registry", myhome_js)
+
+        c_reg = rd("rent3_contract", "frontend", "registry.js")
+        c_chat = rd("rent3_contract", "frontend", "chat.js")
+        for needle in (
+            "function openIrosGuideModal",
+            "function openBalanceRegistryFile",
+            "임대인 확인본 (계약 시)",
+            "서버 증빙 보관 완료",
+            "balViewSaved",
+            "PDF로 저장",
+        ):
+            self.assertIn(needle, c_reg, needle)
+        self.assertIn("openIrosGuideModal", c_chat)
+
+        # 로그인 창에서 관리인 전용 Data Pool 체크박스가 제거되고, admin 로그인 후 선택 패널로 이동했는지 검증
+        p_idx = rd("rent3", "frontend", "index.html")
+        p_auth = rd("rent3", "frontend", "auth.js")
+        self.assertNotIn("chkAdminPoolHub", p_idx)
+        self.assertNotIn("chkAdminPoolHub", p_auth)
+        for needle in ('id="adminDestChooser"', 'id="btnAdminGoApp"', 'id="btnAdminGoPool"'):
+            self.assertIn(needle, p_idx, needle)
+        for needle in ("function showAdminDestChooser", "function finishLoginRedirect"):
+            self.assertIn(needle, p_auth, needle)
+
+    def test_12_registry_lifecycle_listing_preview_and_balance_archive(self):
+        """매물 하단 임대인 제시본 공개(민감키 비노출) → 잔금 시 임차인 직접 열람 AI 분석·임대인 확인본 비교·서버 원본 보관을 end-to-end 검증한다."""
+        from datetime import datetime
+        from apps.rent_dist._rent3_core import Contract, Lessor, Room, balancecheck as bc, registry_ai, roomregistry as rr
+
+        lh = self._lessor_headers("chic")
+        # 테스트용 공개 공실 호실 준비
+        lsr = Lessor.for_branch("main")
+        owner_name = lsr.name if lsr else "김임대"
+        room = Room(
+            id="room_reg_e2e_912",
+            branch="main",
+            id_building="bldg_main",
+            room_no="912",
+            name="912호",
+            is_occupied=False,
+            is_published=True,
+            deposit=5000000,
+            monthly_rent=450000,
+            maintenance_fee=50000,
+        ).save(action="t_e2e")
+        fake_clean = _FakeGeminiClient({
+            "document_type": "registry",
+            "readable": True,
+            "issue_number": "1101-2026-912",
+            "viewed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "property_address": "인천 서해구 석남동 507-34 912호",
+            "owners": [{"name": owner_name, "share": "단독"}],
+            "mortgages": [],
+            "restrictions": [],
+            "ownership_transfers": [],
+        })
+        ct_tmp = None
+        sess_tmp = None
+        try:
+            # 1) 임대인이 등기부등본을 올려 AI 읽기 + 확인 완료
+            with mock.patch("apps.rent_dist._rent3_core.registry_ai._client", return_value=fake_clean):
+                r_read = self.client.post(
+                    f"/api/rent3_lessor/rooms/{room.id}/registry/read",
+                    headers=lh,
+                    json={"attachment_data_url": TINY_PNG_DATA_URL, "consent": True},
+                )
+            self.assertEqual(r_read.status_code, 200, r_read.text)
+            r_conf = self.client.post(
+                f"/api/rent3_lessor/rooms/{room.id}/registry/confirm",
+                headers=lh,
+                json={"checked_original": True, "all_rooms": False},
+            )
+            self.assertEqual(r_conf.status_code, 200, r_conf.text)
+
+            # 임대인 전용 미리보기 엔드포인트
+            lessor_doc = self.client.get(f"/api/rent3_lessor/rooms/{room.id}/registry/doc", headers=lh)
+            self.assertEqual(lessor_doc.status_code, 200)
+            self.assertEqual(lessor_doc.headers.get("content-type"), "image/png")
+
+            # 2) 공개 매물 목록 & 임차인 매물 목록에 안전한 lessor_registry_preview 노출(registry_info 원문 비노출)
+            ov = self.client.get("/api/rent3/pool/landing").json()
+            hit = next((x for x in ov["listings"] if x["id"] == room.id), None)
+            self.assertIsNotNone(hit)
+            self.assertNotIn("registry_info", hit)
+            pv = hit["lessor_registry_preview"]
+            self.assertTrue(pv["has_file"])
+            self.assertEqual(pv["owner_name"], owner_name)
+            self.assertEqual(pv["doc_url"], f"/api/rent3/pool/listings/{room.id}/registry-doc")
+
+            pub_doc = self.client.get(pv["doc_url"])
+            self.assertEqual(pub_doc.status_code, 200)
+            self.assertEqual(pub_doc.headers.get("x-frame-options"), "SAMEORIGIN")
+            self.assertGreater(len(pub_doc.content), 20)
+
+            tn_list = self.client.get("/api/rent3_tenant/listings").json()["listings"]
+            thit = next((x for x in tn_list if x["id"] == room.id), None)
+            self.assertIsNotNone(thit)
+            self.assertNotIn("registry_info", thit)
+            self.assertTrue(thit["lessor_registry_preview"]["has_file"])
+
+            # 3) 잔금 처리 시: 임차인이 직접 열람해 올리면 AI 분석 + 임대인 확인본 비교 + 서버에 파일 보관
+            ct_tmp = Contract(
+                id="ct_reg_e2e_912",
+                branch="main",
+                id_building="bldg_main",
+                id_room=room.id,
+                room_no="912",
+                lessor_name=owner_name,
+                tenant_name="이임차",
+                deposit=5000000,
+                contract_deposit=500000,
+                monthly_rent=450000,
+                maintenance_fee=50000,
+                keys_released=False,
+                registry_snapshot={
+                    "owner_name": owner_name,
+                    "mortgage_amount": 0,
+                    "seizure_or_trust": "없음",
+                    "issue_number": "1101-2026-912",
+                    "checked_date": datetime.now().strftime("%Y-%m-%d"),
+                },
+            ).save(action="t_e2e")
+
+            # 변동 케이스(근저당 신규 발생) → 임대인 확인본과 차이 감지 + 파일 보관
+            fake_mort = _FakeGeminiClient({
+                "document_type": "registry",
+                "readable": True,
+                "issue_number": "1101-2026-912-BAL",
+                "viewed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "owners": [{"name": owner_name, "share": "단독"}],
+                "mortgages": [{"creditor": "신규은행", "amount": 250000000, "cancelled": False}],
+                "restrictions": [],
+                "ownership_transfers": [],
+            })
+            with mock.patch("apps.rent_dist._rent3_core.registry_ai._client", return_value=fake_mort):
+                res_bad = bc.read(ct_tmp, TINY_PNG_DATA_URL, consent=True)
+            self.assertEqual(res_bad["status"], "ok")
+            self.assertTrue(res_bad["read"]["lessor_differences"])
+            self.assertEqual(res_bad["read"]["lessor_baseline"]["owner_name"], owner_name)
+            self.assertTrue(res_bad["read"]["file"].startswith("uploads/balance_registry/"))
+
+            # 정상 케이스 → 변동 없음 + 서버에 실제 파일 존재 + 호실 등기부등본이 임차인 최신본으로 자동 덮어쓰기 + 계약 당사자 다운로드 API 통과
+            fake_fresh = _FakeGeminiClient({
+                "document_type": "registry",
+                "readable": True,
+                "issue_number": "1101-2026-912-FRESH",
+                "viewed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "property_address": "인천 서해구 석남동 507-34 912호",
+                "owners": [{"name": owner_name, "share": "단독"}],
+                "mortgages": [],
+                "restrictions": [],
+                "ownership_transfers": [],
+            })
+            with mock.patch("apps.rent_dist._rent3_core.registry_ai._client", return_value=fake_fresh):
+                res_ok = bc.read(ct_tmp, TINY_PNG_DATA_URL, consent=True)
+            self.assertEqual(res_ok["status"], "ok")
+            self.assertEqual(res_ok["read"]["differences"], [])
+            self.assertEqual(res_ok["read"]["lessor_differences"], [])
+            saved_doc = bc.doc_path(Contract.get(ct_tmp.id))
+            self.assertIsNotNone(saved_doc)
+            self.assertTrue(os.path.isfile(saved_doc[0]))
+
+            br = bc.record(Contract.get(ct_tmp.id), changed=False, checked=True)
+            self.assertTrue(br["evidence"]["file"].startswith("uploads/balance_registry/"))
+            self.assertTrue(br["evidence"].get("room_registry_updated"))
+            # 호실 등기부가 잔금 시 임차인 등재본으로 최신 덮어씌워졌는지 검증
+            refreshed_room = Room.get(room.id)
+            self.assertTrue(refreshed_room.registry_checked)
+            self.assertEqual(refreshed_room.registry_info.get("source"), "tenant_balance")
+            self.assertEqual(refreshed_room.registry_info.get("issue_number"), "1101-2026-912-FRESH")
+            self.assertEqual(refreshed_room.registry_info.get("updated_from_contract_id"), ct_tmp.id)
+            self.assertIsNotNone(rr.doc_path(refreshed_room))
+
+            # 도어락 · 주차 API 검증: 공실은 차량 등록 불가(400), 입주 호실은 차량 번호 저장·해제 가능
+            self.assertEqual(
+                self.client.post(f"/api/rent3_lessor/rooms/{room.id}/vehicle", headers=lh, json={"car_number": "12가 3456"}).status_code,
+                400,
+            )
+            occ_room = next((x for x in Room.find(branch="main") if x.is_occupied and x.id_tenant), None)
+            if occ_room:
+                from apps.rent_dist._rent3_core import Tenant
+                prev_car = Tenant.get(occ_room.id_tenant).car_number
+                try:
+                    v_res = self.client.post(f"/api/rent3_lessor/rooms/{occ_room.id}/vehicle", headers=lh, json={"car_number": "34나 5678"})
+                    self.assertEqual(v_res.status_code, 200, v_res.text)
+                    self.assertEqual(Tenant.get(occ_room.id_tenant).car_number, "34나 5678")
+                finally:
+                    t_restore = Tenant.get(occ_room.id_tenant)
+                    t_restore.car_number = prev_car
+                    t_restore.save(action="t_restore")
+
+            from apps.rent_dist._rent3_core import CoSignSession
+            sess_tmp = CoSignSession(
+                id="sess_reg_e2e_912",
+                session_code="E2E912",
+                branch="main",
+                id_building="bldg_main",
+                id_room=room.id,
+                room_no="912",
+                lessor_name=owner_name,
+                status="COMPLETED",
+                created_contract_id=ct_tmp.id,
+            ).save(action="t_e2e")
+            # 비인증 차단(401), 임대인 당사자 조회 허용(200)
+            self.assertEqual(
+                self.client.get(f"/api/rent3_contract/sessions/{sess_tmp.id}/balance-registry/attachment").status_code,
+                401,
+            )
+            att = self.client.get(
+                f"/api/rent3_contract/sessions/{sess_tmp.id}/balance-registry/attachment",
+                headers=lh,
+            )
+            self.assertEqual(att.status_code, 200, att.text)
+            self.assertEqual(att.headers.get("x-frame-options"), "SAMEORIGIN")
+            self.assertGreater(len(att.content), 20)
+        finally:
+            if sess_tmp:
+                sess_tmp.delete(action="cleanup")
+            if ct_tmp:
+                ct_live = Contract.get(ct_tmp.id)
+                saved = bc.doc_path(ct_live) if ct_live else None
+                if saved and os.path.isfile(saved[0]):
+                    os.remove(saved[0])
+                if ct_live:
+                    ct_live.delete(action="cleanup")
+            r_live = Room.get(room.id)
+            r_doc = rr.doc_path(r_live, allow_pending=True) if r_live else None
+            if r_doc and os.path.isfile(r_doc[0]):
+                os.remove(r_doc[0])
+            if r_live:
+                r_live.delete(action="cleanup")
 
 
 if __name__ == "__main__":

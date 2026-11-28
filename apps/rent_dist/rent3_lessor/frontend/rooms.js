@@ -9,6 +9,220 @@
     $m, copyText, openModal, closeModal,
   } = L;
 
+  // 대법원 인터넷등기소 열기: 보안상 URL 파라미터 전달은 불가하므로 클릭 제스처 안에서 주소를 동기 복사한 뒤 새 창을 연다.
+  function irosUrl() {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")
+      ? "https://m.iros.go.kr"
+      : "https://www.iros.go.kr";
+  }
+
+  function roomAddressForIros(bldgAddr, roomNo) {
+    const base = String(bldgAddr || "").trim();
+    const rn = String(roomNo || "").trim();
+    if (!base) return "";
+    if (!rn) return base;
+    const unit = /호$/.test(rn) ? rn : `${rn}호`;
+    return `${base} ${unit}`.trim();
+  }
+
+  function copyAddressSync(text) {
+    const t = String(text || "").trim();
+    if (!t) return Promise.resolve(false);
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;";
+      document.body.appendChild(ta);
+      try { ta.focus({ preventScroll: true }); } catch (_) { ta.focus(); }
+      ta.select();
+      ta.setSelectionRange(0, t.length);
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (ok) return Promise.resolve(true);
+    } catch (_) { /* 아래 폴백으로 */ }
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(t).then(() => true, () => false);
+    }
+    return Promise.resolve(false);
+  }
+
+  function openIrosWithAddress(addr, label) {
+    const cleanAddr = String(addr || "").trim();
+    const copied = cleanAddr ? copyAddressSync(cleanAddr) : Promise.resolve(false);
+    const w = window.open(irosUrl(), "_blank");
+    if (w) { try { w.opener = null; } catch (_) {} }
+    copied.then((ok) => {
+      const target = label ? `${label} 주소` : "주소";
+      if (!cleanAddr) {
+        Bass.updateAppAlert(
+          "warning",
+          "건물 주소가 아직 등록되지 않아 법원등기소만 열었습니다.",
+          "더보기 ▸ 건물 정보 수정에서 건물 주소를 입력해 두면 버튼 클릭 시 주소가 자동 복사됩니다."
+        );
+      } else if (!w) {
+        Bass.updateAppAlert(
+          "warning",
+          ok
+            ? `✅ ${target}를 복사했습니다. 새 창이 차단되어 주소창에 iros.go.kr 을 직접 입력해 붙여넣으세요.`
+            : "새 창이 차단되었습니다. 주소창에 iros.go.kr 을 직접 입력해 접속하세요.",
+          `주소: ${cleanAddr}`
+        );
+      } else {
+        Bass.updateAppAlert(
+          "success",
+          ok
+            ? `✅ ${target} 복사 완료 — 열린 법원등기소 검색창에 붙여넣기 하세요.`
+            : "🏛️ 법원등기소를 열었습니다. 아래 주소를 복사해 검색창에 입력하세요.",
+          `주소: ${cleanAddr}`
+        );
+      }
+    });
+  }
+
+  async function openLessorRegistryDoc(roomId) {
+    if (!roomId) return;
+    const headers = {};
+    const tk = Bass.token();
+    if (tk) headers["Authorization"] = "Bearer " + tk;
+    const resp = await fetch(`${Bass.apiBase(APP_ID)}/rooms/${encodeURIComponent(roomId)}/registry/doc`, { headers });
+    if (!resp.ok) throw new Error("등록된 등기부등본 파일을 불러올 수 없습니다.");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
+  function openRegistryGuideModal({ bldgAddr = "", roomId = "", roomNo = "", rooms = [], allowUpload = true } = {}) {
+    const E = Bass.escapeHtml;
+    const cleanBldg = String(bldgAddr || "").trim();
+    const roomAddr = roomAddressForIros(cleanBldg, roomNo);
+    const defaultMode = roomAddr ? "room" : "building";
+    const sorted = (rooms || []).slice().sort((a, b) => String(a.room_no).localeCompare(String(b.room_no), "ko", { numeric: true }));
+    const body = openModal("📄 등기부등본 발급 받기 · AI 분석 안내", `
+      <div style="font-size:13px;line-height:1.65;">
+        <div style="padding:9px 11px;border-radius:10px;background:#fffbeb;border:1px solid #f59e0b;color:#78350f;font-size:12.5px;margin-bottom:10px;">
+          <strong>📌 등기부 확인 흐름 안내</strong><br>
+          임대인이 올린 등기부등본은 매물 하단 <strong>[📜 등기부 확인]</strong>에서 예비 임차인의 사전 검토용으로 제시됩니다.<br>
+          실제 <strong>계약서 작성 전</strong>과 <strong>잔금 처리 시</strong>에는 위·변조 예방을 위해 임차인이 직접 법원등기소에서 재열람·AI 분석합니다.
+        </div>
+
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2,#f8fafc);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">① 조회 주소 복사 & 대법원 인터넷등기소 열기</div>
+          ${cleanBldg && roomNo ? `
+            <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+              <button type="button" id="rgModeRoom" class="bass-btn bass-btn--sm ${defaultMode === "room" ? "bass-btn--primary" : ""}">🚪 ${E(roomNo)}호 주소 (구분등기)</button>
+              <button type="button" id="rgModeBldg" class="bass-btn bass-btn--sm ${defaultMode === "building" ? "bass-btn--primary" : ""}">🏢 건물 전체 주소 (다가구·원룸 1회 열람)</button>
+            </div>` : ""}
+          ${cleanBldg ? `
+            <div class="bass-row" style="gap:6px;margin-bottom:6px;">
+              <input id="rgAddrInp" class="bass-input" style="flex:1;min-width:0;" readonly value="${E(defaultMode === "room" ? roomAddr : cleanBldg)}">
+              <button type="button" id="rgCopyBtn" class="bass-btn bass-btn--sm" style="min-height:40px;">📋 복사</button>
+            </div>
+            <button type="button" id="rgIrosBtn" class="bass-btn bass-btn--primary" style="width:100%;min-height:44px;">🏛️ 주소 복사하고 법원등기소 열기 ↗</button>
+          ` : `
+            <div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">건물 주소가 아직 등록되지 않았습니다. 주소를 입력해 두면 버튼 클릭 시 자동 복사됩니다.</div>
+            <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+              <button type="button" id="rgEditBldg" class="bass-btn bass-btn--sm" style="min-height:40px;">🏢 건물 주소 입력</button>
+              <button type="button" id="rgIrosBtn" class="bass-btn bass-btn--primary" style="min-height:40px;">🏛️ 법원등기소 열기 ↗</button>
+            </div>
+          `}
+          <div id="rgCopyMsg" class="bass-muted" style="font-size:12px;margin-top:6px;">대법원 보안상 외부에서 주소 자동 입력은 불가하므로, 열린 등기소 검색창에 붙여넣기 하세요.</div>
+        </div>
+
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">② 인터넷등기소에서 PDF 저장 방법 (700원 열람 권장)</div>
+          <ol style="margin:0 0 6px 18px;padding:0;font-size:12.5px;line-height:1.65;">
+            <li>등기소 로그인(비회원 가능) → <strong>부동산 열람 (700원)</strong> 선택 → 복사한 주소 <strong>붙여넣기</strong></li>
+            <li>등기유형은 <strong>현재 유효사항</strong> + <strong>주요 등기사항 요약 포함</strong> 체크 후 결제 (최초 열람 후 1시간 무료 재열람)</li>
+            <li><strong>💻 PC (권장):</strong> 열람 화면 상단 <strong>[인쇄]</strong> → 프린터를 <strong>PDF로 저장</strong>(또는 Microsoft Print to PDF)으로 선택해 저장</li>
+            <li><strong>📱 스마트폰:</strong> 대법원 <strong>'인터넷등기소' 공식 앱은 보안 정책으로 화면 캡처·PDF 저장이 차단</strong>됩니다. 모바일 웹(<code>m.iros.go.kr</code>)의 <strong>인쇄 → PDF로 저장</strong>을 쓰거나, <strong>PC에서 PDF 저장</strong>(또는 다른 폰으로 화면 촬영)을 이용해 주세요.</li>
+          </ol>
+          <div class="bass-muted" style="font-size:12px;">💡 다가구·원룸(단독 건물)은 1번만 열람해 올린 뒤 <strong>[같은 건물의 모든 호실에 적용]</strong>을 체크하면 전 호실에 일괄 반영됩니다.</div>
+        </div>
+
+        ${allowUpload && (roomId || sorted.length) ? `
+          <div style="padding:10px 12px;border-radius:10px;border:1px solid #93c5fd;background:#eff6ff;">
+            <div style="font-weight:800;color:#1e3a8a;margin-bottom:6px;">③ 다운받은 PDF·사진 올려서 AI 분석하기</div>
+            ${!roomId && sorted.length ? `
+              <label class="bass-label">적용할 기준 호실</label>
+              <select id="rgRoomPick" class="bass-select" style="margin-bottom:8px;">
+                ${sorted.map((r) => `<option value="${E(r.id)}">${E(r.room_no)}호</option>`).join("")}
+              </select>` : `<div class="bass-muted" style="font-size:12.5px;margin-bottom:6px;">대상 호실: <strong>${E(roomNo)}호</strong></div>`}
+            <input type="file" id="rgFile" accept="application/pdf,image/*" class="bass-input" style="margin-bottom:6px;">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-bottom:8px;cursor:pointer;">
+              <input type="checkbox" id="rgConsent" checked> AI 읽기에 동의(파일이 AI 서비스로 전송되어 소유자·근저당·압류를 분석합니다)
+            </label>
+            <button type="button" id="rgUploadBtn" class="bass-btn bass-btn--primary" style="width:100%;min-height:44px;">🤖 올려서 AI 분석하기</button>
+          </div>` : ""}
+      </div>
+    `);
+
+    const addrInp = body.querySelector("#rgAddrInp");
+    const msgEl = body.querySelector("#rgCopyMsg");
+    let curLabel = defaultMode === "room" ? `${roomNo}호` : "건물";
+    const setMode = (mode) => {
+      if (!addrInp) return;
+      const isRoom = mode === "room" && roomAddr;
+      addrInp.value = isRoom ? roomAddr : cleanBldg;
+      curLabel = isRoom ? `${roomNo}호` : "건물";
+      const bR = body.querySelector("#rgModeRoom"), bB = body.querySelector("#rgModeBldg");
+      if (bR) bR.classList.toggle("bass-btn--primary", !!isRoom);
+      if (bB) bB.classList.toggle("bass-btn--primary", !isRoom);
+    };
+    const bR = body.querySelector("#rgModeRoom"), bB = body.querySelector("#rgModeBldg");
+    if (bR) bR.addEventListener("click", () => setMode("room"));
+    if (bB) bB.addEventListener("click", () => setMode("building"));
+
+    const copyBtn = body.querySelector("#rgCopyBtn");
+    if (copyBtn && addrInp) {
+      copyBtn.addEventListener("click", () => {
+        copyAddressSync(addrInp.value).then((ok) => {
+          if (msgEl) msgEl.textContent = ok ? `✅ ${curLabel} 주소(${addrInp.value}) 복사 완료 — 등기소 검색창에 붙여넣기 하세요.` : "자동 복사에 실패했습니다. 위 입력칸 주소를 직접 복사해 주세요.";
+        });
+      });
+    }
+    const irosBtn = body.querySelector("#rgIrosBtn");
+    if (irosBtn) {
+      irosBtn.addEventListener("click", () => {
+        const val = addrInp ? addrInp.value : cleanBldg;
+        openIrosWithAddress(val, curLabel);
+        if (msgEl && val) msgEl.textContent = `✅ ${curLabel} 주소(${val})를 복사하고 법원등기소를 열었습니다.`;
+      });
+    }
+    const editBtn = body.querySelector("#rgEditBldg");
+    if (editBtn) {
+      editBtn.addEventListener("click", () => { closeModal(); showBuildingModal(); });
+    }
+    const upBtn = body.querySelector("#rgUploadBtn");
+    if (upBtn) {
+      upBtn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const targetId = roomId || (body.querySelector("#rgRoomPick") && body.querySelector("#rgRoomPick").value) || "";
+          if (!targetId) { Bass.updateAppAlert("warning", "대상 호실을 선택해 주세요."); return; }
+          const file = body.querySelector("#rgFile").files[0];
+          if (!file) { Bass.updateAppAlert("warning", "등기사항증명서 파일(PDF·사진)을 먼저 골라 주세요."); return; }
+          if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+          const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+          const res = await Bass.api(APP_ID, `/rooms/${targetId}/registry/read`, {
+            method: "POST",
+            body: { attachment_data_url: dataUrl, consent: body.querySelector("#rgConsent").checked },
+          });
+          closeModal();
+          Bass.updateAppAlert("success", res.message);
+          S.regOpen = true;
+          await L.refresh();
+          const rc = document.getElementById("regCard");
+          if (rc) {
+            rc.scrollIntoView({ behavior: "smooth", block: "start" });
+          } else if (roomNo) {
+            openRoomRegistryModal(roomNo);
+          }
+        });
+      });
+    }
+  }
+
   // 사업자등록증 올리기: [📷 촬영하기] · [🖼 사진·PDF 선택]. 사진은 긴 변 2000px JPEG 로 줄여 올린다.
   function bizPickerHtml(p) {
     return `<div class="bass-row" style="gap:8px;flex-wrap:wrap;margin:6px 0;">
@@ -89,7 +303,10 @@
           <button id="btnBldgSave" class="bass-btn bass-btn--sm" type="button">건물 정보 저장</button>
         </div>
         <div style="margin-top:8px;">
-          <div><strong>${done(st.registry)} 3. 등기부 대조</strong> — 인터넷등기소에서 받은 PDF·캡처를 올리세요.</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span><strong>${done(st.registry)} 3. 등기부 대조</strong> — 인터넷등기소에서 받은 PDF·사진을 올리세요.</span>
+            <button id="btnFrIros" class="bass-btn bass-btn--sm" type="button">📄 등기부등본 발급 받기</button>
+          </div>
           <input id="frFile" type="file" accept="image/*,application/pdf" class="bass-input" ${st.identity ? "" : "disabled"}>
           <label class="check-row" style="margin:4px 0;"><span style="font-size:12px;">등기부 내용이 Google Gemini로 전송되어 자동 대조되는 것에 동의합니다 (미동의 시 관리자가 직접 확인).</span><input type="checkbox" id="frConsent"></label>
           <button id="btnRegUpload" class="bass-btn bass-btn--sm bass-btn--primary" type="button" ${st.identity ? "" : "disabled"}>올리고 대조하기</button>
@@ -135,6 +352,11 @@
       const r = await Bass.api(APP_ID, "/franchise/building", { method: "POST", body: {
         branch: S.currentBranch, building_name: $q("fbName").value.trim(), address: $q("fbAddr").value.trim(), property_value: Number($q("fbValue").value || 0) } });
       Bass.updateAppAlert("success", r.message);
+    });
+    const frIros = $q("btnFrIros");
+    if (frIros) frIros.addEventListener("click", () => {
+      const addr = ($q("fbAddr") && $q("fbAddr").value.trim()) || (a.building && a.building.address) || "";
+      openRegistryGuideModal({ bldgAddr: addr, allowUpload: false });
     });
     act("btnRegUpload", async () => {
       const file = $q("frFile").files[0];
@@ -448,6 +670,7 @@
     const OPTION_PRESETS = ["시스템 에어컨", "드럼 세탁기", "빌트인 냉장고", "인덕션", "디지털 도어락", "옷장", "침대", "책상", "전자레인지", "신발장"];
     const MAINT_PRESETS = ["수도료", "인터넷", "케이블TV", "공용전기", "건물청소", "승강기유지비"];
     const E = Bass.escapeHtml;
+    const bldgAddr = String(bldg.address || "").trim();
     const listingAlerts = S.dash.listing_alerts || [];
     const alertBannerHtml = listingAlerts.length ? `
       <div class="bass-card" style="margin-bottom:12px;padding:10px 12px;border-left:4px solid var(--primary,#2563eb);background:rgba(37,99,235,.06);">
@@ -592,15 +815,29 @@
         <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
           <button id="btnCreateRoom" class="bass-btn bass-btn--primary" type="button">📢 임대매물 등록 (PDF 자동 생성)</button>
           <button id="btnPreviewListingPdf" class="bass-btn" type="button" style="display:none;">📄 표준 임대조건서 PDF 보기</button>
+          <button id="btnListingRegCheck" class="bass-btn" type="button" style="display:none;">📜 등기부 확인</button>
           <button id="btnUnpublishRoom" class="bass-btn" type="button" style="display:none;">매물 내리기</button>
         </div>
       </div>
 
       <details class="bass-card" id="regCard" ${S.regOpen ? "open" : ""}>
-        <summary style="cursor:pointer;font-weight:800;">📜 호실별 등기부 확인 (등기클린 표시)</summary>
-        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:8px 0;">인터넷등기소에서 받은 <strong>등기사항증명서(PDF 또는 사진)</strong>를 올리면 AI 가 소유자·근저당·압류 여부를 읽습니다. <strong>원본과 대조해 [확인 완료]를 눌러야</strong> 기록되고, 소유자가 임대인과 같고 근저당·압류가 없을 때만 임차인에게 '등기클린'이 표시됩니다(확정 후 ${REG_FRESH_DAYS}일 동안). AI 는 서류의 진위를 가리지 못하므로 참고용입니다.</div>
+        <summary style="cursor:pointer;font-weight:800;">📜 호실별 등기부 확인 (등기클린 · 매물 제시본)</summary>
+        <div class="bass-muted" style="font-size:12.5px;line-height:1.7;margin:8px 0;">인터넷등기소에서 받은 <strong>등기사항증명서(PDF 또는 사진)</strong>를 올리면 AI 가 소유자·근저당·압류 여부를 읽습니다. <strong>원본과 대조해 [확인 완료]를 눌러야</strong> 기록되고, 매물 하단의 <strong>[📜 등기부 확인]</strong>으로 예비 임차인에게 검토용 제시본이 공개됩니다(소유자 일치·근저당/압류 없음 시 ${REG_FRESH_DAYS}일간 '등기클린'). 계약·잔금 전에는 임차인이 직접 법원등기소에서 재확인합니다.</div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;margin:8px 0 4px;border-radius:10px;background:var(--surface-2,#f8fafc);border:1px solid var(--border);font-size:13px;">
+          <div style="flex:1 1 220px;min-width:0;line-height:1.55;">
+            <div>🏛️ <strong>대법원 인터넷등기소 · PDF 발급 & AI 분석</strong></div>
+            <div class="bass-muted" style="font-size:12.5px;margin-top:2px;">
+              ${bldgAddr
+                ? `건물 주소: <strong>${E(bldgAddr)}</strong> · 버튼 하나로 주소 복사·PDF 저장법·AI 분석까지 안내합니다.`
+                : `건물 주소가 비어 있습니다. 버튼을 눌러 건물 주소를 입력하고 등기부를 발급받으세요.`}
+            </div>
+          </div>
+          <button type="button" class="bass-btn bass-btn--sm bass-btn--primary btn-reg-guide" data-room-id="" data-room-no="" style="min-height:42px;">📄 등기부등본 발급 받기</button>
+        </div>
         ${rooms.map((r) => {
           const ri = r.registry_info || {}, st = ri.status || (r.registry_checked ? "confirmed" : "");
+          const roomAddr = roomAddressForIros(bldgAddr, r.room_no);
+          const hasDoc = Boolean(ri.file);
           const badge = st === "confirmed" && r.registry_checked ? `<span class="bass-badge bass-badge--ok">✅ 확인됨 ${Bass.escapeHtml(ri.verified_at || "")}</span>` : st === "pending" ? `<span class="bass-badge bass-badge--warn">⏳ 확인 대기</span>` : `<span class="bass-badge">미확인</span>`;
           const risks = (ri.risks || []).map((x) => `<li style="color:${x.level === "high" ? "var(--err)" : x.level === "caution" ? "var(--warn, #b45309)" : "inherit"};">${Bass.escapeHtml(x.text)}</li>`).join("");
           const pend = st === "pending" ? `
@@ -613,7 +850,14 @@
               <button class="bass-btn bass-btn--primary btn-reg-confirm" data-id="${r.id}" type="button" style="min-height:44px;" ${ri.owner_matches ? "" : "disabled"}>✅ 확인 완료</button>
             </div>` : "";
           return `<div class="room-card" style="margin-top:10px;">
-            <div class="bass-row" style="justify-content:space-between;gap:8px;flex-wrap:wrap;"><strong>${r.room_no}호</strong>${badge}</div>
+            <div class="bass-row" style="justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">
+              <div class="bass-row" style="gap:8px;align-items:center;flex-wrap:wrap;"><strong>${E(r.room_no)}호</strong>${badge}</div>
+              <div class="bass-row" style="gap:6px;align-items:center;flex-wrap:wrap;">
+                ${hasDoc ? `<button class="bass-btn bass-btn--sm btn-reg-view" data-id="${E(r.id)}" type="button" style="min-height:38px;">👁️ 제시본 보기</button>` : ""}
+                <button class="bass-btn bass-btn--sm btn-reg-guide" data-room-id="${E(r.id)}" data-room-no="${E(r.room_no)}" type="button" style="min-height:38px;" title="${E(roomAddr || "등기부등본 발급·AI 분석 안내")}">📄 등기부등본 발급 받기</button>
+              </div>
+            </div>
+            ${roomAddr ? `<div class="bass-muted" style="font-size:12px;margin-top:4px;">📍 ${E(roomAddr)}</div>` : ""}
             <div class="bass-row" style="gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center;">
               <input type="file" class="reg-file" data-id="${r.id}" accept="application/pdf,image/*" style="max-width:100%;">
               <label style="display:flex;gap:5px;align-items:center;font-size:12.5px;"><input type="checkbox" class="reg-consent" data-id="${r.id}"> AI 읽기에 동의(파일이 AI 서비스로 전송됩니다)</label>
@@ -710,6 +954,13 @@
       $nr("nrPreMoveout").checked = Boolean(r && r.pre_moveout_notice);
       $nr("btnUnpublishRoom").style.display = isLive ? "inline-flex" : "none";
       $nr("btnPreviewListingPdf").style.display = r ? "inline-flex" : "none";
+      $nr("btnListingRegCheck").style.display = r ? "inline-flex" : "none";
+      if (r) {
+        const hasDoc = Boolean(r.registry_info && r.registry_info.file);
+        $nr("btnListingRegCheck").textContent = hasDoc
+          ? `📜 등기부 확인 (${r.registry_checked ? "제시본 있음" : "확정 대기"})`
+          : "📜 등기부 확인 · 발급 안내";
+      }
       $nr("btnCreateRoom").textContent = isLive ? "📢 변경 내용으로 다시 등록 (PDF 갱신)" : (isOcc ? "📢 전출예정 사전 매물 등록 (PDF 생성)" : "📢 임대매물 등록 (PDF 자동 생성)");
       if (!r) {
         $nr("nrAvailNow").disabled = false;
@@ -787,6 +1038,38 @@
       const r = roomById($nr("nrRoom").value);
       if (!r) return;
       Bass.withLock(this, () => openLessorTermsPdf(r.id), "PDF 생성 중...");
+    });
+
+    $nr("btnListingRegCheck").addEventListener("click", () => {
+      const r = roomById($nr("nrRoom").value);
+      if (!r) return;
+      const ri = r.registry_info || {};
+      if (ri.file) {
+        const body = openModal(`📜 ${r.room_no}호 등기부 확인 (임대인 제시본)`, `
+          <div style="font-size:13px;line-height:1.65;">
+            <div style="padding:10px 12px;border-radius:10px;background:#f8fafc;border:1px solid var(--border);margin-bottom:10px;">
+              <div>상태: <strong>${r.registry_checked ? `✅ 확인 완료 (${E(ri.verified_at || "-")})` : "⏳ 확인 대기 (아래 호실별 등기부 확인에서 확정 필요)"}</strong></div>
+              <div>갑구 소유자: <strong>${E(ri.owner_name || "-")}</strong> · 유효 근저당: <strong>${Number(ri.mortgage_count || 0)}건 / ${Number(ri.mortgage_amount || 0).toLocaleString()}원</strong></div>
+              <div>압류·신탁: <strong>${E(ri.seizure_or_trust || "없음")}</strong></div>
+            </div>
+            <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;">
+              예비 임차인이 매물 하단 <strong>[📜 등기부 확인]</strong>을 누르면 이 제시본이 참고용으로 열립니다. 계약·잔금 전에는 임차인이 직접 법원등기소에서 재확인합니다.
+            </div>
+            <div class="bass-row" style="gap:8px;flex-wrap:wrap;">
+              <button type="button" id="lrViewOrig" class="bass-btn bass-btn--primary" style="min-height:42px;">🔍 제시본 원본 보기 ↗</button>
+              <button type="button" id="lrReissue" class="bass-btn" style="min-height:42px;">📄 새로 발급 받아 올리기</button>
+            </div>
+          </div>
+        `);
+        body.querySelector("#lrViewOrig").addEventListener("click", function () {
+          Bass.withLock(this, () => openLessorRegistryDoc(r.id), "불러오는 중...");
+        });
+        body.querySelector("#lrReissue").addEventListener("click", () => {
+          openRegistryGuideModal({ bldgAddr, roomId: r.id, roomNo: r.room_no, rooms });
+        });
+      } else {
+        openRegistryGuideModal({ bldgAddr, roomId: r.id, roomNo: r.room_no, rooms });
+      }
     });
 
     $nr("btnUnpublishRoom").addEventListener("click", function () {
@@ -869,6 +1152,21 @@
     });
 
     const regVal = (cls, id) => elTabContent.querySelector(`.${cls}[data-id="${id}"]`);
+    elTabContent.querySelectorAll(".btn-reg-guide").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        openRegistryGuideModal({
+          bldgAddr,
+          roomId: btn.dataset.roomId || "",
+          roomNo: btn.dataset.roomNo || "",
+          rooms,
+        });
+      });
+    });
+    elTabContent.querySelectorAll(".btn-reg-view").forEach((btn) => {
+      btn.addEventListener("click", function () {
+        Bass.withLock(this, () => openLessorRegistryDoc(btn.dataset.id), "불러오는 중...");
+      });
+    });
     elTabContent.querySelectorAll(".btn-reg-read").forEach((btn) => {
       btn.addEventListener("click", function () {
         Bass.withLock(this, async () => {
@@ -893,10 +1191,181 @@
     });
   }
 
+  function openRoomRegistryModal(roomNo) {
+    const rooms = (S.dash && S.dash.rooms) || [];
+    const r = rooms.find((x) => String(x.room_no) === String(roomNo));
+    if (!r) return;
+    const bldg = (S.dash && S.dash.building) || {};
+    const bldgAddr = String(bldg.address || "").trim();
+    const roomAddr = roomAddressForIros(bldgAddr, r.room_no);
+    const ri = r.registry_info || {};
+    const st = ri.status || (r.registry_checked ? "confirmed" : "");
+    const E = Bass.escapeHtml;
+    const isBalanceSynced = ri.source === "tenant_balance";
+    const risks = (ri.risks || []).map((x) => `<li style="color:${x.level === "high" ? "var(--err)" : x.level === "caution" ? "var(--warn, #b45309)" : "inherit"};">${E(x.text)}</li>`).join("");
+
+    const statusBox = st === "confirmed" && r.registry_checked
+      ? `<div style="padding:10px 12px;border-radius:10px;background:#f0fdf4;border:1px solid #86efac;margin-bottom:10px;">
+           <div style="font-weight:800;color:#166534;">✅ 등기부등본 등재 완료 (${E(ri.verified_at || "-")}) ${isBalanceSynced ? '<span class="bass-badge bass-badge--info" style="margin-left:4px;">🔄 잔금 시 임차인 최신본 자동 반영</span>' : ""}</div>
+           <div style="margin-top:4px;font-size:12.5px;line-height:1.6;">
+             갑구 소유자: <strong>${E(ri.owner_name || "-")}</strong> · 유효 근저당: <strong>${Number(ri.mortgage_count || 0)}건 / ${Number(ri.mortgage_amount || 0).toLocaleString()}원</strong> · 압류·신탁: <strong>${E(ri.seizure_or_trust || "없음")}</strong>
+           </div>
+           ${ri.file ? `<div style="margin-top:8px;"><button type="button" id="rmRegViewDoc" class="bass-btn bass-btn--sm bass-btn--primary" style="min-height:38px;">🔍 등재된 원본 보기 ↗</button></div>` : ""}
+         </div>`
+      : st === "pending"
+        ? `<div style="padding:10px 12px;border-radius:10px;background:#fffbeb;border:1px solid var(--primary);margin-bottom:10px;line-height:1.65;">
+             <div style="font-weight:800;color:#92400e;">⏳ AI 분석 완료 — 원본 대조 후 확정해 주세요</div>
+             <div>소유자 <strong>${E(ri.owner_name || "읽지 못함")}</strong> ${ri.owner_matches ? "✅ 임대인과 같음" : "<span style='color:var(--err);font-weight:700;'>⚠️ 임대인과 다름 — 확정할 수 없습니다</span>"}</div>
+             <div>유효 근저당 ${ri.mortgage_count || 0}건 · 채권최고액 합계 ${Number(ri.mortgage_amount || 0).toLocaleString()}원 · 압류·신탁 ${E(ri.seizure_or_trust || "없음")} · 발급번호 ${E(ri.issue_number || "읽지 못함")}</div>
+             ${risks ? `<ul style="margin:6px 0 6px 18px;padding:0;">${risks}</ul>` : ""}
+             <label style="display:flex;gap:6px;align-items:center;min-height:36px;"><input type="checkbox" id="rmRegOrig"> 인터넷등기소 원본과 대조했습니다</label>
+             <label style="display:flex;gap:6px;align-items:center;min-height:36px;"><input type="checkbox" id="rmRegAll"> 같은 건물의 모든 호실에 적용 (다가구·원룸 1회 등록)</label>
+             <button id="rmRegConfirm" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:44px;margin-top:4px;" ${ri.owner_matches ? "" : "disabled"}>✅ 등기부등본 등재 확정</button>
+           </div>`
+        : `<div style="padding:10px 12px;border-radius:10px;background:#fce7f3;border:1px solid #f9a8d4;color:#9d174d;margin-bottom:10px;font-size:12.5px;line-height:1.65;">
+             <strong>📌 미등록 상태 (최초 1회 등록 필요)</strong><br>
+             등기부등본을 1회 등재해 두면 매물 하단 <strong>[📜 등기부 확인]</strong>에 자동 제시됩니다. 변동 사항이 있을 때만 재등록하시면 되며, 새 계약의 <strong>잔금 처리 시 임차인이 직접 등재한 최신본으로 자동 덮어씌워집니다.</strong>
+           </div>`;
+
+    const body = openModal(`📜 ${E(r.room_no)}호 등기부등본 등재`, `
+      <div style="font-size:13px;line-height:1.65;">
+        ${roomAddr ? `<div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;">📍 ${E(roomAddr)}</div>` : ""}
+        ${statusBox}
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2,#f8fafc);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:4px;">💡 등기부등본 관리 원칙</div>
+          <ul style="margin:0 0 0 18px;padding:0;font-size:12.5px;line-height:1.6;">
+            <li><strong>1회 등록:</strong> 최초 1회 등록해 두면 계속 유지됩니다(다가구·원룸은 전 호실 일괄 적용 가능).</li>
+            <li><strong>변동 시 재등록:</strong> 근저당 설정·말소·소유권 변동이 있을 때만 새 PDF를 올려 재등록하세요.</li>
+            <li><strong>잔금 시 자동 최신화:</strong> 새 계약 잔금 처리 시 임차인이 직접 열람·등재한 등기부등본으로 <strong>자동 덮어씌워져 최신 상태로 유지</strong>됩니다.</li>
+          </ul>
+        </div>
+        <div class="bass-row" style="gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+          <button type="button" id="rmRegGuide" class="bass-btn bass-btn--primary" style="width:100%;min-height:44px;">📄 등기부등본 발급 받기 (주소복사 · PDF 안내 · AI 분석)</button>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);">
+          <div style="font-weight:800;margin-bottom:6px;">${r.registry_checked ? "🔄 변동 사항 재등록 (PDF · 사진)" : "📤 파일 바로 올려서 AI 분석"}</div>
+          <input type="file" id="rmRegFile" accept="application/pdf,image/*" class="bass-input" style="margin-bottom:6px;">
+          <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="rmRegConsent" checked> AI 읽기에 동의(파일이 AI 서비스로 전송됩니다)
+          </label>
+          <button type="button" id="rmRegUpload" class="bass-btn" style="width:100%;min-height:42px;">📤 올려서 읽기</button>
+        </div>
+      </div>
+    `);
+
+    const viewBtn = body.querySelector("#rmRegViewDoc");
+    if (viewBtn) viewBtn.addEventListener("click", function () {
+      Bass.withLock(this, () => openLessorRegistryDoc(r.id), "불러오는 중...");
+    });
+    const guideBtn = body.querySelector("#rmRegGuide");
+    if (guideBtn) guideBtn.addEventListener("click", () => {
+      openRegistryGuideModal({ bldgAddr, roomId: r.id, roomNo: r.room_no, rooms });
+    });
+    const confBtn = body.querySelector("#rmRegConfirm");
+    if (confBtn) confBtn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const res = await Bass.api(APP_ID, `/rooms/${r.id}/registry/confirm`, {
+          method: "POST",
+          body: { checked_original: body.querySelector("#rmRegOrig").checked, all_rooms: body.querySelector("#rmRegAll").checked },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await L.refresh();
+        openRoomRegistryModal(r.room_no);
+      });
+    });
+    const upBtn = body.querySelector("#rmRegUpload");
+    if (upBtn) upBtn.addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const file = body.querySelector("#rmRegFile").files[0];
+        if (!file) { Bass.updateAppAlert("warning", "등기사항증명서 파일(PDF·사진)을 먼저 골라 주세요."); return; }
+        if (file.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+        const dataUrl = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(file); });
+        const res = await Bass.api(APP_ID, `/rooms/${r.id}/registry/read`, {
+          method: "POST",
+          body: { attachment_data_url: dataUrl, consent: body.querySelector("#rmRegConsent").checked },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await L.refresh();
+        openRoomRegistryModal(r.room_no);
+      });
+    });
+  }
+
+  function openRoomDoorlockParkingModal(roomNo) {
+    const rooms = (S.dash && S.dash.rooms) || [];
+    const r = rooms.find((x) => String(x.room_no) === String(roomNo));
+    if (!r) return;
+    const bldg = (S.dash && S.dash.building) || {};
+    const E = Bass.escapeHtml;
+    const isOcc = Boolean(r.is_occupied && r.tenant);
+    const carNo = (r.tenant && r.tenant.car_number) ? String(r.tenant.car_number) : "";
+    const body = openModal(`🔑 ${E(r.room_no)}호 도어락 · 주차`, `
+      <div style="font-size:13.5px;line-height:1.65;">
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface-2,#f8fafc);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">🚪 세대 도어락 비밀번호</div>
+          <div style="font-size:13px;margin-bottom:8px;">현재 비밀번호: <code style="font-size:15px;font-weight:800;">${E(r.doorlock_pwd || "미설정")}</code></div>
+          <div class="bass-row" style="gap:6px;">
+            <input id="dpDoorPwd" class="bass-input" style="flex:1;min-width:0;" value="${E(r.doorlock_pwd || "")}" placeholder="예: 2580*">
+            <button id="dpDoorSave" class="bass-btn bass-btn--primary" type="button" style="min-height:42px;">비번 변경</button>
+          </div>
+          <div class="bass-muted" style="font-size:12px;margin-top:6px;">변경하면 임차인 앱의 출입 정보에도 즉시 반영됩니다.</div>
+        </div>
+
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:6px;">🚗 등록 차량 · 주차</div>
+          ${isOcc ? `
+            <div style="font-size:13px;margin-bottom:8px;">입주자: <strong>${E((r.contract && r.contract.tenant_name) || (r.tenant && r.tenant.name) || "-")}</strong> · 현재 등록차량: <strong>${E(carNo || "미등록")}</strong></div>
+            <div class="bass-row" style="gap:6px;">
+              <input id="dpCarNo" class="bass-input" style="flex:1;min-width:0;" value="${E(carNo)}" placeholder="차량번호 (예: 12가 3456 · 비우면 해제)">
+              <button id="dpCarSave" class="bass-btn bass-btn--primary" type="button" style="min-height:42px;">차량 저장</button>
+            </div>
+          ` : `
+            <div class="bass-muted" style="font-size:12.5px;">공실 상태입니다. 입주 후 임차인 또는 임대인이 등록 차량을 기록할 수 있습니다.</div>
+          `}
+        </div>
+
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#f8fafc;font-size:12.5px;">
+          <div>🏢 <strong>건물 공동현관:</strong> <code>${E(bldg.common_entrance_pwd || "-")}</code> · <strong>Wi-Fi:</strong> <code>${E(bldg.wifi_info || "-")}</code></div>
+        </div>
+      </div>
+    `);
+
+    body.querySelector("#dpDoorSave").addEventListener("click", function () {
+      Bass.withLock(this, async () => {
+        const pwd = body.querySelector("#dpDoorPwd").value.trim();
+        if (!pwd) { Bass.updateAppAlert("warning", "새 도어락 비밀번호를 입력해 주세요."); return; }
+        const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/doorlock`, {
+          method: "POST",
+          body: { new_pwd: pwd },
+        });
+        Bass.updateAppAlert("success", res.message);
+        await L.refresh();
+        openRoomDoorlockParkingModal(r.room_no);
+      });
+    });
+
+    const carBtn = body.querySelector("#dpCarSave");
+    if (carBtn) {
+      carBtn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const val = body.querySelector("#dpCarNo").value.trim();
+          const res = await Bass.api(APP_ID, `/rooms/${encodeURIComponent(r.id)}/vehicle`, {
+            method: "POST",
+            body: { car_number: val },
+          });
+          Bass.updateAppAlert("success", res.message);
+          await L.refresh();
+          openRoomDoorlockParkingModal(r.room_no);
+        });
+      });
+    }
+  }
+
   Object.assign(L, {
     bizPickerHtml, bindBizPicker, bizDataUrl,
     renderApplication, renderFranchiseBanner,
     showPromoModal, showBuildingModal, showBizRegModal, showTenantBizRegModal,
+    openRoomRegistryModal, openRoomDoorlockParkingModal,
     renderRoomsTab,
   });
 })();

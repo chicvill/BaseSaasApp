@@ -8,23 +8,44 @@
 
   // ───────────── 등기부 직접 확인 (임차인) ─────────────
   const IROS_URL = "https://www.iros.go.kr";
+  function irosTargetUrl() {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")
+      ? "https://m.iros.go.kr"
+      : IROS_URL;
+  }
 
   // 인터넷등기소 열기: 열기 전에 검색할 주소를 클립보드에 복사한다.
   function searchAddress(s) {
-    return `${s.building_address || ""} ${s.room_no}호`.trim();
+    const rn = String((s && s.room_no) || "").trim();
+    const unit = rn ? (/호$/.test(rn) ? rn : `${rn}호`) : "";
+    return `${(s && s.building_address) || ""} ${unit}`.trim();
+  }
+
+  function pdfGuideStepsHtml() {
+    return `
+      <ol style="margin:6px 0 0 18px;padding:0;font-size:12.5px;line-height:1.65;">
+        <li>등기소 로그인(비회원 가능) → <strong>부동산 열람 (700원)</strong> → 복사한 주소 <strong>붙여넣기</strong></li>
+        <li><strong>현재 유효사항 + 주요 등기사항 요약 포함</strong> 선택 후 결제 (최초 열람 후 1시간 무료 재열람)</li>
+        <li><strong>💻 PC (권장):</strong> 열람창 <strong>[인쇄] → PDF로 저장</strong>(또는 Microsoft Print to PDF)</li>
+        <li><strong>📱 스마트폰:</strong> 공식 <strong>'인터넷등기소' 앱은 보안상 캡처·PDF 저장이 차단</strong>됩니다. 모바일 웹(<code>m.iros.go.kr</code>) 인쇄→PDF 저장 또는 <strong>PC PDF 저장</strong>(현장에서는 타 기기로 화면 촬영)을 이용해 주세요.</li>
+      </ol>`;
   }
 
   function irosBoxHtml(addr) {
     return `
-      <div style="font-size:12.5px;margin-top:8px;">① 먼저 검색할 주소를 복사하고, ② 인터넷등기소에서 붙여 넣어 검색하세요.</div>
+      <div style="font-size:12.5px;margin-top:8px;">① 검색할 주소를 복사하고, ② 법원등기소에서 붙여넣어 열람·PDF 저장 후 아래에 올려 AI 분석을 받으세요.</div>
       <div class="bass-row" style="gap:6px;margin-top:6px;">
         <input id="irosAddr" class="bass-input" style="flex:1;min-width:0;" readonly value="${esc(addr)}">
         <button id="btnCopyAddr" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
       </div>
-      <button id="btnOpenIros" class="bass-btn bass-btn--primary" style="margin-top:8px;width:100%;" type="button">🏛️ 주소 복사하고 인터넷등기소 열기</button>
+      <button id="btnOpenIros" class="bass-btn bass-btn--primary" style="margin-top:8px;width:100%;" type="button">🏛️ 주소 복사하고 법원등기소 열기 ↗</button>
       <div id="irosMsg" class="bass-muted" style="font-size:12px;margin-top:6px;min-height:16px;">
         새 창이 열리지 않으면 주소창에 <strong>iros.go.kr</strong> 을 직접 입력하세요.
-      </div>`;
+      </div>
+      <details style="margin-top:6px;font-size:12.5px;">
+        <summary style="cursor:pointer;font-weight:700;color:#1e3a8a;">📄 PDF 저장 방법 보기 (PC · 스마트폰)</summary>
+        ${pdfGuideStepsHtml()}
+      </details>`;
   }
 
   // 복사는 사용자의 터치 동작 안에서 '동기'로 시작해야 한다 (일부 휴대폰 브라우저는 await 뒤에 새 창·복사를 막는다).
@@ -41,30 +62,108 @@
     return false;
   }
 
-  function bindIrosBox() {
-    const msg = document.getElementById("irosMsg");
-    const input = document.getElementById("irosAddr");
+  function bindIrosBox(root = document) {
+    const q = (id) => (root && root.querySelector ? root.querySelector("#" + id) : document.getElementById(id));
+    const msg = q("irosMsg");
+    const input = q("irosAddr");
     const say = (t) => { if (msg) msg.innerHTML = t; };
+    const btnCopy = q("btnCopyAddr");
+    const btnOpen = q("btnOpenIros");
 
-    document.getElementById("btnCopyAddr").addEventListener("click", () => {
-      Promise.resolve(copyNow(input)).then((ok) => say(
-        ok ? "✅ 주소가 복사되었습니다. 등기소 검색창에 붙여 넣으세요."
-           : "복사하지 못했습니다. 위 주소를 길게 눌러 직접 복사해 주세요."));
-    });
-
-    document.getElementById("btnOpenIros").addEventListener("click", () => {
-      const copied = copyNow(input);              // 1) 먼저 복사 (동기)
-      const w = window.open(IROS_URL, "_blank");  // 2) 같은 터치 안에서 바로 열기
-      if (w) { try { w.opener = null; } catch (_) { /* 무시 */ } }
-      Promise.resolve(copied).then((ok) => {
-        if (!w) {
-          say("새 창이 차단되었습니다. 주소창에 <strong>iros.go.kr</strong> 을 직접 입력해 접속하세요." + (ok ? " (주소는 복사되어 있습니다)" : ""));
-        } else {
-          say(ok ? "✅ 주소가 복사되었습니다. 열린 등기소 창에서 '부동산 주소로 열람'을 고르고 붙여 넣으세요."
-                 : "등기소를 열었습니다. 위 주소를 직접 복사해 입력하세요.");
-        }
+    if (btnCopy && input) {
+      btnCopy.addEventListener("click", () => {
+        Promise.resolve(copyNow(input)).then((ok) => say(
+          ok ? "✅ 주소가 복사되었습니다. 등기소 검색창에 붙여 넣으세요."
+             : "복사하지 못했습니다. 위 주소를 길게 눌러 직접 복사해 주세요."));
       });
-    });
+    }
+
+    if (btnOpen && input) {
+      btnOpen.addEventListener("click", () => {
+        const copied = copyNow(input);                    // 1) 먼저 복사 (동기)
+        const w = window.open(irosTargetUrl(), "_blank"); // 2) 같은 터치 안에서 바로 열기
+        if (w) { try { w.opener = null; } catch (_) { /* 무시 */ } }
+        Promise.resolve(copied).then((ok) => {
+          if (!w) {
+            say("새 창이 차단되었습니다. 주소창에 <strong>iros.go.kr</strong> 을 직접 입력해 접속하세요." + (ok ? " (주소는 복사되어 있습니다)" : ""));
+          } else {
+            say(ok ? "✅ 주소가 복사되었습니다. 열린 등기소 창에서 '부동산 열람(700원)'을 고르고 붙여 넣으세요."
+                   : "등기소를 열었습니다. 위 주소를 직접 복사해 입력하세요.");
+          }
+        });
+      });
+    }
+  }
+
+  // ── 계약 전 등기부등본 발급 받기 · AI 분석 원스톱 안내 모달 ──
+  function openIrosGuideModal(s) {
+    if (!s) return;
+    const addr = searchAddress(s);
+    const body = R3.openModal("📄 등기부등본 발급 받기 · AI 분석 안내", `
+      <div style="font-size:13px;line-height:1.65;">
+        <div style="padding:9px 11px;border-radius:10px;background:#fffbeb;border:1px solid #f59e0b;color:#78350f;font-size:12.5px;margin-bottom:10px;">
+          <strong>⚠️ 임대인이 보낸 등기부는 위·변조 우려가 있습니다.</strong><br>
+          반드시 <strong>임차인 본인이 직접 법원등기소에서 열람</strong>해 PDF(또는 촬영 사진)를 올리고 AI 분석과 원본을 함께 확인하세요.
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#f8fafc;margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:4px;">① 주소 복사 & 대법원 인터넷등기소 열기</div>
+          <div class="bass-row" style="gap:6px;margin-top:6px;">
+            <input id="irosAddr" class="bass-input" style="flex:1;min-width:0;" readonly value="${esc(addr)}">
+            <button id="btnCopyAddr" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
+          </div>
+          <button id="btnOpenIros" class="bass-btn bass-btn--primary" style="margin-top:8px;width:100%;min-height:44px;" type="button">🏛️ 주소 복사하고 법원등기소 열기 ↗</button>
+          <div id="irosMsg" class="bass-muted" style="font-size:12px;margin-top:6px;min-height:16px;">열린 등기소 검색창에 복사된 주소를 붙여넣기 하세요.</div>
+        </div>
+        <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);margin-bottom:10px;">
+          <div style="font-weight:800;margin-bottom:4px;">② PDF 파일 저장 방법 (700원 열람 권장)</div>
+          ${pdfGuideStepsHtml()}
+        </div>
+        ${currentRole === "tenant" ? `
+          <div style="padding:10px 12px;border-radius:10px;border:1px solid #93c5fd;background:#eff6ff;">
+            <div style="font-weight:800;color:#1e3a8a;margin-bottom:6px;">③ 저장한 등기부 PDF·사진 바로 AI 분석</div>
+            <input type="file" id="gmRegFile" accept="application/pdf,image/*" class="bass-input" style="margin-bottom:6px;">
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-bottom:8px;cursor:pointer;">
+              <input type="checkbox" id="gmRegConsent" checked> AI(Google Gemini) 등기부 분석 전송에 동의합니다 (참고용)
+            </label>
+            <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+              <button type="button" id="gmRegAnalyze" class="bass-btn bass-btn--primary" style="flex:1;min-height:42px;">🤖 올려서 AI 분석하기</button>
+              <button type="button" id="gmOpenStep1" class="bass-btn" style="min-height:42px;">🔍 상세 대조 · 승인 모달</button>
+            </div>
+            <div id="gmRegOut" style="margin-top:8px;"></div>
+          </div>` : `
+          <div class="bass-muted" style="font-size:12.5px;">임차인이 위 절차로 직접 열람·AI 분석을 진행하면 실시간으로 확인 상태가 반영됩니다.</div>`}
+      </div>
+    `);
+    bindIrosBox(body);
+    const btnStep1 = body.querySelector("#gmOpenStep1");
+    if (btnStep1) btnStep1.addEventListener("click", () => { R3.closeModal(); C.openStepModal(1, { forceDoc: true }); });
+    const btnAn = body.querySelector("#gmRegAnalyze");
+    if (btnAn) {
+      btnAn.addEventListener("click", function () {
+        Bass.withLock(this, async () => {
+          const f = body.querySelector("#gmRegFile").files[0];
+          if (!f) { Bass.updateAppAlert("warning", "등기부 PDF 또는 사진 파일을 먼저 골라 주세요."); return; }
+          if (f.size > 10 * 1024 * 1024) { Bass.updateAppAlert("warning", "파일은 10MB 이하만 가능합니다."); return; }
+          const dataUrl = await new Promise((resolve, reject) => {
+            const fr = new FileReader();
+            fr.onload = () => resolve(fr.result);
+            fr.onerror = () => reject(new Error("파일을 읽지 못했습니다."));
+            fr.readAsDataURL(f);
+          });
+          const res = await Bass.api(APP_ID, `/sessions/${s.id}/registry-ai`, {
+            method: "POST",
+            body: { attachment_data_url: dataUrl, consent: body.querySelector("#gmRegConsent").checked },
+          });
+          if (res.session) S.activeSession = res.session;
+          const out = body.querySelector("#gmRegOut");
+          if (out) {
+            out.innerHTML = aiResultHtml(res.result) || `<div class="bass-muted" style="font-size:12.5px;">${esc(res.message)}</div>`;
+          }
+          Bass.updateAppAlert(res.level === "success" ? "success" : "warning", res.message);
+          C.renderWorkspace();
+        });
+      });
+    }
   }
 
   function isJeonseSession(s) {
@@ -706,36 +805,106 @@
     </div>`;
   }
 
+  async function openBalanceRegistryFile(sessionId) {
+    const headers = {};
+    const tk = Bass.token();
+    if (tk) headers["Authorization"] = "Bearer " + tk;
+    const resp = await fetch(`${Bass.apiBase(APP_ID)}/sessions/${encodeURIComponent(sessionId)}/balance-registry/attachment`, { headers });
+    if (!resp.ok) throw new Error("서버에 보관된 등기부등본 파일을 불러올 수 없습니다.");
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   function openBalRegModal(s) {
     const body = R3.openModal("🏛 입주 전 등기부 재확인", "");
     const E = Bass.escapeHtml;
+    const addr = searchAddress(s);
     const draw = () => {
       const st = balRegState(), rd = st.read || {};
+      const lb = rd.lessor_baseline || {};
+      const allDiffs = [...new Set([...(rd.differences || []), ...(rd.lessor_differences || [])])];
+      const savedHtml = rd.file
+        ? `<div style="margin-top:8px;padding:7px 9px;border-radius:8px;background:#f0fdf4;border:1px solid #86efac;display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap;font-size:12px;">
+             <span>💾 <strong>서버 증빙 보관 완료</strong> (${E(String(rd.saved_at || rd.read_at || "").slice(0, 16).replace("T", " "))})</span>
+             <button type="button" id="balViewSaved" class="bass-btn bass-btn--sm" style="min-height:32px;">📄 보관 원본 보기 ↗</button>
+           </div>`
+        : "";
+      const cmpTableHtml = rd.status === "ok"
+        ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;">
+             <thead>
+               <tr style="background:#f8fafc;">
+                 <th style="border:1px solid var(--border);padding:5px 6px;text-align:left;">항목</th>
+                 <th style="border:1px solid var(--border);padding:5px 6px;text-align:left;">임대인 확인본 (계약 시)</th>
+                 <th style="border:1px solid var(--border);padding:5px 6px;text-align:left;">잔금 시 임차인 직접 열람</th>
+               </tr>
+             </thead>
+             <tbody>
+               <tr>
+                 <td style="border:1px solid var(--border);padding:5px 6px;font-weight:700;">갑구 소유자</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;">${E(lb.owner_name || s.lessor_name || "-")}</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;"><strong>${E(rd.owner_name || "-")}</strong></td>
+               </tr>
+               <tr>
+                 <td style="border:1px solid var(--border);padding:5px 6px;font-weight:700;">근저당 합계</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;">${fmtWon(lb.mortgage_amount || 0)}</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;"><strong>${fmtWon(rd.mortgage_total || 0)}</strong></td>
+               </tr>
+               <tr>
+                 <td style="border:1px solid var(--border);padding:5px 6px;font-weight:700;">압류 · 신탁</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;">${E(lb.seizure_or_trust || "없음")}</td>
+                 <td style="border:1px solid var(--border);padding:5px 6px;"><strong>${E(rd.seizure_or_trust || "없음")}</strong></td>
+               </tr>
+             </tbody>
+           </table>`
+        : "";
       const readHtml = !rd.status ? "" : rd.status === "unavailable"
-        ? `<div style="margin:8px 0;font-size:12.5px;">⚠️ AI 를 쓸 수 없어 직접 확인으로 진행합니다. 인터넷등기소 원본을 직접 보고 아래에 체크해 주세요.</div>`
-        : `<div style="margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;line-height:1.7;">
-            <strong>AI 가 읽은 값</strong> — 열람 일시 <strong>${E((rd.viewed_at || "읽지 못함").replace("T", " "))}</strong> ${rd.recent ? "✅ 최근" : "<span style='color:var(--err);font-weight:700;'>⚠️ 오래됨·확인 불가 — 오늘 다시 열람하세요</span>"}<br>
-            소유자 ${E(rd.owner_name || "-")} · 근저당 합계 ${fmtWon(rd.mortgage_total || 0)} · 압류·신탁 ${E(rd.seizure_or_trust || "-")}
-            ${(rd.differences || []).length ? `<div style="color:var(--err);font-weight:700;margin-top:4px;">⚠️ 계약 때와 달라진 점:<br>${rd.differences.map((x) => "· " + E(x)).join("<br>")}<br>잔금을 보내지 말고 [변동 있음 신고]를 눌러 주세요.</div>` : `<div style="margin-top:4px;">계약 때와 달라진 점: 없음(AI 가 읽은 범위)</div>`}
+        ? `<div style="margin:8px 0;font-size:12.5px;">⚠️ AI 를 쓸 수 없어 직접 확인으로 진행합니다. 인터넷등기소 원본을 직접 보고 아래에 체크해 주세요.${savedHtml}</div>`
+        : `<div style="margin:8px 0;padding:10px 12px;border:1px solid var(--border);border-radius:10px;font-size:12.5px;line-height:1.7;">
+            <strong>🤖 AI 분석 · 임대인 확인본 비교 결과</strong> — 열람 일시 <strong>${E((rd.viewed_at || "읽지 못함").replace("T", " "))}</strong> ${rd.recent ? "✅ 최근" : "<span style='color:var(--err);font-weight:700;'>⚠️ 오래됨·확인 불가 — 오늘 다시 열람하세요</span>"}
+            ${cmpTableHtml}
+            ${rd.plain_summary ? `<div class="bass-muted" style="margin-top:6px;white-space:pre-line;font-size:12px;">${E(rd.plain_summary)}</div>` : ""}
+            ${allDiffs.length ? `<div style="color:var(--err);font-weight:700;margin-top:6px;">⚠️ 임대인 확인본·계약 때와 달라진 점:<br>${allDiffs.map((x) => "· " + E(x)).join("<br>")}<br>잔금을 보내지 말고 [변동 있음 신고]를 눌러 주세요.</div>` : `<div style="color:var(--ok);font-weight:700;margin-top:6px;">✅ 임대인 확인본 및 계약 시점과 달라진 점이 없습니다 (AI 분석 범위).</div>`}
+            ${savedHtml}
           </div>`;
       body.innerHTML = `
         <div style="font-size:13px;line-height:1.7;">
-          <div><strong>① 인터넷등기소에서 오늘 다시 열람</strong>해 PDF로 저장하세요.<br><a class="bass-btn bass-btn--primary" href="https://www.iros.go.kr" target="_blank" rel="noopener" style="margin-top:4px;min-height:44px;display:inline-flex;align-items:center;">🏛 인터넷등기소 열기 ↗</a></div>
-          <div style="margin-top:10px;"><strong>② 열람한 파일을 올려 AI 로 계약 때와 비교</strong>
+          <div style="padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#f8fafc;">
+            <strong>① 인터넷등기소에서 오늘 다시 열람</strong>해 PDF로 저장하세요.
+            <div class="bass-row" style="gap:6px;margin-top:6px;">
+              <input id="irosAddr" class="bass-input" style="flex:1;min-width:0;" readonly value="${E(addr)}">
+              <button id="btnCopyAddr" class="bass-btn bass-btn--sm" type="button">📋 복사</button>
+            </div>
+            <button id="btnOpenIros" class="bass-btn bass-btn--primary" type="button" style="margin-top:6px;width:100%;min-height:44px;">🏛️ 주소 복사하고 법원등기소 열기 ↗</button>
+            <div id="irosMsg" class="bass-muted" style="font-size:12px;margin-top:4px;">열리지 않으면 <a href="https://www.iros.go.kr" target="_blank" rel="noopener">iros.go.kr</a> 로 직접 접속하세요.</div>
+            <details style="margin-top:6px;font-size:12.5px;">
+              <summary style="cursor:pointer;font-weight:700;color:#1e3a8a;">📄 PDF 저장 방법 보기 (PC · 스마트폰)</summary>
+              ${pdfGuideStepsHtml()}
+            </details>
+          </div>
+          <div style="margin-top:10px;"><strong>② 열람한 파일 올려 AI 분석 · 임대인 확인본과 비교 · 서버 저장</strong>
             <input type="file" id="balFile" accept="application/pdf,image/*" style="display:block;margin:6px 0;max-width:100%;">
-            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;"><input type="checkbox" id="balConsent"> AI 읽기에 동의(파일이 AI 서비스로 전송되며 서버에는 저장하지 않습니다)</label>
-            <button id="balRead" class="bass-btn bass-btn--sm" type="button" style="min-height:44px;margin-top:4px;">📤 올려서 AI로 확인</button>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;"><input type="checkbox" id="balConsent" checked> AI 분석(Google Gemini), 임대인 확인본 자동 비교 및 잔금 증빙 서버 보관에 동의합니다</label>
+            <button id="balRead" class="bass-btn bass-btn--sm bass-btn--primary" type="button" style="min-height:44px;margin-top:4px;">📤 올려서 AI 분석 · 비교 · 서버 저장</button>
           </div>
           ${readHtml}
           <div style="margin-top:10px;"><strong>③ 원본과 직접 대조</strong>
             <label style="display:flex;gap:6px;align-items:center;min-height:40px;font-size:12.5px;"><input type="checkbox" id="balChecked"> <strong>인터넷등기소 원본과 직접 대조했고, 변동이 없음을 확인했음</strong></label>
-            <div class="bass-muted" style="font-size:12px;">체크하지 않으면 다음 단계(잔금·출입 정보 받기)로 진행할 수 없습니다.</div>
+            <div class="bass-muted" style="font-size:12px;">'확인했음'에 체크하지 않으면 다음 단계(잔금·출입 정보 받기)로 진행할 수 없습니다.</div>
           </div>
           <div class="bass-row" style="gap:8px;margin-top:10px;flex-wrap:wrap;">
             <button id="balOk" class="bass-btn bass-btn--primary" type="button" style="min-height:46px;">변동 없음 확인</button>
             <button id="balChg" class="bass-btn" type="button" style="min-height:46px;">변동 있음 신고</button>
           </div>
         </div>`;
+      bindIrosBox(body);
+      const viewBtn = body.querySelector("#balViewSaved");
+      if (viewBtn) {
+        viewBtn.addEventListener("click", function () {
+          Bass.withLock(this, () => openBalanceRegistryFile(s.id), "불러오는 중...");
+        });
+      }
       const post = (path, payload) => Bass.api(APP_ID, `/sessions/${s.id}/balance-registry/${path}`, { method: "POST", body: { role: "tenant", ...payload } });
       body.querySelector("#balRead").addEventListener("click", function () {
         Bass.withLock(this, async () => {
@@ -749,7 +918,7 @@
         });
       });
       const record = (changed) => Bass.withLock(body.querySelector(changed ? "#balChg" : "#balOk"), async () => {
-        if (!changed && !body.querySelector("#balChecked").checked) { Bass.updateAppAlert("warning", "원본과 대조하고 '확인했음'에 체크해야 진행할 수 있습니다."); return; }
+        if (!changed && !body.querySelector("#balChecked").checked) { Bass.updateAppAlert("warning", "원본과 대조하고 '확인했음'에 체크해 주세요."); return; }
         const res = await post("check", { changed, checked: !changed });
         S.sealedContract = res.contract;
         Bass.updateAppAlert(changed ? "warning" : "success", res.message);
@@ -762,10 +931,10 @@
   }
 
   Object.assign(C, {
-    IROS_URL, searchAddress, irosBoxHtml, copyNow, bindIrosBox,
+    IROS_URL, irosTargetUrl, searchAddress, irosBoxHtml, copyNow, bindIrosBox, openIrosGuideModal,
     isJeonseSession, pairDots, needsGuarantee, isLowDepositMonthly,
     mortgageExposure, hardBlocks, riskBlock, nowLocalInput,
     registryMismatches, aiResultHtml, renderStep1Tenant, renderRecheckTenant,
-    renderCancelled, renderStep1, balRegState, balRegCardHtml, openBalRegModal,
+    renderCancelled, renderStep1, balRegState, balRegCardHtml, openBalRegModal, openBalanceRegistryFile,
   });
 })();

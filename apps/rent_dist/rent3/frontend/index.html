@@ -323,10 +323,6 @@
           <input id="chkKeepLoggedIn" type="checkbox" checked style="width:18px; height:18px; margin:0; cursor:pointer; flex-shrink:0;">
           <label for="chkKeepLoggedIn" style="margin:0; font-weight:600; cursor:pointer;">🔐 로그인 상태 유지 <span style="font-weight:400; color:var(--or-muted);">(30일 · 다시 접속 시 자동 로그인)</span></label>
         </div>
-        <div class="or-field" style="display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--or-muted);">
-          <input id="chkAdminPoolHub" type="checkbox">
-          <label for="chkAdminPoolHub" style="margin:0; font-weight:500; cursor:pointer;">관리인(admin) 로그인 시 통합 Data Pool 허브(<code>/rent3/pool.html</code>)로 바로 이동</label>
-        </div>
         <button type="submit" id="btnSubmitLogin" class="or-btn or-btn--blue" style="width:100%; padding:12px;">
           본인인증 로그인 후 이동 →
         </button>
@@ -338,6 +334,23 @@
           <div id="demoAccountGrid" class="or-demo-grid"></div>
         </div>
       </form>
+
+      <!-- 관리인(admin) 로그인 완료 후 이동 화면 선택 -->
+      <div id="adminDestChooser" style="display:none; padding:4px 0;">
+        <div style="font-size:13.5px; background:#eff6ff; color:#1e3a8a; border:1px solid #bfdbfe; border-radius:10px; padding:10px 12px; margin-bottom:12px; line-height:1.55;">
+          👑 <strong id="adminDestWho">관리인</strong> 로그인 완료 — 이동할 화면을 선택해 주세요.
+        </div>
+        <div style="display:grid; gap:10px;">
+          <button type="button" id="btnAdminGoApp" class="or-btn or-btn--blue" style="width:100%; padding:13px 14px; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <span><strong>👑 총괄 관리인 전용 앱</strong><br><span style="font-size:12px; opacity:.9; font-weight:500;">가맹 승인 · 지점 현황 · 원격 지원 (<code>/rent3_admin/</code>)</span></span>
+            <span style="font-size:16px;">→</span>
+          </button>
+          <button type="button" id="btnAdminGoPool" class="or-btn or-btn--outline" style="width:100%; padding:13px 14px; text-align:left; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+            <span><strong>🌐 통합 Data Pool 허브</strong><br><span style="font-size:12px; color:var(--or-muted); font-weight:500;">실시간 Data Pool 관제 · 백업 · 복구 (<code>/rent3/pool.html</code>)</span></span>
+            <span style="font-size:16px;">→</span>
+          </button>
+        </div>
+      </div>
 
       <!-- 비밀번호 재설정 (본인인증 기반) -->
       <form id="formReset" style="display:none;">

@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import os
 from datetime import date, datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.errors import DomainError
 
@@ -118,3 +118,122 @@ def public_clean(room: Room) -> bool:
     """공개 매물의 '등기클린' 표시: 임대인이 확정했고, 최근이고, 코드가 계산한 깨끗함일 때만."""
     info = room.registry_info or {}
     return bool(room.registry_checked and info.get("clean_title") and info.get("owner_matches", True) and is_fresh(info))
+
+
+_EXT_TO_MIME = {
+    ".pdf": "application/pdf",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+def doc_path(room: Room, *, allow_pending: bool = False) -> Optional[Tuple[str, str, str]]:
+    """임대인이 올린 등기부등본 파일의 (절대경로, MIME, 다운로드 파일명)을 반환한다. 없거나 안전하지 않으면 None."""
+    info = room.registry_info or {}
+    if not allow_pending and not room.registry_checked:
+        return None
+    rel = str(info.get("file") or "").strip().replace("\\", "/")
+    if not rel or not rel.startswith("uploads/room_registry/"):
+        return None
+    base_dir = os.path.realpath(os.path.join(pool().pool_dir, "uploads", "room_registry"))
+    target = os.path.realpath(os.path.join(pool().pool_dir, rel))
+    if not (target == base_dir or target.startswith(base_dir + os.sep)) or not os.path.isfile(target):
+        return None
+    ext = os.path.splitext(target)[1].lower()
+    mime = _EXT_TO_MIME.get(ext, "application/octet-stream")
+    fname = f"registry_{room.room_no}{ext or '.pdf'}"
+    return target, mime, fname
+
+
+def public_summary(room: Room) -> Optional[Dict[str, Any]]:
+    """공개 매물 카드·상세의 [등기부 확인] 버튼에 제시할 안전한 임대인 확인본 요약(민감 경로/해시 제외)."""
+    info = room.registry_info or {}
+    if not room.registry_checked or not info:
+        return None
+    doc = doc_path(room)
+    return {
+        "verified_at": str(info.get("verified_at") or ""),
+        "owner_name": str(info.get("owner_name") or ""),
+        "mortgage_amount": int(info.get("mortgage_amount") or 0),
+        "mortgage_count": int(info.get("mortgage_count") or 0),
+        "seizure_or_trust": str(info.get("seizure_or_trust") or "없음"),
+        "clean_title": public_clean(room),
+        "fresh": is_fresh(info),
+        "source": str(info.get("source") or "lessor"),
+        "has_file": doc is not None,
+        "doc_mime": doc[1] if doc else "",
+        "doc_url": f"/api/rent3/pool/listings/{room.id}/registry-doc" if doc else "",
+    }
+
+
+def overwrite_from_balance(room: Room, ct: Any, br_read: Dict[str, Any], *, app_source: str = "rent3_contract") -> bool:
+    """잔금 처리 시 임차인이 직접 열람·등재한 최신 등기부등본으로 호실 등기부를 덮어씌워 최신화한다."""
+    rd = br_read or {}
+    prev = dict(room.registry_info or {})
+    saved_file = str(prev.get("file") or "")
+    saved_sha = str(prev.get("sha256") or "")
+
+    # 1) 잔금 시 서버 보관 파일이 있으면 호실 등기부 폴더로 원자적 복사(덮어쓰기)
+    rel_src = str(rd.get("file") or "").strip().replace("\\", "/")
+    if rel_src.startswith("uploads/balance_registry/"):
+        bal_base = os.path.realpath(os.path.join(pool().pool_dir, "uploads", "balance_registry"))
+        src_abs = os.path.realpath(os.path.join(pool().pool_dir, rel_src))
+        if (src_abs == bal_base or src_abs.startswith(bal_base + os.sep)) and os.path.isfile(src_abs):
+            ext = os.path.splitext(src_abs)[1].lower()
+            mime = _EXT_TO_MIME.get(ext, "")
+            if mime:
+                with open(src_abs, "rb") as fp:
+                    binary = fp.read()
+                saved = _save_file(room.id, binary, mime)
+                saved_file = saved["file"]
+                saved_sha = saved["sha256"]
+
+    if rd.get("status") != "ok" and not saved_file:
+        return False
+
+    today = date_today().isoformat()
+    if rd.get("status") == "ok":
+        owner_name = str(rd.get("owner_name") or prev.get("owner_name") or "")
+        mort_amt = int(rd.get("mortgage_total") or 0)
+        mort_cnt = int(rd.get("mortgage_count") if rd.get("mortgage_count") is not None else (1 if mort_amt > 0 else 0))
+        seize = str(rd.get("seizure_or_trust") or "없음")
+        issue_no = str(rd.get("issue_number") or prev.get("issue_number") or "")
+        names = {registry_ai._norm_name(n) for n in _lessor_names(room)}
+        owner_matches = (not names) or (registry_ai._norm_name(owner_name) in names) or bool(prev.get("owner_matches", True))
+        clean = mort_amt == 0 and seize == "없음"
+        info = {
+            **prev,
+            "status": "confirmed",
+            "source": "tenant_balance",
+            "updated_from_contract_id": str(getattr(ct, "id", "") or ""),
+            "issue_number": issue_no,
+            "owner_name": owner_name,
+            "mortgage_amount": mort_amt,
+            "mortgage_count": mort_cnt,
+            "seizure_or_trust": seize,
+            "clean_title": bool(clean),
+            "owner_matches": bool(owner_matches),
+            "readable": True,
+            "viewed_at": str(rd.get("viewed_at") or ""),
+            "verified_at": today,
+            "read_at": now_iso(),
+            "file": saved_file,
+            "sha256": saved_sha or str(rd.get("sha256") or ""),
+        }
+    else:
+        info = {
+            **prev,
+            "status": "confirmed",
+            "source": "tenant_balance",
+            "updated_from_contract_id": str(getattr(ct, "id", "") or ""),
+            "verified_at": today,
+            "read_at": now_iso(),
+            "file": saved_file,
+            "sha256": saved_sha or str(rd.get("sha256") or ""),
+        }
+    room.registry_info = info
+    room.registry_checked = True
+    room.save(action="room_registry_overwritten_from_balance", app_source=app_source)
+    return True

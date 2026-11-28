@@ -71,6 +71,10 @@ class DoorlockReq(BaseModel):
     new_pwd: str
 
 
+class RoomVehicleReq(BaseModel):
+    car_number: str = ""
+
+
 class ReservationCancelReq(BaseModel):
     reason: str = ""
 
@@ -580,6 +584,29 @@ def room_registry_confirm(room_id: str, req: RoomRegistryConfirmReq):
     }
 
 
+@router.get("/rooms/{room_id}/registry/doc")
+def get_lessor_room_registry_doc(room_id: str, download: int = 0):
+    """임대인이 자기 호실에 올려 둔 등기부등본 파일(PDF·사진)을 미리보기/다운로드한다."""
+    from apps.rent_dist._rent3_core import roomregistry as rr
+    room = Room.require(room_id)
+    doc = rr.doc_path(room, allow_pending=True)
+    if not doc:
+        raise DomainError("등록된 등기부등본 파일이 없습니다.", hint="먼저 등기부등본(PDF·사진)을 올려서 읽어 주세요.")
+    path, mime, fname = doc
+    with open(path, "rb") as fp:
+        raw = fp.read()
+    disp = "attachment" if download else "inline"
+    fname_utf8 = quote(f"등기부등본_{room.room_no}호{fname[fname.rfind('.'):] if '.' in fname else '.pdf'}")
+    return Response(
+        content=raw,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'{disp}; filename="{fname}"; filename*=UTF-8\'\'{fname_utf8}',
+            "X-Frame-Options": "SAMEORIGIN",
+        },
+    )
+
+
 @router.post("/rooms/{room_id}/release-keys")
 def release_keys(room_id: str, req: ReleaseKeysReq, request: Request):
     """입주일 잔금 입금을 확인하고 도어락·공동현관 정보를 임차인에게 교부한다 (임차인 화면에서 즉시 열림)."""
@@ -615,6 +642,13 @@ def release_keys(room_id: str, req: ReleaseKeysReq, request: Request):
         )
     who = (claims_from(request) or {}).get("u", "")
     ct.keys_released, ct.keys_released_at, ct.keys_released_by = True, now_iso(), who
+    ev = dict((br.get("evidence") or {}))
+    if not ev.get("room_registry_updated") and (br.get("read") or {}).get("file"):
+        from apps.rent_dist._rent3_core import roomregistry as rr
+        if rr.overwrite_from_balance(room, ct, br.get("read") or {}, app_source=APP_SRC):
+            ev["room_registry_updated"] = True
+            ev["room_registry_updated_at"] = now_iso()
+            ct.balance_registry = {**br, "evidence": ev}
     ct.save(action="keys_released", app_source=APP_SRC)
     return {
         "success": True,
@@ -631,6 +665,23 @@ def change_doorlock(room_id: str, req: DoorlockReq):
         "success": True,
         "message": f"{room.room_no}호 도어락 비밀번호가 변경되어 입주자 정보에도 반영되었습니다.",
         "room": room.model_dump(),
+    }
+
+
+@router.post("/rooms/{room_id}/vehicle")
+def update_room_vehicle(room_id: str, req: RoomVehicleReq):
+    """임대인이 호실 입주자의 등록 차량(주차) 번호를 직접 등록·수정·해제한다."""
+    room = Room.require(room_id)
+    tenant = Tenant.get(room.id_tenant) if room.id_tenant else None
+    if tenant is None:
+        raise DomainError("입주 중인 임차인이 없어 차량 번호를 등록할 수 없습니다.", hint="공실은 입주 후 등록해 주세요.")
+    car = req.car_number.strip()
+    tenant.car_number = car
+    tenant.save(action="room_vehicle_updated", app_source=APP_SRC)
+    return {
+        "success": True,
+        "message": f"{room.room_no}호 등록 차량을 '{car}'(으)로 저장했습니다." if car else f"{room.room_no}호 등록 차량 정보를 해제했습니다.",
+        "car_number": car,
     }
 
 

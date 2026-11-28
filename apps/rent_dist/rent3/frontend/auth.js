@@ -6,6 +6,10 @@
   const { APP_ID, state, $, esc, saveSession, readAcq } = P;
 
   function switchAuthTab(tabName) {
+    const tabs = $("authModalTabs");
+    if (tabs) tabs.style.display = "";
+    const adm = $("adminDestChooser");
+    if (adm) adm.style.display = "none";
     document.querySelectorAll("[data-auth-tab]").forEach((btn) => {
       btn.classList.toggle("is-active", btn.dataset.authTab === tabName);
     });
@@ -23,12 +27,46 @@
     }
   }
 
+  function showAdminDestChooser(done) {
+    const adm = $("adminDestChooser");
+    if (!adm) {
+      closeAuthModal();
+      window.location.href = (done && done.redirect_url) || "/rent3_admin/";
+      return;
+    }
+    const tabs = $("authModalTabs");
+    if (tabs) tabs.style.display = "none";
+    $("formAccountLogin").style.display = "none";
+    $("formRegister").style.display = "none";
+    const fr = $("formReset"); if (fr) fr.style.display = "none";
+    const alertBox = $("authModalAlert");
+    if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
+    const who = $("adminDestWho");
+    if (who) who.textContent = (done && done.user && (done.user.name || done.user.username)) || "관리인(admin)";
+    const sub = $("authModalSub");
+    if (sub) sub.textContent = "관리인 인증이 완료되었습니다. 아래에서 이동할 관리 화면을 선택해 주세요.";
+    adm.style.display = "block";
+    $("authModal").classList.add("is-open");
+    Bass.updateAppAlert("success", (done && done.message) || "관리인 로그인 완료", "총괄 관리인 앱 또는 통합 Data Pool 허브를 선택하세요.");
+  }
+
+  function finishLoginRedirect(done, explicitHint = "") {
+    const role = String((done && (done.role || (done.user && done.user.role))) || "").toLowerCase();
+    const isAdminRole = role === "admin" || role === "superadmin";
+    if (isAdminRole && !explicitHint) {
+      showAdminDestChooser(done);
+      return;
+    }
+    closeAuthModal();
+    Bass.updateAppAlert("success", done.message, `자동 이동: ${done.redirect_url}`);
+    window.location.href = done.redirect_url;
+  }
+
   function openAuthModal({ tab = "login", preset = "", targetHint = "" } = {}) {
     const alertBox = $("authModalAlert");
     if (alertBox) { alertBox.style.display = "none"; alertBox.innerHTML = ""; }
     switchAuthTab(tab === "register" ? "register" : "login");
     $("loginTargetHint").value = targetHint || "";
-    $("chkAdminPoolHub").checked = targetHint === "pool";
 
     const sub = $("authModalSub");
     if ((targetHint || "").startsWith("contract")) {
@@ -46,7 +84,7 @@
       const ex = state.demoAccounts.find((d) => d.group === "임대인");
       if (ex) $("loginIdentifier").value = ex.identifier;
     } else if (preset === "admin") {
-      sub.textContent = "총괄 관리인 계정으로 로그인하면 관리인 전용 앱(/rent3_admin/)으로 즉시 이동합니다.";
+      sub.textContent = "총괄 관리인 계정으로 로그인하면 관리인 전용 앱 또는 통합 Data Pool 허브를 선택해 이동합니다.";
       $("loginIdentifier").value = "admin";
       if (state.demoAccounts.length) $("loginPassword").value = "0202"; // 시연(로컬) 환경에서만 미리 채움
     } else {
@@ -217,8 +255,7 @@
           const res = await Bass.api(APP_ID, "/pool/auth/login", { method: "POST", body: { login_mode: "account", identifier: ident, password: newPw, target_hint: "", device_id: Bass.deviceId(), keep_logged_in: true } });
           const done = await resolveConsent(await resolveMfa(res, true), true);
           saveSession(done.user, done.token, done.refresh_token || "");
-          closeAuthModal();
-          window.location.href = done.redirect_url;
+          finishLoginRedirect(done, "");
           return;
         } catch (_) { /* 자동 입장이 안 되면 아래처럼 로그인 화면에서 직접 들어간다 */ }
         switchAuthTab("login");
@@ -237,7 +274,12 @@
       $("regLessorFields").style.display = $("regRole").value === "lessor" ? "block" : "none";
     });
 
-    // 통합 계정 본인인증 로그인 제출 -> 역할 판별 후 자동 리다이렉트
+    const btnAdmApp = $("btnAdminGoApp");
+    if (btnAdmApp) btnAdmApp.addEventListener("click", () => { closeAuthModal(); window.location.href = "/rent3_admin/"; });
+    const btnAdmPool = $("btnAdminGoPool");
+    if (btnAdmPool) btnAdmPool.addEventListener("click", () => { closeAuthModal(); window.location.href = "/rent3/pool.html"; });
+
+    // 통합 계정 본인인증 로그인 제출 -> 역할 판별 후 자동 리다이렉트(관리인은 로그인 후 화면 선택)
     $("formAccountLogin").addEventListener("submit", (e) => {
       e.preventDefault();
       const btn = $("btnSubmitLogin");
@@ -251,8 +293,7 @@
         : rawIdent;
 
       Bass.withLock(btn, async () => {
-        let hint = $("loginTargetHint").value || "";
-        if ($("chkAdminPoolHub").checked && !hint) hint = "pool";
+        const hint = $("loginTargetHint").value || "";
 
         try {
           const keep = wantKeepLoggedIn();
@@ -269,9 +310,7 @@
           });
           const done = await resolveConsent(await resolveMfa(res, keep), keep);
           saveSession(done.user, done.token, done.refresh_token || "");
-          closeAuthModal();
-          Bass.updateAppAlert("success", done.message, `자동 이동: ${done.redirect_url}`);
-          window.location.href = done.redirect_url;
+          finishLoginRedirect(done, hint);
         } catch (err) {
           if (alertBox) {
             const isNotFound = (err.message || "").includes("찾을 수 없습니다");

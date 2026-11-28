@@ -149,6 +149,9 @@
     .rl-ctx-item:hover, .rl-ctx-item:active { background: #eff6ff; color: #1d4ed8; }
     .rl-ctx-item--danger { color: #b91c1c; }
     .rl-ctx-item--danger:hover, .rl-ctx-item--danger:active { background: #fef2f2; color: #b91c1c; }
+    .rl-ctx-item--pink { background: #fce7f3; color: #9d174d; border: 1px solid #fbcfe8; }
+    .rl-ctx-item--pink:hover, .rl-ctx-item--pink:active { background: #fbcfe8; color: #831843; }
+    .rl-ctx-badge--pink { background: #fbcfe8 !important; color: #9d174d !important; border: 1px solid #f9a8d4 !important; }
     .rl-ctx-sep { height: 1px; background: #e2e8f0; margin: 4px 6px; }
     .rl-no { font-size: 17px; font-weight: 800; white-space: nowrap; } .rl-no small { font-size: 13px; font-weight: 700; }
     .rl-who { font-size: 14px; flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

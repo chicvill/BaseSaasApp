@@ -155,7 +155,11 @@ def api_headers(request: Request, response: Response) -> None:
     """API 응답에 보안 헤더: 개인정보가 캐시에 남지 않게 하고, 형식 추측·프레임 삽입을 막는다."""
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "SAMEORIGIN" if request.url.path.endswith("/terms.pdf") else "DENY"
+    response.headers["X-Frame-Options"] = (
+        "SAMEORIGIN"
+        if request.url.path.endswith(("/terms.pdf", "/registry-doc", "/registry/doc", "/balance-registry/attachment"))
+        else "DENY"
+    )
     response.headers["Referrer-Policy"] = "no-referrer"
 
 

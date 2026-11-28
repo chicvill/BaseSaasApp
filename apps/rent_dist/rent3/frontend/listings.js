@@ -128,6 +128,10 @@
             ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
             ${l.contract_in_progress ? "🔒 계약 진행 중" : "🤝 스마트 계약 요청"}
           </button>
+          <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-registry" style="grid-column:1 / -1;"
+            data-room-id="${esc(l.id)}">
+            📜 등기부 확인 ${l.lessor_registry_preview && l.lessor_registry_preview.has_file ? "(임대인 제시본 보기)" : "(권리관계 확인 안내)"}
+          </button>
         </div>
       </article>
     `;
@@ -208,6 +212,18 @@
           room_no: btn.dataset.room,
           building_name: btn.dataset.bldg,
         });
+      });
+    });
+
+    grid.querySelectorAll(".js-open-registry").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const item = list.find((x) => x.id === btn.dataset.roomId);
+        if (item && window.R3ListingModal && window.R3ListingModal.openRegistryPreview) {
+          window.R3ListingModal.openRegistryPreview(item, {
+            onInquiry: openInquiryFor,
+            onRentNow: openRentNowFor,
+          });
+        }
       });
     });
   }

@@ -203,19 +203,33 @@ def balance_registry_read(session_id: str, req: BalanceReadReq):
         }
     rd = res["read"]
     msg = (
-        "계약 때와 달라진 점이 있습니다. 잔금을 보내지 말고 확인하세요."
-        if rd["differences"]
+        "계약 때(임대인 확인본)와 달라진 점이 있습니다. 잔금을 보내지 말고 확인하세요. (원본 파일은 증빙으로 서버에 보관됨)"
+        if (rd.get("differences") or rd.get("lessor_differences"))
         else "열람 일시가 오래되었거나 읽지 못했습니다. 잔금 직전에 새로 열람해 다시 올려 주세요."
         if not rd["recent"]
-        else "AI 가 읽은 범위에서 계약 때와 달라진 점이 없습니다. 원본과 직접 대조한 뒤 '확인했음'에 체크해 주세요."
+        else "AI 분석 결과 임대인 확인본·계약 시점과 변동이 없으며 원본 파일을 서버에 보관했습니다. 원본과 대조 후 '확인했음'에 체크해 주세요."
     )
     return {
         "success": True,
         "available": True,
-        "level": "warning" if (rd["differences"] or not rd["recent"]) else "success",
+        "level": "warning" if (rd.get("differences") or rd.get("lessor_differences") or not rd["recent"]) else "success",
         "message": msg,
         "read": rd,
     }
+
+
+@router.get("/sessions/{session_id}/balance-registry/attachment")
+def get_balance_registry_attachment(session_id: str):
+    """잔금 처리 시 임차인이 직접 열람해 업로드·서버 보관한 등기부등본 원본(PDF·사진)을 계약 당사자에게 반환한다."""
+    s = CoSignSession.by_code_or_id(session_id)
+    ct = Contract.get(s.created_contract_id) if s.created_contract_id else None
+    if ct is None:
+        raise DomainError("체결된 계약이 없습니다.")
+    doc = bc.doc_path(ct)
+    if not doc:
+        raise DomainError("서버에 보관된 잔금 시 등기부등본 파일이 없습니다.", hint="잔금 전 등기부 재확인에서 PDF 또는 사진을 먼저 올려 주세요.")
+    path, mime, name = doc
+    return FileResponse(path, media_type=mime, filename=name, headers={"X-Frame-Options": "SAMEORIGIN"})
 
 
 @router.post("/sessions/{session_id}/balance-registry/check")

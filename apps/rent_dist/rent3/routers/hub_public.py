@@ -160,6 +160,7 @@ def portal_landing(request: Request) -> Dict[str, Any]:
             "available_from": r.available_from or "즉시입주",
             "pre_moveout_notice": r.pre_moveout_notice,
             "clean_title": room_registry.public_clean(r),       # 임대인이 확정한 최근 등기부가 있고 코드가 깨끗하다고 계산할 때만 '등기클린'
+            "lessor_registry_preview": room_registry.public_summary(r),  # 매물 확인 단계에서 임대인이 제시한 등기부등본 참고 요약·미리보기 URL
             "status_description": r.status_description,
             "options": opts,
             "listing_spec": spec,
@@ -286,6 +287,43 @@ def get_public_listing_terms_pdf(room_id: str, request: Request, download: int =
         media_type="application/pdf",
         headers={
             "Content-Disposition": f'{disp}; filename="{fname_ascii}"; filename*=UTF-8\'\'{fname_utf8}',
+            "X-Frame-Options": "SAMEORIGIN",
+        },
+    )
+
+
+@router.get("/listings/{room_id}/registry-doc")
+def get_public_listing_registry_doc(room_id: str, request: Request, download: int = 0):
+    """공개 매물에서 임대인이 제시한 등기부등본(PDF·이미지) 참고본을 반환한다."""
+    ensure_pool_seeded()
+    room = Room.get(room_id)
+    if not room:
+        raise NotFound("매물을 찾을 수 없습니다.")
+    is_public = (
+        ((not room.is_occupied and room.is_published) or room.pre_moveout_notice)
+        and Lessor.franchise_open(room.branch)
+    )
+    if not is_public:
+        c = claims_from(request) or {}
+        can_staff = is_admin(c) or (
+            c.get("r") in LESSOR_ROLES
+            and normalize_branch_id(str(c.get("b") or "")) == room.branch
+        )
+        if not can_staff:
+            raise NotFound("공개된 매물이 아닙니다.")
+    doc = room_registry.doc_path(room)
+    if not doc:
+        raise NotFound("임대인이 아직 등기부등본 파일을 등록하지 않았습니다.")
+    path, mime, fname = doc
+    with open(path, "rb") as fp:
+        raw = fp.read()
+    disp = "attachment" if download else "inline"
+    fname_utf8 = quote(f"임대인제시_등기부등본_{room.room_no}호{fname[fname.rfind('.'):] if '.' in fname else '.pdf'}")
+    return Response(
+        content=raw,
+        media_type=mime,
+        headers={
+            "Content-Disposition": f'{disp}; filename="{fname}"; filename*=UTF-8\'\'{fname_utf8}',
             "X-Frame-Options": "SAMEORIGIN",
         },
     )

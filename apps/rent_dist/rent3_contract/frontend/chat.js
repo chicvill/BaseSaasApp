@@ -703,7 +703,7 @@
               임차인은 <strong>[ 법원등기소 ]</strong> 에 접속하여 등기부등본을 열람·캡처하고, <strong>등기부 갑구 소유자가 방금 신분증·1원 계좌로 확인한 임대인(${esc(ownerTarget || "-")})과 같은지 재확인</strong>해 주세요.
             </div>
             <div class="cg-link-row">
-              <button type="button" class="cg-link-btn js-cg-iros">🏛️ [ 법원등기소 ] 접속 (주소복사) ↗</button>
+              <button type="button" class="cg-link-btn js-cg-iros">📄 등기부등본 발급 받기 · AI 안내</button>
               <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="1">
                 ${currentRole === "tenant" ? "📄 [ 등기부등본 확인 · 승인 모달 ] ↗" : "📄 [ 등기부 제시 · 확인 모달 ] ↗"}
               </button>
@@ -1103,6 +1103,10 @@
         }));
 
         list.querySelectorAll(".js-cg-iros").forEach((btn) => btn.addEventListener("click", () => {
+          if (C.openIrosGuideModal) {
+            C.openIrosGuideModal(S.activeSession);
+            return;
+          }
           const curS = S.activeSession;
           const addr = `${curS.building_address || ""} ${curS.room_no}호`.trim();
           const w = window.open("https://www.iros.go.kr", "_blank");

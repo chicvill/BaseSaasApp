@@ -134,6 +134,7 @@ def list_open_listings(request: Request, branch: Optional[str] = None):
             **public_room(r.model_dump()),  # 도어락·등기·입주자 정보는 공개 목록에 싣지 않는다
             "is_pre_moveout_listing": r.is_occupied and r.pre_moveout_notice,
             "clean_title": room_registry.public_clean(r),
+            "lessor_registry_preview": room_registry.public_summary(r),
             "building_name": b.building_name if b else r.branch,
             "address": b.address if b else "",
             "lessor_name": lessor.name if lessor else "임대인",

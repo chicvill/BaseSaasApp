@@ -359,7 +359,10 @@
         </div>
 
         <div class="r3-lm-foot">
-          <a href="${esc(pdfUrl)}" target="_blank" rel="noopener" class="r3-lm-btn">📄 임대조건 PDF</a>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <a href="${esc(pdfUrl)}" target="_blank" rel="noopener" class="r3-lm-btn">📄 임대조건 PDF</a>
+            <button type="button" id="r3LmRegistry" class="r3-lm-btn">📜 등기부 확인</button>
+          </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             ${options.onInquiry ? `<button type="button" id="r3LmInquiry" class="r3-lm-btn">💬 1:1 방문문의</button>` : ""}
             ${options.onRentNow
@@ -448,6 +451,10 @@
     wrap.querySelector("#r3LmClose").addEventListener("click", close);
     wrap.addEventListener("click", (e) => { if (e.target === wrap) close(); });
 
+    const btnReg = wrap.querySelector("#r3LmRegistry");
+    if (btnReg) {
+      btnReg.addEventListener("click", () => { openRegistryPreview(listing, options); });
+    }
     const btnInq = wrap.querySelector("#r3LmInquiry");
     if (btnInq && options.onInquiry) {
       btnInq.addEventListener("click", () => { close(); options.onInquiry(listing); });
@@ -472,5 +479,192 @@
     if (window.R3Hist) R3Hist.close("listingDetail");
   }
 
-  window.R3ListingModal = { open, close };
+  function irosUrl() {
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || "")
+      ? "https://m.iros.go.kr"
+      : "https://www.iros.go.kr";
+  }
+
+  function copySync(text) {
+    const t = String(text || "").trim();
+    if (!t) return Promise.resolve(false);
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = t;
+      ta.setAttribute("readonly", "");
+      ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;pointer-events:none;";
+      document.body.appendChild(ta);
+      try { ta.focus({ preventScroll: true }); } catch (_) { ta.focus(); }
+      ta.select();
+      ta.setSelectionRange(0, t.length);
+      const ok = document.execCommand("copy");
+      ta.remove();
+      if (ok) return Promise.resolve(true);
+    } catch (_) {}
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(t).then(() => true, () => false);
+    }
+    return Promise.resolve(false);
+  }
+
+  function closeRegistryPreview() {
+    const el = document.getElementById("r3ListingRegistryModal");
+    if (!el) return;
+    if (el._r3KeyHandler) document.removeEventListener("keydown", el._r3KeyHandler);
+    el.remove();
+    if (window.R3Hist) R3Hist.close("listingRegistry");
+  }
+
+  function openRegistryPreview(listing, opts) {
+    if (!listing) return;
+    ensureStyle();
+    closeRegistryPreview();
+    const options = opts || {};
+    const pv = listing.lessor_registry_preview || null;
+    const roomNoStr = String(listing.room_no || "").trim();
+    const unit = roomNoStr ? (/호$/.test(roomNoStr) ? roomNoStr : `${roomNoStr}호`) : "";
+    const fullAddr = `${String(listing.address || "").trim()} ${unit}`.trim();
+    const docUrl = (pv && pv.has_file && pv.doc_url) ? pv.doc_url : "";
+    const isPdf = Boolean(pv && String(pv.doc_mime || "").toLowerCase() === "application/pdf");
+
+    const docViewHtml = docUrl
+      ? (isPdf
+        ? `<iframe class="r3-lm-pdf-frame" src="${esc(docUrl)}#view=FitH" title="임대인 제시 등기부등본 PDF"></iframe>`
+        : `<div style="margin-top:10px;border:1px solid #cbd5e1;border-radius:12px;overflow:hidden;background:#f8fafc;text-align:center;">
+             <img src="${esc(docUrl)}" alt="임대인 제시 등기부등본" style="max-width:100%;max-height:460px;object-fit:contain;display:block;margin:0 auto;">
+           </div>`)
+      : `<div style="margin-top:10px;padding:14px;border-radius:12px;background:#f8fafc;border:1px dashed #cbd5e1;font-size:13px;line-height:1.6;color:#475569;">
+           임대인이 아직 참고용 등기부등본(PDF·캡처) 파일을 등록하지 않았습니다.<br>
+           방문 문의로 요청하거나, <strong>스마트 계약 단계에서 임차인이 직접 법원등기소에서 열람해 AI 분석</strong>을 진행할 수 있습니다.
+         </div>`;
+
+    const summaryHtml = pv
+      ? `<table class="r3-lm-table" style="margin-top:10px;">
+           <tr><th>임대인 확인일</th><td>${esc(pv.verified_at || "-")} ${pv.clean_title ? `<span class="r3-lm-pill r3-lm-pill--ok" style="margin-left:6px;">🛡️ 등기클린</span>` : (pv.fresh ? "" : `<span class="r3-lm-pill r3-lm-pill--warn" style="margin-left:6px;">기간 경과 · 직접 재확인 필요</span>`)}</td></tr>
+           <tr><th>갑구 소유자</th><td><strong>${esc(pv.owner_name || "-")}</strong> (매물 임대인: ${esc(listing.lessor_name || "-")})</td></tr>
+           <tr><th>을구 선순위 근저당</th><td>${Number(pv.mortgage_count || 0)}건 · 채권최고액 합계 <strong>${fmtWon(pv.mortgage_amount || 0)}</strong></td></tr>
+           <tr><th>압류 · 가압류 · 신탁</th><td><strong>${esc(pv.seizure_or_trust || "없음")}</strong></td></tr>
+         </table>`
+      : "";
+
+    const wrap = document.createElement("div");
+    wrap.id = "r3ListingRegistryModal";
+    wrap.className = "r3-lm-backdrop";
+    wrap.style.zIndex = "380";
+    wrap.setAttribute("role", "dialog");
+    wrap.setAttribute("aria-modal", "true");
+    wrap.setAttribute("aria-label", `${listing.building_name || ""} ${unit} 등기부등본 확인`);
+
+    wrap.innerHTML = `
+      <div class="r3-lm-card">
+        <div class="r3-lm-head">
+          <div style="min-width:0;">
+            <h3 class="r3-lm-title">📜 [${esc(listing.building_name || "")}] ${esc(unit || listing.name || "")} 등기부등본 확인</h3>
+            <div class="r3-lm-sub">📍 ${esc(fullAddr || listing.address || "주소 정보 등록됨")} · 임대인 제시본 검토 후 계약 여부를 결정하세요</div>
+          </div>
+          <button type="button" class="r3-lm-close" id="r3RegClose" aria-label="닫기">✕</button>
+        </div>
+
+        <div style="flex:1;min-height:0;overflow-y:auto;padding:14px 18px 18px;">
+          <div style="padding:10px 12px;border-radius:12px;background:#fffbeb;border:1px solid #f59e0b;font-size:12.5px;line-height:1.65;color:#78350f;">
+            <strong>⚠️ 중요 안내 (참고용 제시본)</strong><br>
+            아래 자료는 <strong>임대인이 매물 검토용으로 제시한 등기부등본</strong>입니다. 서류 위·변조나 발급 이후 근저당·압류 변동 가능성이 있으므로,
+            <strong>① 계약서 작성 전</strong>과 <strong>② 잔금 지불 전</strong>에는 반드시 <strong>임차인 본인이 법원등기소에서 직접 열람(AI 분석)</strong>해 확인하셔야 안전합니다.
+          </div>
+
+          ${summaryHtml}
+
+          <div style="margin-top:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong style="font-size:14px;color:#0f172a;">📄 임대인이 제시한 등기부등본 원본</strong>
+              ${docUrl ? `
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <a href="${esc(docUrl)}" target="_blank" rel="noopener" class="r3-lm-btn r3-lm-btn--primary" style="min-height:34px;padding:5px 12px;font-size:12.5px;">🔍 새 창으로 크게 보기 ↗</a>
+                  <a href="${esc(docUrl)}?download=1" download class="r3-lm-btn" style="min-height:34px;padding:5px 12px;font-size:12.5px;">⬇️ 저장</a>
+                </div>` : ""}
+            </div>
+            ${docViewHtml}
+          </div>
+
+          <details style="margin-top:14px;border:1px solid #bfdbfe;border-radius:12px;background:#eff6ff;padding:10px 12px;">
+            <summary style="cursor:pointer;font-weight:800;font-size:13px;color:#1e3a8a;">🏛️ 임차인이 직접 법원등기소에서 확인하는 방법 (700원 · PC/모바일)</summary>
+            <div style="font-size:12.5px;line-height:1.65;color:#1e293b;margin-top:8px;">
+              <div><strong>1)</strong> 아래 버튼으로 주소를 복사해 법원등기소를 열고 <strong>부동산 열람(700원)</strong>에서 붙여넣기 하세요.</div>
+              <div><strong>2)</strong> 등기유형에서 <strong>현재 유효사항 + 주요 등기사항 요약 포함</strong>을 선택하세요.</div>
+              <div><strong>3)</strong> <strong>💻 PC</strong>: 열람창 <strong>[인쇄] → PDF로 저장</strong> / <strong>📱 휴대폰</strong>: 모바일 웹(<code>m.iros.go.kr</code>) 인쇄→PDF 저장 <em>(공식 앱은 보안상 화면 캡처가 차단되므로 PC PDF 저장 또는 타 기기 촬영 권장)</em></div>
+              <div><strong>4)</strong> 스마트 계약 진행 시 <strong>계약 전 AI 분석</strong>과 <strong>잔금 전 임대인 확인본 비교·서버 보관</strong>을 바로 이용할 수 있습니다.</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+                <button type="button" id="r3RegIrosOpen" class="r3-lm-btn r3-lm-btn--primary" style="min-height:36px;padding:6px 12px;font-size:12.5px;">🏛️ 주소 복사하고 법원등기소 열기 ↗</button>
+                <button type="button" id="r3RegAddrCopy" class="r3-lm-btn" style="min-height:36px;padding:6px 12px;font-size:12.5px;">📋 주소만 복사</button>
+              </div>
+              <div id="r3RegIrosMsg" style="font-size:12px;color:#1e40af;margin-top:6px;"></div>
+            </div>
+          </details>
+        </div>
+
+        <div class="r3-lm-foot">
+          <button type="button" id="r3RegCancel" class="r3-lm-btn">닫기 (계속 둘러보기)</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${options.onInquiry ? `<button type="button" id="r3RegInquiry" class="r3-lm-btn">💬 1:1 방문문의</button>` : ""}
+            ${options.onRentNow
+              ? `<button type="button" id="r3RegRentNow" class="r3-lm-btn r3-lm-btn--dark" ${listing.contract_in_progress ? "disabled style='opacity:.55;cursor:not-allowed;'" : ""}>${listing.contract_in_progress ? "🔒 계약 진행 중" : esc(options.rentNowLabel || "🤝 검토 완료 · 스마트 계약 요청")}</button>`
+              : ""}
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(wrap);
+
+    const say = (t) => {
+      const m = wrap.querySelector("#r3RegIrosMsg");
+      if (m) m.textContent = t;
+    };
+    const btnIros = wrap.querySelector("#r3RegIrosOpen");
+    if (btnIros) {
+      btnIros.addEventListener("click", () => {
+        const copied = copySync(fullAddr);
+        const w = window.open(irosUrl(), "_blank");
+        if (w) { try { w.opener = null; } catch (_) {} }
+        copied.then((ok) => {
+          say(ok ? `✅ 주소(${fullAddr}) 복사 완료 — 열린 법원등기소 검색창에 붙여넣기 하세요.` : "법원등기소를 열었습니다. 위 주소를 직접 복사해 검색하세요.");
+        });
+      });
+    }
+    const btnCopy = wrap.querySelector("#r3RegAddrCopy");
+    if (btnCopy) {
+      btnCopy.addEventListener("click", () => {
+        copySync(fullAddr).then((ok) => {
+          say(ok ? `📋 주소(${fullAddr})가 복사되었습니다.` : "자동 복사에 실패했습니다. 상단 주소를 직접 복사해 주세요.");
+        });
+      });
+    }
+
+    const onKey = (e) => {
+      if (!document.getElementById("r3ListingRegistryModal")) {
+        document.removeEventListener("keydown", onKey);
+        return;
+      }
+      if (e.key === "Escape") closeRegistryPreview();
+    };
+    document.addEventListener("keydown", onKey);
+    wrap._r3KeyHandler = onKey;
+
+    wrap.querySelector("#r3RegClose").addEventListener("click", closeRegistryPreview);
+    wrap.querySelector("#r3RegCancel").addEventListener("click", closeRegistryPreview);
+    wrap.addEventListener("click", (e) => { if (e.target === wrap) closeRegistryPreview(); });
+
+    const btnInq = wrap.querySelector("#r3RegInquiry");
+    if (btnInq && options.onInquiry) {
+      btnInq.addEventListener("click", () => { closeRegistryPreview(); close(); options.onInquiry(listing); });
+    }
+    const btnRn = wrap.querySelector("#r3RegRentNow");
+    if (btnRn && options.onRentNow) {
+      btnRn.addEventListener("click", () => { closeRegistryPreview(); close(); options.onRentNow(listing); });
+    }
+
+    if (window.R3Hist) R3Hist.open("listingRegistry", closeRegistryPreview);
+  }
+
+  window.R3ListingModal = { open, close, openRegistryPreview, closeRegistryPreview };
 })();
