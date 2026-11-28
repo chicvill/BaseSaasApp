@@ -518,6 +518,22 @@
       </div>`;
     };
     const conn = S.dash.connect_requests || [];
+    const incomingCalls = ((S.dash && S.dash.cosign_sessions) || []).filter((s) =>
+      s.status === "IN_PROGRESS" && s.call_status === "CALLING" && s.initiated_by_role === "tenant"
+    );
+    const incomingCallsHtml = incomingCalls.length ? `
+      <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border:2px solid var(--primary,#2563eb);background:rgba(37,99,235,.07);">
+        <div style="font-weight:800;font-size:14px;color:#1e3a8a;margin-bottom:6px;">💬 예비 임차인 1:1 방문 협의 · 스마트 계약 요청 ${incomingCalls.length}건</div>
+        ${incomingCalls.map((s) => `
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid var(--border);font-size:13px;line-height:1.5;">
+            <div>
+              <strong>${Bass.escapeHtml(s.room_no)}호 ${Bass.escapeHtml((s.terms && s.terms.tenant_name) || "예비 임차인")}님</strong>
+              <div class="bass-muted" style="font-size:12.5px;">채팅으로 방문 일정을 협의한 뒤, 현장에서 대면하면 스마트 계약을 개시할 수 있습니다.</div>
+            </div>
+            <a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${encodeURIComponent(s.id)}&role=lessor&chat=1" style="min-height:42px;display:inline-flex;align-items:center;white-space:nowrap;">💬 채팅 개시 · 확인 →</a>
+          </div>
+        `).join("")}
+      </div>` : "";
     const listingAlerts = S.dash.listing_alerts || [];
     const listingAlertsHtml = listingAlerts.length ? `
       <div class="bass-card" style="padding:10px 12px;margin-bottom:12px;border-left:4px solid var(--primary,#2563eb);background:rgba(37,99,235,.06);">
@@ -558,6 +574,7 @@
         <button id="bankSmsGo" class="bass-btn bass-btn--primary" type="button" style="width:100%;min-height:40px;margin-top:6px;">⚡ 문자 읽고 수납 처리</button>
         <div id="smsWarn"></div>
       </div>
+      ${incomingCallsHtml}
       ${listingAlertsHtml}
       ${coHtml}
       ${connHtml}

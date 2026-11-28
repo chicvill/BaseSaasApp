@@ -49,8 +49,8 @@
           container.prepend(callLink);
         }
         const targetRole = isLessor ? "lessor" : "tenant";
-        callLink.href = `/rent3_contract/?role=${targetRole}&session=${encodeURIComponent(topCall.id)}`;
-        callLink.textContent = `🔔 스마트 계약 호출 (${topCall.building_name} ${topCall.room_no}호 응답하기 →)`;
+        callLink.href = `/rent3_contract/?role=${targetRole}&session=${encodeURIComponent(topCall.id)}&chat=1`;
+        callLink.textContent = `🔔 스마트 계약 호출 · 1:1 방문 협의 채팅 (${topCall.building_name} ${topCall.room_no}호 열기 →)`;
       } else if (callLink) {
         callLink.remove();
       }

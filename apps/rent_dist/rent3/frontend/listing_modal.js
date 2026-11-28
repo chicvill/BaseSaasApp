@@ -183,12 +183,31 @@
     return "r3-lm-pill r3-lm-pill--warn";
   }
 
+  function isUserLoggedIn() {
+    try {
+      const raw = window.localStorage.getItem("rent3_session");
+      const u = raw ? JSON.parse(raw) : null;
+      return Boolean(u && u.name);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function formatMoveInShort(rawVal, preMoveout) {
+    const raw = String(rawVal || "").trim();
+    const m = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (m) return `입주예정일 : ${m[1]}. ${String(Number(m[2])).padStart(2, "0")}. ${String(Number(m[3])).padStart(2, "0")}`;
+    if (preMoveout) return `입주예정일 : ${raw || "협의"}`;
+    return raw || "즉시입주";
+  }
+
   function open(listing, opts) {
     if (!listing) return;
     ensureStyle();
     close();
 
     const options = opts || {};
+    const loggedIn = isUserLoggedIn();
     const spec = listing.listing_spec || {};
     const pdfUrl = listing.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(listing.id)}/terms.pdf`;
     const downloadUrl = `${pdfUrl}${pdfUrl.includes("?") ? "&" : "?"}download=1`;
@@ -206,6 +225,7 @@
     const term2m = spec.terminate_on_2m_arrears !== false;
     const noSublease = spec.no_sublease !== false;
     const termMonths = Number(spec.lease_term_months || 12);
+    const moveInText = formatMoveInShort(listing.available_from, listing.pre_moveout_notice);
 
     const wrap = document.createElement("div");
     wrap.id = "r3ListingDetailModal";
@@ -252,15 +272,15 @@
                   <div class="r3-lm-kpi-val">${fmtWon(listing.maintenance_fee)}</div>
                 </div>
                 <div class="r3-lm-kpi-item">
-                  <div class="r3-lm-kpi-lbl">퇴실 청소비 / 입주 가능일</div>
-                  <div class="r3-lm-kpi-val">${cleanFee > 0 ? fmtWon(cleanFee) : "약정 없음"} · ${esc(listing.available_from || "즉시입주")}</div>
+                  <div class="r3-lm-kpi-lbl">퇴실 청소비 / 입주 예정</div>
+                  <div class="r3-lm-kpi-val">${cleanFee > 0 ? fmtWon(cleanFee) : "약정 없음"} · ${esc(moveInText)}</div>
                 </div>
               </div>
               <table class="r3-lm-table">
                 <tr><th>소재지(주소)</th><td>${esc(listing.address || "-")} (${esc(listing.building_name || "")} ${esc(listing.room_no || "")}호)</td></tr>
                 <tr><th>전용면적 · 층/향</th><td>전용 ${areaSqm || "-"}㎡${pyeong ? ` (약 ${pyeong}평)` : ""} · ${esc(floorStr)}${listing.direction ? ` · ${esc(listing.direction)}` : ""}</td></tr>
                 <tr><th>임대기간 · 유형</th><td>기본 ${termMonths}개월 · ${esc(listing.room_category || "주거용 원룸")}${listing.vat_applicable ? " (부가세 별도)" : ""}</td></tr>
-                <tr><th>등기부 · 임대인</th><td>${listing.clean_title ? "🛡️ 등기부 확인 완료(소유자 일치·클린)" : "계약 시 등기부등본 직접 대조"} · 소유주 ${esc(listing.lessor_name || "건물 소유주")}</td></tr>
+                <tr><th>등기부 · 임대인</th><td>${listing.clean_title ? "🛡️ 등기클린 (소유자 일치·근저당/압류 없음)" : "계약 시 등기부등본 직접 대조"}${loggedIn && listing.lessor_name ? ` · 소유주 ${esc(listing.lessor_name)}` : " · 로그인 후 확인"}</td></tr>
               </table>
               <div class="r3-lm-pdf-box" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;">
                 <div style="font-size:13px;font-weight:700;color:#1e3a8a;">📄 표준임대차계약서 참조 임대조건 안내서 (PDF)</div>
@@ -541,7 +561,7 @@
     const summaryHtml = pv
       ? `<table class="r3-lm-table" style="margin-top:10px;">
            <tr><th>임대인 확인일</th><td>${esc(pv.verified_at || "-")} ${pv.clean_title ? `<span class="r3-lm-pill r3-lm-pill--ok" style="margin-left:6px;">🛡️ 등기클린</span>` : (pv.fresh ? "" : `<span class="r3-lm-pill r3-lm-pill--warn" style="margin-left:6px;">기간 경과 · 직접 재확인 필요</span>`)}</td></tr>
-           <tr><th>갑구 소유자</th><td><strong>${esc(pv.owner_name || "-")}</strong> (매물 임대인: ${esc(listing.lessor_name || "-")})</td></tr>
+           <tr><th>갑구 소유자</th><td><strong>${esc(pv.owner_name || "-")}</strong>${isUserLoggedIn() && listing.lessor_name ? ` (매물 임대인: ${esc(listing.lessor_name)})` : " (계약 시 임대인 신분증·직접 열람으로 대조)"}</td></tr>
            <tr><th>을구 선순위 근저당</th><td>${Number(pv.mortgage_count || 0)}건 · 채권최고액 합계 <strong>${fmtWon(pv.mortgage_amount || 0)}</strong></td></tr>
            <tr><th>압류 · 가압류 · 신탁</th><td><strong>${esc(pv.seizure_or_trust || "없음")}</strong></td></tr>
          </table>`

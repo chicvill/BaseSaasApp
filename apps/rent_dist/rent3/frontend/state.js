@@ -148,9 +148,14 @@
   function renderSessionUI() {
     const user = getSession();
     const btnSignIn = $("btnNavSignIn");
+    const btnAddListing = $("btnNavAddListing");
     const loggedBox = $("navLoggedBox");
     const strip = $("activeSessionStrip");
     const quickAuth = $("quickCosignAuthStatus");
+    if (btnAddListing) {
+      const isStaff = Boolean(user && (user.role === "lessor" || user.role === "admin" || user.role === "superadmin"));
+      btnAddListing.style.display = isStaff ? "inline-flex" : "none";
+    }
 
     if (user && user.redirect_url) {
       btnSignIn.style.display = "none";

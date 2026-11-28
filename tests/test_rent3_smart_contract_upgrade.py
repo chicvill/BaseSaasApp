@@ -1343,6 +1343,111 @@ class TestRent3SmartContractUpgrade(unittest.TestCase):
             if r_live:
                 r_live.delete(action="cleanup")
 
+    def test_13_prospect_listing_card_and_visit_chat_to_smart_contract_flow(self):
+        """비로그인 매물 카드 정리(풀 옵션·엘리베이터 설치·초역세권, 입주예정일 포맷, 클릭 가능한 등기클린) 및
+        스마트 계약 → 로그인 → 1:1 방문 협의 채팅 → 임대인 알림 확인 → 채팅 협의 → 대면 → 스마트 계약 개시 전체 흐름을 검증한다."""
+        def rd(*rel):
+            with open(os.path.join(ROOT, "apps", "rent_dist", *rel), encoding="utf-8") as fp:
+                return fp.read()
+
+        listings_js = rd("rent3", "frontend", "listings.js")
+        for needle in (
+            "function formatMoveInBadge",
+            "입주예정일 : ",
+            "function listingHighlightTags",
+            '"풀 옵션"',
+            '"엘리베이터 설치"',
+            '"초역세권"',
+            'class="or-pill or-pill--navy js-open-registry"',
+            "🛡️ 등기클린",
+            "P.navigateToCoSignOrLogin(l.branch, l.room_no)",
+            "isLoggedIn && l.lessor_name",
+        ):
+            self.assertIn(needle, listings_js, needle)
+        self.assertNotIn("만기전출 사전공개", listings_js)
+
+        c_home = rd("rent3_contract", "frontend", "home.js")
+        c_chat = rd("rent3_contract", "frontend", "chat.js")
+        l_ledger = rd("rent3_lessor", "frontend", "ledger.js")
+        for needle in ("dlgFirstMsg", "1:1 방문 협의"):
+            self.assertIn(needle, c_home, needle)
+        for needle in ("js-cg-respond-now", "wsBtnRespondNow", "대면 완료 · 스마트 계약 개시"):
+            self.assertIn(needle, c_chat, needle)
+        self.assertIn("예비 임차인 1:1 방문 협의 · 스마트 계약 요청", l_ledger)
+
+        # 백엔드 E2E: 예비 임차인 채팅 개시(CALLING) → 임대인 알림(호출 + 채팅) → 양측 방문 협의 채팅 → 대면 후 스마트 계약 개시(CONNECTED)
+        lh = self._lessor_headers("chic")
+        room_id = self._create_vacant_room(lh, "913")
+        from apps.rent_dist._rent3_core import Room, Tenant
+        from apps.rent_dist._rent3_core.authz import tenant_token
+        t_pro = Tenant(
+            id="t_visit_chat_913",
+            branch="main",
+            name="박방문",
+            phone="010-7777-0913",
+            status="PROSPECT",
+            identity={"verified": True, "provider": "fake", "name": "박방문", "phone": "010-7777-0913"},
+        ).save(action="t_e2e")
+        th = {"Authorization": f"Bearer {tenant_token(t_pro)}"}
+        sid = None
+        try:
+            call_r = self.client.post(
+                "/api/rent3_contract/sessions/call",
+                headers=th,
+                json={
+                    "caller_role": "tenant",
+                    "branch": "main",
+                    "room_no": "913",
+                    "mode": "NEW",
+                    "tenant_name": "박방문",
+                    "tenant_phone": "010-7777-0913",
+                    "id_tenant": t_pro.id,
+                },
+            )
+            self.assertEqual(call_r.status_code, 200, call_r.text)
+            sid = call_r.json()["session"]["id"]
+            self.assertEqual(call_r.json()["session"]["call_status"], "CALLING")
+
+            # CALLING 상태에서 임차인이 1:1 방문 협의 첫 메시지 전송
+            m1 = self.client.post(
+                f"/api/rent3_contract/sessions/{sid}/messages",
+                headers=th,
+                json={"kind": "question", "body": "안녕하세요! 내일 오후 3시에 방문 가능할까요?"},
+            )
+            self.assertEqual(m1.status_code, 200, m1.text)
+
+            # 임대인 알림에 방문 협의 요청 + 안 읽은 채팅 모두 표시
+            nf = self.client.get("/api/rent3_lessor/notifications?branch=main", headers=lh).json()
+            kinds = [it["kind"] for it in nf.get("items", [])]
+            self.assertIn(f"contract_call:{sid}", kinds)
+            self.assertIn(f"contract_chat:{sid}", kinds)
+
+            # 임대인도 CALLING 상태에서 채팅으로 방문 협의 응답 가능
+            m2 = self.client.post(
+                f"/api/rent3_contract/sessions/{sid}/messages",
+                headers=lh,
+                json={"kind": "question", "body": "네, 내일 오후 3시에 913호 앞에서 뵙겠습니다!"},
+            )
+            self.assertEqual(m2.status_code, 200, m2.text)
+
+            # 현장 대면 완료 후 임대인이 응답 → 스마트 계약 개시(CONNECTED, Step 1)
+            resp = self.client.post(
+                f"/api/rent3_contract/sessions/{sid}/respond",
+                headers=lh,
+                json={"responder_role": "lessor"},
+            )
+            self.assertEqual(resp.status_code, 200, resp.text)
+            self.assertEqual(resp.json()["session"]["call_status"], "CONNECTED")
+            self.assertEqual(resp.json()["session"]["current_step"], 1)
+        finally:
+            self._cleanup_room_sessions("913")
+            t_live = Tenant.get(t_pro.id)
+            if t_live:
+                t_live.delete(action="cleanup")
+            r_live = Room.get(room_id)
+            if r_live:
+                r_live.delete(action="cleanup")
+
 
 if __name__ == "__main__":
     unittest.main()

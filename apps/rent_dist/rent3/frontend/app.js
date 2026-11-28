@@ -42,10 +42,11 @@
     ).join("");
     brSel.value = prevBr;
 
-    // 진행중 공동계약 호출/응답 현황 요약 바인딩
+    // 진행중 공동계약 호출/응답 현황 요약 바인딩 (로그인한 사용자에게만 표시)
     const sessWrap = $("openSessionsWrap");
     const sessSummary = $("openSessionsSummary");
-    if (state.openSessions.length && sessWrap && sessSummary) {
+    const loggedIn = Boolean(getSession() && getSession().name);
+    if (loggedIn && state.openSessions.length && sessWrap && sessSummary) {
       sessWrap.style.display = "block";
       sessSummary.innerHTML = state.openSessions.slice(0, 3).map((s) => {
         const isCalling = s.call_status === "CALLING";

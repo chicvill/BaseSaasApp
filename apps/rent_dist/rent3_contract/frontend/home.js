@@ -271,7 +271,7 @@
     });
   }
 
-  async function startTenantCallForRoom(room) {
+  async function startTenantCallForRoom(room, firstMessage = "") {
     const res = await Bass.api(APP_ID, "/sessions/call", {
       method: "POST",
       body: {
@@ -284,6 +284,15 @@
         id_tenant: myTenantId,
       },
     });
+    const greet = String(firstMessage || "").trim();
+    if (greet && res && res.session && res.session.id) {
+      try {
+        await Bass.api(APP_ID, `/sessions/${encodeURIComponent(res.session.id)}/messages`, {
+          method: "POST",
+          body: { kind: "question", body: greet },
+        });
+      } catch (_) { /* 채팅방 입장 후 직접 재전송 가능 */ }
+    }
     D.elDlgHost.innerHTML = "";
     await afterCall(res);
   }
@@ -318,15 +327,19 @@
       return;
     }
     const bd = openDialog(`
-      <h3 style="margin:0 0 4px;">🤝 ${esc(room.building_name)} ${esc(room.room_no)}호 스마트 계약 시작</h3>
-      <div class="bass-muted" style="font-size:12.5px;margin-bottom:10px;line-height:1.6;">
+      <h3 style="margin:0 0 4px;">💬 ${esc(room.building_name)} ${esc(room.room_no)}호 1:1 방문 협의 채팅 · 스마트 계약</h3>
+      <div class="bass-muted" style="font-size:12.5px;margin-bottom:8px;line-height:1.6;">
         보증금 <strong>${fmtWon(room.deposit)}</strong> · 월세 <strong>${fmtWon(room.monthly_rent)}</strong> · 관리비 <strong>${fmtWon(room.maintenance_fee)}</strong><br>
-        ${room.is_occupied ? `📅 퇴실 전 사전 계약 (${room.expected_vacate_date ? `${esc(room.expected_vacate_date)} 이후 입주` : "퇴실 확정 후 입주"})` : `⚡ 입주 가능: ${esc(room.available_from || "즉시입주")}`}
+        ${room.is_occupied ? `📅 입주예정일 : ${room.expected_vacate_date ? esc(String(room.expected_vacate_date).replace(/-/g, ". ")) : "퇴실 확정 후"}` : `⚡ 입주 가능: ${esc(room.available_from || "즉시입주")}`}
       </div>
-      <div class="bass-card" style="padding:10px 12px;margin:0 0 12px;font-size:12.5px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a;">
-        임차인 <strong>${esc(loggedUser.name || "")}</strong> (${esc(loggedUser.phone || "-")}) 본인인증 계정으로 임대인(<strong>${esc(room.lessor_name || "임대인")}</strong>)에게 스마트 계약을 요청합니다.
+      <div class="bass-card" style="padding:10px 12px;margin:0 0 10px;font-size:12.5px;background:#eff6ff;border-color:#bfdbfe;color:#1e3a8a;line-height:1.6;">
+        <strong>진행 순서:</strong> ① 임대인과 1:1 채팅 개시(방문 협의) → ② 임대인 알림 확인·채팅 응답 → ③ 현장 방문·대면 → ④ 스마트 계약 개시
       </div>
-      <button id="dlgTenantGo" class="bass-btn bass-btn--primary" style="width:100%;" type="button">📞 임대인 호출하고 스마트 계약 시작</button>
+      <div style="margin-bottom:10px;">
+        <label class="bass-label" for="dlgFirstMsg">임대인에게 보낼 첫 인사 (1:1 방문 협의)</label>
+        <textarea id="dlgFirstMsg" class="bass-input" rows="2" placeholder="방문 희망 날짜·시간이나 궁금한 점을 적어 주세요.">안녕하세요! ${esc(room.building_name)} ${esc(room.room_no)}호 매물을 보고 연락드립니다. 현장 방문 일정을 협의하고 싶습니다.</textarea>
+      </div>
+      <button id="dlgTenantGo" class="bass-btn bass-btn--primary" style="width:100%;" type="button">💬 임대인과 1:1 채팅 개시 (방문 협의 요청)</button>
       <div class="bass-row" style="margin-top:8px;gap:8px;">
         <button id="dlgTenantOther" class="bass-btn" style="flex:1;" type="button">다른 집 고르기</button>
         <button id="dlgCancel" class="bass-btn" style="flex:1;" type="button">닫기</button>
@@ -334,7 +347,8 @@
     bd.querySelector("#dlgCancel").addEventListener("click", closeDialog);
     bd.querySelector("#dlgTenantOther").addEventListener("click", () => openTenantPickerDialog(true));
     bd.querySelector("#dlgTenantGo").addEventListener("click", function () {
-      Bass.withLock(this, () => startTenantCallForRoom(room), "스마트 계약 요청 중... ⏳");
+      const msg = (bd.querySelector("#dlgFirstMsg") && bd.querySelector("#dlgFirstMsg").value) || "";
+      Bass.withLock(this, () => startTenantCallForRoom(room, msg), "임대인 알림 전송 · 채팅방 여는 중... ⏳");
     });
   }
 

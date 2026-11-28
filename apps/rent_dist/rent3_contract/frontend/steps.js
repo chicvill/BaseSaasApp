@@ -67,20 +67,20 @@
       ${isCalleeView ? `
         <div class="call-banner" style="margin-top:12px; margin-bottom:0;">
           <div style="font-weight:800; margin-bottom:6px;">
-            🔔 ${esc(callerKo)}님이 [${esc(s.building_name)} ${esc(s.room_no)}호] 스마트 계약을 호출했습니다!
+            🔔 ${esc(callerKo)}님이 [${esc(s.building_name)} ${esc(s.room_no)}호] 1:1 방문 협의 · 스마트 계약을 요청했습니다!
           </div>
           <div class="bass-muted" style="font-size:12.5px; margin-bottom:10px;">
-            응답하면 ① 신분증·등기부 확인 단계가 시작됩니다.
+            채팅창에서 방문 일정을 협의한 뒤, 현장에서 대면이 완료되면 아래 버튼으로 ① 신분증·계좌·등기부 확인부터 스마트 계약을 개시합니다.
           </div>
           <button id="btnRespondMain" type="button" class="bass-btn bass-btn--primary" style="width:100%;">
-            ✅ 호출에 응답하고 스마트 계약 시작하기 (${currentRole === "lessor" ? "임대인" : "임차인"} 본인인증 연결)
+            🤝 대면 완료 · 스마트 계약 개시하기 (${currentRole === "lessor" ? "임대인" : "임차인"} 본인인증 연결)
           </button>
         </div>
       ` : `
         <div class="bass-card" style="padding:14px; margin-top:12px; border:1px dashed var(--border-strong);">
-          <div style="font-weight:800; margin-bottom:4px;">📡 ${esc(calleeKo)}님의 호출 응답을 기다리고 있습니다...</div>
+          <div style="font-weight:800; margin-bottom:4px;">💬 ${esc(calleeKo)}님과 1:1 방문 협의 채팅 중입니다</div>
           <div class="bass-muted" style="font-size:12.5px;">
-            상대가 응답하면 자동으로 다음 화면이 열립니다.
+            채팅창에서 방문 일정을 협의한 뒤 현장에서 대면하면, 상대방이 [🤝 대면 완료 · 스마트 계약 개시]를 눌러 계약 단계가 자동으로 열립니다.
           </div>
         </div>
       `}

@@ -436,18 +436,19 @@
       const callCard = `
         <div class="cg-card cg-card--active">
           <div class="cg-card__top">
-            <span class="cg-card__tag">🤖 스마트 계약 안내 · 연결 대기</span>
-            <span class="bass-badge bass-badge--warn">${callee ? "내 응답 필요" : "상대 응답 대기"}</span>
+            <span class="cg-card__tag">💬 1:1 방문 협의 채팅 · 대면 전</span>
+            <span class="bass-badge bass-badge--warn">${callee ? "임대인 알림 도착 · 채팅 가능" : "임대인 알림 전송 완료"}</span>
           </div>
           <div class="cg-card__msg">
             ${callee
-              ? `<strong>${esc(s.building_name)} ${esc(s.room_no)}호</strong> 스마트 계약 호출이 도착했습니다. 호출에 응답하면 채팅창 안에서 바로 계약이 시작됩니다.`
-              : `상대방(<strong>${esc(OTHER_KO)}</strong>)의 호출 응답을 기다리고 있습니다. 연결 전에 사전 작성·초대 QR을 확인할 수 있습니다.`}
+              ? `<strong>${esc(s.building_name)} ${esc(s.room_no)}호</strong> 방문 협의 · 스마트 계약 요청이 도착했습니다.<br>먼저 아래 채팅창으로 <strong>방문 일정·문의사항을 자유롭게 협의</strong>하시고, 현장에서 <strong>대면</strong>을 마치면 아래 버튼으로 스마트 계약을 개시해 주세요.`
+              : `<strong>${esc(OTHER_KO)}</strong>에게 실시간 알림이 전송되었습니다.<br>아래 채팅창에서 <strong>1:1 방문 일정·조건을 자유롭게 협의</strong>하세요. 현장 <strong>대면</strong> 후 상대방이 <strong>[🤝 대면 완료 · 스마트 계약 개시]</strong>를 누르면 ① 신분증 확인부터 바로 시작됩니다.`}
           </div>
           <div class="cg-link-row">
-            <button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="0">
-              ${callee ? "📞 호출 응답하고 스마트 계약 시작 ↗" : "📋 초대 QR · 사전 작성 열기 ↗"}
-            </button>
+            ${callee && !adminProxy
+              ? `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-respond-now">🤝 대면 완료 · 스마트 계약 개시하기</button>
+                 <button type="button" class="cg-link-btn js-cg-open-step" data-step="0">📋 상세 연결 정보</button>`
+              : `<button type="button" class="cg-link-btn cg-link-btn--primary js-cg-open-step" data-step="0">📋 초대 QR · 사전 작성 열기 ↗</button>`}
           </div>
         </div>`;
       return pauseBannerHtml + callCard + msgs.map(renderMsg).join("");
@@ -897,7 +898,12 @@
         ? `<button type="button" id="wsBtnResume" class="bass-btn bass-btn--sm bass-btn--primary">▶️ 스마트 계약 재개하기</button>`
         : "";
     } else if (s.call_status === "CALLING") {
-      btns = `<button type="button" class="bass-btn bass-btn--sm bass-btn--primary js-ws-step" data-step="0">📞 호출 응답 / 연결 확인</button>`;
+      const callee = currentRole !== s.initiated_by_role;
+      extraInfo = `<div class="bass-muted" style="font-size:12px;margin-top:4px;">💬 1:1 방문 협의 채팅 진행 중 — 아래 채팅으로 방문 일정을 먼저 협의한 뒤, 현장에서 대면하면 스마트 계약을 개시하세요.</div>`;
+      btns = callee && !adminProxy
+        ? `<button type="button" id="wsBtnRespondNow" class="bass-btn bass-btn--sm bass-btn--primary">🤝 대면 완료 · 스마트 계약 개시</button>
+           <button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="0">📋 상세 연결 정보</button>`
+        : `<button type="button" class="bass-btn bass-btn--sm js-ws-step" data-step="0">📋 초대 QR · 사전 작성</button>`;
     } else if (step === 1) {
       const myIdDone = currentRole === "lessor" ? Boolean(s.lessor_checked_tenant_id) : Boolean(s.tenant_checked_lessor_id);
       const myRegDone = currentRole === "lessor" ? Boolean(s.step1_lessor_confirmed) : Boolean(s.step1_tenant_locked);
@@ -966,6 +972,10 @@
         C.openStepModal(st || s.current_step, { forceDoc: true });
       });
     });
+    const btnWsRespond = document.getElementById("wsBtnRespondNow");
+    if (btnWsRespond && C.respondToIncomingCall) {
+      btnWsRespond.addEventListener("click", function () { C.respondToIncomingCall(this, s.id); });
+    }
     const btnWsResume = document.getElementById("wsBtnResume");
     if (btnWsResume) {
       btnWsResume.addEventListener("click", function () {
@@ -1100,6 +1110,12 @@
         list.querySelectorAll(".js-cg-open-step").forEach((btn) => btn.addEventListener("click", () => {
           const st = Number(btn.dataset.step || 0);
           C.openStepModal(st || S.activeSession.current_step, { forceDoc: true });
+        }));
+
+        list.querySelectorAll(".js-cg-respond-now").forEach((btn) => btn.addEventListener("click", function () {
+          if (C.respondToIncomingCall && S.activeSession) {
+            C.respondToIncomingCall(this, S.activeSession.id);
+          }
         }));
 
         list.querySelectorAll(".js-cg-iros").forEach((btn) => btn.addEventListener("click", () => {

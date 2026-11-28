@@ -48,8 +48,36 @@
     });
   }
 
+  function formatMoveInBadge(l) {
+    const raw = String((l && l.available_from) || "").trim();
+    const m = raw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+    if (m) {
+      const dt = `${m[1]}. ${String(Number(m[2])).padStart(2, "0")}. ${String(Number(m[3])).padStart(2, "0")}`;
+      return { cls: "or-pill--amber", text: `입주예정일 : ${dt}` };
+    }
+    if (l && l.pre_moveout_notice) {
+      return { cls: "or-pill--amber", text: `입주예정일 : ${raw || "협의"}` };
+    }
+    return { cls: "or-pill--navy", text: `⚡ ${raw || "즉시입주"}` };
+  }
+
+  function listingHighlightTags(l) {
+    const spec = (l && l.listing_spec) || {};
+    if (Array.isArray(spec.highlights) && spec.highlights.length) {
+      return spec.highlights.slice(0, 4);
+    }
+    const tags = [];
+    const opts = Array.isArray(l && l.options) ? l.options : [];
+    if (opts.length > 0 || !("options" in spec)) tags.push("풀 옵션");
+    if (spec.elevator !== "없음") tags.push("엘리베이터 설치");
+    tags.push("초역세권");
+    return tags;
+  }
+
   function renderListings() {
     const list = filteredListings();
+    const curUser = getSession();
+    const isLoggedIn = Boolean(curUser && curUser.name);
     $("listingCountSub").innerHTML =
       `총 <strong>${list.length}건</strong>의 직거래 매물이 조건과 일치합니다 (전체 공개 ${state.listings.length}건 · 중개수수료 0원).`;
 
@@ -81,6 +109,9 @@
 
     grid.innerHTML = list.map((l) => {
       const pdfUrl = l.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(l.id)}/terms.pdf`;
+      const moveIn = formatMoveInBadge(l);
+      const tags = listingHighlightTags(l);
+      const hasRegDoc = Boolean(l.lessor_registry_preview && l.lessor_registry_preview.has_file);
       return `
       <article class="or-prop-card" data-room-id="${esc(l.id)}" data-room-no="${esc(l.room_no)}">
         <div class="or-prop-main">
@@ -88,10 +119,12 @@
             <img src="${esc(l.image)}" alt="${esc(l.building_name)} ${esc(l.room_no)}호">
             <div class="or-prop-badges">
               <span class="or-pill or-pill--green">복비 0원</span>
-              ${l.pre_moveout_notice
-                ? `<span class="or-pill or-pill--amber">📦 만기전출 사전공개 (${esc(l.available_from)})</span>`
-                : `<span class="or-pill or-pill--navy">⚡ ${esc(l.available_from || "즉시입주")}</span>`}
-              ${l.clean_title ? `<span class="or-pill or-pill--navy">🛡️ 등기클린</span>` : ""}
+              <span class="or-pill ${moveIn.cls}">${esc(moveIn.text)}</span>
+              ${l.clean_title
+                ? `<button type="button" class="or-pill or-pill--navy js-open-registry" data-room-id="${esc(l.id)}" style="cursor:pointer;border:1px solid rgba(255,255,255,.4);" title="터치하면 등기부등본을 확인합니다">🛡️ 등기클린</button>`
+                : (hasRegDoc
+                  ? `<button type="button" class="or-pill or-pill--navy js-open-registry" data-room-id="${esc(l.id)}" style="cursor:pointer;border:1px solid rgba(255,255,255,.4);" title="터치하면 등기부등본을 확인합니다">📜 등기부 확인</button>`
+                  : "")}
             </div>
             <div class="or-prop-photo-bar">
               <a href="${esc(pdfUrl)}" class="or-photo-pdf-link js-open-detail" data-room-id="${esc(l.id)}" title="표준 임대조건 상세 및 PDF 열기">📄 임대조건 PDF · 상세보기</a>
@@ -110,71 +143,35 @@
                 <span style="font-size:12.5px; font-weight:600; color:var(--or-muted);"> (관리비 ${fmtMan(l.maintenance_fee)})</span>
               </div>
               <div class="or-prop-meta">
-                📍 ${esc(l.address || "주소 정보 등록됨")} · ${esc(l.pay_timing)} · 소유주 ${esc(l.lessor_name)}
+                📍 ${esc(l.address || "주소 정보 등록됨")} · ${esc(l.pay_timing)}${isLoggedIn && l.lessor_name ? ` · 소유주 ${esc(l.lessor_name)}` : ""}
               </div>
               <div class="or-tag-list">
-                ${(l.options || []).slice(0, 5).map((opt) => `<span class="or-tag">${esc(opt)}</span>`).join("")}
+                ${tags.map((opt) => `<span class="or-tag">${esc(opt)}</span>`).join("")}
               </div>
             </div>
           </div>
         </div>
-        <div class="or-prop-actions" style="display:grid; grid-template-columns:1fr 1fr; gap:6px; padding:0 20px 18px;">
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-inquiry"
-            data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}">
-            💬 1:1 방문문의
-          </button>
+        <div class="or-prop-actions" style="display:grid; grid-template-columns:1fr; gap:6px; padding:0 20px 18px;">
           <button type="button" class="or-btn or-btn--green or-btn--sm js-open-rentnow"
             data-branch="${esc(l.branch)}" data-room="${esc(l.room_no)}" data-bldg="${esc(l.building_name)}"
+            aria-label="스마트 계약 요청 — 로그인 후 임대인과 1:1 방문 협의 채팅 및 스마트 계약 개시"
             ${l.contract_in_progress ? 'disabled aria-disabled="true" title="다른 분과 계약이 진행 중입니다" style="opacity:.55;cursor:not-allowed;background:#94a3b8;border-color:#94a3b8;"' : ""}>
-            ${l.contract_in_progress ? "🔒 계약 진행 중" : "🤝 스마트 계약 요청"}
-          </button>
-          <button type="button" class="or-btn or-btn--outline or-btn--sm js-open-registry" style="grid-column:1 / -1;"
-            data-room-id="${esc(l.id)}">
-            📜 등기부 확인 ${l.lessor_registry_preview && l.lessor_registry_preview.has_file ? "(임대인 제시본 보기)" : "(권리관계 확인 안내)"}
+            ${l.contract_in_progress ? "🔒 계약 진행 중" : "🤝 스마트 계약 (채팅 · 방문 협의)"}
           </button>
         </div>
       </article>
     `;
     }).join("");
 
-    function openInquiryFor(l) {
-      $("inqBranch").value = l.branch;
-      $("inqRoomNo").value = l.room_no;
-      $("inqModalTitle").textContent = `💬 [${l.building_name} ${l.room_no}호] 집주인 1:1 방문문의`;
-      const u = getSession();
-      if (u && u.name) $("inqSenderName").value = u.name;
-      if (u && u.phone) $("inqSenderPhone").value = u.phone;
-      $("inquiryModal").classList.add("is-open");
-    }
-
     function openRentNowFor(l) {
-      const u = getSession();
-      if (!u || !u.name) {
-        // 비로그인 시: 본인인증 로그인 후 해당 매물 호출 화면으로 즉시 이동!
-        P.openAuthModal({
-          tab: "login",
-          preset: "cosign",
-          targetHint: `contract:${l.branch}:${l.room_no}`,
-        });
-        return;
-      }
-      $("rnBranch").value = l.branch;
-      $("rnRoomNo").value = l.room_no;
-      const isLessor = u.role === "lessor" || u.role === "admin";
-      $("rnCallerRole").value = isLessor ? "lessor" : "tenant";
-      $("rnModalTitle").textContent = `📞 [${l.building_name} ${l.room_no}호] 상대방 호출 및 스마트 계약 시작`;
-      $("rnVerifiedNotice").innerHTML =
-        `🛡️ <strong>${esc(u.name)}</strong>님(본인인증 완료) 계정으로 <strong>${isLessor ? "임차인" : "임대인"}</strong>을 호출합니다.`;
-      if (!isLessor) {
-        $("rnTenantName").value = u.name || "";
-        $("rnTenantPhone").value = u.phone || "";
-      }
-      $("rentNowModal").classList.add("is-open");
+      // 스마트 계약 터치 → 미로그인이면 로그인/회원가입 → 로그인 후 임대인과 1:1 방문 협의 채팅 · 대면 · 스마트 계약 개시
+      P.navigateToCoSignOrLogin(l.branch, l.room_no);
     }
 
     grid.querySelectorAll(".js-open-detail").forEach((el) => {
       const openIt = (e) => {
         if (e && (e.ctrlKey || e.metaKey || e.shiftKey || e.button === 1)) return;
+        if (e && e.target && e.target.closest && e.target.closest(".js-open-registry")) return;
         if (e) {
           e.preventDefault();
           e.stopPropagation();
@@ -182,8 +179,8 @@
         const item = list.find((x) => x.id === el.dataset.roomId);
         if (item && window.R3ListingModal) {
           window.R3ListingModal.open(item, {
-            onInquiry: openInquiryFor,
             onRentNow: openRentNowFor,
+            rentNowLabel: "🤝 스마트 계약 (채팅 · 방문 협의)",
           });
         }
       };
@@ -193,16 +190,6 @@
           if (e.key === "Enter" || e.key === " ") openIt(e);
         });
       }
-    });
-
-    grid.querySelectorAll(".js-open-inquiry").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        openInquiryFor({
-          branch: btn.dataset.branch,
-          room_no: btn.dataset.room,
-          building_name: btn.dataset.bldg,
-        });
-      });
     });
 
     grid.querySelectorAll(".js-open-rentnow").forEach((btn) => {
@@ -216,12 +203,14 @@
     });
 
     grid.querySelectorAll(".js-open-registry").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const item = list.find((x) => x.id === btn.dataset.roomId);
         if (item && window.R3ListingModal && window.R3ListingModal.openRegistryPreview) {
           window.R3ListingModal.openRegistryPreview(item, {
-            onInquiry: openInquiryFor,
             onRentNow: openRentNowFor,
+            rentNowLabel: "🤝 검토 완료 · 스마트 계약 (채팅 · 방문 협의)",
           });
         }
       });

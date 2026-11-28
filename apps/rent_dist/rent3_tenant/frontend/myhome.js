@@ -674,6 +674,19 @@
       ${list.map((r) => {
         const pdfUrl = r.terms_pdf_url || `/api/rent3/pool/listings/${encodeURIComponent(r.id)}/terms.pdf`;
         const imgUrl = r.image || "https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=800&q=80";
+        const availRaw = String(r.available_from || "").trim();
+        const availM = availRaw.match(/(\d{4})[-./](\d{1,2})[-./](\d{1,2})/);
+        const moveInLabel = availM
+          ? `입주예정일 : ${availM[1]}. ${String(Number(availM[2])).padStart(2, "0")}. ${String(Number(availM[3])).padStart(2, "0")}`
+          : (r.is_pre_moveout_listing ? `입주예정일 : ${availRaw || "협의"}` : `⚡ ${availRaw || "즉시입주"}`);
+        const spec = r.listing_spec || {};
+        const hlTags = Array.isArray(spec.highlights) && spec.highlights.length
+          ? spec.highlights.slice(0, 4)
+          : [
+              ...(((r.options || []).length > 0 || !("options" in spec)) ? ["풀 옵션"] : []),
+              ...(spec.elevator !== "없음" ? ["엘리베이터 설치"] : []),
+              "초역세권",
+            ];
         return `
         <div class="listing-card">
           <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px;">
@@ -684,28 +697,31 @@
             <div style="flex:1;min-width:200px;">
               <div class="bass-row" style="justify-content:space-between;flex-wrap:wrap;gap:6px;">
                 <strong style="font-size:17px;">[${Bass.escapeHtml(r.building_name)}] ${Bass.escapeHtml(r.name || `${r.room_no}호`)}</strong>
-                <div class="bass-row" style="gap:6px;">
-                  ${r.is_pre_moveout_listing ? `<span class="bass-badge bass-badge--warn">📅 만기퇴실 예정 사전공개</span>` : ""}
-                  ${r.clean_title ? `<span class="bass-badge bass-badge--ok">🛡️ 등기클린</span>` : ""}
+                <div class="bass-row" style="gap:6px;flex-wrap:wrap;">
+                  <span class="bass-badge ${r.is_pre_moveout_listing || availM ? "bass-badge--warn" : "bass-badge--info"}">${Bass.escapeHtml(moveInLabel)}</span>
+                  ${r.clean_title
+                    ? `<button type="button" class="bass-badge bass-badge--ok js-tn-registry" data-room-id="${Bass.escapeHtml(r.id)}" style="cursor:pointer;border:1px solid #86efac;" title="터치하면 등기부등본을 확인합니다">🛡️ 등기클린</button>`
+                    : (r.lessor_registry_preview && r.lessor_registry_preview.has_file
+                      ? `<button type="button" class="bass-badge bass-badge--info js-tn-registry" data-room-id="${Bass.escapeHtml(r.id)}" style="cursor:pointer;">📜 등기부 확인</button>`
+                      : "")}
                 </div>
               </div>
-              <div class="bass-muted" style="font-size:13px;margin-top:3px;">${Bass.escapeHtml(r.address)} · ${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${Bass.escapeHtml(r.direction)}` : ""} · 입주 ${Bass.escapeHtml(r.available_from)}</div>
+              <div class="bass-muted" style="font-size:13px;margin-top:3px;">${Bass.escapeHtml(r.address)} · ${r.floor}${r.total_floors ? `/${r.total_floors}` : ""}층 · 전용 ${r.area_sqm}㎡${r.direction ? ` · ${Bass.escapeHtml(r.direction)}` : ""}</div>
               <div style="font-size:16px;font-weight:800;margin:8px 0;color:var(--primary-2);">
                 보증금 ${fmtWon(r.deposit)} / 월세 ${fmtWon(r.monthly_rent)} (관리비 ${fmtWon(r.maintenance_fee)}, ${Bass.escapeHtml(r.pay_timing)})
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 6px;">
+                ${hlTags.map((tg) => `<span class="bass-badge" style="font-size:12px;">${Bass.escapeHtml(tg)}</span>`).join("")}
               </div>
               <div class="bass-muted" style="font-size:13px;">${Bass.escapeHtml(r.status_description)}</div>
             </div>
           </div>
           <div class="bass-row" style="flex-wrap:wrap;gap:6px;">
-            <input class="bass-input inq-name" data-room="${r.room_no}" style="width:120px;" placeholder="내 이름">
-            <input class="bass-input inq-msg" data-room="${r.room_no}" style="flex:1;min-width:160px;" value="이번 주말 현장 방문투어 예약하고 싶습니다!">
-            <button class="bass-btn bass-btn--sm btn-send-inq" data-branch="${r.branch}" data-room="${r.room_no}" type="button">💬 1:1 방문문의</button>
-            <button class="bass-btn bass-btn--sm js-tn-registry" data-room-id="${Bass.escapeHtml(r.id)}" type="button">📜 등기부 확인</button>
             ${r.active_cosign_session
-              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant">🤝 열린 스마트 계약방 입장(코드 ${Bass.escapeHtml(r.active_cosign_session.session_code)})</a>`
+              ? `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?session=${encodeURIComponent(r.active_cosign_session.id)}&role=tenant">💬 진행 중인 1:1 채팅 · 스마트 계약 입장(코드 ${Bass.escapeHtml(r.active_cosign_session.session_code)})</a>`
               : (r.contract_in_progress
                 ? `<button class="bass-btn bass-btn--sm" type="button" disabled style="opacity:.55;cursor:not-allowed;">🔒 다른 분과 계약 진행 중</button>`
-                : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant&call_branch=${encodeURIComponent(r.branch)}&call_room=${encodeURIComponent(r.room_no)}">🤝 스마트 계약 시작</a>`)
+                : `<a class="bass-btn bass-btn--sm bass-btn--primary" href="/rent3_contract/?role=tenant&call_branch=${encodeURIComponent(r.branch)}&call_room=${encodeURIComponent(r.room_no)}">🤝 스마트 계약 시작 (1:1 방문 협의 채팅)</a>`)
             }
           </div>
         </div>`;
